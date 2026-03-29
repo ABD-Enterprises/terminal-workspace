@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+bash "$ROOT_DIR/scripts/generate-tauri-icons.sh"
+cargo check --manifest-path "$ROOT_DIR/src-tauri/Cargo.toml"

@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --shell-base: #07111b;
+  --shell-panel: #0d1724;
+  --shell-border: #1f2c42;
+  --shell-text: #ebf2ff;
+  --shell-muted: #8ea0bd;
+  --shell-accent: #76e4c3;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Avenir Next", "SF Pro Display", "Segoe UI", sans-serif;
+  color: var(--shell-text);
+  background:
+    radial-gradient(circle at top left, rgba(118, 228, 195, 0.14), transparent 30%),
+    radial-gradient(circle at top right, rgba(89, 147, 255, 0.12), transparent 34%),
+    linear-gradient(180deg, #07111b 0%, #09131f 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+*::selection {
+  background: rgba(118, 228, 195, 0.24);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background: rgba(125, 145, 176, 0.3);
+  background-clip: padding-box;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}

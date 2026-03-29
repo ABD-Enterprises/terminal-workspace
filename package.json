@@ -1,0 +1,23 @@
+{
+  "name": "terminal-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "pnpm --filter desktop dev:full",
+    "build": "pnpm --filter desktop build",
+    "native:icons": "bash ./scripts/generate-tauri-icons.sh",
+    "native:check": "bash ./scripts/native-check.sh",
+    "native:build": "bash ./scripts/native-build.sh",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.1.0",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^17.4.0",
+    "typescript-eslint": "^8.57.2"
+  }
+}

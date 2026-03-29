@@ -1,0 +1,31 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { useAppStore } from "./app-store";
+
+const initialState = useAppStore.getState();
+
+afterEach(() => {
+  useAppStore.setState(initialState);
+});
+
+describe("app store preferences", () => {
+  it("defaults to a dense workspace with section shortcuts enabled", () => {
+    const state = useAppStore.getState();
+
+    expect(state.workspaceDensity).toBe("compact");
+    expect(state.sectionShortcutsEnabled).toBe(true);
+  });
+
+  it("updates persisted shell preferences independently from transient UI state", () => {
+    useAppStore.getState().setWorkspaceDensity("comfortable");
+    useAppStore.getState().setSectionShortcutsEnabled(false);
+    useAppStore.getState().openCommandPalette();
+    useAppStore.getState().setSidebarSearch("local");
+
+    const state = useAppStore.getState();
+
+    expect(state.workspaceDensity).toBe("comfortable");
+    expect(state.sectionShortcutsEnabled).toBe(false);
+    expect(state.commandPaletteOpen).toBe(true);
+    expect(state.sidebarSearch).toBe("local");
+  });
+});
