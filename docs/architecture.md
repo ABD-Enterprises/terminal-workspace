@@ -6,7 +6,7 @@ Today the browser and demo experience are the most mature paths:
 
 - the React app owns routing, workspace state, and demo-mode behavior
 - the Node backend still handles the current SSH/SFTP/forwarding contract
-- the Tauri shell now proxies session lifecycle calls and backend discovery for native mode
+- the Tauri shell now proxies backend discovery, session lifecycle, and native session stream I/O
 
 The intended end state is still Rust-backed local transport and persistence, but the current codebase
 is intentionally using a staged seam so the web/demo surface stays stable while native ownership

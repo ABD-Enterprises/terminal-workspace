@@ -39,8 +39,8 @@ depending on local SSH keys or reachable infrastructure.
 The first native-shell transport seam is now in place:
 
 - the browser build still talks to the backend directly
-- the Tauri shell now proxies session lifecycle calls through Rust commands
-- the native webview learns the backend origin from Tauri before opening session sockets
+- the Tauri shell now owns session lifecycle and session-stream bridging through Rust commands
+- the native webview no longer opens backend session websockets directly
 
 This keeps the React transport surface stable while the deeper SSH/SFTP ownership gradually moves
 from the Node dev backend into `src-tauri`.

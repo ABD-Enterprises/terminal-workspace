@@ -7,6 +7,7 @@ import {
   createBackendSession,
   openBackendSessionSocket,
   resizeBackendSession,
+  type SessionSocketLike,
 } from "../../lib/api";
 import { isTauriRuntime } from "../../lib/backend-runtime";
 import { buildBackendConnectionFromKnownHost, findKnownHostMatch } from "../../lib/connections";
@@ -112,7 +113,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
+  const socketRef = useRef<SessionSocketLike | null>(null);
   const commandBufferRef = useRef("");
   const transportRef = useRef<SessionTransport>(pane.transport);
   const connectionStateRef = useRef(pane.connectionState);

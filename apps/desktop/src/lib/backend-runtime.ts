@@ -1,3 +1,4 @@
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import type {
   BackendBooleanResponse,
   BackendHostConnection,
@@ -18,8 +19,66 @@ declare global {
 }
 
 const DEFAULT_NATIVE_BACKEND_BASE_URL = "http://127.0.0.1:8790";
+const SESSION_STREAM_EVENT_NAME = "termsnip://session-stream";
 
 let cachedTransportInfoPromise: Promise<BackendTransportInfo> | undefined;
+
+type SessionSocketEventName = "close" | "error" | "message";
+
+interface SessionMessageEvent {
+  data: string;
+}
+
+interface SessionCloseEvent {
+  type: "close";
+}
+
+interface SessionErrorEvent {
+  type: "error";
+  message?: string;
+}
+
+interface SessionSocketEventMap {
+  close: SessionCloseEvent;
+  error: SessionErrorEvent;
+  message: SessionMessageEvent;
+}
+
+type SessionSocketListener<TEventName extends SessionSocketEventName> = (
+  event: SessionSocketEventMap[TEventName]
+) => void;
+
+interface SessionStreamEventPayload {
+  data?: string;
+  kind: "close" | "error" | "message";
+  message?: string;
+  sessionId: string;
+  streamId: string;
+}
+
+interface OpenSessionStreamResponse {
+  ok: boolean;
+  streamId: string;
+}
+
+interface SessionStreamRequest {
+  sessionId: string;
+  streamId?: string;
+}
+
+interface SessionStreamSendRequest extends SessionStreamRequest {
+  data: string;
+}
+
+export interface SessionSocketLike {
+  readyState: number;
+  addEventListener<TEventName extends SessionSocketEventName>(
+    type: TEventName,
+    listener: SessionSocketListener<TEventName>
+  ): void;
+  close: () => void;
+  send: (data: string) => void;
+}
 
 function getTauriInternals() {
   if (typeof window === "undefined") {
@@ -73,10 +132,8 @@ export function buildBrowserSessionSocketUrl(
   return `${protocol}//${locationLike.host}/ws/sessions/${sessionId}`;
 }
 
-export function buildBackendSessionSocketUrl(backendBaseUrl: string, sessionId: string) {
-  const backendUrl = new URL(backendBaseUrl);
-  const protocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${backendUrl.host}/ws/sessions/${sessionId}`;
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function openBrowserSessionSocket(sessionId: string) {
@@ -87,9 +144,201 @@ async function openBrowserSessionSocket(sessionId: string) {
   return new WebSocket(buildBrowserSessionSocketUrl(window.location, sessionId));
 }
 
-async function openNativeSessionSocket(sessionId: string) {
-  const { backendBaseUrl } = await getNativeTransportInfo();
-  return new WebSocket(buildBackendSessionSocketUrl(backendBaseUrl, sessionId));
+async function listenToSessionStreamEvents(
+  handler: (payload: SessionStreamEventPayload) => void
+): Promise<UnlistenFn> {
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<SessionStreamEventPayload>(SESSION_STREAM_EVENT_NAME, (event) => {
+    handler(event.payload);
+  });
+}
+
+class NativeSessionSocket implements SessionSocketLike {
+  readyState: number = WebSocket.CONNECTING;
+
+  private closed = false;
+  private readonly listeners = {
+    close: new Set<(event: SessionCloseEvent) => void>(),
+    error: new Set<(event: SessionErrorEvent) => void>(),
+    message: new Set<(event: SessionMessageEvent) => void>(),
+  };
+  private pendingEvents: SessionStreamEventPayload[] = [];
+  private streamId?: string;
+  private unlisten?: UnlistenFn;
+
+  private constructor(private readonly sessionId: string) {}
+
+  static async connect(sessionId: string) {
+    const socket = new NativeSessionSocket(sessionId);
+    await socket.initialize();
+    return socket;
+  }
+
+  addEventListener<TEventName extends SessionSocketEventName>(
+    type: TEventName,
+    listener: SessionSocketListener<TEventName>
+  ) {
+    if (type === "message") {
+      this.listeners.message.add(listener as SessionSocketListener<"message">);
+      return;
+    }
+
+    if (type === "error") {
+      this.listeners.error.add(listener as SessionSocketListener<"error">);
+      return;
+    }
+
+    this.listeners.close.add(listener as SessionSocketListener<"close">);
+  }
+
+  close = () => {
+    if (this.readyState === WebSocket.CLOSED || this.readyState === WebSocket.CLOSING) {
+      return;
+    }
+
+    this.readyState = WebSocket.CLOSING;
+    void invokeTauriCommand<BackendBooleanResponse>("termsnip_close_backend_session_stream", {
+      request: {
+        sessionId: this.sessionId,
+        streamId: this.streamId,
+      } satisfies SessionStreamRequest,
+    })
+      .catch((error) => {
+        this.emit("error", {
+          type: "error",
+          message: getErrorMessage(error),
+        });
+      })
+      .finally(() => {
+        this.finishClose();
+      });
+  };
+
+  send = (data: string) => {
+    if (this.readyState !== WebSocket.OPEN || !this.streamId) {
+      return;
+    }
+
+    void invokeTauriCommand<BackendBooleanResponse>("termsnip_send_backend_session_stream", {
+      request: {
+        data,
+        sessionId: this.sessionId,
+        streamId: this.streamId,
+      } satisfies SessionStreamSendRequest,
+    }).catch((error) => {
+      this.emit("error", {
+        type: "error",
+        message: getErrorMessage(error),
+      });
+      this.finishClose();
+    });
+  };
+
+  private emit<TEventName extends SessionSocketEventName>(
+    type: TEventName,
+    event: SessionSocketEventMap[TEventName]
+  ) {
+    if (type === "message") {
+      this.listeners.message.forEach((listener) => {
+        listener(event as SessionMessageEvent);
+      });
+      return;
+    }
+
+    if (type === "error") {
+      this.listeners.error.forEach((listener) => {
+        listener(event as SessionErrorEvent);
+      });
+      return;
+    }
+
+    this.listeners.close.forEach((listener) => {
+      listener(event as SessionCloseEvent);
+    });
+  }
+
+  private finishClose() {
+    if (this.closed) {
+      return;
+    }
+
+    this.closed = true;
+    this.readyState = WebSocket.CLOSED;
+    this.pendingEvents = [];
+    this.unlisten?.();
+    this.unlisten = undefined;
+    this.emit("close", { type: "close" });
+  }
+
+  private flushPendingEvents() {
+    if (!this.streamId || !this.pendingEvents.length) {
+      return;
+    }
+
+    const pendingEvents = this.pendingEvents;
+    this.pendingEvents = [];
+    pendingEvents.forEach((event) => {
+      this.handleStreamEvent(event);
+    });
+  }
+
+  private handleStreamEvent(event: SessionStreamEventPayload) {
+    if (event.sessionId !== this.sessionId) {
+      return;
+    }
+
+    if (!this.streamId) {
+      this.pendingEvents.push(event);
+      return;
+    }
+
+    if (event.streamId !== this.streamId) {
+      return;
+    }
+
+    if (event.kind === "message" && event.data) {
+      this.emit("message", { data: event.data });
+      return;
+    }
+
+    if (event.kind === "error") {
+      this.emit("error", {
+        type: "error",
+        message: event.message,
+      });
+      return;
+    }
+
+    this.finishClose();
+  }
+
+  private async initialize() {
+    this.unlisten = await listenToSessionStreamEvents((event) => {
+      this.handleStreamEvent(event);
+    });
+
+    try {
+      const response = await invokeTauriCommand<OpenSessionStreamResponse>(
+        "termsnip_open_backend_session_stream",
+        {
+          request: {
+            sessionId: this.sessionId,
+          } satisfies SessionStreamRequest,
+        }
+      );
+
+      this.streamId = response.streamId;
+      this.readyState = WebSocket.OPEN;
+      this.flushPendingEvents();
+    } catch (error) {
+      this.emit("error", {
+        type: "error",
+        message: getErrorMessage(error),
+      });
+      this.finishClose();
+      throw error;
+    }
+  }
 }
 
 async function browserFetchJson<T>(path: string, init?: RequestInit) {
@@ -122,9 +371,9 @@ export async function resolveBackendHttpUrl(path: string) {
   return buildAbsoluteBackendUrl(transportInfo.backendBaseUrl, path);
 }
 
-export async function openSessionSocket(sessionId: string) {
+export async function openSessionSocket(sessionId: string): Promise<SessionSocketLike> {
   if (isTauriRuntime()) {
-    return openNativeSessionSocket(sessionId);
+    return NativeSessionSocket.connect(sessionId);
   }
 
   return openBrowserSessionSocket(sessionId);

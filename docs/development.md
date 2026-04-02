@@ -31,8 +31,8 @@ fully reviewable without real SSH infrastructure.
 The native shell now owns the first transport slice:
 
 - Tauri exposes session lifecycle commands for backend status, create, resize, and close.
-- The React app resolves the backend origin through that native bridge before opening SSH session
-  sockets.
+- Tauri also owns the native session stream bridge: it opens the backend websocket, forwards frames
+  to the webview as Tauri events, and proxies input back to the backend.
 - Non-session backend APIs still use the existing backend contract, so demo mode remains the safest
   default path while the Rust transport grows.
 

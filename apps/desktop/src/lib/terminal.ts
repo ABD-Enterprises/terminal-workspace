@@ -26,7 +26,7 @@ export function buildTerminalIntro(
   const detailLine = demoModeEnabled
     ? "Demo mode keeps commands local while the UI remains fully interactive."
     : nativeBridgeEnabled
-      ? "Session lifecycle now routes through Tauri while terminal data still streams over the backend socket."
+      ? "Session lifecycle and terminal stream I/O now route through the native shell bridge."
       : "Session lifecycle routes through the local backend while the browser UI stays decoupled from the transport.";
 
   return [
@@ -76,7 +76,7 @@ export function buildMockCommandResponse(
   if (trimmed === "status") {
     return [
       "transport: mock",
-      "ssh backend: pending tauri/rust implementation",
+      "ssh runtime: demo transport active",
       `time: ${new Date().toLocaleTimeString()}`,
     ];
   }

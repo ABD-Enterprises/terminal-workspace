@@ -22,5 +22,5 @@ screenshots without any live SSH infrastructure.
 
 ## Risks And Opportunities
 
-- Risk: the backend stream still terminates in the Node service, so native session data transport has not moved fully into Rust yet.
-- Opportunity: route-level code splitting and the new Tauri lifecycle bridge give the app a cleaner seam for incrementally replacing the Node transport without reshaping the React workspace.
+- Risk: the Node backend still owns the real SSH process and SFTP operations, so native mode is only partially migrated.
+- Opportunity: route-level code splitting and the Tauri session bridge now give the app a cleaner seam for incrementally replacing the remaining Node transport without reshaping the React workspace.

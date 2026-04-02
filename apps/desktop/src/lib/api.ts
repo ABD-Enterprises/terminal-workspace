@@ -49,6 +49,7 @@ export type {
   SnippetExecutionResult,
   SnippetExecutionTarget,
 } from "./backend-contract";
+export type { SessionSocketLike } from "./backend-runtime";
 
 async function backendFetch<T>(path: string, init?: RequestInit) {
   const response = await fetch(await resolveBackendHttpUrl(path), {

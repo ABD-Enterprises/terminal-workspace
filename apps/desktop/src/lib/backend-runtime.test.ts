@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  buildBackendSessionSocketUrl,
   buildBrowserSessionSocketUrl,
   isTauriRuntime,
   resetBackendRuntimeCacheForTests,
@@ -38,12 +37,6 @@ describe("backend runtime bridge", () => {
         "session-123"
       )
     ).toBe("wss://workspace.local:5173/ws/sessions/session-123");
-  });
-
-  it("builds backend websocket URLs from an absolute backend origin", () => {
-    expect(buildBackendSessionSocketUrl("http://127.0.0.1:8790", "session-abc")).toBe(
-      "ws://127.0.0.1:8790/ws/sessions/session-abc"
-    );
   });
 
   it("detects the tauri runtime when native internals are present", () => {
