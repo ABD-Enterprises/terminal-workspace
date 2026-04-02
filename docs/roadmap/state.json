@@ -1,0 +1,15 @@
+{
+  "updated_at": "2026-04-01T17:45:00-04:00",
+  "current_phase": "web-demo-quality",
+  "completed_phases": [],
+  "upcoming_phases": [
+    "native-shell-quality"
+  ],
+  "risk_remediation_phases": [],
+  "risks": [
+    "Desktop production bundle still exceeds the default Vite chunk-size warning threshold."
+  ],
+  "opportunities": [
+    "The new demo backend can become a contract-test seam while the real transport moves into Tauri."
+  ]
+}

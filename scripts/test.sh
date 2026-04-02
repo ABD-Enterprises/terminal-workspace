@@ -1,2 +1,7 @@
 #!/usr/bin/env bash
-npx pnpm test
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+exec node ./scripts/pnpmw.mjs exec vitest run --config vitest.config.ts

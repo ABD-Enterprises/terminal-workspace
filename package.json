@@ -4,20 +4,34 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "dev": "pnpm --filter desktop dev:full",
-    "build": "pnpm --filter desktop build",
+    "setup": "bash ./bootstrap.sh",
+    "dev": "node ./scripts/pnpmw.mjs --filter desktop dev:full",
+    "dev:ui": "node ./scripts/pnpmw.mjs --filter desktop exec vite --host 127.0.0.1 --port 5173",
+    "build": "node ./scripts/pnpmw.mjs --filter desktop build",
+    "typecheck": "node ./scripts/pnpmw.mjs --filter desktop typecheck",
     "native:icons": "bash ./scripts/generate-tauri-icons.sh",
     "native:check": "bash ./scripts/native-check.sh",
     "native:build": "bash ./scripts/native-build.sh",
     "lint": "eslint .",
-    "test": "vitest run",
-    "e2e": "playwright test"
+    "test": "vitest run --config vitest.config.ts",
+    "e2e": "playwright test --config playwright.config.ts",
+    "setup:browsers": "playwright install chromium",
+    "validate": "bash ./scripts/validate.sh"
   },
   "devDependencies": {
+    "@playwright/test": "^1.53.0",
     "@eslint/js": "^10.0.1",
     "eslint": "^10.1.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^17.4.0",
-    "typescript-eslint": "^8.57.2"
+    "typescript-eslint": "^8.57.2",
+    "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "cpu-features",
+      "esbuild",
+      "ssh2"
+    ]
   }
 }

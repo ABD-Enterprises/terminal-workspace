@@ -2,6 +2,22 @@ import type { HostAuthMethod } from "../types/host";
 import type { PortForwardRecord } from "../types/forward";
 import type { KeyGenerationType, KeyMetadata } from "../types/key";
 import type { RemoteFileEntry } from "../types/transfer";
+import { isDemoModeEnabled } from "../store/app-store";
+import {
+  createDemoForward,
+  createDemoRemoteDirectory,
+  deleteDemoForward,
+  deleteDemoRemoteEntry,
+  downloadDemoRemoteFile,
+  executeDemoSnippetOnHosts,
+  generateDemoPrivateKey,
+  inspectDemoPrivateKey,
+  listDemoForwards,
+  listDemoRemoteDirectory,
+  renameDemoRemoteEntry,
+  scanDemoKnownHost,
+  uploadDemoRemoteFile,
+} from "./demo-backend";
 
 interface BackendStatusResponse {
   ok: boolean;
@@ -120,6 +136,10 @@ function encodeBase64(buffer: ArrayBuffer) {
 }
 
 export async function getBackendStatus() {
+  if (isDemoModeEnabled()) {
+    return { ok: true };
+  }
+
   return backendFetch<BackendStatusResponse>("/api/backend/status");
 }
 
@@ -144,6 +164,10 @@ export async function resizeBackendSession(sessionId: string, payload: ResizeSes
 }
 
 export async function listRemoteDirectory(host: BackendHostConnection, path: string) {
+  if (isDemoModeEnabled()) {
+    return listDemoRemoteDirectory(host, path);
+  }
+
   return backendFetch<SftpDirectoryResponse>("/api/backend/sftp/list", {
     method: "POST",
     body: JSON.stringify({ host, path }),
@@ -151,6 +175,10 @@ export async function listRemoteDirectory(host: BackendHostConnection, path: str
 }
 
 export async function createRemoteDirectory(host: BackendHostConnection, path: string) {
+  if (isDemoModeEnabled()) {
+    return createDemoRemoteDirectory(host, path);
+  }
+
   return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/mkdir", {
     method: "POST",
     body: JSON.stringify({ host, path }),
@@ -162,6 +190,10 @@ export async function renameRemoteEntry(
   currentPath: string,
   nextPath: string
 ) {
+  if (isDemoModeEnabled()) {
+    return renameDemoRemoteEntry(host, currentPath, nextPath);
+  }
+
   return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/rename", {
     method: "POST",
     body: JSON.stringify({ host, currentPath, nextPath }),
@@ -173,6 +205,10 @@ export async function deleteRemoteEntry(
   path: string,
   isDirectory: boolean
 ) {
+  if (isDemoModeEnabled()) {
+    return deleteDemoRemoteEntry(host, path, isDirectory);
+  }
+
   return backendFetch<{ ok: boolean }>("/api/backend/sftp/delete", {
     method: "POST",
     body: JSON.stringify({ host, path, isDirectory }),
@@ -184,6 +220,10 @@ export async function uploadRemoteFile(
   remotePath: string,
   file: File
 ) {
+  if (isDemoModeEnabled()) {
+    return uploadDemoRemoteFile(host, remotePath, file);
+  }
+
   return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/upload", {
     method: "POST",
     body: JSON.stringify({
@@ -196,6 +236,10 @@ export async function uploadRemoteFile(
 }
 
 export async function downloadRemoteFile(host: BackendHostConnection, path: string) {
+  if (isDemoModeEnabled()) {
+    return downloadDemoRemoteFile(host, path);
+  }
+
   const response = await backendBinaryFetch("/api/backend/sftp/download", {
     method: "POST",
     headers: {
@@ -214,6 +258,10 @@ export async function downloadRemoteFile(host: BackendHostConnection, path: stri
 }
 
 export async function inspectPrivateKey(path: string) {
+  if (isDemoModeEnabled()) {
+    return inspectDemoPrivateKey(path);
+  }
+
   return backendFetch<KeyMetadata>("/api/backend/keys/inspect", {
     method: "POST",
     body: JSON.stringify({ path }),
@@ -221,6 +269,10 @@ export async function inspectPrivateKey(path: string) {
 }
 
 export async function generatePrivateKey(payload: GenerateKeyPayload) {
+  if (isDemoModeEnabled()) {
+    return generateDemoPrivateKey(payload);
+  }
+
   return backendFetch<KeyMetadata>("/api/backend/keys/generate", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -228,6 +280,10 @@ export async function generatePrivateKey(payload: GenerateKeyPayload) {
 }
 
 export async function scanKnownHost(hostname: string, port: number) {
+  if (isDemoModeEnabled()) {
+    return scanDemoKnownHost(hostname, port);
+  }
+
   return backendFetch<{ entries: KnownHostScanResult[] }>("/api/backend/known-hosts/scan", {
     method: "POST",
     body: JSON.stringify({ hostname, port }),
@@ -235,12 +291,20 @@ export async function scanKnownHost(hostname: string, port: number) {
 }
 
 export async function listLocalForwards(sessionId: string) {
+  if (isDemoModeEnabled()) {
+    return listDemoForwards(sessionId);
+  }
+
   return backendFetch<{ forwards: PortForwardRecord[] }>(
     `/api/backend/forwards?sessionId=${encodeURIComponent(sessionId)}`
   );
 }
 
 export async function createLocalForward(payload: CreateForwardPayload) {
+  if (isDemoModeEnabled()) {
+    return createDemoForward(payload);
+  }
+
   return backendFetch<PortForwardRecord>("/api/backend/forwards", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -248,12 +312,20 @@ export async function createLocalForward(payload: CreateForwardPayload) {
 }
 
 export async function deleteLocalForward(forwardId: string) {
+  if (isDemoModeEnabled()) {
+    return deleteDemoForward(forwardId);
+  }
+
   return backendFetch<{ ok: boolean }>(`/api/backend/forwards/${forwardId}`, {
     method: "DELETE",
   });
 }
 
 export async function executeSnippetOnHosts(command: string, targets: SnippetExecutionTarget[]) {
+  if (isDemoModeEnabled()) {
+    return executeDemoSnippetOnHosts(command, targets);
+  }
+
   return backendFetch<{ results: SnippetExecutionResult[] }>("/api/backend/snippets/execute", {
     method: "POST",
     body: JSON.stringify({ command, targets }),

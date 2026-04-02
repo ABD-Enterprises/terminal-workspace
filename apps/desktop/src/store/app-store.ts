@@ -8,11 +8,13 @@ interface AppState {
   commandPaletteOpen: boolean;
   workspaceDensity: WorkspaceDensity;
   sectionShortcutsEnabled: boolean;
+  demoModeEnabled: boolean;
   setSidebarSearch: (search: string) => void;
   openCommandPalette: () => void;
   closeCommandPalette: () => void;
   setWorkspaceDensity: (density: WorkspaceDensity) => void;
   setSectionShortcutsEnabled: (enabled: boolean) => void;
+  setDemoModeEnabled: (enabled: boolean) => void;
 }
 
 const fallbackStorage: StateStorage = {
@@ -28,11 +30,13 @@ export const useAppStore = create<AppState>()(
       commandPaletteOpen: false,
       workspaceDensity: "compact",
       sectionShortcutsEnabled: true,
+      demoModeEnabled: true,
       setSidebarSearch: (sidebarSearch) => set({ sidebarSearch }),
       openCommandPalette: () => set({ commandPaletteOpen: true }),
       closeCommandPalette: () => set({ commandPaletteOpen: false }),
       setWorkspaceDensity: (workspaceDensity) => set({ workspaceDensity }),
       setSectionShortcutsEnabled: (sectionShortcutsEnabled) => set({ sectionShortcutsEnabled }),
+      setDemoModeEnabled: (demoModeEnabled) => set({ demoModeEnabled }),
     }),
     {
       name: "termsnip-app",
@@ -42,7 +46,12 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         workspaceDensity: state.workspaceDensity,
         sectionShortcutsEnabled: state.sectionShortcutsEnabled,
+        demoModeEnabled: state.demoModeEnabled,
       }),
     }
   )
 );
+
+export function isDemoModeEnabled() {
+  return useAppStore.getState().demoModeEnabled;
+}

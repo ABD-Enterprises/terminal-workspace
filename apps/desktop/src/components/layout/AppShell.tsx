@@ -38,6 +38,7 @@ export function AppShell() {
   const setSidebarSearch = useAppStore((state) => state.setSidebarSearch);
   const workspaceDensity = useAppStore((state) => state.workspaceDensity);
   const sectionShortcutsEnabled = useAppStore((state) => state.sectionShortcutsEnabled);
+  const demoModeEnabled = useAppStore((state) => state.demoModeEnabled);
   const activeSessionTab = sessionTabs.find((tab) => tab.id === activeSessionTabId) ?? sessionTabs[0];
   const activeSessionPane = activeSessionTab
     ? sessionPanes[activeSessionTab.activePaneId]
@@ -207,6 +208,11 @@ export function AppShell() {
                 <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                   <h1 className="text-[17px] font-semibold text-slate-50">{activeItem.label}</h1>
                   <p className="truncate text-[11px] text-slate-500">{activeItem.description}</p>
+                  {demoModeEnabled ? (
+                    <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-100">
+                      Demo mode
+                    </span>
+                  ) : null}
                 </div>
               </div>
             </div>

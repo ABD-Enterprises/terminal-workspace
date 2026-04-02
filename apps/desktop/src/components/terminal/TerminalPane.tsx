@@ -12,6 +12,7 @@ import { buildBackendConnectionFromKnownHost, findKnownHostMatch } from "../../l
 import { canRestoreSessionWithoutPrompt, ensureRuntimeSecrets } from "../../lib/runtime-secrets";
 import { buildMockCommandResponse, buildTerminalIntro, formatPrompt } from "../../lib/terminal";
 import { cn } from "../../lib/utils";
+import { useAppStore } from "../../store/app-store";
 import { useKnownHostsStore } from "../../store/known-hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
 import type { HostRecord } from "../../types/host";
@@ -106,6 +107,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const setPaneBackendSession = useSessionsStore((state) => state.setPaneBackendSession);
   const consumePaneCommand = useSessionsStore((state) => state.consumePaneCommand);
   const knownHosts = useKnownHostsStore((state) => state.knownHosts);
+  const demoModeEnabled = useAppStore((state) => state.demoModeEnabled);
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -127,6 +129,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     [hostname, knownHosts, port]
   );
   const trustedKnownHostPublicKey = trustedKnownHost?.publicKey;
+  const useMockTransport = demoModeEnabled || authMethod === "none";
 
   useEffect(() => {
     transportRef.current = pane.transport;
@@ -442,7 +445,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     };
 
     const toggleConnection = () => {
-      if (authMethod !== "none") {
+      if (!useMockTransport) {
         if (connectionStateRef.current === "connected") {
           void disconnectSsh();
         } else {
@@ -474,7 +477,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
     toggleConnectionRef.current = toggleConnection;
     ensureConnectedRef.current = () => {
-      if (authMethod === "none") {
+      if (useMockTransport) {
         if (connectionStateRef.current !== "connected") {
           transportRef.current = "mock";
           connectionStateRef.current = "connected";
@@ -523,7 +526,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
     buildTerminalIntro(
       { hostname, label, port, username },
-      connectionStateRef.current === "connected"
+      connectionStateRef.current === "connected",
+      demoModeEnabled
     ).forEach((line) => {
       terminal.writeln(line);
     });
@@ -563,7 +567,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     observer.observe(container);
     scheduleFit();
 
-    if (authMethod === "none") {
+    if (useMockTransport) {
       transportRef.current = "mock";
       setPaneTransport(pane.id, "mock");
       connectionStateRef.current = "connected";
@@ -616,6 +620,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     hostKeyPolicy,
     id,
     label,
+    demoModeEnabled,
     trustedKnownHostPublicKey,
     port,
     pane.id,
@@ -626,6 +631,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     setPaneTransport,
     sftpRoot,
     tags,
+    useMockTransport,
     username,
   ]);
 

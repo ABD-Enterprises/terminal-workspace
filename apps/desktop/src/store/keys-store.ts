@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
-import type { KeyMetadata, KeyRecord, KeySource } from "../types/key";
+import { sampleKeys, type KeyMetadata, type KeyRecord, type KeySource } from "../types/key";
 
 const fallbackStorage: StateStorage = {
   getItem: () => null,
@@ -80,7 +80,7 @@ interface KeysState {
 export const useKeysStore = create<KeysState>()(
   persist(
     (set, get) => ({
-      keys: [],
+      keys: sortKeys(sampleKeys),
       importKey: (label, metadata, hasPassphrase) => {
         set((state) => ({
           keys: upsertKey(state.keys, label, metadata, "imported", hasPassphrase),

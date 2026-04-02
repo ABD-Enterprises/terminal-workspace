@@ -54,3 +54,36 @@ export const emptyGenerateKeyValues: GenerateKeyValues = {
   comment: "termsnip@local",
   type: "ed25519",
 };
+
+export const sampleKeys: KeyRecord[] = [
+  {
+    id: "key-prod-ed25519",
+    label: "MacBook Pro ED25519",
+    algorithm: "ED25519",
+    bits: 256,
+    fingerprint: "SHA256:prodGatewayDemoKey",
+    comment: "ops@macbook-pro",
+    privateKeyPath: "~/.ssh/id_ed25519",
+    publicKeyPath: "~/.ssh/id_ed25519.pub",
+    source: "imported",
+    hasPassphrase: true,
+    assignedHostIds: ["prod-gateway"],
+    createdAt: "2026-03-20T12:00:00.000Z",
+    updatedAt: "2026-03-29T11:10:00.000Z",
+  },
+  {
+    id: "key-deploy-shared",
+    label: "Deploy Shared Key",
+    algorithm: "ED25519",
+    bits: 256,
+    fingerprint: "SHA256:billingDeployDemo",
+    comment: "deploy@billing-api",
+    privateKeyPath: "~/.ssh/deploy_key",
+    publicKeyPath: "~/.ssh/deploy_key.pub",
+    source: "imported",
+    hasPassphrase: false,
+    assignedHostIds: ["billing-api"],
+    createdAt: "2026-03-18T08:30:00.000Z",
+    updatedAt: "2026-03-28T20:12:00.000Z",
+  },
+];

@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import type { KnownHostScanResult } from "../lib/api";
-import { createKnownHostId, createKnownHostRecord, type KnownHostRecord } from "../types/known-host";
+import {
+  createKnownHostId,
+  createKnownHostRecord,
+  sampleKnownHosts,
+  type KnownHostRecord,
+} from "../types/known-host";
 
 const fallbackStorage: StateStorage = {
   getItem: () => null,
@@ -22,7 +27,7 @@ interface KnownHostsState {
 export const useKnownHostsStore = create<KnownHostsState>()(
   persist(
     (set) => ({
-      knownHosts: [],
+      knownHosts: sortKnownHosts(sampleKnownHosts),
       trustKnownHost: (entry) =>
         set((state) => {
           const record = createKnownHostRecord(entry);

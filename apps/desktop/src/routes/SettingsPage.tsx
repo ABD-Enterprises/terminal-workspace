@@ -21,6 +21,8 @@ export function SettingsPage() {
   const setWorkspaceDensity = useAppStore((state) => state.setWorkspaceDensity);
   const sectionShortcutsEnabled = useAppStore((state) => state.sectionShortcutsEnabled);
   const setSectionShortcutsEnabled = useAppStore((state) => state.setSectionShortcutsEnabled);
+  const demoModeEnabled = useAppStore((state) => state.demoModeEnabled);
+  const setDemoModeEnabled = useAppStore((state) => state.setDemoModeEnabled);
 
   const exportConfig = () => {
     const bundle = buildLocalConfigBundle();
@@ -147,6 +149,27 @@ export function SettingsPage() {
                 the shell.
               </p>
             </div>
+
+            <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3 lg:col-span-2">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Demo mode</p>
+              <button
+                type="button"
+                onClick={() => setDemoModeEnabled(!demoModeEnabled)}
+                className={cn(
+                  "mt-2 inline-flex items-center gap-2 rounded-[14px] border px-3 py-2 text-sm transition",
+                  demoModeEnabled
+                    ? "border-amber-400/50 bg-amber-400/10 text-amber-100"
+                    : "border-slate-800 bg-slate-950/70 text-slate-300 hover:border-slate-700 hover:text-white"
+                )}
+              >
+                <span>{demoModeEnabled ? "Demo backend enabled" : "Demo backend disabled"}</span>
+              </button>
+              <p className="mt-2 text-sm leading-5 text-slate-300">
+                When enabled, sessions, keys, trust scans, snippets, and transfers stay inside a
+                deterministic mock backend so screenshots and browser tests do not depend on live
+                SSH material.
+              </p>
+            </div>
           </div>
         </div>
 
@@ -235,8 +258,8 @@ export function SettingsPage() {
               Current default
             </p>
             <p className="mt-1 text-sm leading-5 text-slate-300">
-              Runtime secrets stay in memory only. Import/export moves durable configuration, not
-              authentication secrets.
+              Web demo quality is the active milestone. Demo mode ships on by default so the
+              seeded workspace stays browsable without any host-specific setup.
             </p>
           </div>
           <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
@@ -244,8 +267,8 @@ export function SettingsPage() {
               Next hardening target
             </p>
             <p className="mt-1 text-sm leading-5 text-slate-300">
-              Optional macOS Keychain integration is still pending. Runtime secrets stay in memory
-              only unless the user explicitly opts into a platform store later.
+              Native shell quality follows the demo milestone: real transport resiliency, optional
+              macOS Keychain integration, and tighter Tauri ownership of the connection stack.
             </p>
           </div>
         </div>

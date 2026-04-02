@@ -1,2 +1,7 @@
 #!/usr/bin/env bash
-npx pnpm dev
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+exec node ./scripts/pnpmw.mjs --filter desktop dev:full

@@ -1,4 +1,5 @@
 import { requestConnectionSecretsPrompt } from "../store/connection-secret-prompt-utils";
+import { isDemoModeEnabled } from "../store/app-store";
 import { getHostConnectionSecrets } from "../store/connection-secrets-store";
 import { useHostsStore } from "../store/hosts-store";
 import { useKeysStore } from "../store/keys-store";
@@ -29,6 +30,13 @@ function resolveConnectionChain(host: HostRecord) {
 }
 
 export function getHostSecretRequirement(host: HostRecord): HostSecretRequirement {
+  if (isDemoModeEnabled()) {
+    return {
+      needsPassword: false,
+      needsPassphrase: false,
+    };
+  }
+
   const secrets = getHostConnectionSecrets(host.id);
   const assignedKey = useKeysStore
     .getState()
@@ -52,6 +60,10 @@ export async function ensureRuntimeSecrets(
   host: HostRecord,
   actionLabel: string
 ) {
+  if (isDemoModeEnabled()) {
+    return true;
+  }
+
   for (const entry of resolveConnectionChain(host)) {
     const requirement = getHostSecretRequirement(entry);
 

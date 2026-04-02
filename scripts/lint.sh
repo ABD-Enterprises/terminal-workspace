@@ -1,2 +1,7 @@
 #!/usr/bin/env bash
-npx pnpm lint
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+exec node ./scripts/pnpmw.mjs exec eslint .

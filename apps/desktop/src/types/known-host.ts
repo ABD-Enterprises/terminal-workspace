@@ -29,3 +29,26 @@ export function createKnownHostRecord(entry: KnownHostScanResult): KnownHostReco
     updatedAt: now,
   };
 }
+
+export const sampleKnownHosts: KnownHostRecord[] = [
+  {
+    id: "bastion.acme.internal:22:ssh-ed25519",
+    hostname: "bastion.acme.internal",
+    port: 22,
+    algorithm: "ssh-ed25519",
+    publicKey: "AAAAC3NzaC1lZDI1NTE5AAAAIKprodgatewaydemo",
+    fingerprint: "SHA256:prodGatewayDemoKey",
+    trustedAt: "2026-03-27T16:40:00.000Z",
+    updatedAt: "2026-03-29T11:10:00.000Z",
+  },
+  {
+    id: "billing-api-02.use1.internal:2222:ssh-ed25519",
+    hostname: "billing-api-02.use1.internal",
+    port: 2222,
+    algorithm: "ssh-ed25519",
+    publicKey: "AAAAC3NzaC1lZDI1NTE5AAAAIKbillingapidemo",
+    fingerprint: "SHA256:billingDeployDemo",
+    trustedAt: "2026-03-27T15:00:00.000Z",
+    updatedAt: "2026-03-28T17:45:00.000Z",
+  },
+];

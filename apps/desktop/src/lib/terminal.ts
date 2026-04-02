@@ -2,16 +2,23 @@ import type { HostRecord } from "../types/host";
 
 export function buildTerminalIntro(
   host: Pick<HostRecord, "hostname" | "label" | "port" | "username">,
-  connected: boolean
+  connected: boolean,
+  demoModeEnabled = false
 ) {
-  const stateLine = connected ? "Connection established (mock transport)." : "Connecting...";
+  const stateLine = connected
+    ? demoModeEnabled
+      ? "Demo transport ready."
+      : "Connection established (mock transport)."
+    : "Connecting...";
 
   return [
     "",
     `TermSnip session for ${host.label}`,
     `${host.username}@${host.hostname}:${host.port}`,
     stateLine,
-    "SSH backend is not wired yet, so this pane simulates a local session shell.",
+    demoModeEnabled
+      ? "Demo mode keeps commands local while the UI remains fully interactive."
+      : "SSH backend is not wired yet, so this pane simulates a local session shell.",
     "",
   ];
 }
