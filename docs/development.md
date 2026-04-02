@@ -32,13 +32,13 @@ The native shell now owns the app-facing transport seam:
 
 - Tauri exposes backend status plus JSON and binary proxy commands for the native webview.
 - Tauri exposes session lifecycle commands for create, resize, and close.
-- Direct non-jump-host SSH sessions now connect in Rust instead of through the Node backend.
+- Direct SSH and jump-host SSH sessions now connect in Rust instead of through the Node backend.
 - Tauri still owns the session stream bridge: native sessions emit terminal events directly, while
-  backend-owned sessions continue to proxy websocket frames into the webview.
+  backend-owned browser sessions continue to proxy websocket frames into the webview.
 - Runtime passwords and passphrases persist through macOS Keychain in native mode.
 
-The Node backend still owns jump-host SSH, SFTP, snippet, key, and forwarding operations, so demo
-mode remains the safest default path while the Rust transport grows.
+The Node backend still owns SFTP, snippet, key, and forwarding operations, so demo mode remains the
+safest default path while the Rust transport grows.
 
 ## Browser Coverage
 

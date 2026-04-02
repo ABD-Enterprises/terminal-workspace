@@ -24,6 +24,7 @@ export interface BackendHostConnection {
   environment?: Record<string, string>;
   hostname: string;
   jumpHost?: BackendHostConnection;
+  knownHostAlgorithm?: string;
   knownHostPublicKey?: string;
   password: string;
   passphrase: string;

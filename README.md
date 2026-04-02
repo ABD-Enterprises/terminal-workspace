@@ -40,11 +40,10 @@ The native-shell bridge now covers the app-facing transport seam:
 
 - the browser build still talks to the backend directly
 - the Tauri shell proxies backend JSON and binary APIs for the native webview
-- direct SSH session lifecycle and terminal stream transport are owned by Rust commands
+- direct SSH and jump-host session lifecycle plus terminal stream transport are owned by Rust commands
 - runtime passwords and passphrases persist through macOS Keychain in native mode
 
-Direct native sessions currently cover non-jump-host SSH connections. Jump-host SSH, SFTP,
-snippets, forwards, and the browser build still use the backend path while that transport
+SFTP, snippets, forwards, and the browser build still use the backend path while that transport
 responsibility moves deeper into `src-tauri`.
 
 ## Scope

@@ -66,7 +66,12 @@ export function SessionRestoreManager() {
           void createBackendSession(
             buildBackendConnectionFromKnownHost(
               host,
-              trustedKnownHost ? { publicKey: trustedKnownHost.publicKey } : undefined
+              trustedKnownHost
+                ? {
+                    algorithm: trustedKnownHost.algorithm,
+                    publicKey: trustedKnownHost.publicKey,
+                  }
+                : undefined
             )
           )
             .then(({ sessionId }) => {

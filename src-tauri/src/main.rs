@@ -3,6 +3,7 @@
 use std::{
     collections::HashMap,
     env,
+    fs,
     io::{self, Read, Write},
     net::TcpStream,
     path::PathBuf,
@@ -17,6 +18,7 @@ use std::{
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use futures_util::{SinkExt, StreamExt};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use reqwest::{Client, Method};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -33,6 +35,7 @@ const DEFAULT_TERMINAL_ROWS: u16 = 36;
 const DEFAULT_TERMINAL_PIXEL_WIDTH: u16 = DEFAULT_TERMINAL_COLS * 8;
 const DEFAULT_TERMINAL_PIXEL_HEIGHT: u16 = DEFAULT_TERMINAL_ROWS * 16;
 const NATIVE_SESSION_READ_CHUNK_SIZE: usize = 4096;
+const NATIVE_SESSION_PROMPT_WINDOW_SIZE: usize = 512;
 const NATIVE_SESSION_POLL_INTERVAL_MS: u64 = 10;
 const NATIVE_SESSION_BUFFER_LIMIT: usize = 128;
 static SESSION_STREAM_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -114,6 +117,24 @@ enum NativeSessionCommand {
     Resize { cols: u16, rows: u16 },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PromptResponseKind {
+    Password,
+    Passphrase,
+}
+
+#[derive(Clone)]
+struct PromptResponse {
+    kind: PromptResponseKind,
+    value: String,
+}
+
+enum JumpSessionEvent {
+    Eof,
+    Error(String),
+    Output(String),
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BackendTransportInfo {
@@ -137,6 +158,7 @@ struct BackendHostConnection {
     environment: Option<HashMap<String, String>>,
     hostname: String,
     jump_host: Option<Box<BackendHostConnection>>,
+    known_host_algorithm: Option<String>,
     known_host_public_key: Option<String>,
     password: String,
     passphrase: String,
@@ -339,6 +361,210 @@ fn encode_session_message(message_type: &str, payload: Value) -> String {
         object.extend(fields);
     }
     Value::Object(object).to_string()
+}
+
+fn escape_shell_value(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r#"'\"'\"'"#))
+}
+
+fn build_environment_export_prefix(environment: &Option<HashMap<String, String>>) -> String {
+    get_channel_environment(environment)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(key, value)| format!("export {key}={}", escape_shell_value(&value)))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn build_interactive_shell_command(environment: &Option<HashMap<String, String>>) -> Option<String> {
+    let export_prefix = build_environment_export_prefix(environment);
+    if export_prefix.is_empty() {
+        None
+    } else {
+        Some(format!(r#"{export_prefix}; exec "${{SHELL:-/bin/sh}}" -l"#))
+    }
+}
+
+fn known_hosts_host_pattern(host: &BackendHostConnection) -> String {
+    if host.port == 22 {
+        host.hostname.clone()
+    } else {
+        format!("[{}]:{}", host.hostname, host.port)
+    }
+}
+
+fn append_connection_chain<'a>(host: &'a BackendHostConnection, chain: &mut Vec<&'a BackendHostConnection>) {
+    if let Some(jump_host) = host.jump_host.as_deref() {
+        append_connection_chain(jump_host, chain);
+    }
+
+    chain.push(host);
+}
+
+fn build_connection_chain(host: &BackendHostConnection) -> Vec<&BackendHostConnection> {
+    let mut chain = Vec::new();
+    append_connection_chain(host, &mut chain);
+    chain
+}
+
+fn build_ssh_host_alias(index: usize, last_index: usize) -> String {
+    if index == last_index {
+        "termsnip-target".to_string()
+    } else {
+        format!("termsnip-hop-{index}")
+    }
+}
+
+fn build_prompt_responses(host: &BackendHostConnection) -> Vec<PromptResponse> {
+    let mut responses = Vec::new();
+
+    for connection in build_connection_chain(host) {
+        if connection.auth_method == "privateKey" && !connection.passphrase.is_empty() {
+            responses.push(PromptResponse {
+                kind: PromptResponseKind::Passphrase,
+                value: connection.passphrase.clone(),
+            });
+        }
+
+        if connection.auth_method == "password" && !connection.password.is_empty() {
+            responses.push(PromptResponse {
+                kind: PromptResponseKind::Password,
+                value: connection.password.clone(),
+            });
+        }
+    }
+
+    responses
+}
+
+fn detect_prompt_kind(buffer: &str) -> Option<PromptResponseKind> {
+    let lowercase = buffer.to_ascii_lowercase();
+
+    if lowercase.contains("enter passphrase for key") || lowercase.contains("passphrase for key") {
+        return Some(PromptResponseKind::Passphrase);
+    }
+
+    if lowercase.contains("password:") {
+        return Some(PromptResponseKind::Password);
+    }
+
+    None
+}
+
+fn take_prompt_response(
+    responses: &mut Vec<PromptResponse>,
+    kind: PromptResponseKind,
+) -> Option<PromptResponse> {
+    let index = responses.iter().position(|response| response.kind == kind)?;
+    Some(responses.remove(index))
+}
+
+fn create_jump_ssh_session_dir(session_id: &str) -> Result<PathBuf, String> {
+    let directory = env::temp_dir().join(format!("termsnip-native-jump-{session_id}"));
+    if directory.exists() {
+        fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
+    }
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory)
+}
+
+fn write_jump_session_known_hosts(
+    host: &BackendHostConnection,
+    session_dir: &PathBuf,
+) -> Result<PathBuf, String> {
+    let known_hosts_path = session_dir.join("known_hosts");
+    let mut entries = Vec::new();
+
+    for connection in build_connection_chain(host) {
+        if let (Some(algorithm), Some(public_key)) = (
+            connection.known_host_algorithm.as_ref(),
+            connection.known_host_public_key.as_ref(),
+        ) {
+            entries.push(format!(
+                "{} {} {}",
+                known_hosts_host_pattern(connection),
+                algorithm,
+                public_key
+            ));
+        }
+    }
+
+    fs::write(&known_hosts_path, entries.join("\n")).map_err(|error| error.to_string())?;
+    Ok(known_hosts_path)
+}
+
+fn build_jump_session_config(
+    host: &BackendHostConnection,
+    session_dir: &PathBuf,
+    known_hosts_path: &PathBuf,
+) -> Result<(PathBuf, String), String> {
+    let config_path = session_dir.join("ssh_config");
+    let chain = build_connection_chain(host);
+    let last_index = chain.len().saturating_sub(1);
+    let jump_aliases = chain
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != last_index)
+        .map(|(index, _)| build_ssh_host_alias(index, last_index))
+        .collect::<Vec<_>>();
+    let target_alias = build_ssh_host_alias(last_index, last_index);
+    let mut lines = Vec::new();
+
+    for (index, connection) in chain.iter().enumerate() {
+        let alias = build_ssh_host_alias(index, last_index);
+        lines.push(format!("Host {alias}"));
+        lines.push(format!("  HostName {}", connection.hostname));
+        lines.push(format!("  User {}", connection.username));
+        lines.push(format!("  Port {}", connection.port));
+        lines.push("  RequestTTY force".to_string());
+        lines.push("  LogLevel ERROR".to_string());
+        lines.push("  BatchMode no".to_string());
+        lines.push("  ServerAliveInterval 15".to_string());
+        lines.push("  ServerAliveCountMax 3".to_string());
+        lines.push("  GlobalKnownHostsFile /dev/null".to_string());
+        lines.push(format!(
+            "  UserKnownHostsFile {}",
+            known_hosts_path.to_string_lossy()
+        ));
+
+        if connection.known_host_public_key.is_some() && connection.known_host_algorithm.is_some() {
+            lines.push("  StrictHostKeyChecking yes".to_string());
+        } else {
+            lines.push("  StrictHostKeyChecking no".to_string());
+        }
+
+        if connection.agent_forwarding {
+            lines.push("  ForwardAgent yes".to_string());
+        } else {
+            lines.push("  ForwardAgent no".to_string());
+        }
+
+        match connection.auth_method.as_str() {
+            "privateKey" => {
+                lines.push(format!(
+                    "  IdentityFile {}",
+                    expand_home(&connection.private_key_path).to_string_lossy()
+                ));
+                lines.push("  IdentitiesOnly yes".to_string());
+                lines.push("  PreferredAuthentications publickey".to_string());
+            }
+            "password" => {
+                lines.push("  PubkeyAuthentication no".to_string());
+                lines.push("  PreferredAuthentications keyboard-interactive,password".to_string());
+                lines.push("  NumberOfPasswordPrompts 1".to_string());
+            }
+            _ => {}
+        }
+
+        if index == last_index && !jump_aliases.is_empty() {
+            lines.push(format!("  ProxyJump {}", jump_aliases.join(",")));
+        }
+
+        lines.push(String::new());
+    }
+
+    fs::write(&config_path, lines.join("\n")).map_err(|error| error.to_string())?;
+    Ok((config_path, target_alias))
 }
 
 fn trim_security_output(bytes: &[u8]) -> String {
@@ -564,7 +790,7 @@ fn emit_native_session_error(
 }
 
 fn should_use_native_session(host: &BackendHostConnection) -> bool {
-    host.jump_host.is_none()
+    host.auth_method != "none"
 }
 
 fn validate_session_host(host: &BackendHostConnection) -> Result<(), String> {
@@ -675,6 +901,253 @@ fn connect_native_session(host: &BackendHostConnection) -> Result<(Session, Chan
     session.set_blocking(false);
 
     Ok((session, channel))
+}
+
+fn write_jump_session_input(
+    writer: &Arc<Mutex<Box<dyn Write + Send>>>,
+    input: &str,
+) -> Result<(), String> {
+    let mut writer = writer
+        .lock()
+        .expect("jump session writer lock poisoned");
+    writer
+        .write_all(input.as_bytes())
+        .map_err(|error| error.to_string())?;
+    writer.flush().map_err(|error| error.to_string())
+}
+
+fn resize_jump_session_pty(master: &mut Box<dyn MasterPty + Send>, cols: u16, rows: u16) -> Result<(), String> {
+    master
+        .resize(PtySize {
+            rows,
+            cols,
+            pixel_width: cols.saturating_mul(8),
+            pixel_height: rows.saturating_mul(16),
+        })
+        .map_err(|error| error.to_string())
+}
+
+fn spawn_jump_session_reader(
+    mut reader: Box<dyn Read + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    mut prompt_responses: Vec<PromptResponse>,
+    sender: std::sync::mpsc::Sender<JumpSessionEvent>,
+) {
+    thread::spawn(move || {
+        let mut buffer = [0u8; NATIVE_SESSION_READ_CHUNK_SIZE];
+        let mut prompt_window = String::new();
+
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    let _ = sender.send(JumpSessionEvent::Eof);
+                    break;
+                }
+                Ok(count) => {
+                    let output = String::from_utf8_lossy(&buffer[..count]).to_string();
+                    prompt_window.push_str(&output);
+                    if prompt_window.len() > NATIVE_SESSION_PROMPT_WINDOW_SIZE {
+                        let excess = prompt_window.len() - NATIVE_SESSION_PROMPT_WINDOW_SIZE;
+                        prompt_window.drain(0..excess);
+                    }
+
+                    while let Some(kind) = detect_prompt_kind(&prompt_window) {
+                        let Some(response) = take_prompt_response(&mut prompt_responses, kind) else {
+                            break;
+                        };
+
+                        if write_jump_session_input(&writer, &format!("{}\n", response.value)).is_err() {
+                            break;
+                        }
+                        prompt_window.clear();
+                    }
+
+                    let _ = sender.send(JumpSessionEvent::Output(output));
+                }
+                Err(error) => {
+                    let _ = sender.send(JumpSessionEvent::Error(error.to_string()));
+                    break;
+                }
+            }
+        }
+    });
+}
+
+fn run_jump_host_session_loop(
+    app: AppHandle,
+    registry: NativeSessionRegistry,
+    session_id: String,
+    state: Arc<Mutex<NativeSessionState>>,
+    host: BackendHostConnection,
+    mut receiver: UnboundedReceiver<NativeSessionCommand>,
+) {
+    let session_dir = match create_jump_ssh_session_dir(&session_id) {
+        Ok(path) => path,
+        Err(error) => {
+            emit_native_session_error(&app, &session_id, &state, error);
+            set_native_session_connection_state(&app, &session_id, &state, "error");
+            set_native_session_connection_state(&app, &session_id, &state, "disconnected");
+            return;
+        }
+    };
+
+    let result = (|| -> Result<(), String> {
+        let known_hosts_path = write_jump_session_known_hosts(&host, &session_dir)?;
+        let (config_path, target_alias) =
+            build_jump_session_config(&host, &session_dir, &known_hosts_path)?;
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: DEFAULT_TERMINAL_ROWS,
+                cols: DEFAULT_TERMINAL_COLS,
+                pixel_width: DEFAULT_TERMINAL_PIXEL_WIDTH,
+                pixel_height: DEFAULT_TERMINAL_PIXEL_HEIGHT,
+            })
+            .map_err(|error| error.to_string())?;
+
+        let mut command = CommandBuilder::new("/usr/bin/ssh");
+        command.arg("-F");
+        command.arg(config_path.to_string_lossy().into_owned());
+        command.arg("-tt");
+        command.arg(target_alias);
+        if let Some(remote_command) = build_interactive_shell_command(&host.environment) {
+            command.arg(remote_command);
+        }
+
+        let mut child = pair
+            .slave
+            .spawn_command(command)
+            .map_err(|error| error.to_string())?;
+        drop(pair.slave);
+
+        let writer = Arc::new(Mutex::new(
+            pair.master
+                .take_writer()
+                .map_err(|error| error.to_string())?,
+        ));
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|error| error.to_string())?;
+        let mut master = pair.master;
+        let (output_sender, output_receiver) = std::sync::mpsc::channel();
+
+        spawn_jump_session_reader(reader, writer.clone(), build_prompt_responses(&host), output_sender);
+        set_native_session_connection_state(&app, &session_id, &state, "connected");
+
+        let mut should_close = false;
+        let mut reported_error = false;
+
+        while !should_close {
+            let mut did_work = false;
+
+            loop {
+                match receiver.try_recv() {
+                    Ok(NativeSessionCommand::Close) => {
+                        should_close = true;
+                        break;
+                    }
+                    Ok(NativeSessionCommand::Input(input)) => {
+                        did_work = true;
+                        write_jump_session_input(&writer, &input)?;
+                    }
+                    Ok(NativeSessionCommand::Resize { cols, rows }) => {
+                        did_work = true;
+                        resize_jump_session_pty(&mut master, cols, rows)?;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        should_close = true;
+                        break;
+                    }
+                }
+            }
+
+            loop {
+                match output_receiver.try_recv() {
+                    Ok(JumpSessionEvent::Output(output)) => {
+                        did_work = true;
+                        emit_native_session_output(&app, &session_id, &state, output);
+                    }
+                    Ok(JumpSessionEvent::Error(error)) => {
+                        emit_native_session_error(&app, &session_id, &state, error);
+                        set_native_session_connection_state(&app, &session_id, &state, "error");
+                        reported_error = true;
+                        should_close = true;
+                        break;
+                    }
+                    Ok(JumpSessionEvent::Eof) => {
+                        should_close = true;
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        should_close = true;
+                        break;
+                    }
+                }
+            }
+
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    if !status.success() && !reported_error {
+                        emit_native_session_error(
+                            &app,
+                            &session_id,
+                            &state,
+                            format!("SSH session exited with status {status}."),
+                        );
+                        set_native_session_connection_state(&app, &session_id, &state, "error");
+                    }
+                    should_close = true;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    emit_native_session_error(&app, &session_id, &state, error.to_string());
+                    set_native_session_connection_state(&app, &session_id, &state, "error");
+                    should_close = true;
+                }
+            }
+
+            if !did_work && !should_close {
+                thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
+            }
+        }
+
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(master);
+
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        emit_native_session_error(&app, &session_id, &state, error);
+        set_native_session_connection_state(&app, &session_id, &state, "error");
+    }
+
+    remove_native_session(&registry, &session_id);
+    set_native_session_connection_state(&app, &session_id, &state, "disconnected");
+
+    let stream_id = {
+        let mut state = state.lock().expect("native session state lock poisoned");
+        state.stream_id.take()
+    };
+
+    if let Some(stream_id) = stream_id {
+        emit_session_stream_event(
+            &app,
+            SessionStreamEvent {
+                data: None,
+                kind: "close",
+                message: None,
+                session_id: session_id.clone(),
+                stream_id,
+            },
+        );
+    }
+
+    let _ = fs::remove_dir_all(session_dir);
 }
 
 fn write_native_session_input(channel: &mut Channel, input: &[u8]) -> Result<(), String> {
@@ -1118,9 +1591,7 @@ async fn termsnip_create_backend_session(
     let app_handle = app.clone();
     let session_id_for_thread = session_id.clone();
     let state_for_thread = state.clone();
-
-    let command_sender = tauri::async_runtime::spawn_blocking(move || {
-        let (session, channel) = connect_native_session(&host)?;
+    let command_sender = if host.jump_host.is_some() {
         let (command_sender, command_receiver) = unbounded_channel();
         let registry_for_thread = native_registry.clone();
         let thread_app = app_handle.clone();
@@ -1128,21 +1599,43 @@ async fn termsnip_create_backend_session(
         let thread_state = state_for_thread.clone();
 
         thread::spawn(move || {
-            run_native_session_loop(
+            run_jump_host_session_loop(
                 thread_app,
                 registry_for_thread,
                 thread_session_id,
                 thread_state,
-                session,
-                channel,
+                host,
                 command_receiver,
             );
         });
 
-        Ok::<UnboundedSender<NativeSessionCommand>, String>(command_sender)
-    })
-    .await
-    .map_err(|error| error.to_string())??;
+        command_sender
+    } else {
+        tauri::async_runtime::spawn_blocking(move || {
+            let (session, channel) = connect_native_session(&host)?;
+            let (command_sender, command_receiver) = unbounded_channel();
+            let registry_for_thread = native_registry.clone();
+            let thread_app = app_handle.clone();
+            let thread_session_id = session_id_for_thread.clone();
+            let thread_state = state_for_thread.clone();
+
+            thread::spawn(move || {
+                run_native_session_loop(
+                    thread_app,
+                    registry_for_thread,
+                    thread_session_id,
+                    thread_state,
+                    session,
+                    channel,
+                    command_receiver,
+                );
+            });
+
+            Ok::<UnboundedSender<NativeSessionCommand>, String>(command_sender)
+        })
+        .await
+        .map_err(|error| error.to_string())??
+    };
 
     insert_native_session(
         native_sessions.inner(),
@@ -1438,7 +1931,7 @@ fn main() {
         .expect("error while running tauri application");
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::{
@@ -1446,6 +1939,67 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    fn build_test_host_chain() -> BackendHostConnection {
+        BackendHostConnection {
+            agent_forwarding: true,
+            auth_method: "password".to_string(),
+            environment: Some(HashMap::from([("APP_ENV".to_string(), "production".to_string())])),
+            hostname: "target.internal".to_string(),
+            jump_host: Some(Box::new(BackendHostConnection {
+                agent_forwarding: false,
+                auth_method: "privateKey".to_string(),
+                environment: None,
+                hostname: "jump.internal".to_string(),
+                jump_host: None,
+                known_host_algorithm: Some("ssh-ed25519".to_string()),
+                known_host_public_key: Some("AAAATESTJUMP".to_string()),
+                password: "".to_string(),
+                passphrase: "jump-passphrase".to_string(),
+                port: 2222,
+                private_key_path: "~/.ssh/jump".to_string(),
+                sftp_root: None,
+                username: "jump".to_string(),
+            })),
+            known_host_algorithm: Some("ssh-ed25519".to_string()),
+            known_host_public_key: Some("AAAATESTTARGET".to_string()),
+            password: "target-password".to_string(),
+            passphrase: "".to_string(),
+            port: 2223,
+            private_key_path: "".to_string(),
+            sftp_root: None,
+            username: "deploy".to_string(),
+        }
+    }
+
+    #[test]
+    fn builds_prompt_responses_in_jump_chain_order() {
+        let responses = build_prompt_responses(&build_test_host_chain());
+        let kinds = responses
+            .iter()
+            .map(|response| response.kind)
+            .collect::<Vec<_>>();
+        let values = responses
+            .iter()
+            .map(|response| response.value.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            kinds,
+            vec![PromptResponseKind::Passphrase, PromptResponseKind::Password]
+        );
+        assert_eq!(values, vec!["jump-passphrase", "target-password"]);
+    }
+
+    #[test]
+    fn builds_known_hosts_patterns_for_nondefault_ports() {
+        let host = build_test_host_chain();
+        let chain = build_connection_chain(&host);
+
+        assert_eq!(known_hosts_host_pattern(chain[0]), "[jump.internal]:2222");
+        assert_eq!(known_hosts_host_pattern(chain[1]), "[target.internal]:2223");
+    }
+
+    #[cfg(target_os = "macos")]
     #[test]
     fn keychain_secret_round_trip() {
         let unique_suffix = SystemTime::now()

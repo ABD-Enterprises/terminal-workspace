@@ -130,7 +130,6 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     () => findKnownHostMatch(knownHosts, { hostname, port }),
     [hostname, knownHosts, port]
   );
-  const trustedKnownHostPublicKey = trustedKnownHost?.publicKey;
   const useMockTransport = demoModeEnabled || authMethod === "none";
   const nativeBridgeEnabled = !useMockTransport && isTauriRuntime();
 
@@ -343,7 +342,12 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
                   sftpRoot,
                   username,
                 },
-                trustedKnownHostPublicKey ? { publicKey: trustedKnownHostPublicKey } : undefined
+                trustedKnownHost
+                  ? {
+                      algorithm: trustedKnownHost.algorithm,
+                      publicKey: trustedKnownHost.publicKey,
+                    }
+                  : undefined
               )
             )
           ).sessionId;
@@ -640,7 +644,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     id,
     label,
     demoModeEnabled,
-    trustedKnownHostPublicKey,
+    trustedKnownHost,
     port,
     pane.id,
     privateKeyPath,

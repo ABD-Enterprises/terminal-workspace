@@ -70,6 +70,7 @@ describe("connection helpers", () => {
     );
 
     expect(connection.knownHostPublicKey).toBe(trustedKnownHost.publicKey);
+    expect(connection.knownHostAlgorithm).toBe(trustedKnownHost.algorithm);
   });
 
   it("builds a one-hop jump host chain", () => {

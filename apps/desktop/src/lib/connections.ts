@@ -67,6 +67,7 @@ function buildBackendConnectionRecursive(
     environment: host.environment,
     hostname: host.hostname,
     jumpHost,
+    knownHostAlgorithm: knownHost?.algorithm,
     knownHostPublicKey: knownHost?.publicKey,
     password: secrets.password,
     passphrase: secrets.passphrase,
@@ -79,12 +80,12 @@ function buildBackendConnectionRecursive(
 
 export function buildBackendConnectionFromKnownHost(
   host: BackendConnectionHost,
-  knownHost?: Pick<KnownHostRecord, "publicKey">
+  knownHost?: Pick<KnownHostRecord, "algorithm" | "publicKey">
 ): BackendHostConnection {
   const knownHosts = knownHost
     ? [
         {
-          algorithm: "",
+          algorithm: knownHost.algorithm,
           fingerprint: "",
           hostname: host.hostname,
           id: `${host.hostname}:${host.port}:known`,

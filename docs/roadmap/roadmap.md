@@ -22,5 +22,5 @@ screenshots without any live SSH infrastructure.
 
 ## Risks And Opportunities
 
-- Risk: jump-host SSH, SFTP, and forwarding still depend on the Node backend, so native mode is only partially migrated.
-- Opportunity: route-level code splitting, the backend proxy seam, Keychain-backed runtime secrets, and direct Rust-owned SSH sessions now give the app a cleaner path for replacing the remaining Node transport without reshaping the React workspace.
+- Risk: SFTP and forwarding still depend on the Node backend, so native mode is only partially migrated.
+- Opportunity: route-level code splitting, the backend proxy seam, Keychain-backed runtime secrets, and Rust-owned direct plus jump-host SSH sessions now give the app a cleaner path for replacing the remaining Node transport without reshaping the React workspace.
