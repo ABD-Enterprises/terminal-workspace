@@ -26,7 +26,7 @@ export function buildTerminalIntro(
   const detailLine = demoModeEnabled
     ? "Demo mode keeps commands local while the UI remains fully interactive."
     : nativeBridgeEnabled
-      ? "Session lifecycle, terminal stream I/O, and backend API calls route through the native shell bridge."
+      ? "Direct SSH sessions, terminal stream I/O, and backend API calls route through the native shell bridge."
       : "Session lifecycle routes through the local backend while the browser UI stays decoupled from the transport.";
 
   return [

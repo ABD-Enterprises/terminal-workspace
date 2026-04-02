@@ -267,8 +267,8 @@ export function SettingsPage() {
               Next hardening target
             </p>
             <p className="mt-1 text-sm leading-5 text-slate-300">
-              Native shell quality follows the demo milestone: real transport resiliency, full Rust
-              ownership of the connection stack, and less dependence on the Node transport layer.
+              Native shell quality follows the demo milestone: jump-host SSH, SFTP, and forwards
+              still need to move off the Node transport path after the new direct Rust session work.
             </p>
           </div>
         </div>
