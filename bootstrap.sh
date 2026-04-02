@@ -31,6 +31,63 @@ require_command git
 require_command node
 require_command python3
 
+ROOT="$ROOT" node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const root = process.env.ROOT;
+const defaults = {
+  "docs/roadmap/state.json": {
+    updated_at: null,
+    current_phase: null,
+    completed_phases: [],
+    upcoming_phases: [],
+    risk_remediation_phases: [],
+    risks: [],
+    opportunities: [],
+  },
+  "state/session.json": {
+    current_run_id: null,
+    current_task: null,
+    started_at: null,
+    updated_at: null,
+    status: "idle",
+  },
+  "state/artifacts.json": {
+    items: [],
+    updated_at: null,
+  },
+  "state/handoff.json": {
+    summary: "",
+    next_steps: [],
+    blockers: [],
+    updated_at: null,
+  },
+  "state/tasks.json": {
+    tasks: [],
+    updated_at: null,
+  },
+  "state/risks.json": {
+    risks: [],
+    updated_at: null,
+  },
+  "state/decisions.json": {
+    decisions: [],
+    updated_at: null,
+  },
+};
+
+for (const [relativePath, value] of Object.entries(defaults)) {
+  const filePath = path.join(root, relativePath);
+  if (fs.existsSync(filePath)) {
+    continue;
+  }
+
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+NODE
+
 require_file docs/roadmap/state.json
 require_file state/session.json
 require_file state/artifacts.json
