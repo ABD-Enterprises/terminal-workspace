@@ -22,5 +22,5 @@ screenshots without any live SSH infrastructure.
 
 ## Risks And Opportunities
 
-- Risk: the current production bundle is still large and should be split once the demo milestone settles.
-- Opportunity: the demo backend now provides a reliable seam for future contract tests against the real Rust/Tauri transport.
+- Risk: the backend stream still terminates in the Node service, so native session data transport has not moved fully into Rust yet.
+- Opportunity: route-level code splitting and the new Tauri lifecycle bridge give the app a cleaner seam for incrementally replacing the Node transport without reshaping the React workspace.

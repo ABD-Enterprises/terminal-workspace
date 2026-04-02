@@ -34,6 +34,17 @@ Demo mode is enabled by default and can be toggled in Settings. When enabled:
 This keeps the seeded workspace usable for screenshots, product review, and browser tests without
 depending on local SSH keys or reachable infrastructure.
 
+## Native Bridge
+
+The first native-shell transport seam is now in place:
+
+- the browser build still talks to the backend directly
+- the Tauri shell now proxies session lifecycle calls through Rust commands
+- the native webview learns the backend origin from Tauri before opening session sockets
+
+This keeps the React transport surface stable while the deeper SSH/SFTP ownership gradually moves
+from the Node dev backend into `src-tauri`.
+
 ## Scope
 
 ### Initial Scope

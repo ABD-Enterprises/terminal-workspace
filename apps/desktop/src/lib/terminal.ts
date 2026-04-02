@@ -3,22 +3,38 @@ import type { HostRecord } from "../types/host";
 export function buildTerminalIntro(
   host: Pick<HostRecord, "hostname" | "label" | "port" | "username">,
   connected: boolean,
-  demoModeEnabled = false
+  {
+    demoModeEnabled = false,
+    nativeBridgeEnabled = false,
+  }: {
+    demoModeEnabled?: boolean;
+    nativeBridgeEnabled?: boolean;
+  } = {}
 ) {
-  const stateLine = connected
-    ? demoModeEnabled
+  const stateLine = demoModeEnabled
+    ? connected
       ? "Demo transport ready."
-      : "Connection established (mock transport)."
-    : "Connecting...";
+      : "Demo transport standing by."
+    : connected
+      ? nativeBridgeEnabled
+        ? "SSH session connected through the native shell bridge."
+        : "SSH session connected."
+      : nativeBridgeEnabled
+        ? "Native session bridge standing by."
+        : "Connecting to the local SSH backend...";
+
+  const detailLine = demoModeEnabled
+    ? "Demo mode keeps commands local while the UI remains fully interactive."
+    : nativeBridgeEnabled
+      ? "Session lifecycle now routes through Tauri while terminal data still streams over the backend socket."
+      : "Session lifecycle routes through the local backend while the browser UI stays decoupled from the transport.";
 
   return [
     "",
     `TermSnip session for ${host.label}`,
     `${host.username}@${host.hostname}:${host.port}`,
     stateLine,
-    demoModeEnabled
-      ? "Demo mode keeps commands local while the UI remains fully interactive."
-      : "SSH backend is not wired yet, so this pane simulates a local session shell.",
+    detailLine,
     "",
   ];
 }

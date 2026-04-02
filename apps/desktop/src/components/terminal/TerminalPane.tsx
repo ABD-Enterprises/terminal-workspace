@@ -8,6 +8,7 @@ import {
   openBackendSessionSocket,
   resizeBackendSession,
 } from "../../lib/api";
+import { isTauriRuntime } from "../../lib/backend-runtime";
 import { buildBackendConnectionFromKnownHost, findKnownHostMatch } from "../../lib/connections";
 import { canRestoreSessionWithoutPrompt, ensureRuntimeSecrets } from "../../lib/runtime-secrets";
 import { buildMockCommandResponse, buildTerminalIntro, formatPrompt } from "../../lib/terminal";
@@ -130,6 +131,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   );
   const trustedKnownHostPublicKey = trustedKnownHost?.publicKey;
   const useMockTransport = demoModeEnabled || authMethod === "none";
+  const nativeBridgeEnabled = !useMockTransport && isTauriRuntime();
 
   useEffect(() => {
     transportRef.current = pane.transport;
@@ -347,7 +349,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         backendSessionIdRef.current = sessionId;
         setPaneBackendSession(pane.id, sessionId);
 
-        const socket = openBackendSessionSocket(sessionId);
+        const socket = await openBackendSessionSocket(sessionId);
         socketRef.current = socket;
 
         socket.addEventListener("message", (event) => {
@@ -527,7 +529,10 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     buildTerminalIntro(
       { hostname, label, port, username },
       connectionStateRef.current === "connected",
-      demoModeEnabled
+      {
+        demoModeEnabled,
+        nativeBridgeEnabled,
+      }
     ).forEach((line) => {
       terminal.writeln(line);
     });
@@ -625,6 +630,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     port,
     pane.id,
     privateKeyPath,
+    nativeBridgeEnabled,
     setPaneBackendSession,
     setPaneReconnectOnRestore,
     setPaneState,

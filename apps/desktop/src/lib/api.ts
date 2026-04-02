@@ -1,8 +1,27 @@
-import type { HostAuthMethod } from "../types/host";
-import type { PortForwardRecord } from "../types/forward";
-import type { KeyGenerationType, KeyMetadata } from "../types/key";
-import type { RemoteFileEntry } from "../types/transfer";
 import { isDemoModeEnabled } from "../store/app-store";
+import type { PortForwardRecord } from "../types/forward";
+import type { KeyMetadata } from "../types/key";
+import type {
+  BackendBooleanResponse,
+  BackendHostConnection,
+  CreateForwardPayload,
+  DownloadRemoteFileResponse,
+  GenerateKeyPayload,
+  KnownHostScanResult,
+  ListForwardsResponse,
+  ResizeSessionPayload,
+  SftpDirectoryResponse,
+  SnippetExecutionResult,
+  SnippetExecutionTarget,
+} from "./backend-contract";
+import {
+  closeSession,
+  createSession,
+  getSessionBackendStatus,
+  openSessionSocket,
+  resolveBackendHttpUrl,
+  resizeSession,
+} from "./backend-runtime";
 import {
   createDemoForward,
   createDemoRemoteDirectory,
@@ -19,85 +38,20 @@ import {
   uploadDemoRemoteFile,
 } from "./demo-backend";
 
-interface BackendStatusResponse {
-  ok: boolean;
-}
-
-interface CreateSessionResponse {
-  sessionId: string;
-}
-
-export interface BackendHostConnection {
-  agentForwarding: boolean;
-  authMethod: HostAuthMethod;
-  environment?: Record<string, string>;
-  hostname: string;
-  jumpHost?: BackendHostConnection;
-  knownHostPublicKey?: string;
-  password: string;
-  passphrase: string;
-  port: number;
-  privateKeyPath: string;
-  sftpRoot?: string;
-  username: string;
-}
-
-export interface KnownHostScanResult {
-  algorithm: string;
-  fingerprint: string;
-  hostname: string;
-  port: number;
-  publicKey: string;
-}
-
-interface ResizeSessionPayload {
-  cols: number;
-  rows: number;
-}
-
-interface SftpDirectoryResponse {
-  entries: RemoteFileEntry[];
-  path: string;
-}
-
-interface GenerateKeyPayload {
-  comment: string;
-  passphrase: string;
-  path: string;
-  type: KeyGenerationType;
-}
-
-interface CreateForwardPayload {
-  direction: "local" | "remote";
-  localHost: string;
-  localPort: number;
-  remoteHost: string;
-  remotePort: number;
-  sessionId: string;
-}
-
-interface SnippetExecutionTarget {
-  host: BackendHostConnection;
-  id: string;
-  label: string;
-}
-
-export interface SnippetExecutionResult {
-  targetId: string;
-  label: string;
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-  exitCode: number | null;
-  errorMessage?: string;
-}
-
-function buildBackendUrl(path: string) {
-  return path;
-}
+export type {
+  BackendHostConnection,
+  BackendStatusResponse,
+  CreateForwardPayload,
+  CreateSessionResponse,
+  GenerateKeyPayload,
+  KnownHostScanResult,
+  ResizeSessionPayload,
+  SnippetExecutionResult,
+  SnippetExecutionTarget,
+} from "./backend-contract";
 
 async function backendFetch<T>(path: string, init?: RequestInit) {
-  const response = await fetch(buildBackendUrl(path), {
+  const response = await fetch(await resolveBackendHttpUrl(path), {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -114,7 +68,7 @@ async function backendFetch<T>(path: string, init?: RequestInit) {
 }
 
 async function backendBinaryFetch(path: string, init?: RequestInit) {
-  const response = await fetch(buildBackendUrl(path), init);
+  const response = await fetch(await resolveBackendHttpUrl(path), init);
 
   if (!response.ok) {
     const errorBody = await response.text();
@@ -140,27 +94,19 @@ export async function getBackendStatus() {
     return { ok: true };
   }
 
-  return backendFetch<BackendStatusResponse>("/api/backend/status");
+  return getSessionBackendStatus();
 }
 
 export async function createBackendSession(host: BackendHostConnection) {
-  return backendFetch<CreateSessionResponse>("/api/backend/sessions", {
-    method: "POST",
-    body: JSON.stringify({ host }),
-  });
+  return createSession(host);
 }
 
 export async function closeBackendSession(sessionId: string) {
-  return backendFetch<{ ok: boolean }>(`/api/backend/sessions/${sessionId}`, {
-    method: "DELETE",
-  });
+  return closeSession(sessionId);
 }
 
 export async function resizeBackendSession(sessionId: string, payload: ResizeSessionPayload) {
-  return backendFetch<{ ok: boolean }>(`/api/backend/sessions/${sessionId}/resize`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return resizeSession(sessionId, payload);
 }
 
 export async function listRemoteDirectory(host: BackendHostConnection, path: string) {
@@ -254,7 +200,7 @@ export async function downloadRemoteFile(host: BackendHostConnection, path: stri
     path.split("/").filter(Boolean).slice(-1)[0] ??
     "download";
 
-  return { blob, filename };
+  return { blob, filename } satisfies DownloadRemoteFileResponse;
 }
 
 export async function inspectPrivateKey(path: string) {
@@ -295,7 +241,7 @@ export async function listLocalForwards(sessionId: string) {
     return listDemoForwards(sessionId);
   }
 
-  return backendFetch<{ forwards: PortForwardRecord[] }>(
+  return backendFetch<ListForwardsResponse>(
     `/api/backend/forwards?sessionId=${encodeURIComponent(sessionId)}`
   );
 }
@@ -316,7 +262,7 @@ export async function deleteLocalForward(forwardId: string) {
     return deleteDemoForward(forwardId);
   }
 
-  return backendFetch<{ ok: boolean }>(`/api/backend/forwards/${forwardId}`, {
+  return backendFetch<BackendBooleanResponse>(`/api/backend/forwards/${forwardId}`, {
     method: "DELETE",
   });
 }
@@ -332,7 +278,6 @@ export async function executeSnippetOnHosts(command: string, targets: SnippetExe
   });
 }
 
-export function openBackendSessionSocket(sessionId: string) {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return new WebSocket(`${protocol}//${window.location.host}/ws/sessions/${sessionId}`);
+export async function openBackendSessionSocket(sessionId: string) {
+  return openSessionSocket(sessionId);
 }
