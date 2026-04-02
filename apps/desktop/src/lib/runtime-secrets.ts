@@ -1,6 +1,9 @@
 import { requestConnectionSecretsPrompt } from "../store/connection-secret-prompt-utils";
 import { isDemoModeEnabled } from "../store/app-store";
-import { getHostConnectionSecrets } from "../store/connection-secrets-store";
+import {
+  getHostConnectionSecrets,
+  hydrateHostConnectionSecrets,
+} from "../store/connection-secrets-store";
 import { useHostsStore } from "../store/hosts-store";
 import { useKeysStore } from "../store/keys-store";
 import type { HostRecord } from "../types/host";
@@ -49,7 +52,19 @@ export function getHostSecretRequirement(host: HostRecord): HostSecretRequiremen
   };
 }
 
-export function canRestoreSessionWithoutPrompt(host: HostRecord) {
+async function hydrateConnectionSecrets(host: HostRecord) {
+  for (const entry of resolveConnectionChain(host)) {
+    await hydrateHostConnectionSecrets(entry.id);
+  }
+}
+
+export async function canRestoreSessionWithoutPrompt(host: HostRecord) {
+  if (isDemoModeEnabled()) {
+    return true;
+  }
+
+  await hydrateConnectionSecrets(host);
+
   return resolveConnectionChain(host).every((entry) => {
     const requirement = getHostSecretRequirement(entry);
     return !requirement.needsPassword && !requirement.needsPassphrase;
@@ -65,6 +80,7 @@ export async function ensureRuntimeSecrets(
   }
 
   for (const entry of resolveConnectionChain(host)) {
+    await hydrateHostConnectionSecrets(entry.id);
     const requirement = getHostSecretRequirement(entry);
 
     if (!requirement.needsPassword && !requirement.needsPassphrase) {

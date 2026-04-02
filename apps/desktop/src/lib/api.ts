@@ -18,8 +18,10 @@ import {
   closeSession,
   createSession,
   getSessionBackendStatus,
+  isTauriRuntime,
   openSessionSocket,
-  resolveBackendHttpUrl,
+  proxyBackendBinary,
+  proxyBackendJson,
   resizeSession,
 } from "./backend-runtime";
 import {
@@ -52,7 +54,11 @@ export type {
 export type { SessionSocketLike } from "./backend-runtime";
 
 async function backendFetch<T>(path: string, init?: RequestInit) {
-  const response = await fetch(await resolveBackendHttpUrl(path), {
+  if (isTauriRuntime()) {
+    return proxyBackendJson<T>(path, init);
+  }
+
+  const response = await fetch(path, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -69,7 +75,11 @@ async function backendFetch<T>(path: string, init?: RequestInit) {
 }
 
 async function backendBinaryFetch(path: string, init?: RequestInit) {
-  const response = await fetch(await resolveBackendHttpUrl(path), init);
+  if (isTauriRuntime()) {
+    return proxyBackendBinary(path, init);
+  }
+
+  const response = await fetch(path, init);
 
   if (!response.ok) {
     const errorBody = await response.text();

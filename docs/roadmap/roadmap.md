@@ -18,9 +18,9 @@ screenshots without any live SSH infrastructure.
 
 - Native shell quality
 - Transport hardening inside the Tauri shell
-- Optional macOS Keychain integration for runtime secrets
+- Replace more of the Node transport layer with Rust-owned SSH and SFTP
 
 ## Risks And Opportunities
 
 - Risk: the Node backend still owns the real SSH process and SFTP operations, so native mode is only partially migrated.
-- Opportunity: route-level code splitting and the Tauri session bridge now give the app a cleaner seam for incrementally replacing the remaining Node transport without reshaping the React workspace.
+- Opportunity: route-level code splitting, the backend proxy seam, and Keychain-backed runtime secrets now give the app a cleaner path for incrementally replacing the remaining Node transport without reshaping the React workspace.

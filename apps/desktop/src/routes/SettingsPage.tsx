@@ -236,7 +236,7 @@ export function SettingsPage() {
               <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Secret handling</p>
               <p className="mt-1 text-sm leading-5 text-slate-300">
                 Passwords and passphrases are not exported because runtime secrets stay outside the
-                persisted host inventory.
+                persisted host inventory and, in the native shell, live in macOS Keychain.
               </p>
             </div>
           </div>
@@ -267,8 +267,8 @@ export function SettingsPage() {
               Next hardening target
             </p>
             <p className="mt-1 text-sm leading-5 text-slate-300">
-              Native shell quality follows the demo milestone: real transport resiliency, optional
-              macOS Keychain integration, and tighter Tauri ownership of the connection stack.
+              Native shell quality follows the demo milestone: real transport resiliency, full Rust
+              ownership of the connection stack, and less dependence on the Node transport layer.
             </p>
           </div>
         </div>

@@ -36,14 +36,15 @@ depending on local SSH keys or reachable infrastructure.
 
 ## Native Bridge
 
-The first native-shell transport seam is now in place:
+The native-shell bridge now covers the app-facing transport seam:
 
 - the browser build still talks to the backend directly
-- the Tauri shell now owns session lifecycle and session-stream bridging through Rust commands
-- the native webview no longer opens backend session websockets directly
+- the Tauri shell proxies backend JSON and binary APIs for the native webview
+- session lifecycle and session-stream transport are owned by Rust commands
+- runtime passwords and passphrases persist through macOS Keychain in native mode
 
-This keeps the React transport surface stable while the deeper SSH/SFTP ownership gradually moves
-from the Node dev backend into `src-tauri`.
+The Node backend still owns the actual SSH/SFTP work today, but the React surface now stays stable
+while that transport responsibility moves deeper into `src-tauri`.
 
 ## Scope
 

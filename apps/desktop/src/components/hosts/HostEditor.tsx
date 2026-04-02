@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { isTauriRuntime } from "../../lib/backend-runtime";
 import { emptyHostFormValues, hostToFormValues, type HostRecord, type HostFormValues } from "../../types/host";
 import { useConnectionSecretsStore } from "../../store/connection-secrets-store";
 import { useHostsStore } from "../../store/hosts-store";
@@ -19,6 +20,7 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
   const runtimeSecrets = useConnectionSecretsStore((state) =>
     host ? state.secretsByHostId[host.id] : undefined
   );
+  const hydrateHostSecrets = useConnectionSecretsStore((state) => state.hydrateHostSecrets);
   const formId = host ? `host-editor-${host.id}` : "host-editor-new";
   const [values, setValues] = useState<HostFormValues>(() =>
     host
@@ -29,9 +31,34 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
         }
       : emptyHostFormValues
   );
+  const nativeSecretStorage = isTauriRuntime();
 
   const isInvalid = !values.label.trim() || !values.hostname.trim() || !values.username.trim();
   const jumpHostOptions = hosts.filter((candidate) => candidate.id !== host?.id);
+
+  useEffect(() => {
+    if (!open || !host) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void hydrateHostSecrets(host.id).then((record) => {
+      if (!record || cancelled) {
+        return;
+      }
+
+      setValues((current) => ({
+        ...current,
+        passphrase: current.passphrase || record.passphrase,
+        password: current.password || record.password,
+      }));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [host, hydrateHostSecrets, open]);
 
   return (
     <Modal
@@ -191,7 +218,11 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
               setValues((current) => ({ ...current, password: event.target.value }))
             }
             className={fieldClassName}
-            placeholder="Only for local testing until keychain support lands"
+            placeholder={
+              nativeSecretStorage
+                ? "Stored in macOS Keychain in the native shell"
+                : "Kept in memory only in the browser demo"
+            }
           />
         </label>
         <label className="block">
@@ -266,8 +297,9 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
         </label>
       </div>
       <div className="mt-5 rounded-2xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm leading-6 text-amber-100">
-        Passwords and passphrases stay in memory only for the current app run. Moving them to
-        macOS Keychain is still outstanding.
+        {nativeSecretStorage
+          ? "Passwords and passphrases stay outside the host inventory and persist through macOS Keychain in the native shell."
+          : "Passwords and passphrases stay in memory only in the browser demo and are not exported with host metadata."}
       </div>
       <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-slate-300">
         Require trusted key blocks SSH, SFTP, and snippet execution until the host key is scanned

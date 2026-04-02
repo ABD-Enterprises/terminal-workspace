@@ -274,7 +274,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
       const hasReusableBackendSession = Boolean(backendSessionIdRef.current);
       const canConnectWithoutPrompt =
-        hasReusableBackendSession || canRestoreSessionWithoutPrompt(host);
+        hasReusableBackendSession || (await canRestoreSessionWithoutPrompt(host));
 
       if (!hasReusableBackendSession) {
         if (!promptForSecrets && !canConnectWithoutPrompt) {
@@ -573,32 +573,45 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     observer.observe(container);
     scheduleFit();
 
-    if (useMockTransport) {
-      transportRef.current = "mock";
-      setPaneTransport(pane.id, "mock");
-      connectionStateRef.current = "connected";
-      setPaneState(pane.id, "connected");
-      writePrompt();
-    } else if (backendSessionIdRef.current) {
-      void connectSsh({
-        allowPendingSecrets: true,
-        promptForSecrets: false,
-      });
-    } else if (
-      reconnectOnRestoreRef.current ||
-      connectionStateRef.current === "pendingSecrets"
-    ) {
-      if (canRestoreSessionWithoutPrompt(host)) {
-        void connectSsh({
+    const initializeTransport = async () => {
+      if (useMockTransport) {
+        transportRef.current = "mock";
+        setPaneTransport(pane.id, "mock");
+        connectionStateRef.current = "connected";
+        setPaneState(pane.id, "connected");
+        writePrompt();
+        return;
+      }
+
+      if (backendSessionIdRef.current) {
+        await connectSsh({
           allowPendingSecrets: true,
           promptForSecrets: false,
         });
-      } else {
-        setPendingSecretsState(true);
+        return;
       }
-    } else if (connectionStateRef.current !== "disconnected") {
-      void connectSsh();
-    }
+
+      if (
+        reconnectOnRestoreRef.current ||
+        connectionStateRef.current === "pendingSecrets"
+      ) {
+        if (await canRestoreSessionWithoutPrompt(host)) {
+          await connectSsh({
+            allowPendingSecrets: true,
+            promptForSecrets: false,
+          });
+        } else if (!disposed) {
+          setPendingSecretsState(true);
+        }
+        return;
+      }
+
+      if (connectionStateRef.current !== "disconnected") {
+        await connectSsh();
+      }
+    };
+
+    void initializeTransport();
 
     return () => {
       disposed = true;

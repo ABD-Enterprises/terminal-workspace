@@ -20,34 +20,41 @@ export function SessionRestoreManager() {
   const secretsByHostId = useConnectionSecretsStore((state) => state.secretsByHostId);
 
   useEffect(() => {
+    let cancelled = false;
     const inactiveTabIds = new Set(
       tabs.filter((tab) => tab.id !== activeTabId).map((tab) => tab.id)
     );
 
-    Object.values(panes)
-      .filter(
+    const restoreInactiveSessions = async () => {
+      const restoreCandidates = Object.values(panes).filter(
         (pane) =>
           pane.transport === "ssh" &&
           pane.reconnectOnRestore &&
           pane.connectionState !== "error" &&
           !pane.backendSessionId &&
           tabs.some((tab) => tab.paneIds.includes(pane.id) && inactiveTabIds.has(tab.id))
-      )
-      .forEach((pane) => {
+      );
+
+      for (const pane of restoreCandidates) {
         const host = hosts.find((entry) => entry.id === pane.hostId);
         if (!host || host.authMethod === "none") {
+          continue;
+        }
+
+        const canRestore = await canRestoreSessionWithoutPrompt(host);
+        if (cancelled) {
           return;
         }
 
-        if (!canRestoreSessionWithoutPrompt(host)) {
+        if (!canRestore) {
           if (pane.connectionState !== "pendingSecrets") {
             setPaneState(pane.id, "pendingSecrets");
           }
-          return;
+          continue;
         }
 
         if (restoringPaneIdsRef.current.has(pane.id)) {
-          return;
+          continue;
         }
 
         const trustedKnownHost = findKnownHostMatch(knownHosts, host);
@@ -77,7 +84,14 @@ export function SessionRestoreManager() {
           setPaneBackendSession(pane.id, undefined);
           setPaneState(pane.id, "error");
         }
-      });
+      }
+    };
+
+    void restoreInactiveSessions();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     activeTabId,
     hosts,

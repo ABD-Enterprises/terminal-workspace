@@ -70,6 +70,18 @@ interface SessionStreamSendRequest extends SessionStreamRequest {
   data: string;
 }
 
+interface BackendProxyRequest {
+  body?: unknown;
+  method: string;
+  path: string;
+}
+
+interface BackendBinaryProxyResponse {
+  base64Body: string;
+  contentDisposition?: string;
+  contentType?: string;
+}
+
 export interface SessionSocketLike {
   readyState: number;
   addEventListener<TEventName extends SessionSocketEventName>(
@@ -97,7 +109,7 @@ function buildAbsoluteBackendUrl(backendBaseUrl: string, path: string) {
   return new URL(path, `${backendBaseUrl.replace(/\/+$/, "")}/`).toString();
 }
 
-async function invokeTauriCommand<T>(command: string, args?: Record<string, unknown>) {
+export async function invokeTauriCommand<T>(command: string, args?: Record<string, unknown>) {
   const internals = getTauriInternals();
   if (!internals) {
     throw new Error("Tauri runtime is unavailable.");
@@ -134,6 +146,29 @@ export function buildBrowserSessionSocketUrl(
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function decodeBase64ToBytes(value: string) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+}
+
+function parseProxyRequestBody(body?: BodyInit | null) {
+  if (!body) {
+    return undefined;
+  }
+
+  if (typeof body === "string") {
+    return body ? JSON.parse(body) : undefined;
+  }
+
+  throw new Error("Native backend proxy only supports JSON string bodies.");
 }
 
 async function openBrowserSessionSocket(sessionId: string) {
@@ -356,6 +391,39 @@ async function browserFetchJson<T>(path: string, init?: RequestInit) {
   }
 
   return (await response.json()) as T;
+}
+
+export async function proxyBackendJson<T>(path: string, init?: RequestInit) {
+  return invokeTauriCommand<T>("termsnip_proxy_backend_json", {
+    request: {
+      body: parseProxyRequestBody(init?.body),
+      method: init?.method ?? "GET",
+      path,
+    } satisfies BackendProxyRequest,
+  });
+}
+
+export async function proxyBackendBinary(path: string, init?: RequestInit) {
+  const response = await invokeTauriCommand<BackendBinaryProxyResponse>(
+    "termsnip_proxy_backend_binary",
+    {
+      request: {
+        body: parseProxyRequestBody(init?.body),
+        method: init?.method ?? "GET",
+        path,
+      } satisfies BackendProxyRequest,
+    }
+  );
+
+  return new Response(decodeBase64ToBytes(response.base64Body), {
+    headers: {
+      ...(response.contentDisposition
+        ? { "content-disposition": response.contentDisposition }
+        : undefined),
+      ...(response.contentType ? { "content-type": response.contentType } : undefined),
+    },
+    status: 200,
+  });
 }
 
 export async function resolveBackendHttpUrl(path: string) {

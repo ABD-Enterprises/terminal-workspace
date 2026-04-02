@@ -28,13 +28,16 @@ fully reviewable without real SSH infrastructure.
 
 ## Native Shell Bridge
 
-The native shell now owns the first transport slice:
+The native shell now owns the app-facing transport seam:
 
-- Tauri exposes session lifecycle commands for backend status, create, resize, and close.
+- Tauri exposes backend status plus JSON and binary proxy commands for the native webview.
+- Tauri exposes session lifecycle commands for create, resize, and close.
 - Tauri also owns the native session stream bridge: it opens the backend websocket, forwards frames
   to the webview as Tauri events, and proxies input back to the backend.
-- Non-session backend APIs still use the existing backend contract, so demo mode remains the safest
-  default path while the Rust transport grows.
+- Runtime passwords and passphrases persist through macOS Keychain in native mode.
+
+The Node backend still owns the actual SSH, SFTP, snippet, key, and forwarding operations, so demo
+mode remains the safest default path while the Rust transport grows.
 
 ## Browser Coverage
 

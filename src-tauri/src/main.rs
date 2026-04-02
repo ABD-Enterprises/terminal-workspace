@@ -2,12 +2,14 @@
 
 use std::{
     collections::HashMap,
+    process::{Command, Output},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use futures_util::{SinkExt, StreamExt};
 use reqwest::{Client, Method};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -17,6 +19,8 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_tungstenite::tungstenite::Message;
 
 const SESSION_STREAM_EVENT_NAME: &str = "termsnip://session-stream";
+const KEYCHAIN_PASSWORD_SERVICE: &str = "com.termsnip.runtime.password";
+const KEYCHAIN_PASSPHRASE_SERVICE: &str = "com.termsnip.runtime.passphrase";
 static SESSION_STREAM_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
@@ -143,6 +147,43 @@ struct BackendBooleanResponse {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct BackendProxyRequest {
+    body: Option<Value>,
+    method: String,
+    path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackendBinaryProxyResponse {
+    base64_body: String,
+    content_disposition: Option<String>,
+    content_type: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HostSecretsRequest {
+    host_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoreHostSecretsRequest {
+    host_id: String,
+    password: String,
+    passphrase: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HostSecretsResponse {
+    password: String,
+    passphrase: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SessionStreamRequest {
     session_id: String,
     stream_id: Option<String>,
@@ -201,6 +242,80 @@ fn extract_backend_error(status: reqwest::StatusCode, body: &str) -> String {
     } else {
         body.to_string()
     }
+}
+
+fn parse_backend_method(value: &str) -> Result<Method, String> {
+    Method::from_bytes(value.as_bytes()).map_err(|error| error.to_string())
+}
+
+fn trim_security_output(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .trim_end_matches(['\n', '\r'])
+        .to_string()
+}
+
+fn format_security_error(output: &Output) -> String {
+    let stderr = trim_security_output(&output.stderr);
+    if stderr.is_empty() {
+        format!("security exited with status {}", output.status)
+    } else {
+        stderr
+    }
+}
+
+fn security_record_missing(output: &Output) -> bool {
+    output.status.code() == Some(44) || format_security_error(output).contains("could not be found")
+}
+
+fn run_security_command(args: &[&str]) -> Result<Output, String> {
+    Command::new("/usr/bin/security")
+        .args(args)
+        .output()
+        .map_err(|error| format!("Failed to run macOS security CLI: {error}"))
+}
+
+fn load_keychain_secret(service: &str, account: &str) -> Result<Option<String>, String> {
+    let output = run_security_command(&["find-generic-password", "-a", account, "-s", service, "-w"])?;
+    if output.status.success() {
+        return Ok(Some(trim_security_output(&output.stdout)));
+    }
+
+    if security_record_missing(&output) {
+        return Ok(None);
+    }
+
+    Err(format_security_error(&output))
+}
+
+fn delete_keychain_secret(service: &str, account: &str) -> Result<(), String> {
+    let output = run_security_command(&["delete-generic-password", "-a", account, "-s", service])?;
+    if output.status.success() || security_record_missing(&output) {
+        return Ok(());
+    }
+
+    Err(format_security_error(&output))
+}
+
+fn store_keychain_secret(service: &str, account: &str, value: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return delete_keychain_secret(service, account);
+    }
+
+    let output = run_security_command(&[
+        "add-generic-password",
+        "-a",
+        account,
+        "-s",
+        service,
+        "-w",
+        value,
+        "-U",
+    ])?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    Err(format_security_error(&output))
 }
 
 fn emit_session_stream_event(app: &AppHandle, event: SessionStreamEvent) {
@@ -266,6 +381,40 @@ async fn proxy_json<T: DeserializeOwned>(
     serde_json::from_str(&text).map_err(|error| error.to_string())
 }
 
+async fn proxy_binary(
+    bridge: &BackendBridge,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> Result<BackendBinaryProxyResponse, String> {
+    let mut request = bridge.client.request(method, bridge.url(path));
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+
+    let response = request.send().await.map_err(|error| error.to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().await.map_err(|error| error.to_string())?;
+        return Err(extract_backend_error(status, &text));
+    }
+
+    let headers = response.headers().clone();
+    let bytes = response.bytes().await.map_err(|error| error.to_string())?;
+
+    Ok(BackendBinaryProxyResponse {
+        base64_body: BASE64_STANDARD.encode(bytes),
+        content_disposition: headers
+            .get("content-disposition")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_string()),
+        content_type: headers
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_string()),
+    })
+}
+
 #[tauri::command]
 fn termsnip_transport_info(bridge: State<'_, BackendBridge>) -> BackendTransportInfo {
     BackendTransportInfo {
@@ -287,6 +436,88 @@ async fn termsnip_backend_status(
         backend_base_url: bridge.base_url.clone(),
         transport: "tauri-proxy",
     })
+}
+
+#[tauri::command]
+async fn termsnip_proxy_backend_json(
+    bridge: State<'_, BackendBridge>,
+    request: BackendProxyRequest,
+) -> Result<Value, String> {
+    proxy_json(
+        &bridge,
+        parse_backend_method(&request.method)?,
+        &request.path,
+        request.body,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn termsnip_proxy_backend_binary(
+    bridge: State<'_, BackendBridge>,
+    request: BackendProxyRequest,
+) -> Result<BackendBinaryProxyResponse, String> {
+    proxy_binary(
+        &bridge,
+        parse_backend_method(&request.method)?,
+        &request.path,
+        request.body,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn termsnip_load_host_secrets(
+    request: HostSecretsRequest,
+) -> Result<HostSecretsResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(HostSecretsResponse {
+            password: load_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id)?
+                .unwrap_or_default(),
+            passphrase: load_keychain_secret(KEYCHAIN_PASSPHRASE_SERVICE, &request.host_id)?
+                .unwrap_or_default(),
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn termsnip_store_host_secrets(
+    request: StoreHostSecretsRequest,
+) -> Result<BackendBooleanResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        store_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id, &request.password)?;
+        store_keychain_secret(
+            KEYCHAIN_PASSPHRASE_SERVICE,
+            &request.host_id,
+            &request.passphrase,
+        )?;
+
+        Ok(BackendBooleanResponse {
+            ok: true,
+            pending: None,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn termsnip_clear_host_secrets(
+    request: HostSecretsRequest,
+) -> Result<BackendBooleanResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        delete_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id)?;
+        delete_keychain_secret(KEYCHAIN_PASSPHRASE_SERVICE, &request.host_id)?;
+
+        Ok(BackendBooleanResponse {
+            ok: true,
+            pending: None,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -527,6 +758,11 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             termsnip_transport_info,
             termsnip_backend_status,
+            termsnip_proxy_backend_json,
+            termsnip_proxy_backend_binary,
+            termsnip_load_host_secrets,
+            termsnip_store_host_secrets,
+            termsnip_clear_host_secrets,
             termsnip_create_backend_session,
             termsnip_close_backend_session,
             termsnip_resize_backend_session,

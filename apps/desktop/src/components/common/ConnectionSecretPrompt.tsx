@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isTauriRuntime } from "../../lib/backend-runtime";
 import type { ConnectionSecretPromptRequest } from "../../store/connection-secret-prompt-store";
 import { useConnectionSecretPromptStore } from "../../store/connection-secret-prompt-store";
 import { getHostConnectionSecrets, useConnectionSecretsStore } from "../../store/connection-secrets-store";
@@ -14,6 +15,7 @@ function ConnectionSecretPromptForm({ pendingRequest }: { pendingRequest: Connec
   const formId = `connection-secret-prompt-${pendingRequest.hostId}`;
   const [password, setPassword] = useState(existingSecrets.password);
   const [passphrase, setPassphrase] = useState(existingSecrets.passphrase);
+  const nativeSecretStorage = isTauriRuntime();
 
   const isInvalid =
     (pendingRequest.needsPassword && !password) ||
@@ -22,17 +24,19 @@ function ConnectionSecretPromptForm({ pendingRequest }: { pendingRequest: Connec
   return (
     <form
       id={formId}
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
 
         if (isInvalid) {
           return;
         }
 
-        setHostSecrets(pendingRequest.hostId, {
-          password,
-          passphrase,
-        });
+        await Promise.resolve(
+          setHostSecrets(pendingRequest.hostId, {
+            password,
+            passphrase,
+          })
+        );
         clearPrompt(true);
       }}
     >
@@ -66,8 +70,9 @@ function ConnectionSecretPromptForm({ pendingRequest }: { pendingRequest: Connec
         ) : null}
 
         <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-slate-300">
-          Secrets are kept in memory only. They are cleared on app reload and are not written into
-          saved host metadata.
+          {nativeSecretStorage
+            ? "In the native shell, runtime secrets are stored in macOS Keychain and kept out of host exports."
+            : "In the browser demo, runtime secrets stay in memory only for the current app session."}
         </div>
       </div>
       <div className="mt-6 border-t border-slate-800 pt-5">
@@ -96,6 +101,7 @@ function ConnectionSecretPromptForm({ pendingRequest }: { pendingRequest: Connec
 export function ConnectionSecretPrompt() {
   const pendingRequest = useConnectionSecretPromptStore((state) => state.pendingRequest);
   const clearPrompt = useConnectionSecretPromptStore((state) => state.clearPrompt);
+  const nativeSecretStorage = isTauriRuntime();
 
   return (
     <Modal
@@ -103,7 +109,9 @@ export function ConnectionSecretPrompt() {
       title={pendingRequest ? `${pendingRequest.actionLabel}: ${pendingRequest.hostLabel}` : "Runtime secret"}
       description={
         pendingRequest
-          ? `Enter the missing runtime credentials for ${pendingRequest.username}@${pendingRequest.hostname}. These secrets stay in memory only for this app run.`
+          ? nativeSecretStorage
+            ? `Enter the missing runtime credentials for ${pendingRequest.username}@${pendingRequest.hostname}. These secrets stay outside the host inventory and are stored in macOS Keychain.`
+            : `Enter the missing runtime credentials for ${pendingRequest.username}@${pendingRequest.hostname}. These secrets stay in memory only for this browser session.`
           : undefined
       }
       onClose={() => clearPrompt(false)}
