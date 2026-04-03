@@ -19,8 +19,8 @@ export default defineConfig({
   webServer: process.env.TERMSNIP_E2E_BASE_URL
     ? undefined
     : {
-        command: "node ./scripts/pnpmw.mjs --filter desktop exec vite --host 127.0.0.1 --port 4173",
-        url: "http://127.0.0.1:4173/hosts",
+        command: "cd ./apps/desktop && ./node_modules/.bin/vite --host 127.0.0.1 --port 4173",
+        url: "http://127.0.0.1:4173/",
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,
       },

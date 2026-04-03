@@ -1,15 +1,20 @@
 {
-  "updated_at": "2026-04-01T17:45:00-04:00",
-  "current_phase": "web-demo-quality",
-  "completed_phases": [],
+  "updated_at": "2026-04-02T20:30:00-04:00",
+  "current_phase": "native-shell-quality",
+  "completed_phases": [
+    "web-demo-quality"
+  ],
   "upcoming_phases": [
-    "native-shell-quality"
+    "native-trust-and-key-tooling",
+    "packaging-and-release-hardening"
   ],
   "risk_remediation_phases": [],
   "risks": [
-    "Desktop production bundle still exceeds the default Vite chunk-size warning threshold."
+    "Browser transport and native transport now intentionally diverge, so regressions need both browser validation and macOS-native fixture coverage.",
+    "Key inspection, key generation, and known-host scanning still proxy through the Node backend in native mode."
   ],
   "opportunities": [
-    "The new demo backend can become a contract-test seam while the real transport moves into Tauri."
+    "The new demo backend and browser suite can act as a stable contract seam while the remaining native transport paths move into Tauri.",
+    "The Rust transport split and localhost fixture harness make native hardening less dependent on ad hoc manual testing."
   ]
 }

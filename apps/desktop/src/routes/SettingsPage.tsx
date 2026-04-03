@@ -234,10 +234,10 @@ export function SettingsPage() {
             </div>
             <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
               <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Secret handling</p>
-              <p className="mt-1 text-sm leading-5 text-slate-300">
-                Passwords and passphrases are not exported because runtime secrets stay outside the
-                persisted host inventory and, in the native shell, live in macOS Keychain.
-              </p>
+            <p className="mt-1 text-sm leading-5 text-slate-300">
+              Passwords and passphrases are not exported because runtime secrets stay outside the
+              persisted host inventory and, in the native shell, live in macOS Keychain.
+            </p>
             </div>
           </div>
         </div>
@@ -258,8 +258,8 @@ export function SettingsPage() {
               Current default
             </p>
             <p className="mt-1 text-sm leading-5 text-slate-300">
-              Web demo quality is the active milestone. Demo mode ships on by default so the
-              seeded workspace stays browsable without any host-specific setup.
+              Native shell quality is the active milestone. Demo mode still ships on by default so
+              the seeded workspace stays browsable without any host-specific setup.
             </p>
           </div>
           <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
@@ -267,8 +267,9 @@ export function SettingsPage() {
               Next hardening target
             </p>
             <p className="mt-1 text-sm leading-5 text-slate-300">
-              Native shell quality follows the demo milestone: SFTP, forwards, and remote snippet
-              execution still need to move off the Node transport path after the new Rust session work.
+              Key inspection, key generation, and trust scanning are the main remaining native-mode
+              features that still proxy through the Node backend after the new Rust session, SFTP,
+              forward, and snippet work.
             </p>
           </div>
         </div>

@@ -78,3 +78,6 @@ jobs:
 
       - name: Run macOS keychain round-trip test
         run: cargo test --manifest-path src-tauri/Cargo.toml keychain_secret_round_trip
+
+      - name: Run native transport fixture test
+        run: npm run native:fixtures

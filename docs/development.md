@@ -13,6 +13,8 @@
 - `npm run test`: root Vitest unit + integration suite
 - `npm run e2e`: Playwright browser suite
 - `npm run build`: desktop production build
+- `npm run native:check`: Tauri compile check plus icon generation
+- `npm run native:fixtures`: macOS localhost transport fixture test
 - `TERMSNIP_RUN_E2E=1 npm run validate`: full lint/test/build/e2e pass
 
 ## Demo Mode
@@ -33,12 +35,17 @@ The native shell now owns the app-facing transport seam:
 - Tauri exposes backend status plus JSON and binary proxy commands for the native webview.
 - Tauri exposes session lifecycle commands for create, resize, and close.
 - Direct SSH and jump-host SSH sessions now connect in Rust instead of through the Node backend.
+- Native SFTP list, mkdir, rename, delete, upload, and download now execute through OpenSSH from Rust.
+- Native local and remote forwards now execute through Rust-owned OpenSSH control sessions.
+- Native remote snippet execution now reuses the same Rust-owned control-session path.
 - Tauri still owns the session stream bridge: native sessions emit terminal events directly, while
   backend-owned browser sessions continue to proxy websocket frames into the webview.
 - Runtime passwords and passphrases persist through macOS Keychain in native mode.
 
-The Node backend still owns SFTP, snippet, key, and forwarding operations, so demo mode remains the
-safest default path while the Rust transport grows.
+The Node backend still owns key inspection, key generation, known-host scanning, and the browser
+transport path. The native transport implementation now lives primarily in
+`src-tauri/src/native_transport.rs`, with macOS secret storage isolated in
+`src-tauri/src/keychain_support.rs`.
 
 ## Browser Coverage
 
@@ -54,5 +61,6 @@ The Playwright suite exercises the seeded workspace and captures route screensho
 
 ## Milestone Choice
 
-The repo is currently optimized for web demo quality first. Native shell quality remains the next
-phase once the browser-visible workspace is stable, testable, and easy to bootstrap.
+Web demo quality is complete enough to keep as the default screenshot/review path. The active phase
+is native shell quality: shrinking the backend-owned surface, hardening localhost/native transport
+tests, and making native builds/release checks routine.

@@ -7,18 +7,19 @@ use std::{
     io::{self, Read, Write},
     net::TcpStream,
     path::PathBuf,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use futures_util::{SinkExt, StreamExt};
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use reqwest::{Client, Method};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -26,6 +27,12 @@ use ssh2::{Channel, Session};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_tungstenite::tungstenite::Message;
+
+mod keychain_support;
+mod native_transport;
+
+use keychain_support::*;
+use native_transport::*;
 
 const SESSION_STREAM_EVENT_NAME: &str = "termsnip://session-stream";
 const KEYCHAIN_PASSWORD_SERVICE: &str = "com.termsnip.runtime.password";
@@ -38,8 +45,10 @@ const NATIVE_SESSION_READ_CHUNK_SIZE: usize = 4096;
 const NATIVE_SESSION_PROMPT_WINDOW_SIZE: usize = 512;
 const NATIVE_SESSION_POLL_INTERVAL_MS: u64 = 10;
 const NATIVE_SESSION_BUFFER_LIMIT: usize = 128;
+const NATIVE_SSH_CONTROL_READY_TIMEOUT_MS: u64 = 15_000;
 static SESSION_STREAM_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NATIVE_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
+static NATIVE_FORWARD_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 struct BackendBridge {
@@ -91,6 +100,11 @@ struct NativeSessionRegistry {
     sessions: Arc<Mutex<HashMap<String, NativeSessionHandle>>>,
 }
 
+#[derive(Clone, Default)]
+struct NativeForwardRegistry {
+    forwards: Arc<Mutex<HashMap<String, NativeForwardHandle>>>,
+}
+
 #[derive(Clone)]
 enum SessionStreamCommand {
     Close,
@@ -100,7 +114,14 @@ enum SessionStreamCommand {
 #[derive(Clone)]
 struct NativeSessionHandle {
     command_sender: UnboundedSender<NativeSessionCommand>,
+    host: BackendHostConnection,
     state: Arc<Mutex<NativeSessionState>>,
+}
+
+#[derive(Clone)]
+struct NativeForwardHandle {
+    killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
+    record: PortForwardRecord,
 }
 
 #[derive(Default)]
@@ -135,6 +156,12 @@ enum JumpSessionEvent {
     Output(String),
 }
 
+struct NativeSshControlContext {
+    config_path: PathBuf,
+    session_dir: PathBuf,
+    target_alias: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BackendTransportInfo {
@@ -150,7 +177,7 @@ struct BackendStatusResponse {
     transport: &'static str,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BackendHostConnection {
     agent_forwarding: bool,
@@ -198,6 +225,132 @@ struct ResizeSessionPayload {
 struct ResizeBackendSessionRequest {
     session_id: String,
     payload: ResizeSessionPayload,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteFileEntry {
+    kind: String,
+    modified_at: Option<String>,
+    name: String,
+    path: String,
+    permissions: Option<String>,
+    size: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SftpDirectoryResponse {
+    entries: Vec<RemoteFileEntry>,
+    path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackendPathResponse {
+    ok: bool,
+    path: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PortForwardRecord {
+    created_at: String,
+    direction: String,
+    id: String,
+    local_host: String,
+    local_port: u16,
+    remote_host: String,
+    remote_port: u16,
+    session_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ListForwardsResponse {
+    forwards: Vec<PortForwardRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SftpPathRequest {
+    host: BackendHostConnection,
+    path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SftpRenameRequest {
+    current_path: String,
+    host: BackendHostConnection,
+    next_path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SftpDeleteRequest {
+    host: BackendHostConnection,
+    is_directory: bool,
+    path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SftpUploadRequest {
+    contents_base64: String,
+    filename: String,
+    host: BackendHostConnection,
+    path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateForwardPayload {
+    direction: String,
+    local_host: String,
+    local_port: u16,
+    remote_host: String,
+    remote_port: u16,
+    session_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ForwardIdRequest {
+    forward_id: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnippetExecutionTarget {
+    host: BackendHostConnection,
+    id: String,
+    label: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SnippetExecutionResult {
+    target_id: String,
+    label: String,
+    ok: bool,
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+    error_message: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnippetExecutionRequest {
+    command: String,
+    targets: Vec<SnippetExecutionTarget>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SnippetExecutionResponse {
+    results: Vec<SnippetExecutionResult>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -299,6 +452,13 @@ fn next_native_session_id() -> String {
     )
 }
 
+fn next_native_forward_id() -> String {
+    format!(
+        "forward-{}",
+        NATIVE_FORWARD_COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 fn extract_backend_error(status: reqwest::StatusCode, body: &str) -> String {
     if let Ok(parsed) = serde_json::from_str::<BackendErrorBody>(body) {
         if let Some(error) = parsed.error {
@@ -325,316 +485,6 @@ fn expand_home(pathname: &str) -> PathBuf {
     }
 
     PathBuf::from(pathname)
-}
-
-fn is_valid_environment_key(value: &str) -> bool {
-    let mut characters = value.chars();
-    match characters.next() {
-        Some(first) if first.is_ascii_alphabetic() || first == '_' => {}
-        _ => return false,
-    }
-
-    characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
-}
-
-fn get_channel_environment(
-    environment: &Option<HashMap<String, String>>,
-) -> Option<Vec<(String, String)>> {
-    let environment = environment.as_ref()?;
-    let entries = environment
-        .iter()
-        .filter(|(key, _)| is_valid_environment_key(key))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect::<Vec<_>>();
-
-    if entries.is_empty() {
-        None
-    } else {
-        Some(entries)
-    }
-}
-
-fn encode_session_message(message_type: &str, payload: Value) -> String {
-    let mut object = serde_json::Map::new();
-    object.insert("type".to_string(), Value::String(message_type.to_string()));
-    if let Value::Object(fields) = payload {
-        object.extend(fields);
-    }
-    Value::Object(object).to_string()
-}
-
-fn escape_shell_value(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r#"'\"'\"'"#))
-}
-
-fn build_environment_export_prefix(environment: &Option<HashMap<String, String>>) -> String {
-    get_channel_environment(environment)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(key, value)| format!("export {key}={}", escape_shell_value(&value)))
-        .collect::<Vec<_>>()
-        .join("; ")
-}
-
-fn build_interactive_shell_command(environment: &Option<HashMap<String, String>>) -> Option<String> {
-    let export_prefix = build_environment_export_prefix(environment);
-    if export_prefix.is_empty() {
-        None
-    } else {
-        Some(format!(r#"{export_prefix}; exec "${{SHELL:-/bin/sh}}" -l"#))
-    }
-}
-
-fn known_hosts_host_pattern(host: &BackendHostConnection) -> String {
-    if host.port == 22 {
-        host.hostname.clone()
-    } else {
-        format!("[{}]:{}", host.hostname, host.port)
-    }
-}
-
-fn append_connection_chain<'a>(host: &'a BackendHostConnection, chain: &mut Vec<&'a BackendHostConnection>) {
-    if let Some(jump_host) = host.jump_host.as_deref() {
-        append_connection_chain(jump_host, chain);
-    }
-
-    chain.push(host);
-}
-
-fn build_connection_chain(host: &BackendHostConnection) -> Vec<&BackendHostConnection> {
-    let mut chain = Vec::new();
-    append_connection_chain(host, &mut chain);
-    chain
-}
-
-fn build_ssh_host_alias(index: usize, last_index: usize) -> String {
-    if index == last_index {
-        "termsnip-target".to_string()
-    } else {
-        format!("termsnip-hop-{index}")
-    }
-}
-
-fn build_prompt_responses(host: &BackendHostConnection) -> Vec<PromptResponse> {
-    let mut responses = Vec::new();
-
-    for connection in build_connection_chain(host) {
-        if connection.auth_method == "privateKey" && !connection.passphrase.is_empty() {
-            responses.push(PromptResponse {
-                kind: PromptResponseKind::Passphrase,
-                value: connection.passphrase.clone(),
-            });
-        }
-
-        if connection.auth_method == "password" && !connection.password.is_empty() {
-            responses.push(PromptResponse {
-                kind: PromptResponseKind::Password,
-                value: connection.password.clone(),
-            });
-        }
-    }
-
-    responses
-}
-
-fn detect_prompt_kind(buffer: &str) -> Option<PromptResponseKind> {
-    let lowercase = buffer.to_ascii_lowercase();
-
-    if lowercase.contains("enter passphrase for key") || lowercase.contains("passphrase for key") {
-        return Some(PromptResponseKind::Passphrase);
-    }
-
-    if lowercase.contains("password:") {
-        return Some(PromptResponseKind::Password);
-    }
-
-    None
-}
-
-fn take_prompt_response(
-    responses: &mut Vec<PromptResponse>,
-    kind: PromptResponseKind,
-) -> Option<PromptResponse> {
-    let index = responses.iter().position(|response| response.kind == kind)?;
-    Some(responses.remove(index))
-}
-
-fn create_jump_ssh_session_dir(session_id: &str) -> Result<PathBuf, String> {
-    let directory = env::temp_dir().join(format!("termsnip-native-jump-{session_id}"));
-    if directory.exists() {
-        fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
-    }
-    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-    Ok(directory)
-}
-
-fn write_jump_session_known_hosts(
-    host: &BackendHostConnection,
-    session_dir: &PathBuf,
-) -> Result<PathBuf, String> {
-    let known_hosts_path = session_dir.join("known_hosts");
-    let mut entries = Vec::new();
-
-    for connection in build_connection_chain(host) {
-        if let (Some(algorithm), Some(public_key)) = (
-            connection.known_host_algorithm.as_ref(),
-            connection.known_host_public_key.as_ref(),
-        ) {
-            entries.push(format!(
-                "{} {} {}",
-                known_hosts_host_pattern(connection),
-                algorithm,
-                public_key
-            ));
-        }
-    }
-
-    fs::write(&known_hosts_path, entries.join("\n")).map_err(|error| error.to_string())?;
-    Ok(known_hosts_path)
-}
-
-fn build_jump_session_config(
-    host: &BackendHostConnection,
-    session_dir: &PathBuf,
-    known_hosts_path: &PathBuf,
-) -> Result<(PathBuf, String), String> {
-    let config_path = session_dir.join("ssh_config");
-    let chain = build_connection_chain(host);
-    let last_index = chain.len().saturating_sub(1);
-    let jump_aliases = chain
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| *index != last_index)
-        .map(|(index, _)| build_ssh_host_alias(index, last_index))
-        .collect::<Vec<_>>();
-    let target_alias = build_ssh_host_alias(last_index, last_index);
-    let mut lines = Vec::new();
-
-    for (index, connection) in chain.iter().enumerate() {
-        let alias = build_ssh_host_alias(index, last_index);
-        lines.push(format!("Host {alias}"));
-        lines.push(format!("  HostName {}", connection.hostname));
-        lines.push(format!("  User {}", connection.username));
-        lines.push(format!("  Port {}", connection.port));
-        lines.push("  RequestTTY force".to_string());
-        lines.push("  LogLevel ERROR".to_string());
-        lines.push("  BatchMode no".to_string());
-        lines.push("  ServerAliveInterval 15".to_string());
-        lines.push("  ServerAliveCountMax 3".to_string());
-        lines.push("  GlobalKnownHostsFile /dev/null".to_string());
-        lines.push(format!(
-            "  UserKnownHostsFile {}",
-            known_hosts_path.to_string_lossy()
-        ));
-
-        if connection.known_host_public_key.is_some() && connection.known_host_algorithm.is_some() {
-            lines.push("  StrictHostKeyChecking yes".to_string());
-        } else {
-            lines.push("  StrictHostKeyChecking no".to_string());
-        }
-
-        if connection.agent_forwarding {
-            lines.push("  ForwardAgent yes".to_string());
-        } else {
-            lines.push("  ForwardAgent no".to_string());
-        }
-
-        match connection.auth_method.as_str() {
-            "privateKey" => {
-                lines.push(format!(
-                    "  IdentityFile {}",
-                    expand_home(&connection.private_key_path).to_string_lossy()
-                ));
-                lines.push("  IdentitiesOnly yes".to_string());
-                lines.push("  PreferredAuthentications publickey".to_string());
-            }
-            "password" => {
-                lines.push("  PubkeyAuthentication no".to_string());
-                lines.push("  PreferredAuthentications keyboard-interactive,password".to_string());
-                lines.push("  NumberOfPasswordPrompts 1".to_string());
-            }
-            _ => {}
-        }
-
-        if index == last_index && !jump_aliases.is_empty() {
-            lines.push(format!("  ProxyJump {}", jump_aliases.join(",")));
-        }
-
-        lines.push(String::new());
-    }
-
-    fs::write(&config_path, lines.join("\n")).map_err(|error| error.to_string())?;
-    Ok((config_path, target_alias))
-}
-
-fn trim_security_output(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes)
-        .trim_end_matches(['\n', '\r'])
-        .to_string()
-}
-
-fn format_security_error(output: &Output) -> String {
-    let stderr = trim_security_output(&output.stderr);
-    if stderr.is_empty() {
-        format!("security exited with status {}", output.status)
-    } else {
-        stderr
-    }
-}
-
-fn security_record_missing(output: &Output) -> bool {
-    output.status.code() == Some(44) || format_security_error(output).contains("could not be found")
-}
-
-fn run_security_command(args: &[&str]) -> Result<Output, String> {
-    Command::new("/usr/bin/security")
-        .args(args)
-        .output()
-        .map_err(|error| format!("Failed to run macOS security CLI: {error}"))
-}
-
-fn load_keychain_secret(service: &str, account: &str) -> Result<Option<String>, String> {
-    let output = run_security_command(&["find-generic-password", "-a", account, "-s", service, "-w"])?;
-    if output.status.success() {
-        return Ok(Some(trim_security_output(&output.stdout)));
-    }
-
-    if security_record_missing(&output) {
-        return Ok(None);
-    }
-
-    Err(format_security_error(&output))
-}
-
-fn delete_keychain_secret(service: &str, account: &str) -> Result<(), String> {
-    let output = run_security_command(&["delete-generic-password", "-a", account, "-s", service])?;
-    if output.status.success() || security_record_missing(&output) {
-        return Ok(());
-    }
-
-    Err(format_security_error(&output))
-}
-
-fn store_keychain_secret(service: &str, account: &str, value: &str) -> Result<(), String> {
-    if value.is_empty() {
-        return delete_keychain_secret(service, account);
-    }
-
-    let output = run_security_command(&[
-        "add-generic-password",
-        "-a",
-        account,
-        "-s",
-        service,
-        "-w",
-        value,
-        "-U",
-    ])?;
-    if output.status.success() {
-        return Ok(());
-    }
-
-    Err(format_security_error(&output))
 }
 
 fn emit_session_stream_event(app: &AppHandle, event: SessionStreamEvent) {
@@ -705,6 +555,62 @@ fn remove_native_session(registry: &NativeSessionRegistry, session_id: &str) -> 
         .lock()
         .expect("native session registry lock poisoned")
         .remove(session_id)
+}
+
+fn insert_native_forward(
+    registry: &NativeForwardRegistry,
+    forward_id: &str,
+    handle: NativeForwardHandle,
+) {
+    registry
+        .forwards
+        .lock()
+        .expect("native forward registry lock poisoned")
+        .insert(forward_id.to_string(), handle);
+}
+
+fn remove_native_forward(registry: &NativeForwardRegistry, forward_id: &str) -> Option<NativeForwardHandle> {
+    registry
+        .forwards
+        .lock()
+        .expect("native forward registry lock poisoned")
+        .remove(forward_id)
+}
+
+fn list_native_forwards(registry: &NativeForwardRegistry, session_id: &str) -> Vec<PortForwardRecord> {
+    registry
+        .forwards
+        .lock()
+        .expect("native forward registry lock poisoned")
+        .values()
+        .filter(|handle| handle.record.session_id == session_id)
+        .map(|handle| handle.record.clone())
+        .collect()
+}
+
+fn close_native_forward_handle(handle: NativeForwardHandle) {
+    let mut killer = handle
+        .killer
+        .lock()
+        .expect("native forward killer lock poisoned");
+    let _ = killer.kill();
+}
+
+fn close_native_forwards_for_session(registry: &NativeForwardRegistry, session_id: &str) {
+    let forward_ids = registry
+        .forwards
+        .lock()
+        .expect("native forward registry lock poisoned")
+        .values()
+        .filter(|handle| handle.record.session_id == session_id)
+        .map(|handle| handle.record.id.clone())
+        .collect::<Vec<_>>();
+
+    for forward_id in forward_ids {
+        if let Some(handle) = remove_native_forward(registry, &forward_id) {
+            close_native_forward_handle(handle);
+        }
+    }
 }
 
 fn emit_native_session_message(
@@ -976,12 +882,13 @@ fn spawn_jump_session_reader(
 fn run_jump_host_session_loop(
     app: AppHandle,
     registry: NativeSessionRegistry,
+    forward_registry: NativeForwardRegistry,
     session_id: String,
     state: Arc<Mutex<NativeSessionState>>,
     host: BackendHostConnection,
     mut receiver: UnboundedReceiver<NativeSessionCommand>,
 ) {
-    let session_dir = match create_jump_ssh_session_dir(&session_id) {
+    let session_dir = match create_native_ssh_session_dir(&session_id) {
         Ok(path) => path,
         Err(error) => {
             emit_native_session_error(&app, &session_id, &state, error);
@@ -992,9 +899,9 @@ fn run_jump_host_session_loop(
     };
 
     let result = (|| -> Result<(), String> {
-        let known_hosts_path = write_jump_session_known_hosts(&host, &session_dir)?;
+        let known_hosts_path = write_native_known_hosts(&host, &session_dir)?;
         let (config_path, target_alias) =
-            build_jump_session_config(&host, &session_dir, &known_hosts_path)?;
+            build_native_ssh_config(&host, &session_dir, &known_hosts_path, None)?;
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -1126,6 +1033,7 @@ fn run_jump_host_session_loop(
         set_native_session_connection_state(&app, &session_id, &state, "error");
     }
 
+    close_native_forwards_for_session(&forward_registry, &session_id);
     remove_native_session(&registry, &session_id);
     set_native_session_connection_state(&app, &session_id, &state, "disconnected");
 
@@ -1193,6 +1101,7 @@ fn handle_native_session_command(
 fn run_native_session_loop(
     app: AppHandle,
     registry: NativeSessionRegistry,
+    forward_registry: NativeForwardRegistry,
     session_id: String,
     state: Arc<Mutex<NativeSessionState>>,
     session: Session,
@@ -1268,6 +1177,7 @@ fn run_native_session_loop(
     let _ = channel.close();
     let _ = channel.wait_close();
     let _ = session.disconnect(None, "TermSnip session closed", None);
+    close_native_forwards_for_session(&forward_registry, &session_id);
     remove_native_session(&registry, &session_id);
     set_native_session_connection_state(&app, &session_id, &state, "disconnected");
 
@@ -1508,6 +1418,174 @@ async fn termsnip_proxy_backend_binary(
 }
 
 #[tauri::command]
+fn termsnip_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirectoryResponse, String> {
+    validate_session_host(&request.host)?;
+    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+    let output = with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+        run_sftp_batch_commands(
+            context,
+            &[format!("@ls -la {}", escape_sftp_argument(&target_path))],
+        )
+    })?;
+
+    Ok(SftpDirectoryResponse {
+        entries: parse_sftp_directory_listing(&target_path, &output),
+        path: target_path,
+    })
+}
+
+#[tauri::command]
+fn termsnip_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPathResponse, String> {
+    validate_session_host(&request.host)?;
+    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+    with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+        run_sftp_batch_commands(
+            context,
+            &[format!("@mkdir {}", escape_sftp_argument(&target_path))],
+        )
+        .map(|_| BackendPathResponse {
+            ok: true,
+            path: target_path.clone(),
+        })
+    })
+}
+
+#[tauri::command]
+fn termsnip_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathResponse, String> {
+    validate_session_host(&request.host)?;
+    let source_path =
+        resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.current_path);
+    let target_path =
+        resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.next_path);
+    with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+        run_sftp_batch_commands(
+            context,
+            &[format!(
+                "@rename {} {}",
+                escape_sftp_argument(&source_path),
+                escape_sftp_argument(&target_path)
+            )],
+        )
+        .map(|_| BackendPathResponse {
+            ok: true,
+            path: target_path.clone(),
+        })
+    })
+}
+
+#[tauri::command]
+fn termsnip_sftp_delete_entry(request: SftpDeleteRequest) -> Result<BackendBooleanResponse, String> {
+    validate_session_host(&request.host)?;
+    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+    with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+        run_sftp_batch_commands(
+            context,
+            &[format!(
+                "@{} {}",
+                if request.is_directory { "rmdir" } else { "rm" },
+                escape_sftp_argument(&target_path)
+            )],
+        )
+        .map(|_| BackendBooleanResponse {
+            ok: true,
+            pending: None,
+        })
+    })
+}
+
+#[tauri::command]
+fn termsnip_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathResponse, String> {
+    validate_session_host(&request.host)?;
+    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+    let contents = BASE64_STANDARD
+        .decode(request.contents_base64.as_bytes())
+        .map_err(|error| error.to_string())?;
+    with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+        let upload_path = context
+            .session_dir
+            .join(format!("upload-{}", sanitize_filename(&request.filename)));
+        fs::write(&upload_path, &contents).map_err(|error| error.to_string())?;
+        run_sftp_batch_commands(
+            context,
+            &[format!(
+                "@put {} {}",
+                escape_sftp_argument(&upload_path.to_string_lossy()),
+                escape_sftp_argument(&target_path)
+            )],
+        )
+        .map(|_| BackendPathResponse {
+            ok: true,
+            path: target_path.clone(),
+        })
+    })
+}
+
+#[tauri::command]
+fn termsnip_sftp_download_file(request: SftpPathRequest) -> Result<BackendBinaryProxyResponse, String> {
+    validate_session_host(&request.host)?;
+    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+    with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+        let filename = sanitize_filename(
+            target_path
+                .rsplit('/')
+                .find(|segment| !segment.is_empty())
+                .unwrap_or("download"),
+        );
+        let download_path = context.session_dir.join(format!("download-{filename}"));
+        run_sftp_batch_commands(
+            context,
+            &[format!(
+                "@get {} {}",
+                escape_sftp_argument(&target_path),
+                escape_sftp_argument(&download_path.to_string_lossy())
+            )],
+        )?;
+        let bytes = fs::read(download_path).map_err(|error| error.to_string())?;
+        Ok(BackendBinaryProxyResponse {
+            base64_body: BASE64_STANDARD.encode(bytes),
+            content_disposition: Some(format!("attachment; filename=\"{filename}\"")),
+            content_type: Some("application/octet-stream".to_string()),
+        })
+    })
+}
+
+#[tauri::command]
+fn termsnip_list_session_forwards(
+    native_forwards: State<'_, NativeForwardRegistry>,
+    request: SessionIdRequest,
+) -> ListForwardsResponse {
+    list_session_forwards(native_forwards.inner(), &request.session_id)
+}
+
+#[tauri::command]
+fn termsnip_create_forward(
+    native_sessions: State<'_, NativeSessionRegistry>,
+    native_forwards: State<'_, NativeForwardRegistry>,
+    request: CreateForwardPayload,
+) -> Result<PortForwardRecord, String> {
+    create_native_forward(native_sessions.inner(), native_forwards.inner(), request)
+}
+
+#[tauri::command]
+fn termsnip_delete_forward(
+    native_forwards: State<'_, NativeForwardRegistry>,
+    request: ForwardIdRequest,
+) -> BackendBooleanResponse {
+    delete_native_forward(native_forwards.inner(), &request.forward_id)
+}
+
+#[tauri::command]
+async fn termsnip_execute_snippet_on_hosts(
+    request: SnippetExecutionRequest,
+) -> Result<SnippetExecutionResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_native_snippet_request(request)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn termsnip_load_host_secrets(
     request: HostSecretsRequest,
 ) -> Result<HostSecretsResponse, String> {
@@ -1565,6 +1643,7 @@ async fn termsnip_clear_host_secrets(
 async fn termsnip_create_backend_session(
     bridge: State<'_, BackendBridge>,
     native_sessions: State<'_, NativeSessionRegistry>,
+    native_forwards: State<'_, NativeForwardRegistry>,
     app: AppHandle,
     request: CreateBackendSessionRequest,
 ) -> Result<CreateSessionResponse, String> {
@@ -1587,13 +1666,16 @@ async fn termsnip_create_backend_session(
         stream_id: None,
     }));
     let native_registry = native_sessions.inner().clone();
+    let forward_registry = native_forwards.inner().clone();
     let host = request.host;
+    let session_host = host.clone();
     let app_handle = app.clone();
     let session_id_for_thread = session_id.clone();
     let state_for_thread = state.clone();
     let command_sender = if host.jump_host.is_some() {
         let (command_sender, command_receiver) = unbounded_channel();
         let registry_for_thread = native_registry.clone();
+        let forward_registry_for_thread = forward_registry.clone();
         let thread_app = app_handle.clone();
         let thread_session_id = session_id_for_thread.clone();
         let thread_state = state_for_thread.clone();
@@ -1602,6 +1684,7 @@ async fn termsnip_create_backend_session(
             run_jump_host_session_loop(
                 thread_app,
                 registry_for_thread,
+                forward_registry_for_thread,
                 thread_session_id,
                 thread_state,
                 host,
@@ -1615,6 +1698,7 @@ async fn termsnip_create_backend_session(
             let (session, channel) = connect_native_session(&host)?;
             let (command_sender, command_receiver) = unbounded_channel();
             let registry_for_thread = native_registry.clone();
+            let forward_registry_for_thread = forward_registry.clone();
             let thread_app = app_handle.clone();
             let thread_session_id = session_id_for_thread.clone();
             let thread_state = state_for_thread.clone();
@@ -1623,6 +1707,7 @@ async fn termsnip_create_backend_session(
                 run_native_session_loop(
                     thread_app,
                     registry_for_thread,
+                    forward_registry_for_thread,
                     thread_session_id,
                     thread_state,
                     session,
@@ -1642,6 +1727,7 @@ async fn termsnip_create_backend_session(
         &session_id,
         NativeSessionHandle {
             command_sender,
+            host: session_host,
             state: state.clone(),
         },
     );
@@ -1654,9 +1740,11 @@ async fn termsnip_create_backend_session(
 async fn termsnip_close_backend_session(
     bridge: State<'_, BackendBridge>,
     native_sessions: State<'_, NativeSessionRegistry>,
+    native_forwards: State<'_, NativeForwardRegistry>,
     request: SessionIdRequest,
 ) -> Result<BackendBooleanResponse, String> {
     if let Some(handle) = remove_native_session(native_sessions.inner(), &request.session_id) {
+        close_native_forwards_for_session(native_forwards.inner(), &request.session_id);
         let _ = handle.command_sender.send(NativeSessionCommand::Close);
         return Ok(BackendBooleanResponse {
             ok: true,
@@ -1912,11 +2000,22 @@ fn main() {
         .manage(BackendBridge::new())
         .manage(SessionStreamRegistry::default())
         .manage(NativeSessionRegistry::default())
+        .manage(NativeForwardRegistry::default())
         .invoke_handler(tauri::generate_handler![
             termsnip_transport_info,
             termsnip_backend_status,
             termsnip_proxy_backend_json,
             termsnip_proxy_backend_binary,
+            termsnip_sftp_list_directory,
+            termsnip_sftp_create_directory,
+            termsnip_sftp_rename_entry,
+            termsnip_sftp_delete_entry,
+            termsnip_sftp_upload_file,
+            termsnip_sftp_download_file,
+            termsnip_list_session_forwards,
+            termsnip_create_forward,
+            termsnip_delete_forward,
+            termsnip_execute_snippet_on_hosts,
             termsnip_load_host_secrets,
             termsnip_store_host_secrets,
             termsnip_clear_host_secrets,
@@ -1930,6 +2029,9 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod native_transport_fixtures;
 
 #[cfg(test)]
 mod tests {
@@ -1997,6 +2099,36 @@ mod tests {
 
         assert_eq!(known_hosts_host_pattern(chain[0]), "[jump.internal]:2222");
         assert_eq!(known_hosts_host_pattern(chain[1]), "[target.internal]:2223");
+    }
+
+    #[test]
+    fn resolves_remote_paths_relative_to_the_sftp_root() {
+        assert_eq!(resolve_remote_path("/srv", "releases/../logs"), "/srv/logs");
+        assert_eq!(resolve_remote_path("/srv", "/var/tmp"), "/var/tmp");
+        assert_eq!(resolve_remote_path("/", "../../etc"), "/etc");
+    }
+
+    #[test]
+    fn parses_sftp_directory_listing_output() {
+        let output = r#"
+Connected to target.internal.
+drwxr-xr-x    2 ops ops 4096 Apr  2 18:10 apps
+-rw-r--r--    1 ops ops 128 Apr  1 2026 README.md
+lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
+"#;
+
+        let entries = parse_sftp_directory_listing("/srv", output);
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].name, "apps");
+        assert_eq!(entries[0].kind, "directory");
+        assert_eq!(entries[0].path, "/srv/apps");
+        assert_eq!(entries[0].permissions.as_deref(), Some("755"));
+        assert_eq!(entries[1].name, "current");
+        assert_eq!(entries[1].kind, "file");
+        assert_eq!(entries[1].path, "/srv/current");
+        assert_eq!(entries[2].name, "README.md");
+        assert_eq!(entries[2].permissions.as_deref(), Some("644"));
     }
 
     #[cfg(target_os = "macos")]

@@ -18,6 +18,7 @@ import {
   closeSession,
   createSession,
   getSessionBackendStatus,
+  invokeTauriCommand,
   isTauriRuntime,
   openSessionSocket,
   proxyBackendBinary,
@@ -125,6 +126,12 @@ export async function listRemoteDirectory(host: BackendHostConnection, path: str
     return listDemoRemoteDirectory(host, path);
   }
 
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<SftpDirectoryResponse>("termsnip_sftp_list_directory", {
+      request: { host, path },
+    });
+  }
+
   return backendFetch<SftpDirectoryResponse>("/api/backend/sftp/list", {
     method: "POST",
     body: JSON.stringify({ host, path }),
@@ -134,6 +141,12 @@ export async function listRemoteDirectory(host: BackendHostConnection, path: str
 export async function createRemoteDirectory(host: BackendHostConnection, path: string) {
   if (isDemoModeEnabled()) {
     return createDemoRemoteDirectory(host, path);
+  }
+
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<{ ok: boolean; path: string }>("termsnip_sftp_create_directory", {
+      request: { host, path },
+    });
   }
 
   return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/mkdir", {
@@ -151,6 +164,12 @@ export async function renameRemoteEntry(
     return renameDemoRemoteEntry(host, currentPath, nextPath);
   }
 
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<{ ok: boolean; path: string }>("termsnip_sftp_rename_entry", {
+      request: { host, currentPath, nextPath },
+    });
+  }
+
   return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/rename", {
     method: "POST",
     body: JSON.stringify({ host, currentPath, nextPath }),
@@ -166,6 +185,12 @@ export async function deleteRemoteEntry(
     return deleteDemoRemoteEntry(host, path, isDirectory);
   }
 
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<{ ok: boolean }>("termsnip_sftp_delete_entry", {
+      request: { host, path, isDirectory },
+    });
+  }
+
   return backendFetch<{ ok: boolean }>("/api/backend/sftp/delete", {
     method: "POST",
     body: JSON.stringify({ host, path, isDirectory }),
@@ -179,6 +204,17 @@ export async function uploadRemoteFile(
 ) {
   if (isDemoModeEnabled()) {
     return uploadDemoRemoteFile(host, remotePath, file);
+  }
+
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<{ ok: boolean; path: string }>("termsnip_sftp_upload_file", {
+      request: {
+        host,
+        path: remotePath,
+        filename: file.name,
+        contentsBase64: encodeBase64(await file.arrayBuffer()),
+      },
+    });
   }
 
   return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/upload", {
@@ -197,6 +233,26 @@ export async function downloadRemoteFile(host: BackendHostConnection, path: stri
     return downloadDemoRemoteFile(host, path);
   }
 
+  if (isTauriRuntime()) {
+    const response = await invokeTauriCommand<{
+      base64Body: string;
+      contentDisposition?: string;
+      contentType?: string;
+    }>("termsnip_sftp_download_file", {
+      request: { host, path },
+    });
+    const blob = new Blob([decodeBase64ToBytes(response.base64Body)], {
+      type: response.contentType ?? "application/octet-stream",
+    });
+    const header = response.contentDisposition;
+    const filename =
+      header?.match(/filename="?([^"]+)"?$/)?.[1] ??
+      path.split("/").filter(Boolean).slice(-1)[0] ??
+      "download";
+
+    return { blob, filename } satisfies DownloadRemoteFileResponse;
+  }
+
   const response = await backendBinaryFetch("/api/backend/sftp/download", {
     method: "POST",
     headers: {
@@ -212,6 +268,17 @@ export async function downloadRemoteFile(host: BackendHostConnection, path: stri
     "download";
 
   return { blob, filename } satisfies DownloadRemoteFileResponse;
+}
+
+function decodeBase64ToBytes(value: string) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
 }
 
 export async function inspectPrivateKey(path: string) {
@@ -252,6 +319,12 @@ export async function listLocalForwards(sessionId: string) {
     return listDemoForwards(sessionId);
   }
 
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<ListForwardsResponse>("termsnip_list_session_forwards", {
+      request: { sessionId },
+    });
+  }
+
   return backendFetch<ListForwardsResponse>(
     `/api/backend/forwards?sessionId=${encodeURIComponent(sessionId)}`
   );
@@ -260,6 +333,12 @@ export async function listLocalForwards(sessionId: string) {
 export async function createLocalForward(payload: CreateForwardPayload) {
   if (isDemoModeEnabled()) {
     return createDemoForward(payload);
+  }
+
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<PortForwardRecord>("termsnip_create_forward", {
+      request: payload,
+    });
   }
 
   return backendFetch<PortForwardRecord>("/api/backend/forwards", {
@@ -273,6 +352,12 @@ export async function deleteLocalForward(forwardId: string) {
     return deleteDemoForward(forwardId);
   }
 
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<BackendBooleanResponse>("termsnip_delete_forward", {
+      request: { forwardId },
+    });
+  }
+
   return backendFetch<BackendBooleanResponse>(`/api/backend/forwards/${forwardId}`, {
     method: "DELETE",
   });
@@ -281,6 +366,15 @@ export async function deleteLocalForward(forwardId: string) {
 export async function executeSnippetOnHosts(command: string, targets: SnippetExecutionTarget[]) {
   if (isDemoModeEnabled()) {
     return executeDemoSnippetOnHosts(command, targets);
+  }
+
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<{ results: SnippetExecutionResult[] }>(
+      "termsnip_execute_snippet_on_hosts",
+      {
+        request: { command, targets },
+      }
+    );
   }
 
   return backendFetch<{ results: SnippetExecutionResult[] }>("/api/backend/snippets/execute", {

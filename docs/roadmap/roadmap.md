@@ -2,25 +2,26 @@
 
 ## Current Focus
 
-Stabilize the web demo workspace so a fresh checkout can boot, validate, and produce browser-safe
-screenshots without any live SSH infrastructure.
+Finish native shell quality so the macOS app can own real SSH transport end-to-end while the
+browser/demo path stays stable for screenshots, review, and contract coverage.
 
 ## Active Phases
 
-- Web demo quality
+- Native shell quality
 - Success criteria:
-  - `npm run setup` works from a fresh shell without a global `pnpm`
-  - `npm run dev`, `npm run test`, `npm run e2e`, and `npm run validate` are all documented and runnable
-  - Hosts, Sessions, Snippets, Keys, Transfers, and Settings render cleanly with seeded demo data
-  - Browser smoke tests capture the six primary routes
+  - direct SSH, jump-host SSH, SFTP, forwarding, and remote snippets run through Rust in the native shell
+  - `npm run native:fixtures` passes on macOS runners and locally
+  - `src-tauri/src/main.rs` stays focused on app boot and command wiring instead of transport internals
+  - `npm run native:build` remains clean after transport changes
 
 ## Upcoming Phases
 
-- Native shell quality
-- Transport hardening inside the Tauri shell
-- Replace more of the Node transport layer with Rust-owned SSH and SFTP
+- Native trust and key tooling
+- Packaging and release hardening
+- Replace the remaining backend-owned native paths for key inspection, generation, and known-host scans
 
 ## Risks And Opportunities
 
-- Risk: SFTP and forwarding still depend on the Node backend, so native mode is only partially migrated.
-- Opportunity: route-level code splitting, the backend proxy seam, Keychain-backed runtime secrets, and Rust-owned direct plus jump-host SSH sessions now give the app a cleaner path for replacing the remaining Node transport without reshaping the React workspace.
+- Risk: the browser path and native path intentionally diverge now, so transport regressions need both browser validation and macOS-native fixture coverage.
+- Risk: key inspection, generation, and trust scanning still proxy through the Node backend in native mode.
+- Opportunity: route-level code splitting, the backend proxy seam, Keychain-backed runtime secrets, Rust-owned SSH sessions, forwarding, snippets, native SFTP, and the new localhost fixture harness now give the app a tighter path toward a fully native transport stack.

@@ -4,9 +4,9 @@ A local-first macOS SSH client starter repo inspired by the usability patterns o
 
 ## Current Focus
 
-The active milestone is web demo quality: the React/Vite workspace should boot from a fresh checkout,
-render the primary flows without real SSH material, and stay covered by browser smoke tests before
-the project shifts deeper into native-shell hardening.
+The active milestone is native shell quality: the React/Vite workspace already boots from a fresh
+checkout and stays covered by browser smoke tests, and the current effort is removing the remaining
+Node-owned transport pieces from the native shell without regressing the demo/browser path.
 
 ## Quick Start
 
@@ -41,10 +41,13 @@ The native-shell bridge now covers the app-facing transport seam:
 - the browser build still talks to the backend directly
 - the Tauri shell proxies backend JSON and binary APIs for the native webview
 - direct SSH and jump-host session lifecycle plus terminal stream transport are owned by Rust commands
+- native SFTP list, mkdir, rename, delete, upload, and download now run through OpenSSH from Rust
+- native local and remote forwards now run through OpenSSH control sessions from Rust
+- native remote snippet execution now runs through the same Rust-owned SSH control path
 - runtime passwords and passphrases persist through macOS Keychain in native mode
 
-SFTP, snippets, forwards, and the browser build still use the backend path while that transport
-responsibility moves deeper into `src-tauri`.
+The remaining backend-owned native features are key inspection, key generation, and known-host
+scanning. The browser build still uses the backend path by design.
 
 ## Scope
 
@@ -67,8 +70,9 @@ responsibility moves deeper into `src-tauri`.
 
 ## Native Validation
 
-- `pnpm native:icons` generates the Tauri icon set from `apps/desktop/public/favicon.svg`
-- `pnpm native:check` regenerates icons and runs `cargo check --manifest-path src-tauri/Cargo.toml`
-- `pnpm native:build` regenerates icons and runs `cargo build --manifest-path src-tauri/Cargo.toml`
+- `npm run native:icons` generates the Tauri icon set from `apps/desktop/public/favicon.svg`
+- `npm run native:check` regenerates icons and runs `cargo check --manifest-path src-tauri/Cargo.toml`
+- `npm run native:fixtures` runs the macOS localhost transport fixture for direct SSH, jump-host SSH, SFTP, forwards, and snippets
+- `npm run native:build` regenerates icons and runs `cargo build --manifest-path src-tauri/Cargo.toml`
 
 More setup and milestone detail lives in [docs/development.md](/Users/deffenda/Code/term-snip/docs/development.md) and [docs/roadmap/roadmap.md](/Users/deffenda/Code/term-snip/docs/roadmap/roadmap.md).
