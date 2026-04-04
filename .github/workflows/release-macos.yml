@@ -66,6 +66,57 @@ jobs:
       - name: Bootstrap repo
         run: npm run setup
 
+      - name: Validate release secrets
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+          MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_APP_PASSWORD: ${{ secrets.MACOS_NOTARY_APP_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        shell: bash
+        run: |
+          missing=()
+
+          for name in \
+            MACOS_CERTIFICATE_P12_BASE64 \
+            MACOS_CERTIFICATE_PASSWORD \
+            MACOS_KEYCHAIN_PASSWORD \
+            MACOS_SIGN_IDENTITY
+          do
+            if [[ -z "${!name}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          has_key_auth=1
+          for name in MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER MACOS_NOTARY_KEY_BASE64; do
+            if [[ -z "${!name}" ]]; then
+              has_key_auth=0
+            fi
+          done
+
+          has_apple_id_auth=1
+          for name in MACOS_NOTARY_APPLE_ID MACOS_NOTARY_APP_PASSWORD MACOS_NOTARY_TEAM_ID; do
+            if [[ -z "${!name}" ]]; then
+              has_apple_id_auth=0
+            fi
+          done
+
+          if [[ "$has_key_auth" -eq 0 && "$has_apple_id_auth" -eq 0 ]]; then
+            missing+=("notary credentials (App Store Connect key triple or Apple ID/app password/team ID)")
+          fi
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required release secrets:\n' >&2
+            printf '  - %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+
       - name: Import Developer ID certificate
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -132,7 +183,7 @@ jobs:
         run: npm run native:publish
 
       - name: Upload promoted release artifacts
-        if: always()
+        if: always() && hashFiles('artifacts/release/**') != ''
         uses: actions/upload-artifact@v4
         with:
           name: macos-release-${{ steps.release_meta.outputs.tag }}
