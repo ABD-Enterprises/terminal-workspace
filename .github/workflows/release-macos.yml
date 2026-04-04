@@ -13,6 +13,8 @@ on:
         default: stable
         type: string
   push:
+    branches:
+      - "phase/release-workflow-live-verification"
     tags:
       - "v*"
 
@@ -35,9 +37,16 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             echo "tag=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
             echo "channel=${{ github.event.inputs.release_channel }}" >> "$GITHUB_OUTPUT"
-          else
+            echo "target=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
             echo "channel=stable" >> "$GITHUB_OUTPUT"
+            echo "target=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+            echo "tag=v${VERSION}-verify.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "channel=preview" >> "$GITHUB_OUTPUT"
+            echo "target=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup pnpm
@@ -73,14 +82,14 @@ jobs:
           KEYCHAIN_PATH="$RUNNER_TEMP/termsnip-signing.keychain-db"
 
           MACOS_CERTIFICATE_P12_BASE64="$MACOS_CERTIFICATE_P12_BASE64" CERT_PATH="$CERT_PATH" python3 <<'PY'
-import base64
-import os
-from pathlib import Path
+          import base64
+          import os
+          from pathlib import Path
 
-Path(os.environ["CERT_PATH"]).write_bytes(
-    base64.b64decode(os.environ["MACOS_CERTIFICATE_P12_BASE64"])
-)
-PY
+          Path(os.environ["CERT_PATH"]).write_bytes(
+              base64.b64decode(os.environ["MACOS_CERTIFICATE_P12_BASE64"])
+          )
+          PY
           security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -118,6 +127,7 @@ PY
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          RELEASE_TARGET: ${{ steps.release_meta.outputs.target }}
           MACOS_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
         run: npm run native:publish
 

@@ -7,6 +7,7 @@ source "$ROOT_DIR/scripts/load-env.sh"
 CHANNEL="${MACOS_RELEASE_CHANNEL:-stable}"
 PROMOTED_MANIFEST_PATH="$ROOT_DIR/artifacts/release/promoted/$CHANNEL/latest-macos-release.json"
 DRY_RUN="${RELEASE_DRY_RUN:-0}"
+RELEASE_TARGET="${RELEASE_TARGET:-}"
 
 if [[ ! -f "$PROMOTED_MANIFEST_PATH" ]]; then
   echo "Promoted release manifest not found at $PROMOTED_MANIFEST_PATH" >&2
@@ -67,6 +68,9 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo "  tag: $RELEASE_TAG"
   echo "  name: $RELEASE_NAME"
   echo "  channel: $CHANNEL"
+  if [[ -n "$RELEASE_TARGET" ]]; then
+    echo "  target: $RELEASE_TARGET"
+  fi
   echo "  promotion directory: $PROMOTION_DIRECTORY"
   if [[ -n "$RELEASE_NOTES_PATH" ]]; then
     echo "  release notes: $RELEASE_NOTES_PATH"
@@ -89,6 +93,10 @@ if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1;
     --repo "$GITHUB_REPOSITORY"
     --title "$RELEASE_NAME"
   )
+
+  if [[ -n "$RELEASE_TARGET" ]]; then
+    create_args+=(--target "$RELEASE_TARGET")
+  fi
 
   if [[ "$CHANNEL" != "stable" ]]; then
     create_args+=(--prerelease)
