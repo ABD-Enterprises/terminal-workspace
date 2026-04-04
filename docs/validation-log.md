@@ -2,6 +2,24 @@
 
 ## 2026-04-04
 
+### Notarization And Release Promotion
+
+- `MACOS_NOTARY_PROFILE=BugNarratorNotary npm run native:notarize`
+  - Apple notarization submission `cdcc26c4-de7c-46c3-9908-fffee66dfd7f` accepted during the first
+    local proof pass
+  - after the implementation commit, Apple notarization submission
+    `0a91fc93-73af-4f5b-b41c-4def1ee41594` accepted on the committed release automation
+  - stapling passed
+  - post-notary `spctl` reported `accepted`
+- `npm run native:promote`
+  - promoted the notarized artifact into `artifacts/release/promoted/stable/v0.1.0`
+- `xcrun stapler validate -v src-tauri/target/release/bundle/macos/Terminal Workspace.app`
+  - passed after notarization
+- `spctl --assess --type execute --verbose=4 src-tauri/target/release/bundle/macos/Terminal Workspace.app`
+  - reported `accepted`
+- `TERMSNIP_RUN_E2E=1 npm run validate`
+  - passed after the notarization/promotion implementation commit
+
 ### Packaging And Release Hardening
 
 - `MACOS_SIGN_MODE=skip npm run native:release:check`

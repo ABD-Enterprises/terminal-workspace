@@ -1,9 +1,9 @@
 {
-  "updated_at": "2026-04-04T08:25:13-04:00",
+  "updated_at": "2026-04-04T08:36:52-04:00",
   "version": "0.1.0",
-  "current_phase": "packaging-and-release-hardening",
+  "current_phase": "notarization-and-release-promotion",
   "current_phase_status": "validated",
-  "current_phase_branch": "phase/packaging-and-release-hardening",
+  "current_phase_branch": "phase/notarization-and-release-promotion",
   "completed_phases": [
     {
       "id": "web-demo-quality",
@@ -16,26 +16,41 @@
       "title": "Native shell quality",
       "status": "completed",
       "completed_at": "2026-04-04T05:04:59-04:00"
+    },
+    {
+      "id": "packaging-and-release-hardening",
+      "title": "Packaging and release hardening",
+      "status": "completed",
+      "completed_at": "2026-04-04T08:25:13-04:00"
     }
   ],
   "upcoming_phases": [
     {
-      "id": "notarization-and-release-promotion",
-      "title": "Notarization and release promotion",
+      "id": "multi-surface-regression-hardening",
+      "title": "Multi-surface regression hardening",
       "priority": 1,
       "depends_on": [
-        "packaging-and-release-hardening"
+        "notarization-and-release-promotion"
       ],
-      "rationale": "The repo now produces signed bundles, versioned zip artifacts, and release manifests, but Gatekeeper still rejects the bundle because notarization and promotion automation are not complete."
+      "rationale": "The highest remaining product risk is intentional browser/native transport drift, so the next phase should harden regression coverage across both surfaces."
     },
     {
-      "id": "vault-sync-architecture",
-      "title": "Vault and sync architecture",
+      "id": "release-credential-portability-hardening",
+      "title": "Release credential portability hardening",
       "priority": 2,
       "depends_on": [
         "notarization-and-release-promotion"
       ],
-      "rationale": "With local-first native parity established, the next product opportunity is designing encrypted vaults, sync, and future team collaboration without reopening the transport boundary."
+      "rationale": "Notarization and stable promotion now work locally, but the release automation still depends on a machine-local keychain profile and lacks CI-backed promotion credentials."
+    },
+    {
+      "id": "vault-sync-architecture",
+      "title": "Vault and sync architecture",
+      "priority": 3,
+      "depends_on": [
+        "multi-surface-regression-hardening"
+      ],
+      "rationale": "With local-first native parity and a notarized release path established, the next product opportunity is designing encrypted vaults, sync, and future team collaboration without reopening the transport seam."
     }
   ],
   "risk_remediation_phases": [
@@ -65,6 +80,15 @@
         "risk-macos-bundle-not-notarized"
       ],
       "rationale": "The packaging phase now produces signed release artifacts and logs, but the macOS bundle still fails Gatekeeper assessment until notarization, stapling, and promotion are automated."
+    },
+    {
+      "id": "release-credential-portability-hardening",
+      "title": "Release credential portability hardening",
+      "priority": "medium",
+      "source_risk_ids": [
+        "risk-release-automation-requires-local-notary-profile"
+      ],
+      "rationale": "The release flow is now notarized and promoted locally, but it still depends on a machine-local `notarytool` keychain profile and has no CI-backed promotion credential path."
     }
   ],
   "risks": [
@@ -106,9 +130,18 @@
       "id": "risk-macos-bundle-not-notarized",
       "title": "Signed macOS bundle is not notarized",
       "severity": "high",
-      "status": "open",
-      "summary": "The package now signs cleanly and produces release manifests, but `spctl` still reports `not_accepted`, so the artifact is not ready for broad Gatekeeper-safe distribution.",
+      "status": "resolved",
+      "summary": "The local release path now submits the signed archive to Apple, staples the accepted ticket, and produces a Gatekeeper-accepted app bundle plus a promoted stable manifest.",
+      "resolved_at": "2026-04-04T08:36:52-04:00",
       "assigned_phase": "notarization-and-release-promotion"
+    },
+    {
+      "id": "risk-release-automation-requires-local-notary-profile",
+      "title": "Release automation still requires a machine-local notary profile",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The notarization and promotion path works locally with a `notarytool` keychain profile, but the repo does not yet provide CI-backed credentials or a shared release credential contract.",
+      "assigned_phase": "release-credential-portability-hardening"
     }
   ],
   "opportunities": [
@@ -128,6 +161,14 @@
       "effort": "high",
       "assigned_phase": "vault-sync-architecture",
       "summary": "The local-first native foundation is strong enough to plan vault, sync, and future shared-workspace features without redesigning the transport seam."
+    },
+    {
+      "id": "opp-notarized-release-publishing",
+      "title": "Publish promoted notarized artifacts through CI-backed release channels",
+      "impact": "medium",
+      "effort": "medium",
+      "assigned_phase": "release-credential-portability-hardening",
+      "summary": "The repo now produces notarized stable-channel artifacts locally, which creates a clear path for CI-backed release publishing and credential portability."
     }
   ],
   "incidents": [
@@ -146,8 +187,8 @@
     {
       "id": "incident-2026-04-04-spctl-not-accepted",
       "date": "2026-04-04",
-      "status": "open",
-      "summary": "The signed packaging gate now passes `codesign` but still records `spctl: not_accepted`, confirming notarization remains a release blocker."
+      "status": "resolved",
+      "summary": "The signed packaging gate originally reported `spctl: not_accepted`, but the notarization phase resolved it by submitting the archive to Apple, stapling the ticket, and revalidating with Gatekeeper."
     }
   ],
   "decisions": [
@@ -168,11 +209,17 @@
       "date": "2026-04-04",
       "title": "Make macOS packaging explicit and machine-readable",
       "summary": "Use an explicit `MACOS_SIGN_MODE=require` path for local signed bundles, a `skip` preview path for CI artifact generation, and emit release manifests plus verification logs into `artifacts/release/`."
+    },
+    {
+      "id": "dec-local-notarize-and-promote-flow",
+      "date": "2026-04-04",
+      "title": "Automate local notarization and stable promotion",
+      "summary": "Drive notarization with a local `notarytool` keychain profile, staple and validate the accepted app bundle, then promote the notarized artifact into a stable-channel directory with manifest and checksum outputs."
     }
   ],
   "environment_status": {
-    "branch": "phase/packaging-and-release-hardening",
-    "dirty": false,
+    "branch": "phase/notarization-and-release-promotion",
+    "dirty": true,
     "os": "macos",
     "node": "v25.9.0",
     "npm": "11.12.1",
@@ -183,10 +230,24 @@
     "native_trust": "passed (unsandboxed)",
     "native_fixtures": "passed (unsandboxed)",
     "native_release_preview": "passed",
-    "native_release_signed": "passed (codesign), spctl not_accepted",
+    "native_release_signed": "passed (codesign), spctl accepted",
+    "native_notarize": "passed",
+    "native_promote": "passed",
+    "stapler_validate": "passed",
     "validate": "passed (unsandboxed)",
     "deployment": "not_deployed"
   },
   "deployment_history": [],
-  "promotion_history": []
+  "promotion_history": [
+    {
+      "id": "promotion-2026-04-04-stable-v0.1.0",
+      "date": "2026-04-04T08:35:53-04:00",
+      "channel": "stable",
+      "version": "0.1.0",
+      "commit": "eb6d7969d5d1a14828b02fc6ac6b3708b8d196a6",
+      "manifest": "/Users/deffenda/Code/term-snip/artifacts/release/promoted/stable/latest-macos-release.json",
+      "archive": "/Users/deffenda/Code/term-snip/artifacts/release/terminal-workspace-macos-v0.1.0.zip",
+      "status": "promoted"
+    }
+  ]
 }

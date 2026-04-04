@@ -19,7 +19,12 @@
       "id": "artifact-native-release-preview",
       "path": "artifacts/release",
       "type": "release-artifact"
+    },
+    {
+      "id": "artifact-native-release-promoted",
+      "path": "artifacts/release/promoted/stable",
+      "type": "release-artifact"
     }
   ],
-  "updated_at": "2026-04-04T08:25:13-04:00"
+  "updated_at": "2026-04-04T08:36:52-04:00"
 }

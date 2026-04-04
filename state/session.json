@@ -1,29 +1,40 @@
 {
-  "branch": "phase/packaging-and-release-hardening",
-  "current_run_id": "2026-04-04-packaging-and-release-hardening",
-  "current_task": "Execute packaging and release hardening with release artifacts, signed bundle verification, CI preview packaging, and state persistence.",
-  "current_phase": "packaging-and-release-hardening",
-  "started_at": "2026-04-04T07:30:43-04:00",
-  "summary": "Added a native packaging gate that writes versioned zip and manifest artifacts, hardened signing mode selection, added CI preview release artifacts, corrected the macOS bundle identifier to `com.abdenterprises.terminalworkspace`, and revalidated the repo on the packaging branch.",
-  "updated_at": "2026-04-04T08:25:13-04:00",
+  "branch": "phase/notarization-and-release-promotion",
+  "current_run_id": "2026-04-04-notarization-and-release-promotion",
+  "current_task": "Execute notarization and release promotion with Apple submission, stapling, Gatekeeper validation, stable-channel promotion, and state persistence.",
+  "current_phase": "notarization-and-release-promotion",
+  "started_at": "2026-04-04T08:26:00-04:00",
+  "summary": "Implemented local notarization and stable promotion automation, submitted and accepted a notarized release on the committed branch tip, validated stapling and Gatekeeper acceptance, and promoted the notarized artifact into the stable channel.",
+  "updated_at": "2026-04-04T08:36:52-04:00",
   "status": "validated",
   "validation": [
     {
-      "id": "validation-native-release-preview",
-      "command": "MACOS_SIGN_MODE=skip npm run native:release:check",
+      "id": "validation-native-notarize",
+      "command": "MACOS_NOTARY_PROFILE=BugNarratorNotary npm run native:notarize",
       "result": "passed"
     },
     {
-      "id": "validation-native-release-signed",
-      "command": "npm run native:release:check",
+      "id": "validation-native-promote",
+      "command": "npm run native:promote",
+      "result": "passed"
+    },
+    {
+      "id": "validation-stapler-validate",
+      "command": "xcrun stapler validate -v src-tauri/target/release/bundle/macos/Terminal Workspace.app",
       "result": "passed",
-      "notes": "Executed outside the desktop sandbox. `codesign` verification passed on the final bundle identifier `com.abdenterprises.terminalworkspace`; `spctl` remained `not_accepted`, which is tracked as the notarization blocker."
+      "notes": "Validated the stapled ticket after the accepted Apple notarization submission."
+    },
+    {
+      "id": "validation-spctl-accepted",
+      "command": "spctl --assess --type execute --verbose=4 src-tauri/target/release/bundle/macos/Terminal Workspace.app",
+      "result": "passed",
+      "notes": "Reported `accepted` with source `Notarized Developer ID`."
     },
     {
       "id": "validation-validate",
       "command": "TERMSNIP_RUN_E2E=1 npm run validate",
       "result": "passed",
-      "notes": "Executed outside the desktop sandbox after the packaging script and workflow changes."
+      "notes": "Executed on the committed release automation branch after the notarization and promotion implementation."
     }
   ]
 }

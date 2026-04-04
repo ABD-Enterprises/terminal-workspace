@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-04-04T08:25:13-04:00",
+  "generated_at": "2026-04-04T08:36:52-04:00",
   "repo_root": "/Users/deffenda/Code/term-snip",
-  "branch": "phase/packaging-and-release-hardening",
-  "commit": "acd66719a6ab0fa39a813ba3b59d6dd553014ee8",
-  "dirty": false,
+  "branch": "phase/notarization-and-release-promotion",
+  "commit": "eb6d7969d5d1a14828b02fc6ac6b3708b8d196a6",
+  "dirty": true,
   "name": "terminal-workspace",
   "version": "0.1.0"
 }

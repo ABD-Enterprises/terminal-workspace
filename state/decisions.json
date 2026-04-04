@@ -30,7 +30,18 @@
         "CI can build preview release artifacts without access to signing secrets.",
         "Notarization remains a separate tracked release blocker because `spctl` still reports `not_accepted`."
       ]
+    },
+    {
+      "id": "dec-local-notarize-and-promote-flow",
+      "date": "2026-04-04",
+      "title": "Automate local notarization and stable promotion",
+      "decision": "Drive notarization with a local `notarytool` keychain profile, staple and validate the accepted app bundle, then promote the notarized artifact into a stable-channel directory with manifest and checksum outputs.",
+      "consequences": [
+        "The repo now has a repeatable local notarization and stable promotion path.",
+        "Release provenance includes Apple submission IDs, stapler logs, Gatekeeper assessment, and promotion metadata.",
+        "Credential portability remains a separate follow-up because the release flow still depends on a machine-local keychain profile."
+      ]
     }
   ],
-  "updated_at": "2026-04-04T08:25:13-04:00"
+  "updated_at": "2026-04-04T08:36:52-04:00"
 }

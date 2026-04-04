@@ -1,13 +1,13 @@
 {
-  "summary": "The packaging-and-release-hardening phase is validated and committed on phase/packaging-and-release-hardening. The repo now emits signed macOS release zips plus JSON manifests, CI preview release artifacts, and explicit signing diagnostics; the bundle identifier is no longer a placeholder. `codesign` passes, but `spctl` still reports `not_accepted`, so notarization remains the next release blocker.",
+  "summary": "The notarization-and-release-promotion phase is validated on phase/notarization-and-release-promotion. The repo now notarizes the signed macOS bundle with Apple, staples the accepted ticket, records a Gatekeeper-accepted result, and promotes the notarized release into the stable channel with manifest and checksum artifacts.",
   "next_steps": [
-    "Execute notarization-and-release-promotion so the signed macOS bundle can pass Gatekeeper assessment and support promotion.",
     "Execute multi-surface-regression-hardening to reduce the intentional browser/native transport drift risk.",
+    "Execute release-credential-portability-hardening so notarization and promotion can run without a machine-local keychain profile.",
     "Reduce local desktop sandbox friction for localhost SSH fixtures in the dedicated remediation phase."
   ],
   "blockers": [
-    "The macOS release artifact is signed but not notarized.",
+    "Release automation still depends on a machine-local `notarytool` keychain profile.",
     "Local macOS localhost SSH fixture suites still require an unsandboxed shell for valid results."
   ],
-  "updated_at": "2026-04-04T08:25:13-04:00"
+  "updated_at": "2026-04-04T08:36:52-04:00"
 }

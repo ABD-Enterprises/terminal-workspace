@@ -27,7 +27,7 @@
     {
       "id": "task-notarization-release-promotion",
       "title": "Automate notarization, stapling, and release promotion for the macOS bundle",
-      "status": "pending",
+      "status": "completed",
       "phase": "notarization-and-release-promotion"
     },
     {
@@ -37,11 +37,17 @@
       "phase": "multi-surface-regression-hardening"
     },
     {
+      "id": "task-release-credential-portability-hardening",
+      "title": "Move release credentials and promotion into a portable CI-backed release path",
+      "status": "pending",
+      "phase": "release-credential-portability-hardening"
+    },
+    {
       "id": "task-local-fixture-sandbox-hardening",
       "title": "Reduce local desktop sandbox friction for macOS localhost SSH fixtures",
       "status": "pending",
       "phase": "local-fixture-sandbox-hardening"
     }
   ],
-  "updated_at": "2026-04-04T08:25:13-04:00"
+  "updated_at": "2026-04-04T08:36:52-04:00"
 }

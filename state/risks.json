@@ -38,10 +38,19 @@
       "id": "risk-macos-bundle-not-notarized",
       "title": "Signed macOS bundle is not notarized",
       "severity": "high",
+      "status": "resolved",
+      "summary": "The local release path now submits the signed archive to Apple, staples the accepted ticket, and produces a Gatekeeper-accepted app bundle plus a promoted stable manifest.",
+      "assigned_phase": "notarization-and-release-promotion",
+      "resolved_at": "2026-04-04T08:36:52-04:00"
+    },
+    {
+      "id": "risk-release-automation-requires-local-notary-profile",
+      "title": "Release automation still requires a machine-local notary profile",
+      "severity": "medium",
       "status": "open",
-      "summary": "The package now signs cleanly and produces release manifests, but `spctl` still reports `not_accepted`, so the artifact is not ready for broad Gatekeeper-safe distribution.",
-      "assigned_phase": "notarization-and-release-promotion"
+      "summary": "The notarization and promotion path works locally with a `notarytool` keychain profile, but the repo does not yet provide CI-backed credentials or a shared release credential contract.",
+      "assigned_phase": "release-credential-portability-hardening"
     }
   ],
-  "updated_at": "2026-04-04T08:25:13-04:00"
+  "updated_at": "2026-04-04T08:36:52-04:00"
 }

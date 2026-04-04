@@ -4,9 +4,9 @@ A local-first macOS SSH client starter repo inspired by the usability patterns o
 
 ## Current Focus
 
-The active phase is packaging and release hardening: the native macOS shell already owns sessions,
-SFTP, snippets, forwards, trust, and key tooling, and this branch adds release manifests, signed
-bundle verification, preview release artifacts in CI, and explicit macOS packaging diagnostics.
+The active phase is notarization and release promotion: the native macOS shell already owns
+sessions, SFTP, snippets, forwards, trust, and key tooling, and this branch now produces notarized,
+stapled, Gatekeeper-accepted macOS release artifacts plus a promoted stable-channel bundle record.
 
 ## Quick Start
 
@@ -26,6 +26,10 @@ bundle verification, preview release artifacts in CI, and explicit macOS packagi
   generation, and known-host scans.
 - `npm run native:release:check` builds the native app bundle, writes a release manifest into
   `artifacts/release/`, and verifies the signed macOS package contract.
+- `npm run native:notarize` rebuilds the signed bundle, submits the zip for notarization, staples
+  the accepted ticket, recreates the zip, and updates the release manifest.
+- `npm run native:promote` promotes an accepted notarized release into
+  `artifacts/release/promoted/stable/`.
 - `TERMSNIP_RUN_E2E=1 npm run validate` runs lint, unit/integration tests, build, macOS native
   trust tooling when available, and browser e2e.
 
@@ -57,7 +61,7 @@ The native-shell bridge now covers the app-facing transport seam:
 - runtime passwords and passphrases persist through macOS Keychain in native mode
 
 The browser build still uses the backend path by design, while the native shell now adds a release
-manifest, signed bundle verification, and CI preview artifacts ahead of notarization and promotion.
+manifest, signed bundle verification, notarization, stapling, and stable promotion artifacts.
 
 ## Scope
 
@@ -88,6 +92,10 @@ manifest, signed bundle verification, and CI preview artifacts ahead of notariza
 - `npm run native:fixtures` runs the macOS localhost transport fixture for direct SSH, jump-host SSH, SFTP, forwards, and snippets
 - `npm run native:release:check` writes `artifacts/release/latest-macos-release.json` plus the
   versioned zip, manifest, and signing logs for the current native bundle
+- `npm run native:notarize` records the Apple submission ID, notary log, stapler logs, and
+  post-notary Gatekeeper assessment in the same manifest
+- `npm run native:promote` copies the notarized release, manifest, logs, and checksum file into the
+  stable promotion channel directory
 - `npm run native:build` regenerates icons and runs `cargo build --manifest-path src-tauri/Cargo.toml`
 
 More setup and milestone detail lives in [docs/development.md](/Users/deffenda/Code/term-snip/docs/development.md) and [docs/roadmap/roadmap.md](/Users/deffenda/Code/term-snip/docs/roadmap/roadmap.md).

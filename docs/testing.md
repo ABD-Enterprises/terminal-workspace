@@ -13,6 +13,10 @@
   forwarding, and snippets.
 - `npm run native:release:check`: packaging gate that builds the macOS bundle, creates the versioned
   zip/manifest pair, and verifies the signed release contract.
+- `MACOS_NOTARY_PROFILE=<profile> npm run native:notarize`: notarization gate that verifies Apple
+  acceptance, stapling, and post-notary Gatekeeper acceptance.
+- `npm run native:promote`: promotion gate that copies the notarized artifact into the stable
+  channel directory and writes a checksum file.
 - `TERMSNIP_RUN_E2E=1 npm run validate`: repo-level lint, Vitest, desktop build, macOS native
   trust fixture when available, and browser e2e.
 
@@ -22,6 +26,8 @@
   they may need to be executed outside the shell sandbox to produce valid results.
 - `native:trust` is the required validation path for the native trust and key tooling phase.
 - `native:release:check` is the required validation path for packaging and release hardening.
+- `native:notarize` plus `native:promote` are the required validation paths for notarization and
+  release promotion.
 - `native:fixtures` remains the broader transport regression suite and may still fail on host setups
   where localhost `sshd` forwarding is restricted; treat that as a tracked transport-fixture risk,
   not as silent skipped coverage.
