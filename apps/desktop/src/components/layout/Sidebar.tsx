@@ -10,7 +10,6 @@ export function Sidebar() {
   const sidebarSearch = useAppStore((state) => state.sidebarSearch);
   const setSidebarSearch = useAppStore((state) => state.setSidebarSearch);
   const workspaceDensity = useAppStore((state) => state.workspaceDensity);
-  const sectionShortcutsEnabled = useAppStore((state) => state.sectionShortcutsEnabled);
   const favoriteCount = hosts.filter((host) => host.favorite).length;
   const groupCount = new Set(hosts.map((host) => host.group).filter(Boolean)).size;
 
@@ -27,25 +26,16 @@ export function Sidebar() {
           workspaceDensity === "compact" ? "px-3 py-2" : "px-3.5 py-2.5"
         )}
       >
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-emerald-300">
-              TermSnip
-            </p>
-            <h1 className="mt-0.5 text-base font-semibold text-slate-50">Local Vault</h1>
-          </div>
-          <div className="rounded-xl border border-slate-800 bg-slate-950/80 px-2 py-1 text-right">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Hosts</p>
-            <p className="text-sm font-semibold text-slate-100">{hosts.length}</p>
-          </div>
-        </div>
-        <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px] text-slate-400">
-          <div className="rounded-xl border border-slate-800 bg-slate-950/70 px-2 py-1.5">
-            Favorites <span className="float-right text-slate-200">{favoriteCount}</span>
-          </div>
-          <div className="rounded-xl border border-slate-800 bg-slate-950/70 px-2 py-1.5">
-            Groups <span className="float-right text-slate-200">{groupCount}</span>
-          </div>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-emerald-300">
+          TermSnip
+        </p>
+        <h1 className="mt-0.5 text-base font-semibold text-slate-50">Local Vault</h1>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-400">
+          <span>{hosts.length} hosts</span>
+          <span>•</span>
+          <span>{favoriteCount} favorites</span>
+          <span>•</span>
+          <span>{groupCount} groups</span>
         </div>
       </div>
 
@@ -58,7 +48,7 @@ export function Sidebar() {
       </div>
 
       <nav className={cn("mt-2", workspaceDensity === "compact" ? "space-y-1" : "space-y-1.5")}>
-        {navigationItems.map((item, index) => (
+        {navigationItems.map((item) => (
           <NavLink
             key={item.path}
             to={item.path}
@@ -72,42 +62,12 @@ export function Sidebar() {
               )
             }
           >
-            {({ isActive }) => (
-              <>
-                <span className="min-w-0">
-                  <span className="block text-[13px] font-medium text-slate-100">{item.label}</span>
-                  <span className="mt-0.5 block truncate text-[10px] leading-4 text-slate-500">
-                    {item.description}
-                  </span>
-                </span>
-                <div className="ml-2 flex shrink-0 items-center gap-1.5">
-                  {sectionShortcutsEnabled ? (
-                    <span
-                      className={cn(
-                        "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.14em]",
-                        isActive
-                          ? "border-emerald-300/50 bg-emerald-300/10 text-emerald-200"
-                          : "border-slate-700 bg-slate-950/80 text-slate-400"
-                      )}
-                    >
-                      ⌘{index + 1}
-                    </span>
-                  ) : null}
-                  {item.badge ? (
-                    <span
-                      className={cn(
-                        "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.14em]",
-                        isActive
-                          ? "border-emerald-300/50 bg-emerald-300/10 text-emerald-200"
-                          : "border-slate-700 bg-slate-950/80 text-slate-400"
-                      )}
-                    >
-                      {item.badge}
-                    </span>
-                  ) : null}
-                </div>
-              </>
-            )}
+            <span className="min-w-0">
+              <span className="block text-[13px] font-medium text-slate-100">{item.label}</span>
+              <span className="mt-0.5 block truncate text-[10px] leading-4 text-slate-500">
+                {item.description}
+              </span>
+            </span>
           </NavLink>
         ))}
       </nav>

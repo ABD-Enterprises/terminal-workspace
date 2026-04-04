@@ -79,22 +79,6 @@ export function HostFilterBar({
           Favorites only
         </button>
       </div>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {tags.slice(0, 8).map((tag) => (
-          <button
-            key={tag}
-            type="button"
-            onClick={() => onTagChange(tag === activeTag ? "all" : tag)}
-            className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
-              tag === activeTag
-                ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-200"
-                : "border-slate-700 bg-slate-900/60 text-slate-300 hover:border-slate-500 hover:text-white"
-            }`}
-          >
-            {tag}
-          </button>
-        ))}
-      </div>
     </section>
   );
 }

@@ -80,24 +80,30 @@ export function FileBrowser({ host }: FileBrowserProps) {
   const [search, setSearch] = useState("");
   const [entries, setEntries] = useState<RemoteFileEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [browserLocked, setBrowserLocked] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>();
   const [selectedEntry, setSelectedEntry] = useState<RemoteFileEntry>();
   const [draftAction, setDraftAction] = useState<DraftActionState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<RemoteFileEntry>();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const browseInteractionRef = useRef(false);
 
-  const loadDirectory = useCallback(async (targetPath: string) => {
+  const loadDirectory = useCallback(async (targetPath: string, interactive = false) => {
     setLoading(true);
     setErrorMessage(undefined);
 
     try {
-      const readyForConnection = await ensureRuntimeSecrets(host, "Browse remote files");
+      const readyForConnection = await ensureRuntimeSecrets(host, "Browse remote files", {
+        interactive,
+      });
       if (!readyForConnection) {
+        setBrowserLocked(true);
         setEntries([]);
         setSelectedEntry(undefined);
         return;
       }
 
+      setBrowserLocked(false);
       const result = await listRemoteDirectory(buildBackendConnection(host, knownHosts), targetPath);
       rememberRemotePath(host.id, result.path);
       setEntries(result.entries);
@@ -123,8 +129,15 @@ export function FileBrowser({ host }: FileBrowserProps) {
   }, [currentPath]);
 
   useEffect(() => {
-    void loadDirectory(currentPath);
+    const interactive = browseInteractionRef.current;
+    browseInteractionRef.current = false;
+    void loadDirectory(currentPath, interactive);
   }, [currentPath, loadDirectory]);
+
+  const navigateToPath = (targetPath: string, interactive = true) => {
+    browseInteractionRef.current = interactive;
+    rememberRemotePath(host.id, targetPath);
+  };
 
   const filteredEntries = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -334,28 +347,28 @@ export function FileBrowser({ host }: FileBrowserProps) {
                 onChange={(event) => setDraftPath(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
-                    rememberRemotePath(host.id, draftPath.trim() || host.sftpRoot || "/");
+                    navigateToPath(draftPath.trim() || host.sftpRoot || "/");
                   }
                 }}
                 className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-1.5 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
               />
               <button
                 type="button"
-                onClick={() => rememberRemotePath(host.id, draftPath.trim() || host.sftpRoot || "/")}
+                onClick={() => navigateToPath(draftPath.trim() || host.sftpRoot || "/")}
                 className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white"
               >
                 Go
               </button>
               <button
                 type="button"
-                onClick={() => rememberRemotePath(host.id, host.sftpRoot || "/")}
+                onClick={() => navigateToPath(host.sftpRoot || "/")}
                 className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white"
               >
                 Root
               </button>
               <button
                 type="button"
-                onClick={() => rememberRemotePath(host.id, getParentPath(currentPath))}
+                onClick={() => navigateToPath(getParentPath(currentPath))}
                 className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white"
               >
                 Up
@@ -366,7 +379,7 @@ export function FileBrowser({ host }: FileBrowserProps) {
           <div className="flex flex-wrap items-start gap-2 xl:justify-end">
             <button
               type="button"
-              onClick={() => void loadDirectory(currentPath)}
+              onClick={() => void loadDirectory(currentPath, true)}
               className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white"
             >
               Refresh
@@ -444,17 +457,34 @@ export function FileBrowser({ host }: FileBrowserProps) {
             <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/70 px-4 py-10 text-center text-sm text-slate-500">
               Loading remote directory…
             </div>
+          ) : browserLocked ? (
+            <div className="rounded-[22px] border border-dashed border-slate-800/80 bg-slate-950/70 px-6 py-10 text-center">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300">
+                Remote browser locked
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                Browse requests stay passive until you explicitly unlock runtime credentials for{" "}
+                {host.username}@{host.hostname}.
+              </p>
+              <button
+                type="button"
+                onClick={() => void loadDirectory(currentPath, true)}
+                className="mt-4 rounded-xl bg-emerald-400 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-300"
+              >
+                Unlock and browse
+              </button>
+            </div>
           ) : (
             <FileList
               currentPath={currentPath}
               entries={filteredEntries}
               selectedPath={selectedPath}
-              onNavigateUp={() => rememberRemotePath(host.id, getParentPath(currentPath))}
+              onNavigateUp={() => navigateToPath(getParentPath(currentPath))}
               onSelect={setSelectedEntry}
               onOpen={(entry) => {
                 setSelectedEntry(entry);
                 if (entry.kind === "directory") {
-                  rememberRemotePath(host.id, entry.path);
+                  navigateToPath(entry.path);
                 }
               }}
             />

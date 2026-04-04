@@ -7,7 +7,6 @@ import { SnippetList } from "../components/snippets/SnippetList";
 import { buildBackendConnection } from "../lib/connections";
 import { ensureRuntimeSecrets } from "../lib/runtime-secrets";
 import { executeSnippetOnHosts, type SnippetExecutionResult } from "../lib/api";
-import { formatRelativeTime } from "../lib/utils";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useSessionsStore } from "../store/sessions-store";
@@ -130,14 +129,10 @@ export function SnippetsPage() {
       <section className="flex h-full min-h-0 flex-col gap-3">
         <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300">
-                Snippet library
-              </p>
-              <h2 className="mt-1 text-xl font-semibold text-slate-50">
-                Save commands once, inject them into the active pane, or broadcast across hosts.
-              </h2>
-            </div>
+            <p className="text-sm text-slate-400">
+              {filteredSnippets.length} snippets • run in the active pane or broadcast across saved
+              hosts
+            </p>
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
@@ -165,62 +160,83 @@ export function SnippetsPage() {
                 Duplicate
               </button>
             </div>
-          </div>
-        </div>
-
-        <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1.1fr)_340px]">
-          <div className="flex min-h-0 flex-col gap-3">
-            <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 p-3">
+            <div className="w-full">
               <SearchInput
                 value={query}
                 onChange={setQuery}
                 placeholder="Search snippets, tags, descriptions, or commands"
               />
             </div>
-
-            <SnippetList
-              snippets={filteredSnippets}
-              hostsById={hostsById}
-              selectedSnippetId={selectedSnippet?.id}
-              onSelect={(snippetId) => {
-                setSelectedSnippetId(snippetId);
-                setSelectedHostIdsOverride(null);
-              }}
-              onDuplicate={(snippetId) => {
-                setSelectedHostIdsOverride(null);
-                setSelectedSnippetId(duplicateSnippet(snippetId));
-              }}
-              onDelete={setDeletePendingId}
-            />
           </div>
+        </div>
 
-          <aside className="min-h-0 overflow-auto rounded-[22px] border border-slate-800/80 bg-slate-950/45 p-3">
-            {selectedSnippet ? (
+        <div className="min-h-0 flex-1">
+          <SnippetList
+            snippets={filteredSnippets}
+            hostsById={hostsById}
+            selectedSnippetId={selectedSnippet?.id}
+            onSelect={(snippetId) => {
+              setSelectedSnippetId(snippetId);
+              setSelectedHostIdsOverride(null);
+            }}
+            onEdit={(snippetId) => {
+              const snippet = snippets.find((entry) => entry.id === snippetId);
+              if (!snippet) {
+                return;
+              }
+
+              setSelectedSnippetId(snippetId);
+              setSelectedHostIdsOverride(null);
+              setEditorTarget(snippet);
+              setEditorOpen(true);
+            }}
+            onDuplicate={(snippetId) => {
+              setSelectedHostIdsOverride(null);
+              setSelectedSnippetId(duplicateSnippet(snippetId));
+            }}
+            onDelete={setDeletePendingId}
+            renderExpandedContent={(snippet) => (
               <>
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                       Snippet details
                     </p>
-                    <h3 className="mt-1.5 truncate text-lg font-semibold text-slate-50">
-                      {selectedSnippet.title}
-                    </h3>
-                    <p className="mt-1 text-sm text-slate-400">{selectedSnippet.description}</p>
+                    <h3 className="mt-1.5 text-lg font-semibold text-slate-50">{snippet.title}</h3>
+                    <p className="mt-1 text-sm text-slate-400">{snippet.description}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditorTarget(selectedSnippet);
-                      setEditorOpen(true);
-                    }}
-                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition hover:border-slate-500 hover:text-white"
-                  >
-                    Edit
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditorTarget(snippet);
+                        setEditorOpen(true);
+                      }}
+                      className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition hover:border-slate-500 hover:text-white"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!activePane}
+                      onClick={runInActivePane}
+                      className="rounded-lg bg-emerald-400 px-3 py-1.5 text-sm font-medium text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Run in active pane
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!selectedHostIds.length}
+                      onClick={() => void broadcastToHosts()}
+                      className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {broadcastBusy ? "Broadcasting…" : "Broadcast"}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-1.5">
-                  {selectedSnippet.tags.map((tag) => (
+                  {snippet.tags.map((tag) => (
                     <span
                       key={tag}
                       className="rounded-full border border-slate-700 bg-slate-900/70 px-2.5 py-1 text-[11px] text-slate-300"
@@ -230,147 +246,127 @@ export function SnippetsPage() {
                   ))}
                 </div>
 
-                <div className="mt-3 rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Command</p>
-                    <p className="text-[11px] text-slate-500">
-                      Last run {formatRelativeTime(selectedSnippet.lastRunAt)}
-                    </p>
-                  </div>
-                  <pre className="mt-2 overflow-auto rounded-[14px] bg-slate-950/80 p-3 text-xs leading-5 text-emerald-200">
-                    <code>{selectedSnippet.command}</code>
-                  </pre>
-                </div>
+                <div
+                  className={`mt-3 grid gap-3 ${
+                    broadcastResults.length ? "xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : ""
+                  }`}
+                >
+                  <div className="space-y-3">
+                    <div className="rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                        Command
+                      </p>
+                      <pre className="mt-2 whitespace-pre-wrap break-words rounded-[14px] bg-slate-950/80 p-3 text-xs leading-5 text-emerald-200">
+                        <code>{snippet.command}</code>
+                      </pre>
+                    </div>
 
-                <div className="mt-3 grid gap-2">
-                  <button
-                    type="button"
-                    disabled={!activePane}
-                    onClick={runInActivePane}
-                    className="rounded-lg bg-emerald-400 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Run in active pane
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!selectedHostIds.length}
-                    onClick={() => void broadcastToHosts()}
-                    className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {broadcastBusy ? "Broadcasting…" : "Broadcast to selected hosts"}
-                  </button>
-                </div>
+                    <div className="rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                          Targets
+                        </p>
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedHostIdsOverride(snippet.targetHostIds)}
+                            className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-white"
+                          >
+                            Defaults
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedHostIdsOverride(
+                                selectedHostIds.length === hosts.length ? [] : hosts.map((host) => host.id)
+                              )
+                            }
+                            className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-white"
+                          >
+                            {selectedHostIds.length === hosts.length ? "Clear all" : "Select all"}
+                          </button>
+                        </div>
+                      </div>
 
-                <div className="mt-3 rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Targets</p>
-                    <div className="flex gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedHostIdsOverride(selectedSnippet.targetHostIds)}
-                        className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-white"
-                      >
-                        Defaults
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSelectedHostIdsOverride(
-                            selectedHostIds.length === hosts.length ? [] : hosts.map((host) => host.id)
-                          )
-                        }
-                        className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-white"
-                      >
-                        {selectedHostIds.length === hosts.length ? "Clear all" : "Select all"}
-                      </button>
+                      <div className="mt-2 grid gap-2 md:grid-cols-2">
+                        {hosts.map((host) => {
+                          const selected = selectedHostIds.includes(host.id);
+
+                          return (
+                            <label
+                              key={host.id}
+                              className={`flex items-start gap-3 rounded-[14px] border px-3 py-2 text-sm transition ${
+                                selected
+                                  ? "border-emerald-400/40 bg-emerald-400/10"
+                                  : "border-slate-800 bg-slate-950/70"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={() =>
+                                  setSelectedHostIdsOverride((current) => {
+                                    const resolvedCurrent = current ?? snippet.targetHostIds;
+
+                                    return selected
+                                      ? resolvedCurrent.filter((entry) => entry !== host.id)
+                                      : [...resolvedCurrent, host.id];
+                                  })
+                                }
+                                className="mt-1"
+                              />
+                              <span className="min-w-0">
+                                <span className="block truncate font-medium text-slate-100">
+                                  {host.label}
+                                </span>
+                                <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+                                  {host.username}@{host.hostname}:{host.port}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="mt-2 max-h-[320px] space-y-1.5 overflow-auto pr-1">
-                    {hosts.map((host) => {
-                      const selected = selectedHostIds.includes(host.id);
-
-                      return (
-                        <label
-                          key={host.id}
-                          className={`flex items-start gap-3 rounded-[14px] border px-3 py-2 text-sm transition ${
-                            selected
-                              ? "border-emerald-400/40 bg-emerald-400/10"
-                              : "border-slate-800 bg-slate-950/70"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={() =>
-                              setSelectedHostIdsOverride((current) => {
-                                const resolvedCurrent = current ?? selectedSnippet.targetHostIds;
-
-                                return selected
-                                  ? resolvedCurrent.filter((entry) => entry !== host.id)
-                                  : [...resolvedCurrent, host.id];
-                              })
-                            }
-                            className="mt-1"
-                          />
-                          <span className="min-w-0">
-                            <span className="block truncate font-medium text-slate-100">
-                              {host.label}
-                            </span>
-                            <span className="mt-0.5 block truncate text-[11px] text-slate-500">
-                              {host.username}@{host.hostname}:{host.port}
-                            </span>
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="mt-3 rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
-                    Last broadcast
-                  </p>
-                  <div className="mt-2 space-y-1.5">
-                    {broadcastResults.length ? (
-                      broadcastResults.map((result) => (
-                        <div
-                          key={`${result.targetId}-${result.exitCode ?? "error"}`}
-                          className={`rounded-[14px] border px-3 py-2 ${
-                            result.ok
-                              ? "border-emerald-400/40 bg-emerald-400/10"
-                              : "border-rose-500/40 bg-rose-500/10"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="truncate text-sm font-medium text-slate-100">
-                              {result.label}
-                            </p>
-                            <span className="text-[11px] text-slate-400">
-                              {result.ok ? "ok" : `exit ${result.exitCode ?? "?"}`}
-                            </span>
-                          </div>
-                          <p className="mt-1 text-[11px] leading-5 text-slate-400">
-                            {(result.stdout || result.stderr || result.errorMessage || "No output")
-                              .trim()
-                              .slice(0, 160) || "No output"}
-                          </p>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-sm text-slate-500">
-                        Broadcast results appear here after a multi-host execution run.
+                  {broadcastResults.length ? (
+                    <div className="rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                        Last broadcast
                       </p>
-                    )}
-                  </div>
+                      <div className="mt-2 space-y-1.5">
+                        {broadcastResults.map((result) => (
+                          <div
+                            key={`${result.targetId}-${result.exitCode ?? "error"}`}
+                            className={`rounded-[14px] border px-3 py-2 ${
+                              result.ok
+                                ? "border-emerald-400/40 bg-emerald-400/10"
+                                : "border-rose-500/40 bg-rose-500/10"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="truncate text-sm font-medium text-slate-100">
+                                {result.label}
+                              </p>
+                              <span className="text-[11px] text-slate-400">
+                                {result.ok ? "ok" : `exit ${result.exitCode ?? "?"}`}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-[11px] leading-5 text-slate-400">
+                              {(result.stdout || result.stderr || result.errorMessage || "No output")
+                                .trim()
+                                .slice(0, 160) || "No output"}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </>
-            ) : (
-              <div className="rounded-[18px] border border-dashed border-slate-700/80 bg-slate-950/40 px-4 py-10 text-center text-sm text-slate-500">
-                Select a snippet to inspect its command and target hosts.
-              </div>
             )}
-          </aside>
+          />
         </div>
       </section>
 

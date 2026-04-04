@@ -1,5 +1,6 @@
 import { Suspense, lazy } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { ConnectionSecretPrompt } from "../components/common/ConnectionSecretPrompt";
 import { AppShell } from "../components/layout/AppShell";
 
 const HostsPage = lazy(() => import("./HostsPage").then((module) => ({ default: module.HostsPage })));
@@ -35,59 +36,62 @@ function LazyRoute({ children }: { children: React.ReactNode }) {
 export function AppRouter() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<AppShell />}>
-          <Route index element={<Navigate to="/hosts" replace />} />
-          <Route
-            path="/hosts"
-            element={
-              <LazyRoute>
-                <HostsPage />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/sessions"
-            element={
-              <LazyRoute>
-                <SessionsPage />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/snippets"
-            element={
-              <LazyRoute>
-                <SnippetsPage />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/keys"
-            element={
-              <LazyRoute>
-                <KeysPage />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/transfers"
-            element={
-              <LazyRoute>
-                <TransfersPage />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <LazyRoute>
-                <SettingsPage />
-              </LazyRoute>
-            }
-          />
-        </Route>
-      </Routes>
+      <>
+        <Routes>
+          <Route path="/" element={<AppShell />}>
+            <Route index element={<Navigate to="/hosts" replace />} />
+            <Route
+              path="/hosts"
+              element={
+                <LazyRoute>
+                  <HostsPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/sessions"
+              element={
+                <LazyRoute>
+                  <SessionsPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/snippets"
+              element={
+                <LazyRoute>
+                  <SnippetsPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/keys"
+              element={
+                <LazyRoute>
+                  <KeysPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/transfers"
+              element={
+                <LazyRoute>
+                  <TransfersPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <LazyRoute>
+                  <SettingsPage />
+                </LazyRoute>
+              }
+            />
+          </Route>
+        </Routes>
+        <ConnectionSecretPrompt />
+      </>
     </BrowserRouter>
   );
 }

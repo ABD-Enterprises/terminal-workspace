@@ -20,7 +20,15 @@ fi
 
 mkdir -p "$TARGET_DIR" "$ICONSET_DIR"
 
-qlmanage -t -s 1024 -o "$TMP_DIR" "$SOURCE_ICON" >/dev/null 2>&1
+if ! qlmanage -t -s 1024 -o "$TMP_DIR" "$SOURCE_ICON" >/dev/null 2>&1; then
+  if [[ -f "$TARGET_DIR/icon.icns" && -f "$TARGET_DIR/icon.png" ]]; then
+    echo "Quick Look could not render icons in this shell; reusing existing generated icons." >&2
+    exit 0
+  fi
+
+  echo "Quick Look failed to render a PNG from $SOURCE_ICON and no generated icons are available." >&2
+  exit 1
+fi
 
 SOURCE_PNG="$TMP_DIR/$(basename "$SOURCE_ICON").png"
 if [[ ! -f "$SOURCE_PNG" ]]; then

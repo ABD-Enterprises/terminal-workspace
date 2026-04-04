@@ -165,157 +165,112 @@ export function KeysPage() {
   return (
     <>
       <section className="flex h-full min-h-0 flex-col gap-4">
-        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 px-4 py-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300">
-                  Identity vault
-                </p>
-                <h2 className="mt-1 text-xl font-semibold text-slate-50">
-                  Local key inventory is live.
-                </h2>
-                <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-400">
-                  Import existing private keys, generate new ones locally with `ssh-keygen`, and
-                  assign identities back to saved hosts without leaving the app.
-                </p>
-              </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                  onClick={() => {
-                    setEditorMode("import");
-                    setEditorOpen(true);
-                  }}
-                    className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500 hover:text-white"
-                  >
-                    Import key
-                  </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditorMode("generate");
-                    setEditorOpen(true);
-                  }}
-                    className="rounded-lg bg-emerald-400 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-300"
-                  >
-                    Generate key
-                  </button>
-                </div>
-              </div>
-          </div>
-
-          <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 px-4 py-3">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Guardrail
+        <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="max-w-3xl text-sm leading-6 text-slate-400">
+              {keys.length} keys • import existing identities, generate new ones locally, and keep
+              passphrases out of the saved inventory
             </p>
-            <p className="mt-1.5 text-sm leading-5 text-slate-300">
-              Key metadata is persisted locally. Passphrases are not stored in the key inventory;
-              hosts still prompt through their own auth settings.
-            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditorMode("import");
+                  setEditorOpen(true);
+                }}
+                className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500 hover:text-white"
+              >
+                Import key
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditorMode("generate");
+                  setEditorOpen(true);
+                }}
+                className="rounded-lg bg-emerald-400 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-300"
+              >
+                Generate key
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
-          <KeyList
-            keys={keys}
-            hosts={hostsById}
-            selectedKeyId={selectedKey?.id}
-            onSelect={setSelectedKeyId}
-            onDelete={setDeletePendingKeyId}
-          />
+        <div className="min-h-0 flex flex-1 flex-col gap-3">
+          <div className="min-h-0 flex-1">
+            <KeyList
+              keys={keys}
+              hosts={hostsById}
+              selectedKeyId={selectedKey?.id}
+              onSelect={setSelectedKeyId}
+              onDelete={setDeletePendingKeyId}
+              renderExpandedContent={(key) => (
+                <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-[18px] border border-slate-800 bg-slate-900/60 p-3 sm:col-span-2">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                        Fingerprint
+                      </p>
+                      <p className="mt-2 break-all text-sm text-slate-100">{key.fingerprint}</p>
+                    </div>
+                    <div className="rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                        Metadata
+                      </p>
+                      <p className="mt-2 text-sm text-slate-100">
+                        {key.algorithm} · {key.bits || "?"} bits · {key.source}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {key.comment} {key.hasPassphrase ? "· passphrase set" : ""}
+                      </p>
+                    </div>
+                    <div className="rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                        Private key path
+                      </p>
+                      <p className="mt-2 break-all text-sm text-slate-100">{key.privateKeyPath}</p>
+                    </div>
+                  </div>
 
-          <aside className="min-h-0 overflow-auto rounded-[22px] border border-slate-800/80 bg-slate-950/45 p-3">
-            {selectedKey ? (
-              <>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  Key details
-                </p>
-                <h3 className="mt-1.5 text-base font-semibold text-slate-50">{selectedKey.label}</h3>
-                <p className="mt-1 text-sm text-slate-400">{selectedKey.privateKeyPath}</p>
-
-                <div className="mt-4 grid gap-3">
                   <div className="rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
                     <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                      Fingerprint
+                      Assign to host
                     </p>
-                    <p className="mt-2 break-all text-sm text-slate-100">{selectedKey.fingerprint}</p>
-                  </div>
-                  <div className="rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                      Metadata
-                    </p>
-                    <p className="mt-2 text-sm text-slate-100">
-                      {selectedKey.algorithm} · {selectedKey.bits || "?"} bits · {selectedKey.source}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {selectedKey.comment} {selectedKey.hasPassphrase ? "· passphrase set" : ""}
-                    </p>
-                  </div>
-                </div>
+                    <select
+                      value={resolvedAssignHostId}
+                      onChange={(event) => setAssignHostId(event.target.value)}
+                      className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
+                    >
+                      {hosts.map((host) => (
+                        <option key={host.id} value={host.id}>
+                          {host.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!resolvedAssignHostId) {
+                          return;
+                        }
 
-                <div className="mt-4 rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                    Assign to host
-                  </p>
-                  <select
-                    value={resolvedAssignHostId}
-                    onChange={(event) => setAssignHostId(event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
-                  >
-                    {hosts.map((host) => (
-                      <option key={host.id} value={host.id}>
-                        {host.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!resolvedAssignHostId) {
-                        return;
-                      }
-
-                      assignHost(selectedKey.id, resolvedAssignHostId);
-                      assignKey(resolvedAssignHostId, {
-                        label: selectedKey.label,
-                        privateKeyPath: selectedKey.privateKeyPath,
-                      });
-                    }}
-                    className="mt-3 w-full rounded-xl bg-emerald-400 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-300"
-                  >
-                    Assign key
-                  </button>
-                </div>
-
-                <div className="mt-4 rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                    Assigned hosts
-                  </p>
-                  <div className="mt-2 space-y-2">
-                    {selectedKey.assignedHostIds.length ? (
-                      selectedKey.assignedHostIds.map((hostId) => (
-                        <div
-                          key={hostId}
-                          className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-200"
-                        >
-                          {hostsById[hostId]?.label ?? hostId}
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-sm text-slate-500">No host assignments yet.</p>
-                    )}
+                        assignHost(key.id, resolvedAssignHostId);
+                        assignKey(resolvedAssignHostId, {
+                          label: key.label,
+                          privateKeyPath: key.privateKeyPath,
+                        });
+                      }}
+                      className="mt-3 w-full rounded-xl bg-emerald-400 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-300"
+                    >
+                      Assign key
+                    </button>
                   </div>
                 </div>
-              </>
-            ) : (
-              <div className="rounded-[18px] border border-dashed border-slate-700/80 bg-slate-950/40 px-4 py-10 text-center text-sm text-slate-500">
-                Select a key to inspect its fingerprint and host assignments.
-              </div>
-            )}
+              )}
+            />
+          </div>
 
-            <div className="mt-4 rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
+          <section className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 p-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
                   Known hosts
@@ -403,8 +358,7 @@ export function KeysPage() {
                   </p>
                 )}
               </div>
-            </div>
-          </aside>
+          </section>
         </div>
       </section>
 

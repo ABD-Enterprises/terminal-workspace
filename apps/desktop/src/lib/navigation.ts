@@ -2,39 +2,37 @@ export interface NavigationItem {
   path: string;
   label: string;
   description: string;
-  badge?: string;
 }
 
 export const navigationItems: NavigationItem[] = [
   {
     path: "/hosts",
     label: "Hosts",
-    description: "Inventory, tags, groups, favorites, and quick filters.",
+    description: "Inventory, trust, and launch.",
   },
   {
     path: "/sessions",
     label: "Sessions",
-    description: "Terminal tabs, split panes, reconnect flow, and restore.",
-    badge: "Local",
+    description: "Terminal tabs, panes, and restore.",
   },
   {
     path: "/snippets",
     label: "Snippets",
-    description: "Reusable commands, libraries, and broadcast execution.",
+    description: "Saved commands and broadcast runs.",
   },
   {
     path: "/keys",
     label: "Keys",
-    description: "Imported identities, generated SSH keys, and known hosts.",
+    description: "SSH identities, keygen, and trust.",
   },
   {
     path: "/transfers",
     label: "Transfers",
-    description: "SFTP browser, upload queue, and remote file operations.",
+    description: "Remote files and transfer queue.",
   },
   {
     path: "/settings",
     label: "Settings",
-    description: "Preferences, restore behavior, and local-first defaults.",
+    description: "Preferences, backup, and runtime mode.",
   },
 ];

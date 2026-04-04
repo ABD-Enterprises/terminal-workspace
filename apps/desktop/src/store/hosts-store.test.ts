@@ -18,7 +18,7 @@ describe("hosts store helpers", () => {
       username: "writer",
       agentForwarding: true,
       environment: "APP_ENV=staging\nFEATURE_FLAG=true",
-      tags: "docs, staging",
+      tags: "docs, favorite, staging",
       group: "Acme / Docs",
     };
 
@@ -71,6 +71,7 @@ describe("hosts store helpers", () => {
     const normalized = sortHostCollection([
       {
         ...sampleHosts[0],
+        tags: [...sampleHosts[0].tags, "favorite"],
         password: "secret",
         passphrase: "secret",
         agentForwarding: undefined,
@@ -82,6 +83,7 @@ describe("hosts store helpers", () => {
     expect(normalized[0]?.hostKeyPolicy).toBe(defaultHostKeyPolicy);
     expect(normalized[0]?.agentForwarding).toBe(false);
     expect(normalized[0]?.environment).toEqual({});
+    expect(normalized[0]?.tags).not.toContain("favorite");
     expect("password" in (normalized[0] ?? {})).toBe(false);
     expect("passphrase" in (normalized[0] ?? {})).toBe(false);
   });

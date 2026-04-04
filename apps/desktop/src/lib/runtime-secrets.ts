@@ -73,11 +73,16 @@ export async function canRestoreSessionWithoutPrompt(host: HostRecord) {
 
 export async function ensureRuntimeSecrets(
   host: HostRecord,
-  actionLabel: string
+  actionLabel: string,
+  options?: {
+    interactive?: boolean;
+  }
 ) {
   if (isDemoModeEnabled()) {
     return true;
   }
+
+  const interactive = options?.interactive ?? true;
 
   for (const entry of resolveConnectionChain(host)) {
     await hydrateHostConnectionSecrets(entry.id);
@@ -85,6 +90,10 @@ export async function ensureRuntimeSecrets(
 
     if (!requirement.needsPassword && !requirement.needsPassphrase) {
       continue;
+    }
+
+    if (!interactive) {
+      return false;
     }
 
     const approved = await requestConnectionSecretsPrompt({

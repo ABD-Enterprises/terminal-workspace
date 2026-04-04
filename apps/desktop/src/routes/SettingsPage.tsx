@@ -3,17 +3,12 @@ import {
   applyImportedLocalConfigBundle,
   buildLocalConfigBundle,
 } from "../lib/local-config";
+import { isTauriRuntime } from "../lib/backend-runtime";
 import { cn } from "../lib/utils";
 import { useAppStore } from "../store/app-store";
 
-const settingsMilestones = [
-  "Restore prior session tabs and splits on relaunch",
-  "Local preferences for theme, keyboard, and behavior",
-  "Known-host defaults and runtime secret prompts",
-  "Import and export of local configuration",
-];
-
 export function SettingsPage() {
+  const nativeRuntime = isTauriRuntime();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [statusMessage, setStatusMessage] = useState<string>();
   const [errorMessage, setErrorMessage] = useState<string>();
@@ -65,27 +60,8 @@ export function SettingsPage() {
   };
 
   return (
-    <section className="grid gap-3 xl:grid-cols-[1.2fr_0.9fr]">
+    <section className="grid h-full min-h-0 gap-3 overflow-auto pr-1 xl:grid-cols-[1.2fr_0.9fr]">
       <div className="grid gap-3">
-        <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300">
-            Local-first preferences
-          </p>
-          <h2 className="mt-1 text-xl font-semibold text-slate-50">
-            Backups and migration are live.
-          </h2>
-          <div className="mt-3 grid gap-2">
-            {settingsMilestones.map((milestone) => (
-              <div
-                key={milestone}
-                className="rounded-[16px] border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-300"
-              >
-                {milestone}
-              </div>
-            ))}
-          </div>
-        </div>
-
         <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -93,9 +69,8 @@ export function SettingsPage() {
                 Workspace preferences
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-400">
-                Keep the shell dense by default, or relax spacing slightly. Shortcut badges and
-                `⌘1` through `⌘6` navigation can also be disabled if they conflict with your
-                terminal habits.
+                Keep the shell dense by default, or relax spacing slightly. `⌘1` through `⌘6`
+                navigation can also be disabled if it conflicts with your terminal habits.
               </p>
             </div>
           </div>
@@ -145,13 +120,13 @@ export function SettingsPage() {
                 <span>{sectionShortcutsEnabled ? "Section shortcuts enabled" : "Section shortcuts disabled"}</span>
               </button>
               <p className="mt-2 text-sm leading-5 text-slate-300">
-                When enabled, `⌘1` through `⌘6` jump sections and shortcut badges stay visible in
-                the shell.
+                When enabled, `⌘1` through `⌘6` jump sections and the shell keeps a single shortcut
+                hint in the header.
               </p>
             </div>
 
             <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3 lg:col-span-2">
-              <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Demo mode</p>
+              <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Runtime mode</p>
               <button
                 type="button"
                 onClick={() => setDemoModeEnabled(!demoModeEnabled)}
@@ -162,12 +137,18 @@ export function SettingsPage() {
                     : "border-slate-800 bg-slate-950/70 text-slate-300 hover:border-slate-700 hover:text-white"
                 )}
               >
-                <span>{demoModeEnabled ? "Demo backend enabled" : "Demo backend disabled"}</span>
+                <span>
+                  {demoModeEnabled
+                    ? "Demo backend"
+                    : nativeRuntime
+                      ? "Native transport"
+                      : "Live backend"}
+                </span>
               </button>
               <p className="mt-2 text-sm leading-5 text-slate-300">
-                When enabled, sessions, keys, trust scans, snippets, and transfers stay inside a
+                Demo mode keeps sessions, keys, trust scans, snippets, and transfers inside a
                 deterministic mock backend so screenshots and browser tests do not depend on live
-                SSH material.
+                SSH material. Native mode uses the live transport path.
               </p>
             </div>
           </div>
@@ -234,44 +215,31 @@ export function SettingsPage() {
             </div>
             <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
               <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Secret handling</p>
-            <p className="mt-1 text-sm leading-5 text-slate-300">
-              Passwords and passphrases are not exported because runtime secrets stay outside the
-              persisted host inventory and, in the native shell, live in macOS Keychain.
-            </p>
+              <p className="mt-1 text-sm leading-5 text-slate-300">
+                Passwords and passphrases are not exported because runtime secrets stay outside the
+                persisted host inventory and, in the native shell, live in macOS Keychain.
+              </p>
             </div>
           </div>
         </div>
       </div>
 
       <aside className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 p-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-          Scope note
-        </p>
-        <p className="mt-2 text-sm leading-6 text-slate-400">
+        <p className="text-sm leading-6 text-slate-400">
           Cloud sync, shared vaults, and team features are still intentionally outside the 90%
           local-first target. The immediate focus is making a single Mac fully replace daily
           Termius usage.
         </p>
-        <div className="mt-4 grid gap-2">
-          <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
-              Current default
-            </p>
-            <p className="mt-1 text-sm leading-5 text-slate-300">
-              Native shell quality is the active milestone. Demo mode still ships on by default so
-              the seeded workspace stays browsable without any host-specific setup.
-            </p>
-          </div>
-          <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
-              Next hardening target
-            </p>
-            <p className="mt-1 text-sm leading-5 text-slate-300">
-              Key inspection, key generation, and trust scanning are the main remaining native-mode
-              features that still proxy through the Node backend after the new Rust session, SFTP,
-              forward, and snippet work.
-            </p>
-          </div>
+        <div className="mt-4 space-y-4 text-sm leading-6 text-slate-300">
+          <p>
+            Browser and screenshot flows still default to demo mode. The native shell now defaults
+            to live transport so local testing starts against the real Tauri-backed connection path.
+          </p>
+          <p>
+            Key inspection, key generation, and trust scanning are the main remaining native-mode
+            features that still proxy through the Node backend after the new Rust session, SFTP,
+            forward, and snippet work.
+          </p>
         </div>
       </aside>
     </section>

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { isTauriRuntime } from "../../lib/backend-runtime";
 import type { ConnectionSecretPromptRequest } from "../../store/connection-secret-prompt-store";
 import { useConnectionSecretPromptStore } from "../../store/connection-secret-prompt-store";
@@ -99,9 +100,19 @@ function ConnectionSecretPromptForm({ pendingRequest }: { pendingRequest: Connec
 }
 
 export function ConnectionSecretPrompt() {
+  const location = useLocation();
   const pendingRequest = useConnectionSecretPromptStore((state) => state.pendingRequest);
   const clearPrompt = useConnectionSecretPromptStore((state) => state.clearPrompt);
   const nativeSecretStorage = isTauriRuntime();
+  const previousPathnameRef = useRef(location.pathname);
+
+  useEffect(() => {
+    if (previousPathnameRef.current !== location.pathname && pendingRequest) {
+      clearPrompt(false);
+    }
+
+    previousPathnameRef.current = location.pathname;
+  }, [clearPrompt, location.pathname, pendingRequest]);
 
   return (
     <Modal

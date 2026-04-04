@@ -16,6 +16,10 @@ export interface HostFilters {
   favoritesOnly: boolean;
 }
 
+function normalizeTags(tags: string[]) {
+  return tags.filter((tag) => tag.trim() && tag.trim().toLowerCase() !== "favorite");
+}
+
 function normalizeEnvironment(environment: unknown) {
   if (!environment || typeof environment !== "object") {
     return {};
@@ -43,6 +47,7 @@ function normalizeHostRecord(host: HostRecord): HostRecord {
     hostKeyPolicy: (rest as HostRecord & { hostKeyPolicy?: HostKeyPolicy }).hostKeyPolicy ?? defaultHostKeyPolicy,
     agentForwarding: rest.agentForwarding ?? false,
     environment: normalizeEnvironment(rest.environment),
+    tags: normalizeTags(Array.isArray(rest.tags) ? rest.tags : []),
     jumpHostId: rest.jumpHostId || undefined,
   };
 }
@@ -59,7 +64,7 @@ export function createHostRecord(values: HostFormValues, currentHost?: HostRecor
     authMethod: values.authMethod,
     privateKeyPath: values.privateKeyPath.trim(),
     group: values.group.trim(),
-    tags: splitCommaList(values.tags),
+    tags: normalizeTags(splitCommaList(values.tags)),
     note: values.note.trim(),
     favorite: values.favorite,
     keyLabel: values.keyLabel.trim(),

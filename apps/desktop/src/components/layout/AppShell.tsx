@@ -11,7 +11,6 @@ import { useSnippetsStore } from "../../store/snippets-store";
 import { useTransfersStore } from "../../store/transfers-store";
 import { SessionRestoreManager } from "../terminal/SessionRestoreManager";
 import { Sidebar } from "./Sidebar";
-import { TopTabs } from "./TopTabs";
 
 export function AppShell() {
   useCommandPalette();
@@ -34,11 +33,11 @@ export function AppShell() {
   const activeItem =
     navigationItems.find((item) => location.pathname.startsWith(item.path)) ?? navigationItems[0];
   const commandPaletteOpen = useAppStore((state) => state.commandPaletteOpen);
+  const openCommandPalette = useAppStore((state) => state.openCommandPalette);
   const closeCommandPalette = useAppStore((state) => state.closeCommandPalette);
   const setSidebarSearch = useAppStore((state) => state.setSidebarSearch);
   const workspaceDensity = useAppStore((state) => state.workspaceDensity);
   const sectionShortcutsEnabled = useAppStore((state) => state.sectionShortcutsEnabled);
-  const demoModeEnabled = useAppStore((state) => state.demoModeEnabled);
   const activeSessionTab = sessionTabs.find((tab) => tab.id === activeSessionTabId) ?? sessionTabs[0];
   const activeSessionPane = activeSessionTab
     ? sessionPanes[activeSessionTab.activePaneId]
@@ -187,7 +186,6 @@ export function AppShell() {
       <SessionRestoreManager />
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopTabs />
         <main
           className={cn(
             "min-h-0 flex-1",
@@ -202,23 +200,29 @@ export function AppShell() {
               )}
             >
               <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-300">
-                  Local-first SSH workspace
-                </p>
-                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                   <h1 className="text-[17px] font-semibold text-slate-50">{activeItem.label}</h1>
                   <p className="truncate text-[11px] text-slate-500">{activeItem.description}</p>
-                  {demoModeEnabled ? (
-                    <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-100">
-                      Demo mode
-                    </span>
-                  ) : null}
                 </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {sectionShortcutsEnabled ? (
+                  <span className="hidden rounded-full border border-slate-700 bg-slate-950/80 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400 sm:inline-flex">
+                    {formatPrimaryShortcut("1")} to {formatPrimaryShortcut("6")}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={openCommandPalette}
+                  className="rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-1.5 text-[12px] text-slate-200 transition hover:border-slate-500 hover:text-white"
+                >
+                  Command Palette {formatPrimaryShortcut("k")}
+                </button>
               </div>
             </div>
             <div
               className={cn(
-                "min-h-0 flex-1 overflow-auto",
+                "min-h-0 flex-1 overflow-hidden",
                 workspaceDensity === "compact" ? "px-3 py-2.5" : "px-4 py-3.5"
               )}
             >
@@ -312,11 +316,6 @@ export function AppShell() {
                           {sectionShortcut >= 0 ? (
                             <span className="rounded-full border border-slate-700 bg-slate-950/80 px-2 py-1 text-[10px] text-slate-400">
                               {formatPrimaryShortcut(String(sectionShortcut + 1))}
-                            </span>
-                          ) : null}
-                          {item.badge ? (
-                            <span className="rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-emerald-200">
-                              {item.badge}
                             </span>
                           ) : null}
                         </div>
