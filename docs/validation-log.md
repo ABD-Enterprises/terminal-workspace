@@ -1,5 +1,39 @@
 # Validation Log
 
+## 2026-04-04
+
+### Passed
+
+- `npm run native:check`
+- `npm run native:key`
+  - `native_transport_fixtures::native_key_tooling_fixture_flow` passed
+- `bash ./scripts/native-trust-tooling-test.sh` from an unsandboxed shell
+  - `native_transport_fixtures::native_trust_tooling_fixture_flow` passed
+- `npm run native:fixtures` from an unsandboxed shell
+  - `native_transport_fixtures::localhost_ssh_transport_fixture_flow` passed
+- `TERMSNIP_RUN_E2E=1 npm run validate` from an unsandboxed shell
+  - Vitest passed 12 files and 33 tests
+  - desktop production build passed
+  - `native_transport_fixtures::native_trust_tooling_fixture_flow` passed
+  - Playwright passed 5 route and workflow specs
+
+### Fix And Retest Notes
+
+- The first `validate` pass failed in Playwright because `tests/e2e/hosts.spec.ts` and
+  `tests/e2e/app-launch.spec.ts` still expected the old host heading and the old Settings runtime
+  copy.
+- After updating those expectations to match the current decluttered host list and `Runtime mode`
+  wording, `TERMSNIP_RUN_E2E=1 npm run validate` passed cleanly.
+
+### Environment Notes
+
+- Local macOS localhost SSH fixtures need an unsandboxed shell in this desktop environment because
+  temporary `sshd` children cannot complete preauth correctly inside the default sandbox.
+- `native:key` is the fast local native key regression.
+- `native:trust` is the phase gate for native trust and key tooling.
+- `native:fixtures` remains the broader localhost transport regression and now runs as an explicit
+  ignored test.
+
 ## 2026-03-29
 
 ### Passed

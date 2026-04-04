@@ -1,0 +1,40 @@
+{
+  "branch": "phase/native-trust-and-key-tooling",
+  "current_run_id": "2026-04-04-native-trust-and-key-tooling",
+  "current_task": "Execute the native trust and key tooling phase with validation, documentation, and state persistence.",
+  "current_phase": "native-trust-and-key-tooling",
+  "started_at": "2026-04-04T04:46:00-04:00",
+  "summary": "Implemented native Tauri commands for key inspection, key generation, and known-host scans; added native regression coverage; updated validation, docs, and roadmap/state tracking.",
+  "updated_at": "2026-04-04T05:04:59-04:00",
+  "status": "validated",
+  "validation": [
+    {
+      "id": "validation-native-check",
+      "command": "npm run native:check",
+      "result": "passed"
+    },
+    {
+      "id": "validation-native-key",
+      "command": "npm run native:key",
+      "result": "passed"
+    },
+    {
+      "id": "validation-native-trust",
+      "command": "bash ./scripts/native-trust-tooling-test.sh",
+      "result": "passed",
+      "notes": "Executed outside the desktop sandbox so the temporary localhost sshd fixture could run correctly."
+    },
+    {
+      "id": "validation-native-fixtures",
+      "command": "npm run native:fixtures",
+      "result": "passed",
+      "notes": "Executed outside the desktop sandbox."
+    },
+    {
+      "id": "validation-validate",
+      "command": "TERMSNIP_RUN_E2E=1 npm run validate",
+      "result": "passed",
+      "notes": "Initial run failed on stale Playwright expectations; rerun passed after the e2e fixes."
+    }
+  ]
+}

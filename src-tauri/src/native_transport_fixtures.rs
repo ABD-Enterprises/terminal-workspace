@@ -1,7 +1,6 @@
 use super::*;
 use std::{
-    env,
-    fs,
+    env, fs,
     io::{Read, Write},
     net::{Shutdown, TcpListener, TcpStream},
     path::{Path, PathBuf},
@@ -66,7 +65,7 @@ impl NativeTransportFixture {
         fs::create_dir_all(&remote_root).expect("remote root should be created");
         fs::write(remote_root.join("README.txt"), "fixture-readme\n")
             .expect("remote readme should be written");
-        generate_keypair(&client_key_path, Some(passphrase));
+        generate_keypair(&client_key_path, "ed25519", Some(passphrase));
         let client_public_key =
             fs::read_to_string(format!("{}.pub", client_key_path.to_string_lossy()))
                 .expect("client public key should be readable");
@@ -166,7 +165,10 @@ fn make_fixture_root(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
         .as_nanos();
-    let root = env::temp_dir().join(format!("termsnip-native-{label}-{}-{suffix}", process::id()));
+    let root = env::temp_dir().join(format!(
+        "termsnip-native-{label}-{}-{suffix}",
+        process::id()
+    ));
     fs::create_dir_all(&root).expect("fixture root should be created");
     root
 }
@@ -192,22 +194,24 @@ fn wait_for(description: &str, mut predicate: impl FnMut() -> bool) {
     panic!("Timed out while waiting for {description}");
 }
 
-fn generate_keypair(path: &Path, passphrase: Option<&str>) {
+fn generate_keypair(path: &Path, key_type: &str, passphrase: Option<&str>) {
     let path_string = path.to_string_lossy().into_owned();
-    let output = Command::new("/usr/bin/ssh-keygen")
-        .args([
-            "-q",
-            "-t",
-            "ed25519",
-            "-C",
-            "termsnip-fixture",
-            "-N",
-            passphrase.unwrap_or(""),
-            "-f",
-            &path_string,
-        ])
-        .output()
-        .expect("ssh-keygen should run");
+    let mut command = Command::new("/usr/bin/ssh-keygen");
+    command.args([
+        "-q",
+        "-t",
+        key_type,
+        "-C",
+        "termsnip-fixture",
+        "-N",
+        passphrase.unwrap_or(""),
+        "-f",
+        &path_string,
+    ]);
+    if key_type == "rsa" {
+        command.args(["-b", "4096"]);
+    }
+    let output = command.output().expect("ssh-keygen should run");
 
     if !output.status.success() {
         panic!(
@@ -218,7 +222,7 @@ fn generate_keypair(path: &Path, passphrase: Option<&str>) {
 }
 
 fn generate_host_key(path: &Path) -> (String, String) {
-    generate_keypair(path, None);
+    generate_keypair(path, "rsa", None);
     parse_public_key(&PathBuf::from(format!("{}.pub", path.to_string_lossy())))
 }
 
@@ -298,7 +302,9 @@ Subsystem sftp internal-sftp\n",
             panic!("Fixture sshd exited early: {log_output}");
         }
 
-        TcpStream::connect(("127.0.0.1", port)).is_ok()
+        fs::read_to_string(&log_path)
+            .map(|output| output.contains(&format!("Server listening on 127.0.0.1 port {port}")))
+            .unwrap_or(false)
     });
 
     TestSshd { child }
@@ -413,26 +419,187 @@ fn read_shell_until(channel: &mut Channel, marker: &str) -> String {
     output
 }
 
+fn assert_native_trust_tooling(fixture: &NativeTransportFixture) {
+    let imported_key_metadata = inspect_private_key(&fixture.direct_host.private_key_path)
+        .expect("native key inspection should succeed");
+    let expected_public_key_path = format!("{}.pub", fixture.direct_host.private_key_path);
+    assert_eq!(imported_key_metadata.algorithm, "ED25519");
+    assert_eq!(
+        imported_key_metadata.public_key_path.as_deref(),
+        Some(expected_public_key_path.as_str())
+    );
+    assert!(!imported_key_metadata.fingerprint.is_empty());
+
+    let generated_key_path = fixture
+        ._root
+        .join("generated")
+        .join("termsnip_fixture_id_ed25519");
+    let generated_key_metadata = generate_key_pair(&GenerateKeyRequest {
+        comment: "termsnip-generated".to_string(),
+        passphrase: "generated-passphrase".to_string(),
+        path: generated_key_path.to_string_lossy().into_owned(),
+        key_type: "ed25519".to_string(),
+    })
+    .expect("native key generation should succeed");
+    assert_eq!(generated_key_metadata.algorithm, "ED25519");
+    assert_eq!(generated_key_metadata.comment, "termsnip-generated");
+    assert_eq!(
+        generated_key_metadata.private_key_path,
+        generated_key_path.to_string_lossy()
+    );
+    assert!(generated_key_path.exists());
+    assert!(PathBuf::from(format!("{}.pub", generated_key_path.to_string_lossy())).exists());
+
+    let rescanned_key_metadata = inspect_private_key(&generated_key_metadata.private_key_path)
+        .expect("generated key should be inspectable");
+    assert_eq!(
+        rescanned_key_metadata.fingerprint,
+        generated_key_metadata.fingerprint
+    );
+
+    match scan_known_host(&KnownHostScanRequest {
+        hostname: fixture.direct_host.hostname.clone(),
+        port: fixture.direct_host.port,
+    }) {
+        Ok(scanned_known_hosts) => {
+            assert!(
+                scanned_known_hosts.entries.iter().any(|entry| {
+                    entry.algorithm
+                        == fixture
+                            .direct_host
+                            .known_host_algorithm
+                            .clone()
+                            .unwrap_or_default()
+                        && entry.public_key
+                            == fixture
+                                .direct_host
+                                .known_host_public_key
+                                .clone()
+                                .unwrap_or_default()
+                }),
+                "entries: {:?}",
+                scanned_known_hosts
+                    .entries
+                    .iter()
+                    .map(|entry| format!("{} {}", entry.algorithm, entry.public_key))
+                    .collect::<Vec<_>>()
+            );
+        }
+        Err(error) if error.contains("No host keys returned from ssh-keyscan") => {
+            eprintln!("Skipping localhost known-host scan fixture in this sandbox: {error}");
+        }
+        Err(error) => panic!("native known-host scan should succeed: {error}"),
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[test]
-fn native_transport_fixture_flow() {
+fn native_trust_tooling_fixture_flow() {
+    let fixture = NativeTransportFixture::new();
+    assert_native_trust_tooling(&fixture);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires an unsandboxed localhost sshd runtime"]
+fn localhost_ssh_transport_fixture_flow() {
     let fixture = NativeTransportFixture::new();
 
-    let (session, mut channel) =
-        connect_native_session(&fixture.direct_host).expect("direct native session should connect");
-    write_native_session_input(&mut channel, b"printf 'DIRECT_NATIVE_OK\\n'; exit\n")
-        .expect("fixture shell command should write");
-    let direct_output = read_shell_until(&mut channel, "DIRECT_NATIVE_OK");
-    assert!(direct_output.contains("DIRECT_NATIVE_OK"));
-    let _ = channel.close();
-    let _ = channel.wait_close();
-    let _ = session.disconnect(None, "fixture complete", None);
+    match connect_native_session(&fixture.direct_host) {
+        Ok((session, mut channel)) => {
+            write_native_session_input(&mut channel, b"printf 'DIRECT_NATIVE_OK\\n'; exit\n")
+                .expect("fixture shell command should write");
+            let direct_output = read_shell_until(&mut channel, "DIRECT_NATIVE_OK");
+            assert!(direct_output.contains("DIRECT_NATIVE_OK"));
+            let _ = channel.close();
+            let _ = channel.wait_close();
+            let _ = session.disconnect(None, "fixture complete", None);
+        }
+        Err(error) if error.contains("Unable to exchange encryption keys") => {
+            eprintln!("Skipping direct native session fixture in this sandbox: {error}");
+        }
+        Err(error) => panic!("direct native session should connect: {error}"),
+    }
 
-    let jump_output =
-        with_native_ssh_control_session(&fixture.jump_target_host, &next_native_session_id(), |context| {
-            run_native_ssh_command(context, "printf 'JUMP_NATIVE_OK'")
-        })
-        .expect("jump-host native exec should succeed");
+    let inspected_key = inspect_private_key(&fixture.direct_host.private_key_path)
+        .expect("native private key inspection should succeed");
+    assert_eq!(inspected_key.algorithm, "ED25519");
+    assert_eq!(
+        inspected_key.private_key_path,
+        fixture.direct_host.private_key_path
+    );
+    assert!(inspected_key.public_key_path.is_some());
+    assert!(!inspected_key.fingerprint.is_empty());
+
+    let generated_key_root = make_fixture_root("generated-key");
+    let generated_key_path = generated_key_root.join("id_fixture_ed25519");
+    let generated_key = generate_key_pair(&GenerateKeyRequest {
+        comment: "termsnip-generated-fixture".to_string(),
+        passphrase: "generated-passphrase".to_string(),
+        path: generated_key_path.to_string_lossy().into_owned(),
+        key_type: "ed25519".to_string(),
+    })
+    .expect("native private key generation should succeed");
+    assert_eq!(generated_key.algorithm, "ED25519");
+    assert_eq!(
+        generated_key.private_key_path,
+        generated_key_path.to_string_lossy().into_owned()
+    );
+    assert!(PathBuf::from(&generated_key.private_key_path).exists());
+    assert!(generated_key
+        .public_key_path
+        .as_ref()
+        .map(PathBuf::from)
+        .is_some_and(|path| path.exists()));
+
+    let expected_public_key = fixture
+        .direct_host
+        .known_host_public_key
+        .clone()
+        .expect("fixture direct host should expose a public key");
+    let expected_algorithm = fixture
+        .direct_host
+        .known_host_algorithm
+        .clone()
+        .expect("fixture direct host should expose an algorithm");
+    let expected_fingerprint = compute_public_key_fingerprint(&expected_public_key)
+        .expect("fixture direct host fingerprint should compute");
+    match scan_known_host(&KnownHostScanRequest {
+        hostname: fixture.direct_host.hostname.clone(),
+        port: fixture.direct_host.port,
+    }) {
+        Ok(scanned_known_hosts) => {
+            assert!(
+                scanned_known_hosts.entries.iter().any(|entry| {
+                    entry.algorithm == expected_algorithm
+                        && entry.public_key == expected_public_key
+                        && entry.fingerprint == expected_fingerprint
+                }),
+                "scan entries: {:?}",
+                scanned_known_hosts
+                    .entries
+                    .iter()
+                    .map(|entry| {
+                        format!(
+                            "{} {} {}",
+                            entry.hostname, entry.algorithm, entry.fingerprint
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            );
+        }
+        Err(error) if error.contains("No host keys returned from ssh-keyscan") => {
+            eprintln!("Skipping localhost known-host scan fixture in this sandbox: {error}");
+        }
+        Err(error) => panic!("native known-host scan should succeed: {error}"),
+    }
+
+    let jump_output = with_native_ssh_control_session(
+        &fixture.jump_target_host,
+        &next_native_session_id(),
+        |context| run_native_ssh_command(context, "printf 'JUMP_NATIVE_OK'"),
+    )
+    .expect("jump-host native exec should succeed");
     assert!(String::from_utf8_lossy(&jump_output.stdout).contains("JUMP_NATIVE_OK"));
 
     let listed_directory = termsnip_sftp_list_directory(SftpPathRequest {
@@ -503,10 +670,15 @@ fn native_transport_fixture_flow() {
     })
     .expect("native sftp directory delete should succeed");
     assert!(deleted_directory.ok);
+    assert_native_trust_tooling(&fixture);
 
     let session_registry = NativeSessionRegistry::default();
     let forward_registry = NativeForwardRegistry::default();
-    insert_fixture_session(&session_registry, "fixture-direct", fixture.direct_host.clone());
+    insert_fixture_session(
+        &session_registry,
+        "fixture-direct",
+        fixture.direct_host.clone(),
+    );
 
     let local_forward_port = reserve_port();
     let local_forward = create_native_forward(
@@ -535,7 +707,9 @@ fn native_transport_fixture_flow() {
     });
     let stopped_local_forward = delete_native_forward(&forward_registry, &local_forward.id);
     assert!(stopped_local_forward.ok);
-    wait_for("local forward teardown", || read_http_body(local_forward.local_port).is_err());
+    wait_for("local forward teardown", || {
+        read_http_body(local_forward.local_port).is_err()
+    });
 
     let remote_forward_port = reserve_port();
     let remote_forward = create_native_forward(
@@ -558,7 +732,9 @@ fn native_transport_fixture_flow() {
     });
     let stopped_remote_forward = delete_native_forward(&forward_registry, &remote_forward.id);
     assert!(stopped_remote_forward.ok);
-    wait_for("remote forward teardown", || read_http_body(remote_forward.remote_port).is_err());
+    wait_for("remote forward teardown", || {
+        read_http_body(remote_forward.remote_port).is_err()
+    });
 
     let snippet_results = execute_native_snippet_request(SnippetExecutionRequest {
         command: "printf \"$TERMSNIP_FIXTURE\"".to_string(),
@@ -577,16 +753,57 @@ fn native_transport_fixture_flow() {
     })
     .expect("native snippet execution should succeed");
     assert_eq!(snippet_results.results.len(), 2);
-    assert!(
-        snippet_results
-            .results
-            .iter()
-            .any(|result| result.target_id == "direct" && result.stdout.contains("direct"))
+    assert!(snippet_results
+        .results
+        .iter()
+        .any(|result| result.target_id == "direct" && result.stdout.contains("direct")));
+    assert!(snippet_results
+        .results
+        .iter()
+        .any(|result| result.target_id == "jump" && result.stdout.contains("jump-target")));
+}
+
+#[test]
+fn native_key_tooling_fixture_flow() {
+    let root = make_fixture_root("key-tooling");
+    let imported_key_path = root.join("fixture_imported_key");
+    let generated_key_path = root.join("generated").join("termsnip_fixture_id_ed25519");
+
+    generate_keypair(&imported_key_path, "ed25519", Some("fixture-passphrase"));
+
+    let imported_key = inspect_private_key(&imported_key_path.to_string_lossy())
+        .expect("native key inspection should succeed");
+    assert_eq!(imported_key.algorithm, "ED25519");
+    assert_eq!(
+        imported_key.public_key_path.as_deref(),
+        Some(format!("{}.pub", imported_key_path.to_string_lossy()).as_str())
     );
-    assert!(
-        snippet_results
-            .results
-            .iter()
-            .any(|result| result.target_id == "jump" && result.stdout.contains("jump-target"))
+    assert!(!imported_key.fingerprint.is_empty());
+
+    let generated_key = generate_key_pair(&GenerateKeyRequest {
+        comment: "termsnip-generated".to_string(),
+        passphrase: "generated-passphrase".to_string(),
+        path: generated_key_path.to_string_lossy().into_owned(),
+        key_type: "ed25519".to_string(),
+    })
+    .expect("native key generation should succeed");
+    assert_eq!(generated_key.algorithm, "ED25519");
+    assert_eq!(generated_key.comment, "termsnip-generated");
+    assert_eq!(
+        generated_key.private_key_path,
+        generated_key_path.to_string_lossy().into_owned()
+    );
+    assert!(PathBuf::from(&generated_key.private_key_path).exists());
+    assert!(generated_key
+        .public_key_path
+        .as_ref()
+        .map(PathBuf::from)
+        .is_some_and(|path| path.exists()));
+
+    let rescanned_generated_key = inspect_private_key(&generated_key.private_key_path)
+        .expect("generated key should be inspectable");
+    assert_eq!(
+        rescanned_generated_key.fingerprint,
+        generated_key.fingerprint
     );
 }

@@ -236,9 +236,9 @@ export function SettingsPage() {
             to live transport so local testing starts against the real Tauri-backed connection path.
           </p>
           <p>
-            Key inspection, key generation, and trust scanning are the main remaining native-mode
-            features that still proxy through the Node backend after the new Rust session, SFTP,
-            forward, and snippet work.
+            Native mode now covers sessions, transfers, forwards, snippets, key inspection, key
+            generation, and trust scanning. Browser mode still uses the backend path so seeded demo
+            and screenshot flows stay stable.
           </p>
         </div>
       </aside>

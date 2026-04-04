@@ -13,6 +13,8 @@
     "native:check": "bash ./scripts/native-check.sh",
     "native:bundle": "bash ./scripts/native-bundle.sh",
     "native:fixtures": "bash ./scripts/native-transport-test.sh",
+    "native:key": "bash ./scripts/native-key-tooling-test.sh",
+    "native:trust": "bash ./scripts/native-trust-tooling-test.sh",
     "native:build": "bash ./scripts/native-build.sh",
     "lint": "eslint .",
     "test": "vitest run --config vitest.config.ts",

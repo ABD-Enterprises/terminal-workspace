@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "id": "artifact-validation-log",
+      "path": "docs/validation-log.md",
+      "type": "documentation"
+    },
+    {
+      "id": "artifact-browser-screenshots",
+      "path": "artifacts/e2e",
+      "type": "test-artifact"
+    },
+    {
+      "id": "artifact-playwright-results",
+      "path": "test-results",
+      "type": "test-artifact"
+    }
+  ],
+  "updated_at": "2026-04-04T05:04:59-04:00"
+}

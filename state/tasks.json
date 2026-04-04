@@ -1,0 +1,35 @@
+{
+  "tasks": [
+    {
+      "id": "task-native-key-command-bridge",
+      "title": "Move native key inspection, generation, and known-host scanning into Tauri",
+      "status": "completed",
+      "phase": "native-trust-and-key-tooling"
+    },
+    {
+      "id": "task-native-trust-validation",
+      "title": "Add native trust and key regression coverage plus repo validation updates",
+      "status": "completed",
+      "phase": "native-trust-and-key-tooling"
+    },
+    {
+      "id": "task-docs-and-state-writeback",
+      "title": "Update docs, roadmap, validation log, bootstrap, and shared state",
+      "status": "completed",
+      "phase": "native-trust-and-key-tooling"
+    },
+    {
+      "id": "task-packaging-release-hardening",
+      "title": "Add packaging, signing, notarization, and release diagnostics hardening",
+      "status": "pending",
+      "phase": "packaging-and-release-hardening"
+    },
+    {
+      "id": "task-local-fixture-sandbox-hardening",
+      "title": "Reduce local desktop sandbox friction for macOS localhost SSH fixtures",
+      "status": "pending",
+      "phase": "local-fixture-sandbox-hardening"
+    }
+  ],
+  "updated_at": "2026-04-04T05:04:59-04:00"
+}

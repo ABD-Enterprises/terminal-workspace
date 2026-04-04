@@ -2,8 +2,7 @@
 
 use std::{
     collections::HashMap,
-    env,
-    fs,
+    env, fs,
     io::{self, Read, Write},
     net::TcpStream,
     path::PathBuf,
@@ -25,7 +24,9 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use ssh2::{Channel, Session};
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{
+    error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender,
+};
 use tokio_tungstenite::tungstenite::Message;
 
 mod keychain_support;
@@ -59,7 +60,8 @@ struct BackendBridge {
 impl BackendBridge {
     fn new() -> Self {
         let base_url = std::env::var("TERMSNIP_BACKEND_BASE_URL").unwrap_or_else(|_| {
-            let port = std::env::var("TERMSNIP_BACKEND_PORT").unwrap_or_else(|_| "8790".to_string());
+            let port =
+                std::env::var("TERMSNIP_BACKEND_PORT").unwrap_or_else(|_| "8790".to_string());
             format!("http://127.0.0.1:{port}")
         });
 
@@ -243,6 +245,56 @@ struct RemoteFileEntry {
 struct SftpDirectoryResponse {
     entries: Vec<RemoteFileEntry>,
     path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyPathRequest {
+    path: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyMetadata {
+    algorithm: String,
+    bits: u32,
+    fingerprint: String,
+    comment: String,
+    private_key_path: String,
+    public_key_path: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GenerateKeyRequest {
+    comment: String,
+    passphrase: String,
+    path: String,
+    #[serde(rename = "type")]
+    key_type: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KnownHostScanRequest {
+    hostname: String,
+    port: u16,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KnownHostScanResult {
+    algorithm: String,
+    fingerprint: String,
+    hostname: String,
+    port: u16,
+    public_key: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KnownHostScanResponse {
+    entries: Vec<KnownHostScanResult>,
 }
 
 #[derive(Serialize)]
@@ -491,7 +543,10 @@ fn emit_session_stream_event(app: &AppHandle, event: SessionStreamEvent) {
     let _ = app.emit(SESSION_STREAM_EVENT_NAME, event);
 }
 
-fn get_session_stream(registry: &SessionStreamRegistry, session_id: &str) -> Option<SessionStreamBridge> {
+fn get_session_stream(
+    registry: &SessionStreamRegistry,
+    session_id: &str,
+) -> Option<SessionStreamBridge> {
     registry
         .bridges
         .lock()
@@ -528,7 +583,10 @@ fn remove_session_stream_if_current(
     }
 }
 
-fn get_native_session(registry: &NativeSessionRegistry, session_id: &str) -> Option<NativeSessionHandle> {
+fn get_native_session(
+    registry: &NativeSessionRegistry,
+    session_id: &str,
+) -> Option<NativeSessionHandle> {
     registry
         .sessions
         .lock()
@@ -549,7 +607,10 @@ fn insert_native_session(
         .insert(session_id.to_string(), handle);
 }
 
-fn remove_native_session(registry: &NativeSessionRegistry, session_id: &str) -> Option<NativeSessionHandle> {
+fn remove_native_session(
+    registry: &NativeSessionRegistry,
+    session_id: &str,
+) -> Option<NativeSessionHandle> {
     registry
         .sessions
         .lock()
@@ -569,7 +630,10 @@ fn insert_native_forward(
         .insert(forward_id.to_string(), handle);
 }
 
-fn remove_native_forward(registry: &NativeForwardRegistry, forward_id: &str) -> Option<NativeForwardHandle> {
+fn remove_native_forward(
+    registry: &NativeForwardRegistry,
+    forward_id: &str,
+) -> Option<NativeForwardHandle> {
     registry
         .forwards
         .lock()
@@ -577,7 +641,10 @@ fn remove_native_forward(registry: &NativeForwardRegistry, forward_id: &str) -> 
         .remove(forward_id)
 }
 
-fn list_native_forwards(registry: &NativeForwardRegistry, session_id: &str) -> Vec<PortForwardRecord> {
+fn list_native_forwards(
+    registry: &NativeForwardRegistry,
+    session_id: &str,
+) -> Vec<PortForwardRecord> {
     registry
         .forwards
         .lock()
@@ -751,7 +818,9 @@ fn authenticate_native_session(
 }
 
 fn open_native_channel(session: &Session, host: &BackendHostConnection) -> Result<Channel, String> {
-    let mut channel = session.channel_session().map_err(|error| error.to_string())?;
+    let mut channel = session
+        .channel_session()
+        .map_err(|error| error.to_string())?;
     channel
         .request_pty(
             "xterm-256color",
@@ -813,16 +882,18 @@ fn write_jump_session_input(
     writer: &Arc<Mutex<Box<dyn Write + Send>>>,
     input: &str,
 ) -> Result<(), String> {
-    let mut writer = writer
-        .lock()
-        .expect("jump session writer lock poisoned");
+    let mut writer = writer.lock().expect("jump session writer lock poisoned");
     writer
         .write_all(input.as_bytes())
         .map_err(|error| error.to_string())?;
     writer.flush().map_err(|error| error.to_string())
 }
 
-fn resize_jump_session_pty(master: &mut Box<dyn MasterPty + Send>, cols: u16, rows: u16) -> Result<(), String> {
+fn resize_jump_session_pty(
+    master: &mut Box<dyn MasterPty + Send>,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
     master
         .resize(PtySize {
             rows,
@@ -858,11 +929,14 @@ fn spawn_jump_session_reader(
                     }
 
                     while let Some(kind) = detect_prompt_kind(&prompt_window) {
-                        let Some(response) = take_prompt_response(&mut prompt_responses, kind) else {
+                        let Some(response) = take_prompt_response(&mut prompt_responses, kind)
+                        else {
                             break;
                         };
 
-                        if write_jump_session_input(&writer, &format!("{}\n", response.value)).is_err() {
+                        if write_jump_session_input(&writer, &format!("{}\n", response.value))
+                            .is_err()
+                        {
                             break;
                         }
                         prompt_window.clear();
@@ -939,7 +1013,12 @@ fn run_jump_host_session_loop(
         let mut master = pair.master;
         let (output_sender, output_receiver) = std::sync::mpsc::channel();
 
-        spawn_jump_session_reader(reader, writer.clone(), build_prompt_responses(&host), output_sender);
+        spawn_jump_session_reader(
+            reader,
+            writer.clone(),
+            build_prompt_responses(&host),
+            output_sender,
+        );
         set_native_session_connection_state(&app, &session_id, &state, "connected");
 
         let mut should_close = false;
@@ -1418,15 +1497,42 @@ async fn termsnip_proxy_backend_binary(
 }
 
 #[tauri::command]
+async fn termsnip_inspect_private_key(request: KeyPathRequest) -> Result<KeyMetadata, String> {
+    tauri::async_runtime::spawn_blocking(move || inspect_private_key(&request.path))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn termsnip_generate_private_key(request: GenerateKeyRequest) -> Result<KeyMetadata, String> {
+    tauri::async_runtime::spawn_blocking(move || generate_key_pair(&request))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn termsnip_scan_known_host(
+    request: KnownHostScanRequest,
+) -> Result<KnownHostScanResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || scan_known_host(&request))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn termsnip_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirectoryResponse, String> {
     validate_session_host(&request.host)?;
-    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
-    let output = with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-        run_sftp_batch_commands(
-            context,
-            &[format!("@ls -la {}", escape_sftp_argument(&target_path))],
-        )
-    })?;
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.path,
+    );
+    let output =
+        with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+            run_sftp_batch_commands(
+                context,
+                &[format!("@ls -la {}", escape_sftp_argument(&target_path))],
+            )
+        })?;
 
     Ok(SftpDirectoryResponse {
         entries: parse_sftp_directory_listing(&target_path, &output),
@@ -1437,7 +1543,10 @@ fn termsnip_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirector
 #[tauri::command]
 fn termsnip_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPathResponse, String> {
     validate_session_host(&request.host)?;
-    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.path,
+    );
     with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
         run_sftp_batch_commands(
             context,
@@ -1453,10 +1562,14 @@ fn termsnip_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPat
 #[tauri::command]
 fn termsnip_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathResponse, String> {
     validate_session_host(&request.host)?;
-    let source_path =
-        resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.current_path);
-    let target_path =
-        resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.next_path);
+    let source_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.current_path,
+    );
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.next_path,
+    );
     with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
         run_sftp_batch_commands(
             context,
@@ -1474,9 +1587,14 @@ fn termsnip_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathR
 }
 
 #[tauri::command]
-fn termsnip_sftp_delete_entry(request: SftpDeleteRequest) -> Result<BackendBooleanResponse, String> {
+fn termsnip_sftp_delete_entry(
+    request: SftpDeleteRequest,
+) -> Result<BackendBooleanResponse, String> {
     validate_session_host(&request.host)?;
-    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.path,
+    );
     with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
         run_sftp_batch_commands(
             context,
@@ -1496,7 +1614,10 @@ fn termsnip_sftp_delete_entry(request: SftpDeleteRequest) -> Result<BackendBoole
 #[tauri::command]
 fn termsnip_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathResponse, String> {
     validate_session_host(&request.host)?;
-    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.path,
+    );
     let contents = BASE64_STANDARD
         .decode(request.contents_base64.as_bytes())
         .map_err(|error| error.to_string())?;
@@ -1521,9 +1642,14 @@ fn termsnip_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathRe
 }
 
 #[tauri::command]
-fn termsnip_sftp_download_file(request: SftpPathRequest) -> Result<BackendBinaryProxyResponse, String> {
+fn termsnip_sftp_download_file(
+    request: SftpPathRequest,
+) -> Result<BackendBinaryProxyResponse, String> {
     validate_session_host(&request.host)?;
-    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.path,
+    );
     with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
         let filename = sanitize_filename(
             target_path
@@ -1578,11 +1704,9 @@ fn termsnip_delete_forward(
 async fn termsnip_execute_snippet_on_hosts(
     request: SnippetExecutionRequest,
 ) -> Result<SnippetExecutionResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        execute_native_snippet_request(request)
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || execute_native_snippet_request(request))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1606,7 +1730,11 @@ async fn termsnip_store_host_secrets(
     request: StoreHostSecretsRequest,
 ) -> Result<BackendBooleanResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        store_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id, &request.password)?;
+        store_keychain_secret(
+            KEYCHAIN_PASSWORD_SERVICE,
+            &request.host_id,
+            &request.password,
+        )?;
         store_keychain_secret(
             KEYCHAIN_PASSPHRASE_SERVICE,
             &request.host_id,
@@ -1979,9 +2107,15 @@ fn termsnip_close_backend_session_stream(
     }
 
     let bridge = match request.stream_id {
-        Some(stream_id) => remove_session_stream_if_current(&registry, &request.session_id, &stream_id),
+        Some(stream_id) => {
+            remove_session_stream_if_current(&registry, &request.session_id, &stream_id)
+        }
         None => get_session_stream(&registry, &request.session_id).and_then(|active_bridge| {
-            remove_session_stream_if_current(&registry, &request.session_id, &active_bridge.stream_id)
+            remove_session_stream_if_current(
+                &registry,
+                &request.session_id,
+                &active_bridge.stream_id,
+            )
         }),
     };
 
@@ -2006,6 +2140,9 @@ fn main() {
             termsnip_backend_status,
             termsnip_proxy_backend_json,
             termsnip_proxy_backend_binary,
+            termsnip_inspect_private_key,
+            termsnip_generate_private_key,
+            termsnip_scan_known_host,
             termsnip_sftp_list_directory,
             termsnip_sftp_create_directory,
             termsnip_sftp_rename_entry,
@@ -2037,7 +2174,7 @@ mod native_transport_fixtures;
 mod tests {
     use super::*;
     use std::{
-        process,
+        env, process,
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -2045,7 +2182,10 @@ mod tests {
         BackendHostConnection {
             agent_forwarding: true,
             auth_method: "password".to_string(),
-            environment: Some(HashMap::from([("APP_ENV".to_string(), "production".to_string())])),
+            environment: Some(HashMap::from([(
+                "APP_ENV".to_string(),
+                "production".to_string(),
+            )])),
             hostname: "target.internal".to_string(),
             jump_host: Some(Box::new(BackendHostConnection {
                 agent_forwarding: false,
@@ -2131,6 +2271,22 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
         assert_eq!(entries[2].permissions.as_deref(), Some("644"));
     }
 
+    #[test]
+    fn normalizes_private_key_algorithms() {
+        assert_eq!(normalize_key_algorithm("ssh-ed25519"), "ED25519");
+        assert_eq!(normalize_key_algorithm("ecdsa-sha2-nistp521"), "ECDSA");
+        assert_eq!(normalize_key_algorithm("rsa-sha2-512"), "RSA");
+        assert_eq!(normalize_key_algorithm("ssh-dss"), "UNKNOWN");
+    }
+
+    #[test]
+    fn computes_known_host_scan_fingerprints() {
+        assert_eq!(
+            compute_public_key_fingerprint("SGVsbG8=").as_deref(),
+            Ok("SHA256:GF+NsyJx/iX1Yab8k4suJkMG7DBO2lGAB9F2SCY4GWk")
+        );
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn keychain_secret_round_trip() {
@@ -2152,5 +2308,28 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
         let cleared = load_keychain_secret(&service, &account)
             .expect("loading deleted test keychain secret should succeed");
         assert_eq!(cleared, None);
+    }
+
+    #[test]
+    fn public_known_host_scan_smoke() {
+        let Ok(hostname) = env::var("TERMSNIP_PUBLIC_SCAN_HOST") else {
+            eprintln!("Skipping public known-host scan smoke; TERMSNIP_PUBLIC_SCAN_HOST is unset");
+            return;
+        };
+        let port = env::var("TERMSNIP_PUBLIC_SCAN_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or(22);
+
+        let result = scan_known_host(&KnownHostScanRequest { hostname, port })
+            .expect("public known-host scan should succeed");
+
+        assert!(!result.entries.is_empty());
+        assert!(result.entries.iter().all(|entry| {
+            entry.port == port
+                && !entry.algorithm.trim().is_empty()
+                && !entry.public_key.trim().is_empty()
+                && entry.fingerprint.starts_with("SHA256:")
+        }));
     }
 }

@@ -1,0 +1,30 @@
+{
+  "risks": [
+    {
+      "id": "risk-native-key-tooling-backend-proxy",
+      "title": "Native trust and key tooling still proxied through the backend",
+      "severity": "high",
+      "status": "resolved",
+      "summary": "Native mode previously proxied key inspection, key generation, and known-host scans through the Node backend.",
+      "assigned_phase": "native-trust-and-key-tooling",
+      "resolved_at": "2026-04-04T05:04:59-04:00"
+    },
+    {
+      "id": "risk-browser-native-divergence",
+      "title": "Browser and native transport paths diverge intentionally",
+      "severity": "medium",
+      "status": "open",
+      "summary": "Browser mode still uses backend transport while native mode uses Tauri/Rust, so regressions need both browser e2e and macOS native fixture coverage.",
+      "assigned_phase": "packaging-and-release-hardening"
+    },
+    {
+      "id": "risk-local-fixtures-need-unsandboxed-runtime",
+      "title": "Local macOS SSH fixtures need an unsandboxed shell",
+      "severity": "medium",
+      "status": "open",
+      "summary": "Temporary localhost sshd fixtures fail inside the default desktop sandbox and need an unsandboxed shell to produce valid trust and transport results.",
+      "assigned_phase": "local-fixture-sandbox-hardening"
+    }
+  ],
+  "updated_at": "2026-04-04T05:04:59-04:00"
+}

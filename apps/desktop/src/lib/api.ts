@@ -286,6 +286,12 @@ export async function inspectPrivateKey(path: string) {
     return inspectDemoPrivateKey(path);
   }
 
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<KeyMetadata>("termsnip_inspect_private_key", {
+      request: { path },
+    });
+  }
+
   return backendFetch<KeyMetadata>("/api/backend/keys/inspect", {
     method: "POST",
     body: JSON.stringify({ path }),
@@ -297,6 +303,12 @@ export async function generatePrivateKey(payload: GenerateKeyPayload) {
     return generateDemoPrivateKey(payload);
   }
 
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<KeyMetadata>("termsnip_generate_private_key", {
+      request: payload,
+    });
+  }
+
   return backendFetch<KeyMetadata>("/api/backend/keys/generate", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -306,6 +318,12 @@ export async function generatePrivateKey(payload: GenerateKeyPayload) {
 export async function scanKnownHost(hostname: string, port: number) {
   if (isDemoModeEnabled()) {
     return scanDemoKnownHost(hostname, port);
+  }
+
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<{ entries: KnownHostScanResult[] }>("termsnip_scan_known_host", {
+      request: { hostname, port },
+    });
   }
 
   return backendFetch<{ entries: KnownHostScanResult[] }>("/api/backend/known-hosts/scan", {

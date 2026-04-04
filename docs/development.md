@@ -14,6 +14,8 @@
 - `npm run e2e`: Playwright browser suite
 - `npm run build`: desktop production build
 - `npm run native:check`: Tauri compile check plus icon generation
+- `npm run native:key`: fast local native key inspection/generation fixture
+- `npm run native:trust`: macOS localhost trust/key fixture
 - `npm run native:fixtures`: macOS localhost transport fixture test
 - `TERMSNIP_RUN_E2E=1 npm run validate`: full lint/test/build/e2e pass
 
@@ -38,12 +40,15 @@ The native shell now owns the app-facing transport seam:
 - Native SFTP list, mkdir, rename, delete, upload, and download now execute through OpenSSH from Rust.
 - Native local and remote forwards now execute through Rust-owned OpenSSH control sessions.
 - Native remote snippet execution now reuses the same Rust-owned control-session path.
+- Native key inspection and generation now execute through Rust-owned `ssh-keygen` invocations.
+- Native known-host scans now execute through Rust-owned `ssh-keyscan` plus local fingerprint
+  verification.
 - Tauri still owns the session stream bridge: native sessions emit terminal events directly, while
   backend-owned browser sessions continue to proxy websocket frames into the webview.
 - Runtime passwords and passphrases persist through macOS Keychain in native mode.
 
-The Node backend still owns key inspection, key generation, known-host scanning, and the browser
-transport path. The native transport implementation now lives primarily in
+The Node backend now only owns the browser transport path plus browser-mode key and trust calls.
+The native transport implementation now lives primarily in
 `src-tauri/src/native_transport.rs`, with macOS secret storage isolated in
 `src-tauri/src/keychain_support.rs`.
 
@@ -62,5 +67,5 @@ The Playwright suite exercises the seeded workspace and captures route screensho
 ## Milestone Choice
 
 Web demo quality is complete enough to keep as the default screenshot/review path. The active phase
-is native shell quality: shrinking the backend-owned surface, hardening localhost/native transport
-tests, and making native builds/release checks routine.
+on this branch is native trust and key tooling, and the next planned phase is packaging and release
+hardening.

@@ -1,0 +1,25 @@
+{
+  "decisions": [
+    {
+      "id": "dec-native-key-tooling-tauri",
+      "date": "2026-04-04",
+      "title": "Move native trust and key tooling into Tauri",
+      "decision": "Native mode now handles key inspection, key generation, and known-host scanning in Rust via Tauri commands and system OpenSSH tooling.",
+      "consequences": [
+        "Browser mode keeps the backend path.",
+        "Native mode no longer depends on the backend for trust establishment or local key generation."
+      ]
+    },
+    {
+      "id": "dec-native-validation-split",
+      "date": "2026-04-04",
+      "title": "Split native validation by scope",
+      "decision": "Keep `native:key` as the fast key regression, `native:trust` as the trust/key phase gate, and `native:fixtures` as the broader localhost transport suite.",
+      "consequences": [
+        "Local validation stays focused and fast for the current phase.",
+        "The broader localhost transport fixture remains explicit and can be tracked separately when local sandboxing interferes."
+      ]
+    }
+  ],
+  "updated_at": "2026-04-04T05:04:59-04:00"
+}

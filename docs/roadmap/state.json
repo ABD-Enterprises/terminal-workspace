@@ -1,20 +1,142 @@
 {
-  "updated_at": "2026-04-02T20:30:00-04:00",
-  "current_phase": "native-shell-quality",
+  "updated_at": "2026-04-04T05:04:59-04:00",
+  "version": "0.1.0",
+  "current_phase": "native-trust-and-key-tooling",
+  "current_phase_status": "validated",
+  "current_phase_branch": "phase/native-trust-and-key-tooling",
   "completed_phases": [
-    "web-demo-quality"
+    {
+      "id": "web-demo-quality",
+      "title": "Web demo quality",
+      "status": "completed",
+      "completed_at": "2026-04-02T20:30:00-04:00"
+    },
+    {
+      "id": "native-shell-quality",
+      "title": "Native shell quality",
+      "status": "completed",
+      "completed_at": "2026-04-04T05:04:59-04:00"
+    }
   ],
   "upcoming_phases": [
-    "native-trust-and-key-tooling",
-    "packaging-and-release-hardening"
+    {
+      "id": "packaging-and-release-hardening",
+      "title": "Packaging and release hardening",
+      "priority": 1,
+      "depends_on": [
+        "native-trust-and-key-tooling"
+      ],
+      "rationale": "Native trust and key tooling now sits on the same Tauri seam as sessions, SFTP, forwards, and snippets, so packaging, notarization, signing diagnostics, and release observability are the next highest-value work."
+    },
+    {
+      "id": "vault-sync-architecture",
+      "title": "Vault and sync architecture",
+      "priority": 2,
+      "depends_on": [
+        "packaging-and-release-hardening"
+      ],
+      "rationale": "With local-first native parity established, the next product opportunity is designing encrypted vaults, sync, and future team collaboration without reopening the transport boundary."
+    }
   ],
-  "risk_remediation_phases": [],
+  "risk_remediation_phases": [
+    {
+      "id": "local-fixture-sandbox-hardening",
+      "title": "Local fixture sandbox hardening",
+      "priority": "medium",
+      "source_risk_ids": [
+        "risk-local-fixtures-need-unsandboxed-runtime"
+      ],
+      "rationale": "The broader localhost SSH fixtures produce valid results when run unsandboxed, but desktop sandboxing still obscures them during local validation and should be hardened into a documented, lower-friction path."
+    }
+  ],
   "risks": [
-    "Browser transport and native transport now intentionally diverge, so regressions need both browser validation and macOS-native fixture coverage.",
-    "Key inspection, key generation, and known-host scanning still proxy through the Node backend in native mode."
+    {
+      "id": "risk-native-key-tooling-backend-proxy",
+      "title": "Native trust and key tooling still proxied through the backend",
+      "severity": "high",
+      "status": "resolved",
+      "summary": "Native mode previously proxied key inspection, key generation, and known-host scans through the Node backend.",
+      "resolved_at": "2026-04-04T05:04:59-04:00",
+      "assigned_phase": "native-trust-and-key-tooling"
+    },
+    {
+      "id": "risk-browser-native-divergence",
+      "title": "Browser and native transport paths diverge intentionally",
+      "severity": "medium",
+      "status": "open",
+      "summary": "Browser mode still uses backend transport while native mode uses Tauri/Rust, so regressions need both browser e2e and macOS native fixture coverage.",
+      "assigned_phase": "packaging-and-release-hardening"
+    },
+    {
+      "id": "risk-local-fixtures-need-unsandboxed-runtime",
+      "title": "Local macOS SSH fixtures need an unsandboxed shell",
+      "severity": "medium",
+      "status": "open",
+      "summary": "Temporary localhost sshd fixtures fail inside the default desktop sandbox and need an unsandboxed shell to produce valid trust and transport results.",
+      "assigned_phase": "local-fixture-sandbox-hardening"
+    }
   ],
   "opportunities": [
-    "The new demo backend and browser suite can act as a stable contract seam while the remaining native transport paths move into Tauri.",
-    "The Rust transport split and localhost fixture harness make native hardening less dependent on ad hoc manual testing."
-  ]
+    {
+      "id": "opp-native-packaging",
+      "title": "Convert native parity into release-ready packaging",
+      "impact": "high",
+      "effort": "medium",
+      "assigned_phase": "packaging-and-release-hardening",
+      "summary": "The native shell now owns sessions, SFTP, snippets, forwards, trust, and key tooling, which makes packaging, notarization, and release diagnostics the next leverage point."
+    },
+    {
+      "id": "opp-vault-sync",
+      "title": "Design encrypted vault and sync architecture",
+      "impact": "high",
+      "effort": "high",
+      "assigned_phase": "vault-sync-architecture",
+      "summary": "The local-first native foundation is strong enough to plan vault, sync, and future shared-workspace features without redesigning the transport seam."
+    }
+  ],
+  "incidents": [
+    {
+      "id": "incident-2026-04-04-playwright-stale-selectors",
+      "date": "2026-04-04",
+      "status": "resolved",
+      "summary": "The first validate pass failed because Playwright still expected pre-declutter host headings and the old Settings runtime copy."
+    },
+    {
+      "id": "incident-2026-04-04-local-fixture-sandbox",
+      "date": "2026-04-04",
+      "status": "resolved-with-runbook",
+      "summary": "Local macOS sshd fixtures failed inside the desktop sandbox; rerunning the native trust and transport suites unsandboxed produced valid passing results."
+    }
+  ],
+  "decisions": [
+    {
+      "id": "dec-native-key-tooling-tauri",
+      "date": "2026-04-04",
+      "title": "Move native trust and key tooling into Tauri",
+      "summary": "Native mode now handles key inspection, key generation, and known-host scanning in Rust via Tauri commands and system OpenSSH tooling, while browser mode keeps the backend path."
+    },
+    {
+      "id": "dec-native-validation-split",
+      "date": "2026-04-04",
+      "title": "Split native validation by scope",
+      "summary": "Keep `native:key` as the fast key regression, `native:trust` as the phase gate, and `native:fixtures` as the broader localhost transport suite that requires explicit unsandboxed execution."
+    }
+  ],
+  "environment_status": {
+    "branch": "phase/native-trust-and-key-tooling",
+    "dirty": true,
+    "os": "macos",
+    "node": "v25.9.0",
+    "npm": "11.12.1",
+    "python": "Python 3.14.3",
+    "git": "git version 2.50.1 (Apple Git-155)",
+    "native_check": "passed",
+    "native_key": "passed",
+    "native_trust": "passed (unsandboxed)",
+    "native_fixtures": "passed (unsandboxed)",
+    "validate": "passed (unsandboxed)",
+    "deployment": "not_deployed"
+  },
+  "deployment_history": [],
+  "promotion_history": []
 }

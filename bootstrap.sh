@@ -40,18 +40,50 @@ const defaults = {
   "docs/roadmap/state.json": {
     updated_at: null,
     current_phase: null,
+    current_phase_branch: null,
     completed_phases: [],
     upcoming_phases: [],
     risk_remediation_phases: [],
+    incidents: [],
     risks: [],
     opportunities: [],
+    decisions: [],
+    version: null,
+    environment_status: {},
+    deployment_history: [],
+    promotion_history: [],
+  },
+  "state/env.json": {
+    generated_at: null,
+    env_files: {
+      example: false,
+      shared: false,
+      local: false,
+    },
+    non_secret_values: {},
+    node_env: null,
+    ci: null,
+    tool_versions: {},
+  },
+  "state/repo.json": {
+    generated_at: null,
+    repo_root: null,
+    branch: null,
+    commit: null,
+    dirty: null,
+    name: null,
+    version: null,
   },
   "state/session.json": {
+    branch: null,
     current_run_id: null,
     current_task: null,
+    current_phase: null,
     started_at: null,
+    summary: "",
     updated_at: null,
     status: "idle",
+    validation: [],
   },
   "state/artifacts.json": {
     items: [],
@@ -89,6 +121,8 @@ for (const [relativePath, value] of Object.entries(defaults)) {
 NODE
 
 require_file docs/roadmap/state.json
+require_file state/env.json
+require_file state/repo.json
 require_file state/session.json
 require_file state/artifacts.json
 require_file state/handoff.json
@@ -97,6 +131,8 @@ require_file state/risks.json
 require_file state/decisions.json
 
 validate_json docs/roadmap/state.json
+validate_json state/env.json
+validate_json state/repo.json
 validate_json state/session.json
 validate_json state/artifacts.json
 validate_json state/handoff.json
@@ -148,6 +184,12 @@ const dirty =
 
 const envState = {
   generated_at: new Date().toISOString(),
+  env_files: {
+    example: fs.existsSync(path.join(root, ".env.example")),
+    shared: fs.existsSync(path.join(root, ".env.shared")),
+    local: fs.existsSync(path.join(root, ".env"))
+  },
+  non_secret_values: {},
   node_env: process.env.NODE_ENV || null,
   ci: process.env.CI || null,
   tool_versions: {

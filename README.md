@@ -4,9 +4,10 @@ A local-first macOS SSH client starter repo inspired by the usability patterns o
 
 ## Current Focus
 
-The active milestone is native shell quality: the React/Vite workspace already boots from a fresh
-checkout and stays covered by browser smoke tests, and the current effort is removing the remaining
-Node-owned transport pieces from the native shell without regressing the demo/browser path.
+The active branch completes native trust and key tooling: the React/Vite workspace already boots
+from a fresh checkout, browser smoke coverage still protects the demo path, and the native macOS
+shell now owns key inspection, key generation, and known-host scanning in addition to the existing
+Rust-backed session, SFTP, snippet, and forward flows.
 
 ## Quick Start
 
@@ -21,7 +22,11 @@ Node-owned transport pieces from the native shell without regressing the demo/br
 
 - `npm run test` runs unit and integration coverage through the root Vitest config.
 - `npm run e2e` runs Playwright against the Vite app and writes screenshots to `artifacts/e2e/`.
-- `TERMSNIP_RUN_E2E=1 npm run validate` runs lint, unit/integration tests, build, and browser e2e.
+- `npm run native:key` runs the fast local native key inspection and generation fixture.
+- `npm run native:trust` runs the macOS localhost trust/key fixture for native key inspection,
+  generation, and known-host scans.
+- `TERMSNIP_RUN_E2E=1 npm run validate` runs lint, unit/integration tests, build, macOS native
+  trust tooling when available, and browser e2e.
 
 ## Demo Mode
 
@@ -44,10 +49,13 @@ The native-shell bridge now covers the app-facing transport seam:
 - native SFTP list, mkdir, rename, delete, upload, and download now run through OpenSSH from Rust
 - native local and remote forwards now run through OpenSSH control sessions from Rust
 - native remote snippet execution now runs through the same Rust-owned SSH control path
+- native key inspection and key generation now run through Rust-owned `ssh-keygen` calls
+- native known-host scanning now runs through Rust-owned `ssh-keyscan` plus local fingerprint
+  verification
 - runtime passwords and passphrases persist through macOS Keychain in native mode
 
-The remaining backend-owned native features are key inspection, key generation, and known-host
-scanning. The browser build still uses the backend path by design.
+The browser build still uses the backend path by design, while the native shell keeps shrinking the
+Node-owned surface ahead of packaging and release hardening.
 
 ## Scope
 
@@ -72,6 +80,9 @@ scanning. The browser build still uses the backend path by design.
 
 - `npm run native:icons` generates the Tauri icon set from `apps/desktop/public/favicon.svg`
 - `npm run native:check` regenerates icons and runs `cargo check --manifest-path src-tauri/Cargo.toml`
+- `npm run native:key` runs the fast local key inspection and generation fixture
+- `npm run native:trust` runs the macOS localhost trust/key fixture for key inspection, generation,
+  and known-host scans
 - `npm run native:fixtures` runs the macOS localhost transport fixture for direct SSH, jump-host SSH, SFTP, forwards, and snippets
 - `npm run native:build` regenerates icons and runs `cargo build --manifest-path src-tauri/Cargo.toml`
 
