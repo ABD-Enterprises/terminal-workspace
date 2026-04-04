@@ -1,40 +1,57 @@
 {
-  "branch": "phase/notarization-and-release-promotion",
-  "current_run_id": "2026-04-04-notarization-and-release-promotion",
-  "current_task": "Execute notarization and release promotion with Apple submission, stapling, Gatekeeper validation, stable-channel promotion, and state persistence.",
-  "current_phase": "notarization-and-release-promotion",
+  "branch": "phase/release-credential-portability-hardening",
+  "current_run_id": "2026-04-04-release-credential-portability-hardening",
+  "current_task": "Harden release credential portability, browser/native regression coverage, localhost native fixture execution, and vault snapshot metadata.",
+  "current_phase": "release-credential-portability-hardening",
   "started_at": "2026-04-04T08:26:00-04:00",
-  "summary": "Implemented local notarization and stable promotion automation, submitted and accepted a notarized release on the committed branch tip, validated stapling and Gatekeeper acceptance, and promoted the notarized artifact into the stable channel.",
-  "updated_at": "2026-04-04T08:39:18-04:00",
+  "summary": "Implemented portable notary auth and CI publish workflow, added localhost fixture preflight plus broader native coverage, expanded browser/native seam tests, and upgraded local exports into sync-ready vault snapshots.",
+  "updated_at": "2026-04-04T09:07:17-04:00",
   "status": "validated",
   "validation": [
     {
-      "id": "validation-native-notarize",
+      "id": "validation-native-notary-auth-test",
+      "command": "npm run native:notary:auth:test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-native-fixture-preflight",
+      "command": "bash ./scripts/native-fixture-preflight.sh trust",
+      "result": "passed"
+    },
+    {
+      "id": "validation-native-trust",
+      "command": "npm run native:trust",
+      "result": "passed"
+    },
+    {
+      "id": "validation-native-fixtures",
+      "command": "npm run native:fixtures",
+      "result": "passed"
+    },
+    {
+      "id": "validation-native-release-check",
+      "command": "npm run native:release:check",
+      "result": "passed"
+    },
+    {
+      "id": "validation-native-notarize-portable",
       "command": "MACOS_NOTARY_PROFILE=BugNarratorNotary npm run native:notarize",
       "result": "passed"
     },
     {
-      "id": "validation-native-promote",
+      "id": "validation-native-promote-portable",
       "command": "npm run native:promote",
       "result": "passed"
     },
     {
-      "id": "validation-stapler-validate",
-      "command": "xcrun stapler validate -v src-tauri/target/release/bundle/macos/Terminal Workspace.app",
-      "result": "passed",
-      "notes": "Validated the stapled ticket after the accepted Apple notarization submission."
+      "id": "validation-native-publish-dry-run",
+      "command": "npm run native:publish:dry-run",
+      "result": "passed"
     },
     {
-      "id": "validation-spctl-accepted",
-      "command": "spctl --assess --type execute --verbose=4 src-tauri/target/release/bundle/macos/Terminal Workspace.app",
-      "result": "passed",
-      "notes": "Reported `accepted` with source `Notarized Developer ID`."
-    },
-    {
-      "id": "validation-validate",
+      "id": "validation-validate-hardening",
       "command": "TERMSNIP_RUN_E2E=1 npm run validate",
-      "result": "passed",
-      "notes": "Executed on the committed release automation branch after the notarization and promotion implementation."
+      "result": "passed"
     }
   ]
 }

@@ -1,4 +1,5 @@
 import { sortHostCollection, useHostsStore } from "../store/hosts-store";
+import { useAppStore } from "../store/app-store";
 import { useKeysStore } from "../store/keys-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useSessionsStore } from "../store/sessions-store";
@@ -9,7 +10,25 @@ import type { KeyRecord } from "../types/key";
 import type { KnownHostRecord } from "../types/known-host";
 import type { SnippetRecord } from "../types/snippet";
 
+export interface LocalVaultMetadata {
+  schema: "local-first-vault";
+  vaultId: string;
+  sourceDeviceId: string;
+  snapshotId: string;
+}
+
 export interface LocalConfigBundle {
+  app: "TermSnip";
+  version: 2;
+  exportedAt: string;
+  vault: LocalVaultMetadata;
+  hosts: HostRecord[];
+  keys: KeyRecord[];
+  snippets: SnippetRecord[];
+  knownHosts: KnownHostRecord[];
+}
+
+interface LegacyLocalConfigBundle {
   app: "TermSnip";
   version: 1;
   exportedAt: string;
@@ -52,10 +71,18 @@ function isKnownHostArray(value: unknown): value is KnownHostRecord[] {
 }
 
 export function buildLocalConfigBundle(): LocalConfigBundle {
+  const appState = useAppStore.getState();
+
   return {
     app: "TermSnip",
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
+    vault: {
+      schema: "local-first-vault",
+      vaultId: appState.vaultId,
+      sourceDeviceId: appState.deviceId,
+      snapshotId: crypto.randomUUID(),
+    },
     hosts: useHostsStore.getState().hosts,
     keys: useKeysStore.getState().keys,
     snippets: useSnippetsStore.getState().snippets,
@@ -68,7 +95,10 @@ export function applyImportedLocalConfigBundle(bundle: unknown) {
     throw new Error("Config import failed: file does not contain a JSON object.");
   }
 
-  if (bundle.app !== "TermSnip" || bundle.version !== 1) {
+  if (
+    bundle.app !== "TermSnip" ||
+    (bundle.version !== 1 && bundle.version !== 2)
+  ) {
     throw new Error("Config import failed: unsupported TermSnip config version.");
   }
 
@@ -88,26 +118,34 @@ export function applyImportedLocalConfigBundle(bundle: unknown) {
     throw new Error("Config import failed: known hosts are missing or invalid.");
   }
 
-  const importedHosts = sortHostCollection(bundle.hosts);
+  const importedBundle = bundle as unknown as LocalConfigBundle | LegacyLocalConfigBundle;
+  const importedHosts = sortHostCollection(importedBundle.hosts);
   const hostIds = new Set(importedHosts.map((host) => host.id));
   const importedKeys = sortKeys(
-    bundle.keys.map((key) => ({
+    importedBundle.keys.map((key) => ({
       ...key,
       assignedHostIds: key.assignedHostIds.filter((hostId) => hostIds.has(hostId)),
     }))
   );
   const importedSnippets = sortSnippets(
-    bundle.snippets.map((snippet) => ({
+    importedBundle.snippets.map((snippet) => ({
       ...snippet,
       targetHostIds: snippet.targetHostIds.filter((hostId) => hostIds.has(hostId)),
     }))
   );
-  const importedKnownHosts = sortKnownHosts(bundle.knownHosts);
+  const importedKnownHosts = sortKnownHosts(importedBundle.knownHosts);
 
   useHostsStore.setState((state) => ({ ...state, hosts: importedHosts }));
   useKeysStore.setState((state) => ({ ...state, keys: importedKeys }));
   useSnippetsStore.setState((state) => ({ ...state, snippets: importedSnippets }));
   useKnownHostsStore.setState((state) => ({ ...state, knownHosts: importedKnownHosts }));
+  if (
+    importedBundle.version === 2 &&
+    importedBundle.vault?.schema === "local-first-vault" &&
+    importedBundle.vault.vaultId
+  ) {
+    useAppStore.getState().setVaultId(importedBundle.vault.vaultId);
+  }
   useSessionsStore.setState((state) => ({
     ...state,
     tabs: [],
@@ -127,5 +165,9 @@ export function applyImportedLocalConfigBundle(bundle: unknown) {
     keyCount: importedKeys.length,
     snippetCount: importedSnippets.length,
     knownHostCount: importedKnownHosts.length,
+    vaultId:
+      importedBundle.version === 2 && importedBundle.vault?.vaultId
+        ? importedBundle.vault.vaultId
+        : useAppStore.getState().vaultId,
   };
 }

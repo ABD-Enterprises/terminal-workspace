@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/load-env.sh"
 MANIFEST_PATH="$ROOT_DIR/artifacts/release/latest-macos-release.json"
 : "${MACOS_SIGN_MODE:=require}"
 export MACOS_SIGN_MODE

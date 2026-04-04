@@ -5,6 +5,8 @@
 1. Run `npm run setup`
 2. Run `npm run dev` for the browser/demo workspace or `npm run native:check` for the native shell
 3. Open Settings and confirm whether you want demo mode or live native transport
+4. Copy `.env.example` to `.env` if you need local release overrides; shared non-secret defaults
+   already live in `.env.shared`
 
 ## What To Learn First
 
@@ -18,3 +20,4 @@
 - Use demo mode for screenshots and seeded UI review.
 - Use the native shell for real SSH, trust, and secret-storage checks.
 - Run `npm run native:trust` before changing native key or trust behavior.
+- Run `npm run native:notary:auth:test` before changing release credential logic.

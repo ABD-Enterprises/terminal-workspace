@@ -13,17 +13,19 @@
       "id": "risk-browser-native-divergence",
       "title": "Browser and native transport paths diverge intentionally",
       "severity": "medium",
-      "status": "open",
-      "summary": "Browser mode still uses backend transport while native mode uses Tauri/Rust, so regressions need both browser e2e and macOS native fixture coverage.",
-      "assigned_phase": "multi-surface-regression-hardening"
+      "status": "resolved",
+      "summary": "Cross-surface runtime coverage now exercises browser and native transport seams through targeted unit tests and shared macOS CI coverage.",
+      "assigned_phase": "multi-surface-regression-hardening",
+      "resolved_at": "2026-04-04T09:07:17-04:00"
     },
     {
       "id": "risk-local-fixtures-need-unsandboxed-runtime",
       "title": "Local macOS SSH fixtures need an unsandboxed shell",
       "severity": "medium",
-      "status": "open",
-      "summary": "Temporary localhost sshd fixtures fail inside the default desktop sandbox and need an unsandboxed shell to produce valid trust and transport results.",
-      "assigned_phase": "local-fixture-sandbox-hardening"
+      "status": "resolved",
+      "summary": "Local fixture scripts now preflight temporary localhost sshd startup and host scanning before running the broader SSH Cargo suites.",
+      "assigned_phase": "local-fixture-sandbox-hardening",
+      "resolved_at": "2026-04-04T09:07:17-04:00"
     },
     {
       "id": "risk-placeholder-bundle-identifier",
@@ -47,10 +49,19 @@
       "id": "risk-release-automation-requires-local-notary-profile",
       "title": "Release automation still requires a machine-local notary profile",
       "severity": "medium",
+      "status": "resolved",
+      "summary": "Portable App Store Connect key auth, Apple ID fallback, CI workflow support, and a documented env contract remove the machine-local profile requirement.",
+      "assigned_phase": "release-credential-portability-hardening",
+      "resolved_at": "2026-04-04T09:07:17-04:00"
+    },
+    {
+      "id": "risk-github-release-workflow-not-live-validated",
+      "title": "GitHub release workflow has not been executed with live repository secrets",
+      "severity": "low",
       "status": "open",
-      "summary": "The notarization and promotion path works locally with a `notarytool` keychain profile, but the repo does not yet provide CI-backed credentials or a shared release credential contract.",
-      "assigned_phase": "release-credential-portability-hardening"
+      "summary": "The CI release workflow and GitHub publish script are implemented and dry-run validated locally, but they still need one live repository-backed run.",
+      "assigned_phase": "release-workflow-live-verification"
     }
   ],
-  "updated_at": "2026-04-04T08:39:18-04:00"
+  "updated_at": "2026-04-04T09:07:17-04:00"
 }

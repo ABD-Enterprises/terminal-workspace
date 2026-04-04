@@ -73,6 +73,9 @@ jobs:
       - name: Bootstrap repo
         run: npm run setup
 
+      - name: Run shared unit and integration tests
+        run: npm run test
+
       - name: Run native check
         run: npm run native:check
 

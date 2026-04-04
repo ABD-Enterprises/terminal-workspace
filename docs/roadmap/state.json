@@ -1,9 +1,9 @@
 {
-  "updated_at": "2026-04-04T08:39:18-04:00",
+  "updated_at": "2026-04-04T09:07:17-04:00",
   "version": "0.1.0",
-  "current_phase": "notarization-and-release-promotion",
+  "current_phase": "release-credential-portability-hardening",
   "current_phase_status": "validated",
-  "current_phase_branch": "phase/notarization-and-release-promotion",
+  "current_phase_branch": "phase/release-credential-portability-hardening",
   "completed_phases": [
     {
       "id": "web-demo-quality",
@@ -22,35 +22,44 @@
       "title": "Packaging and release hardening",
       "status": "completed",
       "completed_at": "2026-04-04T08:25:13-04:00"
-    }
-  ],
-  "upcoming_phases": [
+    },
     {
       "id": "multi-surface-regression-hardening",
       "title": "Multi-surface regression hardening",
-      "priority": 1,
-      "depends_on": [
-        "notarization-and-release-promotion"
-      ],
-      "rationale": "The highest remaining product risk is intentional browser/native transport drift, so the next phase should harden regression coverage across both surfaces."
+      "status": "completed",
+      "completed_at": "2026-04-04T09:07:17-04:00"
+    },
+    {
+      "id": "local-fixture-sandbox-hardening",
+      "title": "Local fixture sandbox hardening",
+      "status": "completed",
+      "completed_at": "2026-04-04T09:07:17-04:00"
     },
     {
       "id": "release-credential-portability-hardening",
       "title": "Release credential portability hardening",
-      "priority": 2,
-      "depends_on": [
-        "notarization-and-release-promotion"
-      ],
-      "rationale": "Notarization and stable promotion now work locally, but the release automation still depends on a machine-local keychain profile and lacks CI-backed promotion credentials."
-    },
+      "status": "completed",
+      "completed_at": "2026-04-04T09:07:17-04:00"
+    }
+  ],
+  "upcoming_phases": [
     {
       "id": "vault-sync-architecture",
       "title": "Vault and sync architecture",
-      "priority": 3,
+      "priority": 1,
       "depends_on": [
-        "multi-surface-regression-hardening"
+        "release-credential-portability-hardening"
       ],
-      "rationale": "With local-first native parity and a notarized release path established, the next product opportunity is designing encrypted vaults, sync, and future team collaboration without reopening the transport seam."
+      "rationale": "Vault snapshot metadata now carries stable vault and device identifiers, so the next product phase can focus on encrypted sync semantics, conflict resolution, and shared-vault policy instead of inventing the snapshot contract."
+    },
+    {
+      "id": "release-workflow-live-verification",
+      "title": "Live GitHub release workflow verification",
+      "priority": 2,
+      "depends_on": [
+        "release-credential-portability-hardening"
+      ],
+      "rationale": "The CI release workflow and GitHub publish script are implemented and dry-run validated, but they still need one live repository-backed execution with production secrets."
     }
   ],
   "risk_remediation_phases": [
@@ -89,6 +98,15 @@
         "risk-release-automation-requires-local-notary-profile"
       ],
       "rationale": "The release flow is now notarized and promoted locally, but it still depends on a machine-local `notarytool` keychain profile and has no CI-backed promotion credential path."
+    },
+    {
+      "id": "release-workflow-live-verification",
+      "title": "Live GitHub release workflow verification",
+      "priority": "low",
+      "source_risk_ids": [
+        "risk-github-release-workflow-not-live-validated"
+      ],
+      "rationale": "The repository now has a CI release workflow and publish script, but the GitHub-hosted signing, notarization, promotion, and release-upload path still needs one live run with repository secrets."
     }
   ],
   "risks": [
@@ -105,17 +123,19 @@
       "id": "risk-browser-native-divergence",
       "title": "Browser and native transport paths diverge intentionally",
       "severity": "medium",
-      "status": "open",
-      "summary": "Browser mode still uses backend transport while native mode uses Tauri/Rust, so regressions need both browser e2e and macOS native fixture coverage.",
-      "assigned_phase": "multi-surface-regression-hardening"
+      "status": "resolved",
+      "summary": "Cross-surface runtime coverage now exercises both browser and native transport seams through targeted unit tests, the shared Vitest suite runs on macOS CI, and browser e2e plus native fixtures remain in the validation matrix.",
+      "assigned_phase": "multi-surface-regression-hardening",
+      "resolved_at": "2026-04-04T09:07:17-04:00"
     },
     {
       "id": "risk-local-fixtures-need-unsandboxed-runtime",
       "title": "Local macOS SSH fixtures need an unsandboxed shell",
       "severity": "medium",
-      "status": "open",
-      "summary": "Temporary localhost sshd fixtures fail inside the default desktop sandbox and need an unsandboxed shell to produce valid trust and transport results.",
-      "assigned_phase": "local-fixture-sandbox-hardening"
+      "status": "resolved",
+      "summary": "Native trust and transport fixture scripts now run an explicit localhost sshd preflight before Cargo tests, so unsupported shells fail fast with deterministic guidance instead of partial SSH fixture errors.",
+      "assigned_phase": "local-fixture-sandbox-hardening",
+      "resolved_at": "2026-04-04T09:07:17-04:00"
     },
     {
       "id": "risk-placeholder-bundle-identifier",
@@ -139,9 +159,18 @@
       "id": "risk-release-automation-requires-local-notary-profile",
       "title": "Release automation still requires a machine-local notary profile",
       "severity": "medium",
+      "status": "resolved",
+      "summary": "Release automation now supports App Store Connect key auth, Apple ID auth, and local profile fallback, and the repo includes CI-backed signing/notarization/publish workflow plus documented env contracts.",
+      "assigned_phase": "release-credential-portability-hardening",
+      "resolved_at": "2026-04-04T09:07:17-04:00"
+    },
+    {
+      "id": "risk-github-release-workflow-not-live-validated",
+      "title": "GitHub release workflow has not been executed with live repository secrets",
+      "severity": "low",
       "status": "open",
-      "summary": "The notarization and promotion path works locally with a `notarytool` keychain profile, but the repo does not yet provide CI-backed credentials or a shared release credential contract.",
-      "assigned_phase": "release-credential-portability-hardening"
+      "summary": "The CI release workflow and GitHub publish script are implemented and dry-run validated locally, but the repository has not yet executed that workflow with real signing and notarization secrets.",
+      "assigned_phase": "release-workflow-live-verification"
     }
   ],
   "opportunities": [
@@ -160,15 +189,17 @@
       "impact": "high",
       "effort": "high",
       "assigned_phase": "vault-sync-architecture",
-      "summary": "The local-first native foundation is strong enough to plan vault, sync, and future shared-workspace features without redesigning the transport seam."
+      "summary": "Local vault snapshots now carry stable `vaultId`, `sourceDeviceId`, and `snapshotId` metadata and imports adopt the incoming vault identity, giving the sync architecture a concrete metadata contract.",
+      "status": "foundation-established"
     },
     {
       "id": "opp-notarized-release-publishing",
       "title": "Publish promoted notarized artifacts through CI-backed release channels",
       "impact": "medium",
       "effort": "medium",
-      "assigned_phase": "release-credential-portability-hardening",
-      "summary": "The repo now produces notarized stable-channel artifacts locally, which creates a clear path for CI-backed release publishing and credential portability."
+      "assigned_phase": "release-workflow-live-verification",
+      "summary": "The repo now includes a CI release workflow plus a GitHub publish script and promoted release notes, and the remaining step is one live GitHub-backed verification run.",
+      "status": "implemented-awaiting-live-verification"
     }
   ],
   "incidents": [
@@ -189,6 +220,12 @@
       "date": "2026-04-04",
       "status": "resolved",
       "summary": "The signed packaging gate originally reported `spctl: not_accepted`, but the notarization phase resolved it by submitting the archive to Apple, stapling the ticket, and revalidating with Gatekeeper."
+    },
+    {
+      "id": "incident-2026-04-04-surface-parity-types",
+      "date": "2026-04-04",
+      "status": "resolved",
+      "summary": "The first signed release rebuild surfaced stale forward/snippet test payloads and a reused Response test harness bug; both were fixed before the final validation pass."
     }
   ],
   "decisions": [
@@ -215,11 +252,29 @@
       "date": "2026-04-04",
       "title": "Automate local notarization and stable promotion",
       "summary": "Drive notarization with a local `notarytool` keychain profile, staple and validate the accepted app bundle, then promote the notarized artifact into a stable-channel directory with manifest and checksum outputs."
+    },
+    {
+      "id": "dec-portable-notary-auth-and-publish",
+      "date": "2026-04-04",
+      "title": "Prefer portable notary auth and CI-backed release publishing",
+      "summary": "Release automation now resolves App Store Connect key auth first, Apple ID second, and local keychain profiles last, then promotes notarized artifacts into a GitHub-release-ready asset set and CI workflow."
+    },
+    {
+      "id": "dec-localhost-fixture-preflight",
+      "date": "2026-04-04",
+      "title": "Preflight localhost fixture capability before Cargo SSH suites",
+      "summary": "The native trust and transport scripts now validate temporary localhost sshd startup and host scanning before running the Cargo fixtures so local failures are explicit and reproducible."
+    },
+    {
+      "id": "dec-vault-snapshot-metadata",
+      "date": "2026-04-04",
+      "title": "Carry stable vault metadata in local snapshot exports",
+      "summary": "The exported local snapshot format now includes a shared vault identifier, source device identifier, and snapshot identifier so future sync work can build on stable identities instead of a flat config dump."
     }
   ],
   "environment_status": {
-    "branch": "phase/notarization-and-release-promotion",
-    "dirty": false,
+    "branch": "phase/release-credential-portability-hardening",
+    "dirty": true,
     "os": "macos",
     "node": "v25.9.0",
     "npm": "11.12.1",
@@ -227,15 +282,17 @@
     "git": "git version 2.50.1 (Apple Git-155)",
     "native_check": "passed",
     "native_key": "passed",
-    "native_trust": "passed (unsandboxed)",
-    "native_fixtures": "passed (unsandboxed)",
+    "native_trust": "passed (fixture preflight + cargo test)",
+    "native_fixtures": "passed (fixture preflight + cargo test)",
     "native_release_preview": "passed",
-    "native_release_signed": "passed (codesign), spctl accepted",
+    "native_release_signed": "passed (codesign)",
     "native_notarize": "passed",
     "native_promote": "passed",
     "stapler_validate": "passed",
-    "validate": "passed (unsandboxed)",
-    "deployment": "not_deployed"
+    "validate": "passed",
+    "deployment": "not_deployed",
+    "native_notary_auth_test": "passed",
+    "native_publish_dry_run": "passed"
   },
   "deployment_history": [],
   "promotion_history": [
@@ -248,6 +305,16 @@
       "manifest": "/Users/deffenda/Code/term-snip/artifacts/release/promoted/stable/latest-macos-release.json",
       "archive": "/Users/deffenda/Code/term-snip/artifacts/release/terminal-workspace-macos-v0.1.0.zip",
       "status": "promoted"
+    },
+    {
+      "id": "promotion-2026-04-04-stable-v0.1.0-portable",
+      "date": "2026-04-04T09:07:17-04:00",
+      "channel": "stable",
+      "version": "0.1.0",
+      "commit": "b4251b3ab65100abbc8ff3bc006cec0648e93193",
+      "manifest": "/Users/deffenda/Code/term-snip/artifacts/release/promoted/stable/latest-macos-release.json",
+      "archive": "/Users/deffenda/Code/term-snip/artifacts/release/terminal-workspace-macos-v0.1.0.zip",
+      "status": "promoted-local-dirty"
     }
   ]
 }

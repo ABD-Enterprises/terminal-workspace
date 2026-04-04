@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/load-env.sh"
 MANIFEST_PATH="$ROOT_DIR/artifacts/release/latest-macos-release.json"
 CHANNEL="${MACOS_RELEASE_CHANNEL:-stable}"
 
@@ -52,6 +53,7 @@ CHANNEL_ROOT="$ROOT_DIR/artifacts/release/promoted/$CHANNEL"
 PROMOTED_MANIFEST_PATH="$PROMOTION_ROOT/release.json"
 LATEST_PROMOTED_MANIFEST_PATH="$CHANNEL_ROOT/latest-macos-release.json"
 CHECKSUM_PATH="$PROMOTION_ROOT/SHA256SUMS.txt"
+RELEASE_NOTES_PATH="$PROMOTION_ROOT/RELEASE_NOTES.md"
 PATCH_JSON="$PROMOTION_ROOT/promotion-patch.json"
 
 mkdir -p "$PROMOTION_ROOT" "$CHANNEL_ROOT"
@@ -78,8 +80,28 @@ ARCHIVE_BASENAME="$(basename "$ZIP_PATH")"
 ARCHIVE_SHA256="$(shasum -a 256 "$ZIP_PATH" | awk '{print $1}')"
 printf "%s  %s\n" "$ARCHIVE_SHA256" "$ARCHIVE_BASENAME" >"$CHECKSUM_PATH"
 
-PATCH_JSON="$PATCH_JSON" CHANNEL="$CHANNEL" PROMOTION_ROOT="$PROMOTION_ROOT" LATEST_PROMOTED_MANIFEST_PATH="$LATEST_PROMOTED_MANIFEST_PATH" CHECKSUM_PATH="$CHECKSUM_PATH" PROMOTED_AT="$(date -Iseconds)" node <<'NODE'
+VERSION="$VERSION" CHANNEL="$CHANNEL" RELEASE_NOTES_PATH="$RELEASE_NOTES_PATH" VERSIONED_MANIFEST_PATH="$VERSIONED_MANIFEST_PATH" node <<'NODE'
 const fs = require("node:fs");
+
+const manifest = JSON.parse(fs.readFileSync(process.env.VERSIONED_MANIFEST_PATH, "utf8"));
+const lines = [
+  `# Terminal Workspace ${process.env.CHANNEL} release ${process.env.VERSION}`,
+  "",
+  `- Commit: ${manifest.commit ?? "unknown"}`,
+  `- Bundle identifier: ${manifest.identifier}`,
+  `- Notarization: ${manifest.notarization?.status ?? "unknown"}`,
+  `- Stapler: ${manifest.notarization?.stapleValidateStatus ?? "unknown"}`,
+  `- Gatekeeper: ${manifest.verification?.spctlStatus ?? "unknown"}`,
+  "",
+  "Assets in this promoted release directory were generated automatically from the notarized macOS bundle."
+];
+
+fs.writeFileSync(process.env.RELEASE_NOTES_PATH, `${lines.join("\n")}\n`);
+NODE
+
+PATCH_JSON="$PATCH_JSON" CHANNEL="$CHANNEL" PROMOTION_ROOT="$PROMOTION_ROOT" LATEST_PROMOTED_MANIFEST_PATH="$LATEST_PROMOTED_MANIFEST_PATH" CHECKSUM_PATH="$CHECKSUM_PATH" RELEASE_NOTES_PATH="$RELEASE_NOTES_PATH" PROMOTED_AT="$(date -Iseconds)" ROOT_DIR="$ROOT_DIR" node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
 
 const patch = {
   promotion: {
@@ -87,8 +109,13 @@ const patch = {
     channel: process.env.CHANNEL,
     promotedAt: process.env.PROMOTED_AT,
     directory: process.env.PROMOTION_ROOT,
+    relativeDirectory: path.relative(process.env.ROOT_DIR, process.env.PROMOTION_ROOT),
     latestManifestPath: process.env.LATEST_PROMOTED_MANIFEST_PATH,
+    latestManifestRelativePath: path.relative(process.env.ROOT_DIR, process.env.LATEST_PROMOTED_MANIFEST_PATH),
     checksumPath: process.env.CHECKSUM_PATH,
+    checksumRelativePath: path.relative(process.env.ROOT_DIR, process.env.CHECKSUM_PATH),
+    releaseNotesPath: process.env.RELEASE_NOTES_PATH,
+    releaseNotesRelativePath: path.relative(process.env.ROOT_DIR, process.env.RELEASE_NOTES_PATH),
   }
 };
 

@@ -2,6 +2,36 @@
 
 ## 2026-04-04
 
+### Release Credential Portability And Regression Hardening
+
+- `npm run native:notary:auth:test`
+  - validated App Store Connect key auth resolution
+  - validated Apple ID auth resolution
+  - validated local keychain-profile auth resolution
+- `bash ./scripts/native-fixture-preflight.sh trust`
+  - confirmed the local shell can launch and scan a temporary localhost `sshd`
+- `npm run native:fixtures`
+  - preflight passed
+  - `native_transport_fixtures::localhost_ssh_transport_fixture_flow` passed
+- `npm run native:release:check`
+  - rebuilt the signed bundle after the portability changes
+  - manifest now includes artifact basenames and relative paths
+- `MACOS_NOTARY_PROFILE=BugNarratorNotary npm run native:notarize`
+  - accepted Apple submission `fdbe1c4b-27a6-47fe-a726-ddaa01cfb723`
+  - after the auth dry-run addition, accepted Apple submission `c7f60fa5-9560-4f94-894c-f399f0afbc6e`
+  - stapling passed
+  - post-notary `spctl` reported `accepted`
+- `npm run native:promote`
+  - wrote promoted release notes and updated the stable manifest
+- `npm run native:publish:dry-run`
+  - validated the promoted GitHub release asset list and release-note path
+- `TERMSNIP_RUN_E2E=1 npm run validate`
+  - passed after the parity tests, vault snapshot metadata, and fixture preflight changes
+  - Vitest passed 12 files and 39 tests
+  - desktop production build passed
+  - `native_transport_fixtures::native_trust_tooling_fixture_flow` passed with preflight
+  - Playwright passed 5 route and workflow specs
+
 ### Notarization And Release Promotion
 
 - `MACOS_NOTARY_PROFILE=BugNarratorNotary npm run native:notarize`

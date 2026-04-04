@@ -1,0 +1,131 @@
+name: Release macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Git tag to publish
+        required: true
+        type: string
+      release_channel:
+        description: Promotion channel
+        required: false
+        default: stable
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release metadata
+        id: release_meta
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "tag=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+            echo "channel=${{ github.event.inputs.release_channel }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Bootstrap repo
+        run: npm run setup
+
+      - name: Import Developer ID certificate
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        shell: bash
+        run: |
+          if [[ -z "$MACOS_CERTIFICATE_P12_BASE64" || -z "$MACOS_CERTIFICATE_PASSWORD" || -z "$MACOS_KEYCHAIN_PASSWORD" ]]; then
+            echo "Missing one or more required signing secrets." >&2
+            exit 1
+          fi
+
+          CERT_PATH="$RUNNER_TEMP/termsnip-signing.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/termsnip-signing.keychain-db"
+
+          MACOS_CERTIFICATE_P12_BASE64="$MACOS_CERTIFICATE_P12_BASE64" CERT_PATH="$CERT_PATH" python3 <<'PY'
+import base64
+import os
+from pathlib import Path
+
+Path(os.environ["CERT_PATH"]).write_bytes(
+    base64.b64decode(os.environ["MACOS_CERTIFICATE_P12_BASE64"])
+)
+PY
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Build signed release bundle
+        env:
+          MACOS_SIGN_MODE: require
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: npm run native:release:check
+
+      - name: Notarize signed bundle
+        env:
+          MACOS_SIGN_MODE: require
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+          MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_APP_PASSWORD: ${{ secrets.MACOS_NOTARY_APP_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: npm run native:notarize
+
+      - name: Promote notarized release
+        env:
+          MACOS_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
+        run: npm run native:promote
+
+      - name: Publish GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          MACOS_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
+        run: npm run native:publish
+
+      - name: Upload promoted release artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-${{ steps.release_meta.outputs.tag }}
+          if-no-files-found: error
+          path: |
+            artifacts/release

@@ -41,7 +41,38 @@
         "Release provenance includes Apple submission IDs, stapler logs, Gatekeeper assessment, and promotion metadata.",
         "Credential portability remains a separate follow-up because the release flow still depends on a machine-local keychain profile."
       ]
+    },
+    {
+      "id": "dec-portable-notary-auth-and-publish",
+      "date": "2026-04-04",
+      "title": "Prefer portable notary auth and CI-backed release publishing",
+      "decision": "Resolve App Store Connect key auth first, Apple ID second, and local keychain profiles last, then build a GitHub-release-ready promoted asset set and CI workflow around the same manifest.",
+      "consequences": [
+        "Local notarization still works with the existing keychain profile.",
+        "CI can publish promoted artifacts without depending on a developer workstation profile.",
+        "A live GitHub workflow verification is still required."
+      ]
+    },
+    {
+      "id": "dec-localhost-fixture-preflight",
+      "date": "2026-04-04",
+      "title": "Preflight localhost fixture capability before Cargo SSH suites",
+      "decision": "Run a dedicated temporary sshd and ssh-keyscan preflight before the native trust and transport Cargo fixtures.",
+      "consequences": [
+        "Unsupported shells fail early with explicit guidance.",
+        "The broader native fixture failures are easier to distinguish from real transport regressions."
+      ]
+    },
+    {
+      "id": "dec-vault-snapshot-metadata",
+      "date": "2026-04-04",
+      "title": "Carry stable vault metadata in local snapshot exports",
+      "decision": "Persist vault and device identifiers in app state and include them in exported/imported local snapshots.",
+      "consequences": [
+        "Imports can adopt a shared vault identity without moving runtime secrets.",
+        "Future sync and conflict-handling work can build on stable identifiers."
+      ]
     }
   ],
-  "updated_at": "2026-04-04T08:39:18-04:00"
+  "updated_at": "2026-04-04T09:07:17-04:00"
 }

@@ -4,6 +4,7 @@ import {
   buildLocalConfigBundle,
   type LocalConfigBundle,
 } from "./local-config";
+import { useAppStore } from "../store/app-store";
 import { useHostsStore } from "../store/hosts-store";
 import { useKeysStore } from "../store/keys-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
@@ -17,8 +18,10 @@ const baseSnippetState = useSnippetsStore.getState();
 const baseKnownHostState = useKnownHostsStore.getState();
 const baseSessionState = useSessionsStore.getState();
 const baseTransferState = useTransfersStore.getState();
+const baseAppState = useAppStore.getState();
 
 afterEach(() => {
+  useAppStore.setState(baseAppState);
   useHostsStore.setState(baseHostState);
   useKeysStore.setState(baseKeyState);
   useSnippetsStore.setState(baseSnippetState);
@@ -59,7 +62,11 @@ describe("local config", () => {
 
     const bundle = buildLocalConfigBundle();
     expect(bundle.app).toBe("TermSnip");
-    expect(bundle.version).toBe(1);
+    expect(bundle.version).toBe(2);
+    expect(bundle.vault.schema).toBe("local-first-vault");
+    expect(bundle.vault.vaultId).toBe(baseAppState.vaultId);
+    expect(bundle.vault.sourceDeviceId).toBe(baseAppState.deviceId);
+    expect(bundle.vault.snapshotId).toBeTruthy();
     expect(bundle.hosts).toHaveLength(1);
     expect(bundle.hosts[0]?.id).toBe("host-a");
   });
@@ -97,8 +104,14 @@ describe("local config", () => {
 
     const bundle: LocalConfigBundle = {
       app: "TermSnip",
-      version: 1,
+      version: 2,
       exportedAt: "2026-03-29T10:00:00.000Z",
+      vault: {
+        schema: "local-first-vault",
+        vaultId: "vault-imported",
+        sourceDeviceId: "device-remote",
+        snapshotId: "snapshot-1",
+      },
       hosts: [
         {
           id: "host-b",
@@ -176,6 +189,7 @@ describe("local config", () => {
       keyCount: 1,
       snippetCount: 1,
       knownHostCount: 1,
+      vaultId: "vault-imported",
     });
     expect(useHostsStore.getState().hosts[0]?.id).toBe("host-b");
     expect(useKeysStore.getState().keys[0]?.assignedHostIds).toEqual(["host-b"]);
@@ -183,5 +197,7 @@ describe("local config", () => {
     expect(useSessionsStore.getState().tabs).toEqual([]);
     expect(useSessionsStore.getState().activeTabId).toBeUndefined();
     expect(useTransfersStore.getState().activeHostId).toBe("host-b");
+    expect(useAppStore.getState().vaultId).toBe("vault-imported");
+    expect(useAppStore.getState().deviceId).toBe(baseAppState.deviceId);
   });
 });

@@ -17,12 +17,21 @@
 - `npm run native:key`: fast local native key inspection/generation fixture
 - `npm run native:trust`: macOS localhost trust/key fixture
 - `npm run native:fixtures`: macOS localhost transport fixture test
+- `npm run native:notary:auth:test`: portable notarization auth dry run
+- `npm run native:publish:dry-run`: promoted GitHub release publish dry run
 - `TERMSNIP_RUN_E2E=1 npm run validate`: full lint/test/build/e2e pass
+
+## Environment Files
+
+- `.env.example` documents the supported local and CI release variables.
+- `.env.shared` carries non-secret shared defaults such as the browser/backend ports and release
+  channel.
+- `.env` is optional and overrides the shared defaults locally.
 
 ## Demo Mode
 
-Demo mode is the default operator experience for this milestone. It exists to keep the seeded app
-fully reviewable without real SSH infrastructure.
+Demo mode remains the default operator experience in the browser review surface. The native shell
+defaults to live transport.
 
 - Sessions connect through the mock terminal transport.
 - Transfers use a deterministic in-memory filesystem keyed by host.
@@ -66,6 +75,6 @@ The Playwright suite exercises the seeded workspace and captures route screensho
 
 ## Milestone Choice
 
-Web demo quality is complete enough to keep as the default screenshot/review path. The active phase
-on this branch is native trust and key tooling, and the next planned phase is packaging and release
-hardening.
+Web demo quality remains the default screenshot and review path. The current hardening branch is
+closing release credential portability, multi-surface regression coverage, and localhost fixture
+preflight; the next product phase is vault and sync architecture.

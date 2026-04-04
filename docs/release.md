@@ -4,23 +4,35 @@
 
 - Local native bundles can now be built, signed, notarized, stapled, zipped, and described with a
   machine-readable release manifest for macOS distribution.
+- Release manifests now include stable basenames and relative paths so promoted metadata is usable
+  outside the local runner workspace.
 - `npm run native:release:check` is the packaging phase gate. It writes release artifacts into
   `artifacts/release/` and verifies the signed bundle contract.
-- `npm run native:notarize` is the notarization gate. It submits the release zip to Apple,
-  waits for acceptance, staples the ticket, recreates the zip, and updates the manifest.
+- `npm run native:notary:auth:test` proves that the repo resolves App Store Connect key auth,
+  Apple ID auth, and keychain-profile auth correctly before a live notarization run.
+- `npm run native:notarize` is the notarization gate. It submits the release zip to Apple, waits
+  for acceptance, staples the ticket, recreates the zip, and updates the manifest.
 - `npm run native:promote` is the local promotion gate. It copies the notarized release into the
-  stable channel directory with the manifest and checksum file.
+  stable channel directory with the manifest, checksum file, and release notes.
+- `npm run native:publish:dry-run` validates the promoted GitHub release asset set without
+  publishing it.
+- `.github/workflows/release-macos.yml` is the CI-backed release path for signing, notarization,
+  promotion, and GitHub release publishing.
 - The current bundle identifier is `com.abdenterprises.terminalworkspace`.
-- Local notarized distribution is complete in this branch.
+- Local notarized distribution is complete in this branch, and CI release publishing is now
+  implemented but not yet executed with repository secrets.
 
 ## Required Checks Before Shipping
 
 - `npm run native:check`
 - `npm run native:key`
 - `npm run native:trust`
+- `npm run native:fixtures`
 - `npm run native:release:check`
+- `npm run native:notary:auth:test`
 - `MACOS_NOTARY_PROFILE=<profile> npm run native:notarize`
 - `npm run native:promote`
+- `npm run native:publish:dry-run`
 - `TERMSNIP_RUN_E2E=1 npm run validate`
 - Native bundle build, notarization, stapling, and promotion verification
 
@@ -35,14 +47,31 @@
 - `artifacts/release/*.stapler-*.txt`: stapling and ticket validation logs
 - `artifacts/release/promoted/stable/v0.1.0/`: promoted release zip, manifest, logs, and checksum
 - `artifacts/release/promoted/stable/latest-macos-release.json`: latest promoted stable manifest
+- `artifacts/release/promoted/stable/v0.1.0/RELEASE_NOTES.md`: promoted release notes used by the
+  GitHub release publish step
 
 ## Required Environment
 
-- `MACOS_NOTARY_PROFILE` or `NOTARY_PROFILE`: a `notarytool` keychain profile available on the
-  current macOS machine. This phase was executed with `BugNarratorNotary`.
+- `.env.shared`: shared non-secret defaults such as the release channel
+- `.env`: optional local overrides
+- `MACOS_SIGN_IDENTITY`: optional local override for the Developer ID Application identity
+- Preferred notarization auth:
+  - `MACOS_NOTARY_KEY_ID`
+  - `MACOS_NOTARY_ISSUER`
+  - `MACOS_NOTARY_KEY_BASE64` or `MACOS_NOTARY_KEY_PATH`
+- Apple ID fallback:
+  - `MACOS_NOTARY_APPLE_ID`
+  - `MACOS_NOTARY_APP_PASSWORD`
+  - `MACOS_NOTARY_TEAM_ID`
+- Local-machine fallback:
+  - `MACOS_NOTARY_PROFILE` or `NOTARY_PROFILE`
+- CI release workflow secrets:
+  - `MACOS_CERTIFICATE_P12_BASE64`
+  - `MACOS_CERTIFICATE_PASSWORD`
+  - `MACOS_KEYCHAIN_PASSWORD`
+  - `MACOS_SIGN_IDENTITY`
 
 ## Current Gaps
 
-- Full transport fixture stability still needs hardening for local host environments.
-- The repo still depends on a machine-local `notarytool` keychain profile for release automation.
-- The repo does not yet publish promoted artifacts through a CI-backed release workflow or GitHub release.
+- The CI release workflow is implemented but has not yet been exercised with live GitHub secrets on
+  this repository.

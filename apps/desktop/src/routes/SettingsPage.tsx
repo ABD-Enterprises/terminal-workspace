@@ -161,9 +161,9 @@ export function SettingsPage() {
                 Local config bundle
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-400">
-                Export a portable JSON snapshot of hosts, keys, snippets, and trusted host keys.
-                Import replaces the current local config and clears open sessions so reconnects are
-                explicit.
+                Export a portable vault snapshot of hosts, keys, snippets, and trusted host keys.
+                Import replaces the current local config, adopts the incoming vault ID, and clears
+                open sessions so reconnects are explicit.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -210,7 +210,7 @@ export function SettingsPage() {
             <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
               <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Export scope</p>
               <p className="mt-1 text-sm leading-5 text-slate-300">
-                Hosts, keys, snippets, and known-host trust are included.
+                Hosts, keys, snippets, known-host trust, and vault metadata are included.
               </p>
             </div>
             <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">

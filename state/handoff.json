@@ -1,13 +1,11 @@
 {
-  "summary": "The notarization-and-release-promotion phase is validated and committed on phase/notarization-and-release-promotion. The repo now notarizes the signed macOS bundle with Apple, staples the accepted ticket, records a Gatekeeper-accepted result, and promotes the notarized release into the stable channel with manifest and checksum artifacts.",
+  "summary": "The release-credential-portability-hardening branch is validated. Portable notary auth, GitHub release publishing automation, localhost fixture preflight, cross-surface parity tests, and sync-ready vault snapshot metadata are implemented and passing locally.",
   "next_steps": [
-    "Execute multi-surface-regression-hardening to reduce the intentional browser/native transport drift risk.",
-    "Execute release-credential-portability-hardening so notarization and promotion can run without a machine-local keychain profile.",
-    "Reduce local desktop sandbox friction for localhost SSH fixtures in the dedicated remediation phase."
+    "Execute vault-sync-architecture using the new vault snapshot identifiers as the local-first sync contract.",
+    "Run .github/workflows/release-macos.yml once with live repository secrets to verify GitHub-hosted signing, notarization, promotion, and release upload."
   ],
   "blockers": [
-    "Release automation still depends on a machine-local `notarytool` keychain profile.",
-    "Local macOS localhost SSH fixture suites still require an unsandboxed shell for valid results."
+    "GitHub-hosted release publishing has not yet been exercised with live repository secrets."
   ],
-  "updated_at": "2026-04-04T08:39:18-04:00"
+  "updated_at": "2026-04-04T09:07:17-04:00"
 }

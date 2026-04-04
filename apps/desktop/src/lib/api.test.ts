@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invokeTauriCommand, isTauriRuntime } = vi.hoisted(() => ({
   invokeTauriCommand: vi.fn(),
@@ -38,12 +38,47 @@ vi.mock("./demo-backend", () => ({
 }));
 
 import { generatePrivateKey, inspectPrivateKey, scanKnownHost } from "./api";
+import {
+  createLocalForward,
+  executeSnippetOnHosts,
+  listRemoteDirectory,
+  type BackendHostConnection,
+} from "./api";
+
+const originalFetch = globalThis.fetch;
+const fetchMock = vi.fn();
+
+const hostFixture: BackendHostConnection = {
+  agentForwarding: false,
+  authMethod: "privateKey",
+  environment: {},
+  hostname: "bastion.internal",
+  password: "",
+  passphrase: "",
+  port: 22,
+  privateKeyPath: "~/.ssh/id_ed25519",
+  username: "ops",
+};
 
 describe("native trust and key tooling API", () => {
   beforeEach(() => {
     invokeTauriCommand.mockReset();
     isTauriRuntime.mockReset();
     isTauriRuntime.mockReturnValue(true);
+    fetchMock.mockReset();
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: fetchMock,
+      writable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: originalFetch,
+      writable: true,
+    });
   });
 
   it("routes private-key inspection through the Tauri command bridge", async () => {
@@ -83,6 +118,77 @@ describe("native trust and key tooling API", () => {
 
     expect(invokeTauriCommand).toHaveBeenCalledWith("termsnip_scan_known_host", {
       request: { hostname: "bastion.internal", port: 2222 },
+    });
+  });
+
+  it("routes browser key inspection through the backend HTTP seam", async () => {
+    isTauriRuntime.mockReturnValue(false);
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ algorithm: "ED25519" }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      })
+    );
+
+    await inspectPrivateKey("~/.ssh/id_ed25519");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/backend/keys/inspect", {
+      body: JSON.stringify({ path: "~/.ssh/id_ed25519" }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+  });
+
+  it("routes browser SFTP listing through the backend HTTP seam", async () => {
+    isTauriRuntime.mockReturnValue(false);
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ entries: [], path: "/" }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      })
+    );
+
+    await listRemoteDirectory(hostFixture, "/");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/backend/sftp/list", {
+      body: JSON.stringify({ host: hostFixture, path: "/" }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+  });
+
+  it("routes native forwards and snippet execution through the Tauri command bridge", async () => {
+    invokeTauriCommand.mockResolvedValueOnce({ id: "forward-1" }).mockResolvedValueOnce({
+      results: [{ ok: true }],
+    });
+
+    await createLocalForward({
+      direction: "local",
+      localHost: "127.0.0.1",
+      localPort: 8080,
+      remoteHost: "127.0.0.1",
+      remotePort: 80,
+      sessionId: "session-1",
+    });
+    await executeSnippetOnHosts("echo ok", [
+      { host: hostFixture, id: "host-1", label: "Bastion" },
+    ]);
+
+    expect(invokeTauriCommand).toHaveBeenNthCalledWith(1, "termsnip_create_forward", {
+      request: {
+        direction: "local",
+        localHost: "127.0.0.1",
+        localPort: 8080,
+        remoteHost: "127.0.0.1",
+        remotePort: 80,
+        sessionId: "session-1",
+      },
+    });
+    expect(invokeTauriCommand).toHaveBeenNthCalledWith(2, "termsnip_execute_snippet_on_hosts", {
+      request: {
+        command: "echo ok",
+        targets: [{ host: hostFixture, id: "host-1", label: "Bastion" }],
+      },
     });
   });
 });

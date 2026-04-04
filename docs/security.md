@@ -8,6 +8,8 @@
   execution can proceed.
 - Native known-host scans compute and store explicit algorithm plus public-key fingerprints instead
   of relying on implicit first-connect trust.
+- Release automation now prefers App Store Connect API-key auth, falls back to Apple ID auth, and
+  only uses a local `notarytool` keychain profile as the final fallback.
 
 ## Current Boundaries
 
@@ -15,10 +17,10 @@
 - Native mode now owns session transport, SFTP, forwarding, snippets, key inspection, key
   generation, and known-host scans.
 - Exported config snapshots exclude runtime passwords and passphrases.
+- Exported vault snapshots include shared vault identifiers but keep runtime secrets outside the
+  persisted snapshot format.
 
 ## Open Security Work
 
-- Harden the macOS localhost transport fixture so native regression coverage does not depend on
-  host-specific sandbox behavior.
-- Finish packaging, signing, notarization, and release diagnostics so the native shell can move
-  from local-test artifacts to distributable builds.
+- Execute the CI release workflow with live repository secrets so the GitHub-hosted signing and
+  notarization path is validated, not just implemented.

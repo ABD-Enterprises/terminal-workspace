@@ -17,5 +17,7 @@
 
 ## Export Behavior
 
-- Hosts, keys, snippets, and trusted host keys are exportable
+- Hosts, keys, snippets, trusted host keys, and vault snapshot metadata are exportable
 - Runtime passwords and passphrases are not exportable
+- Vault imports adopt the incoming `vaultId` but keep the local device identity, which is the base
+  for future sync and conflict handling.

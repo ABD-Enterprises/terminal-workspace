@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/load-env.sh"
 TAURI_CONFIG="$ROOT_DIR/src-tauri/tauri.conf.json"
 PRODUCT_NAME="${MACOS_PRODUCT_NAME:-$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).productName" "$TAURI_CONFIG")}"
 APP_VERSION="${MACOS_APP_VERSION:-$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).version" "$TAURI_CONFIG")}"
@@ -192,6 +193,7 @@ ZIP_SHA256="$(shasum -a 256 "$ZIP_PATH" | awk '{print $1}')"
 export RELEASE_MANIFEST_PATH="$MANIFEST_PATH"
 export RELEASE_LATEST_MANIFEST_PATH="$LATEST_MANIFEST_PATH"
 export PRODUCT_NAME APP_VERSION APP_IDENTIFIER APP_PATH ZIP_PATH EXECUTABLE_PATH
+export WORKSPACE_ROOT="$ROOT_DIR"
 export BUILD_TIME BUILD_BRANCH BUILD_COMMIT BUILD_DIRTY
 export SIGN_MODE SIGNED_IDENTITY SIGNING_PERFORMED SIGNING_TIMESTAMP_MODE
 export CODESIGN_STATUS SPCTL_STATUS CODESIGN_VERIFY_LOG CODESIGN_DISPLAY_LOG SPCTL_LOG

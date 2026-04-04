@@ -33,21 +33,33 @@
     {
       "id": "task-multi-surface-regression-hardening",
       "title": "Expand regression coverage across browser and native transport surfaces",
-      "status": "pending",
+      "status": "completed",
       "phase": "multi-surface-regression-hardening"
     },
     {
       "id": "task-release-credential-portability-hardening",
       "title": "Move release credentials and promotion into a portable CI-backed release path",
-      "status": "pending",
+      "status": "completed",
       "phase": "release-credential-portability-hardening"
     },
     {
       "id": "task-local-fixture-sandbox-hardening",
       "title": "Reduce local desktop sandbox friction for macOS localhost SSH fixtures",
-      "status": "pending",
+      "status": "completed",
       "phase": "local-fixture-sandbox-hardening"
+    },
+    {
+      "id": "task-vault-snapshot-foundation",
+      "title": "Add stable vault metadata to local snapshot exports and imports",
+      "status": "completed",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-release-workflow-live-verification",
+      "title": "Run the GitHub-hosted macOS release workflow with live repository secrets",
+      "status": "pending",
+      "phase": "release-workflow-live-verification"
     }
   ],
-  "updated_at": "2026-04-04T08:39:18-04:00"
+  "updated_at": "2026-04-04T09:07:17-04:00"
 }

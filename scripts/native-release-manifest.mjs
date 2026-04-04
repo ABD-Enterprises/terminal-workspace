@@ -25,6 +25,11 @@ const manifestPath = requireEnv("RELEASE_MANIFEST_PATH");
 const appPath = requireEnv("APP_PATH");
 const zipPath = requireEnv("ZIP_PATH");
 const executablePath = requireEnv("EXECUTABLE_PATH");
+const workspaceRoot = process.env.WORKSPACE_ROOT || process.cwd();
+
+function relativePath(filePath) {
+  return path.relative(workspaceRoot, filePath);
+}
 
 const manifest = {
   generatedAt: requireEnv("BUILD_TIME"),
@@ -36,19 +41,33 @@ const manifest = {
   dirty: normalizeBoolean(process.env.BUILD_DIRTY || "false"),
   manifest: {
     path: manifestPath,
+    fileName: path.basename(manifestPath),
+    relativePath: relativePath(manifestPath),
     latestPath: process.env.RELEASE_LATEST_MANIFEST_PATH || null,
+    latestFileName: process.env.RELEASE_LATEST_MANIFEST_PATH
+      ? path.basename(process.env.RELEASE_LATEST_MANIFEST_PATH)
+      : null,
+    latestRelativePath: process.env.RELEASE_LATEST_MANIFEST_PATH
+      ? relativePath(process.env.RELEASE_LATEST_MANIFEST_PATH)
+      : null,
   },
   bundle: {
     path: appPath,
+    fileName: path.basename(appPath),
+    relativePath: relativePath(appPath),
     exists: fs.existsSync(appPath),
   },
   executable: {
     path: executablePath,
+    fileName: path.basename(executablePath),
+    relativePath: relativePath(executablePath),
     exists: fs.existsSync(executablePath),
     sha256: process.env.EXECUTABLE_SHA256 || null,
   },
   archive: {
     path: zipPath,
+    fileName: path.basename(zipPath),
+    relativePath: relativePath(zipPath),
     exists: fs.existsSync(zipPath),
     sha256: process.env.ZIP_SHA256 || null,
     bytes: fs.existsSync(zipPath) ? fs.statSync(zipPath).size : 0,
