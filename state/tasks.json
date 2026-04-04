@@ -63,6 +63,18 @@
     {
       "id": "task-vault-sync-merge-semantics",
       "title": "Design and implement record-level merge semantics for vault snapshots",
+      "status": "completed",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-conflict-resolution",
+      "title": "Handle record deletions and user-resolvable conflicts for vault snapshot merges",
+      "status": "in_progress",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-deletion-semantics",
+      "title": "Model deletions and tombstones for vault snapshot merges",
       "status": "pending",
       "phase": "vault-sync-architecture"
     },
@@ -91,5 +103,5 @@
       "phase": "bootstrap"
     }
   ],
-  "updated_at": "2026-04-04T15:21:12-04:00"
+  "updated_at": "2026-04-04T15:38:18-04:00"
 }

@@ -102,7 +102,27 @@
         "Vault sync now has a concrete lineage contract instead of a flat export/import file.",
         "Local imports remain full-replace operations, but the UI can warn about destructive divergent or cross-vault steps before execution."
       ]
+    },
+    {
+      "id": "dec-vault-same-vault-merge",
+      "date": "2026-04-04",
+      "title": "Merge same-vault imports before replacing local state",
+      "decision": "Allow same-vault imports to merge non-conflicting host, key, snippet, and known-host records using `updatedAt` ordering, while blocking timestamp-tied conflicts and keeping local-only records until deletion semantics exist.",
+      "consequences": [
+        "Fast-forward and divergent imports can preserve unrelated local records instead of forcing a full replace.",
+        "Deletion tombstones and record-level conflict resolution remain explicit follow-up work."
+      ]
+    },
+    {
+      "id": "dec-vault-merge-conflict-choice",
+      "date": "2026-04-04",
+      "title": "Expose explicit same-vault conflict resolution choices",
+      "decision": "When same-vault records conflict at the same timestamp, allow the import flow to merge by keeping local records or preferring imported records instead of forcing a full replace.",
+      "consequences": [
+        "Users can resolve same-vault conflicts without discarding unrelated local records.",
+        "Deletion semantics remain a separate follow-up because local-only records are still retained by default."
+      ]
     }
   ],
-  "updated_at": "2026-04-04T15:21:12-04:00"
+  "updated_at": "2026-04-04T15:38:18-04:00"
 }

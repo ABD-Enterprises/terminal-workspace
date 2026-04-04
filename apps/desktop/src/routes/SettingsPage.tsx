@@ -72,17 +72,23 @@ export function SettingsPage() {
     }
   };
 
-  const applyPendingImport = () => {
+  const applyPendingImport = (
+    mode: "replace" | "merge",
+    conflictResolution?: "keep-local" | "prefer-imported"
+  ) => {
     if (!pendingImport) {
       return;
     }
 
     try {
-      const summary = applyImportedLocalConfigBundle(pendingImport.bundle);
+      const summary = applyImportedLocalConfigBundle(pendingImport.bundle, {
+        mode,
+        conflictResolution,
+      });
       setPendingImport(null);
       setErrorMessage(undefined);
       setStatusMessage(
-        `Imported ${summary.hostCount} hosts, ${summary.keyCount} keys, ${summary.snippetCount} snippets, and ${summary.knownHostCount} trusted host entries. Strategy: ${formatImportStrategy(summary.importStrategy)}. Sessions were reset so the workspace can reconnect cleanly.`
+        `Imported ${summary.hostCount} hosts, ${summary.keyCount} keys, ${summary.snippetCount} snippets, and ${summary.knownHostCount} trusted host entries via ${summary.mode}${summary.conflictResolution ? ` (${formatConflictResolution(summary.conflictResolution)})` : ""}. Strategy: ${formatImportStrategy(summary.importStrategy)}. Sessions were reset so the workspace can reconnect cleanly.`
       );
     } catch (error) {
       setStatusMessage(undefined);
@@ -238,6 +244,14 @@ export function SettingsPage() {
                   <p className="mt-1 text-sm leading-5 text-amber-100/90">
                     {describeImportStrategy(pendingImport.analysis)}
                   </p>
+                  {pendingImport.analysis.mergePlan ? (
+                    <div className="mt-3 grid gap-2 text-xs text-amber-100/80 md:grid-cols-2">
+                      <p>{formatMergeSection("Hosts", pendingImport.analysis.mergePlan.hosts)}</p>
+                      <p>{formatMergeSection("Keys", pendingImport.analysis.mergePlan.keys)}</p>
+                      <p>{formatMergeSection("Snippets", pendingImport.analysis.mergePlan.snippets)}</p>
+                      <p>{formatMergeSection("Trust", pendingImport.analysis.mergePlan.knownHosts)}</p>
+                    </div>
+                  ) : null}
                   <p className="mt-2 text-xs text-amber-100/70">{pendingImport.fileName}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -248,9 +262,36 @@ export function SettingsPage() {
                   >
                     Cancel
                   </button>
+                  {canMergeImport(pendingImport.analysis) ? (
+                    <button
+                      type="button"
+                      onClick={() => applyPendingImport("merge")}
+                      className="rounded-lg border border-emerald-300/40 bg-emerald-300/10 px-4 py-2 text-sm font-medium text-emerald-100 transition hover:border-emerald-200/60 hover:text-white"
+                    >
+                      Merge import
+                    </button>
+                  ) : null}
+                  {canResolveMergeConflicts(pendingImport.analysis) ? (
+                    <button
+                      type="button"
+                      onClick={() => applyPendingImport("merge", "keep-local")}
+                      className="rounded-lg border border-emerald-300/40 bg-emerald-300/10 px-4 py-2 text-sm font-medium text-emerald-100 transition hover:border-emerald-200/60 hover:text-white"
+                    >
+                      Merge keeping local
+                    </button>
+                  ) : null}
+                  {canResolveMergeConflicts(pendingImport.analysis) ? (
+                    <button
+                      type="button"
+                      onClick={() => applyPendingImport("merge", "prefer-imported")}
+                      className="rounded-lg border border-sky-300/40 bg-sky-300/10 px-4 py-2 text-sm font-medium text-sky-100 transition hover:border-sky-200/60 hover:text-white"
+                    >
+                      Merge preferring imported
+                    </button>
+                  ) : null}
                   <button
                     type="button"
-                    onClick={applyPendingImport}
+                    onClick={() => applyPendingImport("replace")}
                     className="rounded-lg bg-amber-300 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-amber-200"
                   >
                     {getImportActionLabel(pendingImport.analysis.strategy)}
@@ -375,4 +416,32 @@ function describeImportStrategy(analysis: LocalConfigImportAnalysis) {
 
 function truncateId(value: string | null) {
   return value ? value.slice(0, 8) : "unknown";
+}
+
+function canMergeImport(analysis: LocalConfigImportAnalysis) {
+  return (
+    Boolean(analysis.mergePlan?.applicable) &&
+    !analysis.mergePlan?.hasConflicts &&
+    (analysis.strategy === "fast_forward" ||
+      analysis.strategy === "divergent" ||
+      analysis.strategy === "same_snapshot")
+  );
+}
+
+function canResolveMergeConflicts(analysis: LocalConfigImportAnalysis) {
+  return (
+    Boolean(analysis.mergePlan?.applicable) &&
+    Boolean(analysis.mergePlan?.hasConflicts) &&
+    (analysis.strategy === "fast_forward" ||
+      analysis.strategy === "divergent" ||
+      analysis.strategy === "same_snapshot")
+  );
+}
+
+function formatMergeSection(label: string, section: NonNullable<LocalConfigImportAnalysis["mergePlan"]>["hosts"]) {
+  return `${label}: +${section.added} updated ${section.updated} kept ${section.retainedLocal} unchanged ${section.unchanged} conflicts ${section.conflicts}`;
+}
+
+function formatConflictResolution(strategy: "keep-local" | "prefer-imported") {
+  return strategy === "keep-local" ? "keeping local conflicts" : "preferring imported conflicts";
 }

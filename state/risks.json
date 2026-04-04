@@ -66,10 +66,19 @@
       "id": "risk-vault-imports-replace-local-state",
       "title": "Vault imports still replace the local workspace atomically",
       "severity": "medium",
+      "status": "resolved",
+      "summary": "Same-vault imports now preview merge impact and can merge non-conflicting hosts, keys, snippets, and known-host entries instead of overwriting unrelated local records.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T15:33:30-04:00"
+    },
+    {
+      "id": "risk-vault-merge-deletions-and-conflicts",
+      "title": "Vault merges do not yet model deletions or user-resolvable conflicts",
+      "severity": "medium",
       "status": "open",
-      "summary": "Snapshot lineage and import preview now classify same-snapshot, fast-forward, divergent, and cross-vault imports, but applying a bundle still overwrites the full local host/key/snippet/trust inventory without record-level merge or conflict resolution.",
+      "summary": "Same-vault imports now merge additive records and can resolve equal-timestamp conflicts by keeping local or preferring imported data, but the merge path still keeps local-only records by default because deletion tombstones are not modeled.",
       "assigned_phase": "vault-sync-architecture"
     }
   ],
-  "updated_at": "2026-04-04T15:21:12-04:00"
+  "updated_at": "2026-04-04T15:38:18-04:00"
 }

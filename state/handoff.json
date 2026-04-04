@@ -1,12 +1,12 @@
 {
-  "summary": "The active branch is vault-sync-architecture. Local config bundles now export snapshot ancestry, the Settings flow previews same-snapshot, fast-forward, divergent, legacy, and cross-vault imports before replace, and applying an import records the incoming snapshot as the new local baseline.",
+  "summary": "The active branch is vault-sync-architecture. Local config bundles now export snapshot ancestry, the Settings flow previews merge impact, and same-vault imports can merge non-conflicting records or resolve conflicts by keeping local or preferring imported data before apply.",
   "next_steps": [
-    "Implement record-level merge semantics for hosts, keys, snippets, and known-host trust instead of atomic full-replace imports.",
+    "Add deletion semantics and tombstones for vault snapshot merges instead of retaining local-only records by default.",
     "Run .github/workflows/release-macos.yml once with live repository secrets to verify GitHub-hosted signing, notarization, promotion, and release upload."
   ],
   "blockers": [
-    "Vault imports still replace local state atomically and do not resolve divergent record-level conflicts.",
+    "Vault merge semantics do not yet model deletions, so local-only records are retained by default.",
     "GitHub-hosted release publishing has not yet been exercised with live repository secrets."
   ],
-  "updated_at": "2026-04-04T15:21:12-04:00"
+  "updated_at": "2026-04-04T15:38:18-04:00"
 }

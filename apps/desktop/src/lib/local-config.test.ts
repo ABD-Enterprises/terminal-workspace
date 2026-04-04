@@ -98,6 +98,10 @@ describe("local config", () => {
     expect(analysis.currentSnapshotId).toBe("snapshot-current");
     expect(analysis.importedSnapshotId).toBe("snapshot-next");
     expect(analysis.importedBaseSnapshotId).toBe("snapshot-current");
+    expect(analysis.mergePlan).toMatchObject({
+      applicable: true,
+      hasConflicts: false,
+    });
   });
 
   it("imports durable config and clears stale sessions", () => {
@@ -220,6 +224,9 @@ describe("local config", () => {
       snippetCount: 1,
       knownHostCount: 1,
       importStrategy: "adopt_vault",
+      mode: "replace",
+      conflictResolution: null,
+      mergePlan: null,
       snapshotId: "snapshot-1",
       vaultId: "vault-imported",
     });
@@ -232,5 +239,222 @@ describe("local config", () => {
     expect(useAppStore.getState().vaultId).toBe("vault-imported");
     expect(useAppStore.getState().deviceId).toBe(baseAppState.deviceId);
     expect(useAppStore.getState().lastAppliedSnapshotId).toBe("snapshot-1");
+  });
+
+  it("merges non-conflicting local and imported records for the same vault", () => {
+    useAppStore.getState().setVaultId("vault-current");
+    useAppStore.getState().setLastAppliedSnapshotId("snapshot-current");
+    useHostsStore.setState({
+      ...baseHostState,
+      hosts: [
+        {
+          id: "host-local",
+          label: "Local Host",
+          hostname: "10.0.0.1",
+          username: "ops",
+          port: 22,
+          authMethod: "privateKey",
+          privateKeyPath: "/tmp/id_local",
+          group: "Local",
+          tags: ["local"],
+          note: "Local only",
+          favorite: false,
+          keyLabel: "Local Key",
+          hostKeyPolicy: "allowUnknown",
+          agentForwarding: false,
+          environment: {},
+          sftpRoot: "/srv",
+          snippetCount: 0,
+          forwardingCount: 0,
+          createdAt: "2026-03-29T10:00:00.000Z",
+          updatedAt: "2026-03-29T10:00:00.000Z",
+        },
+      ],
+    });
+
+    const bundle: LocalConfigBundle = {
+      app: "TermSnip",
+      version: 2,
+      exportedAt: "2026-03-29T11:00:00.000Z",
+      vault: {
+        schema: "local-first-vault",
+        vaultId: "vault-current",
+        sourceDeviceId: "device-remote",
+        snapshotId: "snapshot-next",
+        baseSnapshotId: "snapshot-current",
+      },
+      hosts: [
+        {
+          id: "host-remote",
+          label: "Remote Host",
+          hostname: "10.0.0.2",
+          username: "deploy",
+          port: 22,
+          authMethod: "privateKey",
+          privateKeyPath: "/tmp/id_remote",
+          group: "Remote",
+          tags: ["remote"],
+          note: "Imported",
+          favorite: true,
+          keyLabel: "Remote Key",
+          hostKeyPolicy: "allowUnknown",
+          agentForwarding: true,
+          environment: {
+            APP_ENV: "staging",
+          },
+          sftpRoot: "/var/www",
+          snippetCount: 0,
+          forwardingCount: 0,
+          createdAt: "2026-03-29T11:00:00.000Z",
+          updatedAt: "2026-03-29T11:00:00.000Z",
+        },
+      ],
+      keys: [],
+      snippets: [],
+      knownHosts: [],
+    };
+
+    const summary = applyImportedLocalConfigBundle(bundle, { mode: "merge" });
+
+    expect(summary).toMatchObject({
+      hostCount: 2,
+      importStrategy: "fast_forward",
+      mode: "merge",
+      snapshotId: "snapshot-next",
+    });
+    expect(summary.mergePlan?.hosts).toEqual({
+      added: 1,
+      updated: 0,
+      retainedLocal: 1,
+      unchanged: 0,
+      conflicts: 0,
+      conflictingIds: [],
+    });
+    expect(useHostsStore.getState().hosts.map((host) => host.id)).toEqual([
+      "host-remote",
+      "host-local",
+    ]);
+    expect(useAppStore.getState().lastAppliedSnapshotId).toBe("snapshot-next");
+  });
+
+  it("allows same-vault merge conflicts to resolve toward local or imported records", () => {
+    useAppStore.getState().setVaultId("vault-current");
+    useAppStore.getState().setLastAppliedSnapshotId("snapshot-current");
+    useHostsStore.setState({
+      ...baseHostState,
+      hosts: [
+        {
+          id: "host-shared",
+          label: "Local Label",
+          hostname: "10.0.0.10",
+          username: "ops",
+          port: 22,
+          authMethod: "privateKey",
+          privateKeyPath: "/tmp/id_local",
+          group: "Ops",
+          tags: ["local"],
+          note: "Local note",
+          favorite: false,
+          keyLabel: "Local Key",
+          hostKeyPolicy: "allowUnknown",
+          agentForwarding: false,
+          environment: {},
+          sftpRoot: "/srv",
+          snippetCount: 0,
+          forwardingCount: 0,
+          createdAt: "2026-03-29T10:00:00.000Z",
+          updatedAt: "2026-03-29T11:00:00.000Z",
+        },
+      ],
+    });
+
+    const bundle: LocalConfigBundle = {
+      app: "TermSnip",
+      version: 2,
+      exportedAt: "2026-03-29T11:30:00.000Z",
+      vault: {
+        schema: "local-first-vault",
+        vaultId: "vault-current",
+        sourceDeviceId: "device-remote",
+        snapshotId: "snapshot-next",
+        baseSnapshotId: "snapshot-current",
+      },
+      hosts: [
+        {
+          id: "host-shared",
+          label: "Imported Label",
+          hostname: "10.0.0.10",
+          username: "ops",
+          port: 22,
+          authMethod: "privateKey",
+          privateKeyPath: "/tmp/id_remote",
+          group: "Ops",
+          tags: ["remote"],
+          note: "Imported note",
+          favorite: true,
+          keyLabel: "Imported Key",
+          hostKeyPolicy: "allowUnknown",
+          agentForwarding: true,
+          environment: {},
+          sftpRoot: "/srv",
+          snippetCount: 0,
+          forwardingCount: 0,
+          createdAt: "2026-03-29T10:00:00.000Z",
+          updatedAt: "2026-03-29T11:00:00.000Z",
+        },
+      ],
+      keys: [],
+      snippets: [],
+      knownHosts: [],
+    };
+
+    const analysis = inspectImportedLocalConfigBundle(bundle);
+    expect(analysis.mergePlan?.hosts.conflicts).toBe(1);
+    expect(analysis.mergePlan?.hosts.conflictingIds).toEqual(["host-shared"]);
+
+    const keepLocalSummary = applyImportedLocalConfigBundle(bundle, {
+      mode: "merge",
+      conflictResolution: "keep-local",
+    });
+    expect(keepLocalSummary.conflictResolution).toBe("keep-local");
+    expect(useHostsStore.getState().hosts[0]?.label).toBe("Local Label");
+
+    useAppStore.setState(baseAppState);
+    useHostsStore.setState({
+      ...baseHostState,
+      hosts: [
+        {
+          id: "host-shared",
+          label: "Local Label",
+          hostname: "10.0.0.10",
+          username: "ops",
+          port: 22,
+          authMethod: "privateKey",
+          privateKeyPath: "/tmp/id_local",
+          group: "Ops",
+          tags: ["local"],
+          note: "Local note",
+          favorite: false,
+          keyLabel: "Local Key",
+          hostKeyPolicy: "allowUnknown",
+          agentForwarding: false,
+          environment: {},
+          sftpRoot: "/srv",
+          snippetCount: 0,
+          forwardingCount: 0,
+          createdAt: "2026-03-29T10:00:00.000Z",
+          updatedAt: "2026-03-29T11:00:00.000Z",
+        },
+      ],
+    });
+    useAppStore.getState().setVaultId("vault-current");
+    useAppStore.getState().setLastAppliedSnapshotId("snapshot-current");
+
+    const preferImportedSummary = applyImportedLocalConfigBundle(bundle, {
+      mode: "merge",
+      conflictResolution: "prefer-imported",
+    });
+    expect(preferImportedSummary.conflictResolution).toBe("prefer-imported");
+    expect(useHostsStore.getState().hosts[0]?.label).toBe("Imported Label");
   });
 });

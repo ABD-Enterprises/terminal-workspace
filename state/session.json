@@ -1,15 +1,15 @@
 {
   "branch": "phase/vault-sync-architecture",
   "current_run_id": "2026-04-04-vault-sync-architecture",
-  "current_task": "Add snapshot ancestry, import classification, and a guarded vault import preview to the local-first config flow.",
+  "current_task": "Expose same-vault conflict resolution choices and leave deletion semantics as the remaining vault-sync gap.",
   "current_phase": "vault-sync-architecture",
   "started_at": "2026-04-04T15:18:00-04:00",
-  "summary": "Persisted last-applied snapshot lineage, exported `baseSnapshotId`, classified imports as same-snapshot, fast-forward, divergent, legacy, or cross-vault adoption, and added an explicit import preview/apply step in Settings.",
-  "updated_at": "2026-04-04T15:21:12-04:00",
+  "summary": "Same-vault imports now preview merge impact, merge non-conflicting records, and offer explicit keep-local or prefer-imported conflict resolution choices before apply. Deletion tombstones remain the main open vault-sync gap.",
+  "updated_at": "2026-04-04T15:38:18-04:00",
   "status": "in_progress",
   "validation": [
     {
-      "id": "validation-vault-sync-targeted-tests",
+      "id": "validation-vault-sync-targeted-tests-conflicts",
       "command": "npm run test -- apps/desktop/src/lib/local-config.test.ts apps/desktop/src/store/app-store.test.ts",
       "result": "passed"
     },
