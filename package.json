@@ -14,6 +14,8 @@
     "native:bundle": "MACOS_SIGN_MODE=require bash ./scripts/native-bundle.sh",
     "native:bundle:preview": "MACOS_SIGN_MODE=skip bash ./scripts/native-bundle.sh",
     "native:release:check": "bash ./scripts/native-release-check.sh",
+    "native:notarize": "bash ./scripts/native-notarize.sh",
+    "native:promote": "bash ./scripts/native-promote.sh",
     "native:fixtures": "bash ./scripts/native-transport-test.sh",
     "native:key": "bash ./scripts/native-key-tooling-test.sh",
     "native:trust": "bash ./scripts/native-trust-tooling-test.sh",

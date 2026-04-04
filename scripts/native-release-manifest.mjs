@@ -33,6 +33,11 @@ const manifest = {
   identifier: requireEnv("APP_IDENTIFIER"),
   branch: process.env.BUILD_BRANCH || null,
   commit: process.env.BUILD_COMMIT || null,
+  dirty: normalizeBoolean(process.env.BUILD_DIRTY || "false"),
+  manifest: {
+    path: manifestPath,
+    latestPath: process.env.RELEASE_LATEST_MANIFEST_PATH || null,
+  },
   bundle: {
     path: appPath,
     exists: fs.existsSync(appPath),

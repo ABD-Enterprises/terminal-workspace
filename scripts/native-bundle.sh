@@ -25,11 +25,16 @@ CODESIGN_DISPLAY_LOG="$ARTIFACT_ROOT/${ARTIFACT_STEM}.codesign-display.txt"
 SPCTL_LOG="$ARTIFACT_ROOT/${ARTIFACT_STEM}.spctl.txt"
 SIGN_MODE="${MACOS_SIGN_MODE:-auto}"
 SIGNED_IDENTITY="${MACOS_SIGN_IDENTITY:-}"
-SIGNING_TIMESTAMP_MODE="${MACOS_SIGN_TIMESTAMP_MODE:-none}"
+SIGNING_TIMESTAMP_MODE="${MACOS_SIGN_TIMESTAMP_MODE:-auto}"
 BUILD_TIME="$(date +"%Y-%m-%dT%H:%M:%S%z")"
 BUILD_BRANCH="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 BUILD_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
+BUILD_DIRTY=false
 EXECUTABLE_PATH="$MACOS_DIR/$PRODUCT_NAME"
+
+if ! git -C "$ROOT_DIR" diff --quiet --ignore-submodules HEAD -- 2>/dev/null; then
+  BUILD_DIRTY=true
+fi
 
 find_developer_id() {
   security find-identity -v -p codesigning \
@@ -60,6 +65,20 @@ if [[ "$SIGN_MODE" == "skip" ]]; then
 elif [[ -n "$SIGNED_IDENTITY" ]]; then
   SIGNING_PERFORMED=true
 fi
+
+codesign_timestamp_args() {
+  case "$SIGNING_TIMESTAMP_MODE" in
+    auto)
+      printf '%s\n' "--timestamp"
+      ;;
+    none)
+      printf '%s\n' "--timestamp=none"
+      ;;
+    *)
+      printf '%s\n' "--timestamp=$SIGNING_TIMESTAMP_MODE"
+      ;;
+  esac
+}
 
 mkdir -p "$ARTIFACT_ROOT"
 rm -f "$ZIP_PATH" "$MANIFEST_PATH" "$LATEST_MANIFEST_PATH" "$CODESIGN_VERIFY_LOG" "$CODESIGN_DISPLAY_LOG" "$SPCTL_LOG"
@@ -127,11 +146,13 @@ echo "codesign display skipped" >"$CODESIGN_DISPLAY_LOG"
 echo "spctl skipped" >"$SPCTL_LOG"
 
 if [[ "$SIGNING_PERFORMED" == "true" ]]; then
+  mapfile -t CODESIGN_TIMESTAMP_ARGS < <(codesign_timestamp_args)
+
   echo "Signing app executable with: $SIGNED_IDENTITY"
   codesign \
     --force \
     --options runtime \
-    --timestamp="$SIGNING_TIMESTAMP_MODE" \
+    "${CODESIGN_TIMESTAMP_ARGS[@]}" \
     --sign "$SIGNED_IDENTITY" \
     "$EXECUTABLE_PATH"
 
@@ -139,7 +160,7 @@ if [[ "$SIGNING_PERFORMED" == "true" ]]; then
   codesign \
     --force \
     --options runtime \
-    --timestamp="$SIGNING_TIMESTAMP_MODE" \
+    "${CODESIGN_TIMESTAMP_ARGS[@]}" \
     --sign "$SIGNED_IDENTITY" \
     "$APP_PATH"
 
@@ -169,8 +190,9 @@ EXECUTABLE_SHA256="$(shasum -a 256 "$EXECUTABLE_PATH" | awk '{print $1}')"
 ZIP_SHA256="$(shasum -a 256 "$ZIP_PATH" | awk '{print $1}')"
 
 export RELEASE_MANIFEST_PATH="$MANIFEST_PATH"
+export RELEASE_LATEST_MANIFEST_PATH="$LATEST_MANIFEST_PATH"
 export PRODUCT_NAME APP_VERSION APP_IDENTIFIER APP_PATH ZIP_PATH EXECUTABLE_PATH
-export BUILD_TIME BUILD_BRANCH BUILD_COMMIT
+export BUILD_TIME BUILD_BRANCH BUILD_COMMIT BUILD_DIRTY
 export SIGN_MODE SIGNED_IDENTITY SIGNING_PERFORMED SIGNING_TIMESTAMP_MODE
 export CODESIGN_STATUS SPCTL_STATUS CODESIGN_VERIFY_LOG CODESIGN_DISPLAY_LOG SPCTL_LOG
 export EXECUTABLE_SHA256 ZIP_SHA256
