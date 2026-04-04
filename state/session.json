@@ -1,31 +1,26 @@
 {
-  "branch": "phase/bootstrap",
-  "current_run_id": "2026-04-04-bootstrap",
-  "current_task": "Normalize canonical roadmap/state, install runtime guardrail validation, and wire pull-request CI enforcement.",
-  "current_phase": "bootstrap",
-  "started_at": "2026-04-04T15:05:24-04:00",
-  "summary": "Created the bootstrap agent and prompt contracts, added a runtime guardrails validator, wired a pull-request CI workflow, and recorded setup, test, and build evidence for the bootstrap branch.",
-  "updated_at": "2026-04-04T15:09:15-04:00",
-  "status": "validated",
+  "branch": "phase/vault-sync-architecture",
+  "current_run_id": "2026-04-04-vault-sync-architecture",
+  "current_task": "Add snapshot ancestry, import classification, and a guarded vault import preview to the local-first config flow.",
+  "current_phase": "vault-sync-architecture",
+  "started_at": "2026-04-04T15:18:00-04:00",
+  "summary": "Persisted last-applied snapshot lineage, exported `baseSnapshotId`, classified imports as same-snapshot, fast-forward, divergent, legacy, or cross-vault adoption, and added an explicit import preview/apply step in Settings.",
+  "updated_at": "2026-04-04T15:21:12-04:00",
+  "status": "in_progress",
   "validation": [
     {
-      "id": "validation-bootstrap-setup",
-      "command": "npm run setup",
+      "id": "validation-vault-sync-targeted-tests",
+      "command": "npm run test -- apps/desktop/src/lib/local-config.test.ts apps/desktop/src/store/app-store.test.ts",
       "result": "passed"
     },
     {
-      "id": "validation-bootstrap-tests",
+      "id": "validation-vault-sync-tests",
       "command": "npm run test",
       "result": "passed"
     },
     {
-      "id": "validation-bootstrap-desktop-build",
+      "id": "validation-vault-sync-desktop-build",
       "command": "npm --prefix ./apps/desktop run build",
-      "result": "passed"
-    },
-    {
-      "id": "validation-bootstrap-guardrails",
-      "command": "node ./tools/validators/enforce-runtime-guardrails.js --base phase/release-credential-portability-hardening",
       "result": "passed"
     }
   ]

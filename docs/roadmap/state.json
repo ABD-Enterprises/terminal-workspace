@@ -1,10 +1,10 @@
 {
-  "updated_at": "2026-04-04T15:09:15-04:00",
-  "last_updated": "2026-04-04T15:09:15-04:00",
+  "updated_at": "2026-04-04T15:21:12-04:00",
+  "last_updated": "2026-04-04T15:21:12-04:00",
   "version": "0.1.0",
-  "current_phase": "bootstrap",
-  "current_phase_status": "validated",
-  "current_phase_branch": "phase/bootstrap",
+  "current_phase": "vault-sync-architecture",
+  "current_phase_status": "in_progress",
+  "current_phase_branch": "phase/vault-sync-architecture",
   "completed_phases": [
     {
       "id": "web-demo-quality",
@@ -41,22 +41,19 @@
       "title": "Release credential portability hardening",
       "status": "completed",
       "completed_at": "2026-04-04T09:07:17-04:00"
+    },
+    {
+      "id": "bootstrap",
+      "title": "Bootstrap",
+      "status": "completed",
+      "completed_at": "2026-04-04T15:09:15-04:00"
     }
   ],
   "upcoming_phases": [
     {
-      "id": "vault-sync-architecture",
-      "title": "Vault and sync architecture",
-      "priority": 1,
-      "depends_on": [
-        "release-credential-portability-hardening"
-      ],
-      "rationale": "Vault snapshot metadata now carries stable vault and device identifiers, so the next product phase can focus on encrypted sync semantics, conflict resolution, and shared-vault policy instead of inventing the snapshot contract."
-    },
-    {
       "id": "release-workflow-live-verification",
       "title": "Live GitHub release workflow verification",
-      "priority": 2,
+      "priority": 1,
       "depends_on": [
         "release-credential-portability-hardening"
       ],
@@ -166,6 +163,18 @@
       "phase": "vault-sync-architecture"
     },
     {
+      "id": "task-vault-snapshot-lineage-preview",
+      "title": "Add snapshot ancestry and import preview classification to local vault bundles",
+      "status": "completed",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-merge-semantics",
+      "title": "Design and implement record-level merge semantics for vault snapshots",
+      "status": "pending",
+      "phase": "vault-sync-architecture"
+    },
+    {
       "id": "task-release-workflow-live-verification",
       "title": "Run the GitHub-hosted macOS release workflow with live repository secrets",
       "status": "pending",
@@ -252,6 +261,14 @@
       "status": "open",
       "summary": "The CI release workflow and GitHub publish script are implemented and dry-run validated locally, but the repository has not yet executed that workflow with real signing and notarization secrets.",
       "assigned_phase": "release-workflow-live-verification"
+    },
+    {
+      "id": "risk-vault-imports-replace-local-state",
+      "title": "Vault imports still replace the local workspace atomically",
+      "severity": "medium",
+      "status": "open",
+      "summary": "Snapshot lineage and import preview now classify same-snapshot, fast-forward, divergent, and cross-vault imports, but applying a bundle still overwrites the full local host/key/snippet/trust inventory without record-level merge or conflict resolution.",
+      "assigned_phase": "vault-sync-architecture"
     }
   ],
   "opportunities": [
@@ -270,8 +287,8 @@
       "impact": "high",
       "effort": "high",
       "assigned_phase": "vault-sync-architecture",
-      "summary": "Local vault snapshots now carry stable `vaultId`, `sourceDeviceId`, and `snapshotId` metadata and imports adopt the incoming vault identity, giving the sync architecture a concrete metadata contract.",
-      "status": "foundation-established"
+      "summary": "Local vault snapshots now carry stable `vaultId`, `sourceDeviceId`, `snapshotId`, and `baseSnapshotId` metadata, and the UI previews fast-forward, divergent, same-snapshot, and cross-vault imports before replace.",
+      "status": "lineage-preview-established"
     },
     {
       "id": "opp-notarized-release-publishing",

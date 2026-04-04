@@ -15,6 +15,7 @@ export interface LocalVaultMetadata {
   vaultId: string;
   sourceDeviceId: string;
   snapshotId: string;
+  baseSnapshotId: string | null;
 }
 
 export interface LocalConfigBundle {
@@ -36,6 +37,33 @@ interface LegacyLocalConfigBundle {
   keys: KeyRecord[];
   snippets: SnippetRecord[];
   knownHosts: KnownHostRecord[];
+}
+
+export type LocalConfigImportStrategy =
+  | "legacy"
+  | "same_snapshot"
+  | "fast_forward"
+  | "divergent"
+  | "adopt_vault";
+
+export interface LocalConfigImportAnalysis {
+  strategy: LocalConfigImportStrategy;
+  hostCount: number;
+  keyCount: number;
+  snippetCount: number;
+  knownHostCount: number;
+  currentVaultId: string;
+  currentDeviceId: string;
+  currentSnapshotId: string | null;
+  importedVaultId: string | null;
+  importedDeviceId: string | null;
+  importedSnapshotId: string | null;
+  importedBaseSnapshotId: string | null;
+}
+
+export interface PreparedLocalConfigImport {
+  bundle: LocalConfigBundle | LegacyLocalConfigBundle;
+  analysis: LocalConfigImportAnalysis;
 }
 
 function sortKeys(keys: KeyRecord[]) {
@@ -82,6 +110,7 @@ export function buildLocalConfigBundle(): LocalConfigBundle {
       vaultId: appState.vaultId,
       sourceDeviceId: appState.deviceId,
       snapshotId: crypto.randomUUID(),
+      baseSnapshotId: appState.lastAppliedSnapshotId,
     },
     hosts: useHostsStore.getState().hosts,
     keys: useKeysStore.getState().keys,
@@ -90,7 +119,7 @@ export function buildLocalConfigBundle(): LocalConfigBundle {
   };
 }
 
-export function applyImportedLocalConfigBundle(bundle: unknown) {
+function parseImportedLocalConfigBundle(bundle: unknown): PreparedLocalConfigImport {
   if (!isRecord(bundle)) {
     throw new Error("Config import failed: file does not contain a JSON object.");
   }
@@ -119,6 +148,60 @@ export function applyImportedLocalConfigBundle(bundle: unknown) {
   }
 
   const importedBundle = bundle as unknown as LocalConfigBundle | LegacyLocalConfigBundle;
+  const appState = useAppStore.getState();
+  const importedVault =
+    importedBundle.version === 2 && importedBundle.vault?.schema === "local-first-vault"
+      ? importedBundle.vault
+      : null;
+  let strategy: LocalConfigImportStrategy = "legacy";
+
+  if (importedVault) {
+    if (importedVault.snapshotId === appState.lastAppliedSnapshotId) {
+      strategy = "same_snapshot";
+    } else if (importedVault.vaultId !== appState.vaultId) {
+      strategy = "adopt_vault";
+    } else if (
+      appState.lastAppliedSnapshotId &&
+      importedVault.baseSnapshotId === appState.lastAppliedSnapshotId
+    ) {
+      strategy = "fast_forward";
+    } else {
+      strategy = "divergent";
+    }
+  }
+
+  return {
+    bundle: importedBundle,
+    analysis: {
+      strategy,
+      hostCount: importedBundle.hosts.length,
+      keyCount: importedBundle.keys.length,
+      snippetCount: importedBundle.snippets.length,
+      knownHostCount: importedBundle.knownHosts.length,
+      currentVaultId: appState.vaultId,
+      currentDeviceId: appState.deviceId,
+      currentSnapshotId: appState.lastAppliedSnapshotId,
+      importedVaultId: importedVault?.vaultId ?? null,
+      importedDeviceId: importedVault?.sourceDeviceId ?? null,
+      importedSnapshotId: importedVault?.snapshotId ?? null,
+      importedBaseSnapshotId: importedVault?.baseSnapshotId ?? null,
+    },
+  };
+}
+
+export function inspectImportedLocalConfigBundle(bundle: unknown): LocalConfigImportAnalysis {
+  return parseImportedLocalConfigBundle(bundle).analysis;
+}
+
+function isPreparedLocalConfigImport(value: unknown): value is PreparedLocalConfigImport {
+  return isRecord(value) && "bundle" in value && "analysis" in value;
+}
+
+export function applyImportedLocalConfigBundle(bundle: unknown) {
+  const preparedImport = isPreparedLocalConfigImport(bundle)
+    ? bundle
+    : parseImportedLocalConfigBundle(bundle);
+  const importedBundle = preparedImport.bundle;
   const importedHosts = sortHostCollection(importedBundle.hosts);
   const hostIds = new Set(importedHosts.map((host) => host.id));
   const importedKeys = sortKeys(
@@ -145,6 +228,9 @@ export function applyImportedLocalConfigBundle(bundle: unknown) {
     importedBundle.vault.vaultId
   ) {
     useAppStore.getState().setVaultId(importedBundle.vault.vaultId);
+    useAppStore.getState().setLastAppliedSnapshotId(importedBundle.vault.snapshotId);
+  } else {
+    useAppStore.getState().setLastAppliedSnapshotId(null);
   }
   useSessionsStore.setState((state) => ({
     ...state,
@@ -165,6 +251,11 @@ export function applyImportedLocalConfigBundle(bundle: unknown) {
     keyCount: importedKeys.length,
     snippetCount: importedSnippets.length,
     knownHostCount: importedKnownHosts.length,
+    importStrategy: preparedImport.analysis.strategy,
+    snapshotId:
+      importedBundle.version === 2 && importedBundle.vault?.snapshotId
+        ? importedBundle.vault.snapshotId
+        : null,
     vaultId:
       importedBundle.version === 2 && importedBundle.vault?.vaultId
         ? importedBundle.vault.vaultId

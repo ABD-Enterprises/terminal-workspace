@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import {
   applyImportedLocalConfigBundle,
   buildLocalConfigBundle,
+  inspectImportedLocalConfigBundle,
+  type LocalConfigImportAnalysis,
 } from "../lib/local-config";
 import { isTauriRuntime } from "../lib/backend-runtime";
 import { cn } from "../lib/utils";
@@ -12,12 +14,20 @@ export function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [statusMessage, setStatusMessage] = useState<string>();
   const [errorMessage, setErrorMessage] = useState<string>();
+  const [pendingImport, setPendingImport] = useState<{
+    bundle: unknown;
+    analysis: LocalConfigImportAnalysis;
+    fileName: string;
+  } | null>(null);
   const workspaceDensity = useAppStore((state) => state.workspaceDensity);
   const setWorkspaceDensity = useAppStore((state) => state.setWorkspaceDensity);
   const sectionShortcutsEnabled = useAppStore((state) => state.sectionShortcutsEnabled);
   const setSectionShortcutsEnabled = useAppStore((state) => state.setSectionShortcutsEnabled);
   const demoModeEnabled = useAppStore((state) => state.demoModeEnabled);
   const setDemoModeEnabled = useAppStore((state) => state.setDemoModeEnabled);
+  const vaultId = useAppStore((state) => state.vaultId);
+  const deviceId = useAppStore((state) => state.deviceId);
+  const lastAppliedSnapshotId = useAppStore((state) => state.lastAppliedSnapshotId);
 
   const exportConfig = () => {
     const bundle = buildLocalConfigBundle();
@@ -44,18 +54,39 @@ export function SettingsPage() {
 
     try {
       const bundle = JSON.parse(await file.text());
-      const summary = applyImportedLocalConfigBundle(bundle);
       setErrorMessage(undefined);
-      setStatusMessage(
-        `Imported ${summary.hostCount} hosts, ${summary.keyCount} keys, ${summary.snippetCount} snippets, and ${summary.knownHostCount} trusted host entries. Sessions were reset so the workspace can reconnect cleanly.`
-      );
+      setStatusMessage(undefined);
+      setPendingImport({
+        bundle,
+        analysis: inspectImportedLocalConfigBundle(bundle),
+        fileName: file.name,
+      });
     } catch (error) {
+      setPendingImport(null);
       setStatusMessage(undefined);
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+    }
+  };
+
+  const applyPendingImport = () => {
+    if (!pendingImport) {
+      return;
+    }
+
+    try {
+      const summary = applyImportedLocalConfigBundle(pendingImport.bundle);
+      setPendingImport(null);
+      setErrorMessage(undefined);
+      setStatusMessage(
+        `Imported ${summary.hostCount} hosts, ${summary.keyCount} keys, ${summary.snippetCount} snippets, and ${summary.knownHostCount} trusted host entries. Strategy: ${formatImportStrategy(summary.importStrategy)}. Sessions were reset so the workspace can reconnect cleanly.`
+      );
+    } catch (error) {
+      setStatusMessage(undefined);
+      setErrorMessage(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -194,6 +225,41 @@ export function SettingsPage() {
             }}
           />
 
+          {pendingImport ? (
+            <div className="mt-3 rounded-[18px] border border-amber-400/30 bg-amber-400/10 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-amber-200">
+                    Import preview
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-amber-50">
+                    {formatImportStrategy(pendingImport.analysis.strategy)}
+                  </p>
+                  <p className="mt-1 text-sm leading-5 text-amber-100/90">
+                    {describeImportStrategy(pendingImport.analysis)}
+                  </p>
+                  <p className="mt-2 text-xs text-amber-100/70">{pendingImport.fileName}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingImport(null)}
+                    className="rounded-lg border border-amber-200/30 px-4 py-2 text-sm text-amber-100 transition hover:border-amber-200/50 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applyPendingImport}
+                    className="rounded-lg bg-amber-300 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-amber-200"
+                  >
+                    {getImportActionLabel(pendingImport.analysis.strategy)}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {statusMessage ? (
             <div className="mt-3 rounded-[16px] border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">
               {statusMessage}
@@ -206,11 +272,23 @@ export function SettingsPage() {
             </div>
           ) : null}
 
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
+            <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Current lineage</p>
+              <p className="mt-1 text-sm leading-5 text-slate-300">
+                Vault <span className="font-mono text-slate-200">{vaultId.slice(0, 8)}</span> on
+                device <span className="font-mono text-slate-200">{deviceId.slice(0, 8)}</span>.
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                {lastAppliedSnapshotId
+                  ? `Last applied snapshot ${lastAppliedSnapshotId.slice(0, 8)}`
+                  : "No imported snapshot has been applied yet."}
+              </p>
+            </div>
             <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
               <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Export scope</p>
               <p className="mt-1 text-sm leading-5 text-slate-300">
-                Hosts, keys, snippets, known-host trust, and vault metadata are included.
+                Hosts, keys, snippets, known-host trust, vault metadata, and snapshot ancestry are included.
               </p>
             </div>
             <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
@@ -240,8 +318,61 @@ export function SettingsPage() {
             generation, and trust scanning. Browser mode still uses the backend path so seeded demo
             and screenshot flows stay stable.
           </p>
+          <p>
+            Local config imports now preview whether a snapshot is a fast-forward, a divergent
+            replacement, or a vault adoption step before replacing the local workspace.
+          </p>
         </div>
       </aside>
     </section>
   );
+}
+
+function formatImportStrategy(strategy: LocalConfigImportAnalysis["strategy"]) {
+  switch (strategy) {
+    case "same_snapshot":
+      return "Same snapshot";
+    case "fast_forward":
+      return "Fast-forward snapshot";
+    case "divergent":
+      return "Divergent snapshot";
+    case "adopt_vault":
+      return "Adopt external vault";
+    case "legacy":
+      return "Legacy import";
+  }
+}
+
+function getImportActionLabel(strategy: LocalConfigImportAnalysis["strategy"]) {
+  switch (strategy) {
+    case "same_snapshot":
+      return "Re-apply snapshot";
+    case "fast_forward":
+      return "Apply snapshot";
+    case "divergent":
+      return "Replace local state";
+    case "adopt_vault":
+      return "Adopt vault";
+    case "legacy":
+      return "Import legacy config";
+  }
+}
+
+function describeImportStrategy(analysis: LocalConfigImportAnalysis) {
+  switch (analysis.strategy) {
+    case "same_snapshot":
+      return `This bundle already matches the local snapshot ${truncateId(analysis.importedSnapshotId)}. Re-applying will reset local sessions and transfers without changing vault lineage.`;
+    case "fast_forward":
+      return `This bundle advances vault ${truncateId(analysis.importedVaultId)} from ${truncateId(analysis.importedBaseSnapshotId)} to ${truncateId(analysis.importedSnapshotId)} and can replace the local workspace cleanly.`;
+    case "divergent":
+      return `This bundle targets vault ${truncateId(analysis.importedVaultId)} but does not descend from the current local snapshot ${truncateId(analysis.currentSnapshotId)}. Importing will discard local changes and switch to snapshot ${truncateId(analysis.importedSnapshotId)}.`;
+    case "adopt_vault":
+      return `This bundle will switch the device from vault ${truncateId(analysis.currentVaultId)} to ${truncateId(analysis.importedVaultId)} and apply snapshot ${truncateId(analysis.importedSnapshotId)} from device ${truncateId(analysis.importedDeviceId)}.`;
+    case "legacy":
+      return "This bundle has no snapshot lineage metadata. Importing will replace the current local config, but conflict detection is not available.";
+  }
+}
+
+function truncateId(value: string | null) {
+  return value ? value.slice(0, 8) : "unknown";
 }

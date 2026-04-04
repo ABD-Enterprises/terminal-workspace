@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-04-04T19:06:36.749Z",
+  "generated_at": "2026-04-04T19:22:32Z",
   "repo_root": "/Users/deffenda/Code/term-snip",
-  "branch": "phase/bootstrap",
-  "commit": "8381293a2952c19b17aab100e80c7570c8a92ec8",
+  "branch": "phase/vault-sync-architecture",
+  "commit": "c73339c333d73f95351507215716f0ec1bbfe9ec",
   "dirty": true,
   "name": "terminal-workspace",
   "version": "0.1.0"

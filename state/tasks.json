@@ -55,6 +55,18 @@
       "phase": "vault-sync-architecture"
     },
     {
+      "id": "task-vault-snapshot-lineage-preview",
+      "title": "Add snapshot ancestry and import preview classification to local vault bundles",
+      "status": "completed",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-merge-semantics",
+      "title": "Design and implement record-level merge semantics for vault snapshots",
+      "status": "pending",
+      "phase": "vault-sync-architecture"
+    },
+    {
       "id": "task-release-workflow-live-verification",
       "title": "Run the GitHub-hosted macOS release workflow with live repository secrets",
       "status": "pending",
@@ -79,5 +91,5 @@
       "phase": "bootstrap"
     }
   ],
-  "updated_at": "2026-04-04T15:09:15-04:00"
+  "updated_at": "2026-04-04T15:21:12-04:00"
 }

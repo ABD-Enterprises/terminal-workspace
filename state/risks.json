@@ -61,7 +61,15 @@
       "status": "open",
       "summary": "The CI release workflow and GitHub publish script are implemented and dry-run validated locally, but they still need one live repository-backed run.",
       "assigned_phase": "release-workflow-live-verification"
+    },
+    {
+      "id": "risk-vault-imports-replace-local-state",
+      "title": "Vault imports still replace the local workspace atomically",
+      "severity": "medium",
+      "status": "open",
+      "summary": "Snapshot lineage and import preview now classify same-snapshot, fast-forward, divergent, and cross-vault imports, but applying a bundle still overwrites the full local host/key/snippet/trust inventory without record-level merge or conflict resolution.",
+      "assigned_phase": "vault-sync-architecture"
     }
   ],
-  "updated_at": "2026-04-04T15:06:48-04:00"
+  "updated_at": "2026-04-04T15:21:12-04:00"
 }

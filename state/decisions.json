@@ -92,7 +92,17 @@
         "Execution changes without state or evidence now fail fast in CI.",
         "Deploy and docs phases can share one enforcement path instead of a parallel policy system."
       ]
+    },
+    {
+      "id": "dec-vault-import-lineage-preview",
+      "date": "2026-04-04",
+      "title": "Classify vault snapshots before replacing local state",
+      "decision": "Persist the last applied snapshot ID locally, export `baseSnapshotId` ancestry in vault bundles, and require the settings flow to preview whether an import is a same-snapshot reset, fast-forward, divergent replacement, or cross-vault adoption.",
+      "consequences": [
+        "Vault sync now has a concrete lineage contract instead of a flat export/import file.",
+        "Local imports remain full-replace operations, but the UI can warn about destructive divergent or cross-vault steps before execution."
+      ]
     }
   ],
-  "updated_at": "2026-04-04T15:06:48-04:00"
+  "updated_at": "2026-04-04T15:21:12-04:00"
 }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyImportedLocalConfigBundle,
   buildLocalConfigBundle,
+  inspectImportedLocalConfigBundle,
   type LocalConfigBundle,
 } from "./local-config";
 import { useAppStore } from "../store/app-store";
@@ -67,8 +68,36 @@ describe("local config", () => {
     expect(bundle.vault.vaultId).toBe(baseAppState.vaultId);
     expect(bundle.vault.sourceDeviceId).toBe(baseAppState.deviceId);
     expect(bundle.vault.snapshotId).toBeTruthy();
+    expect(bundle.vault.baseSnapshotId).toBeNull();
     expect(bundle.hosts).toHaveLength(1);
     expect(bundle.hosts[0]?.id).toBe("host-a");
+  });
+
+  it("classifies sync lineage before import", () => {
+    useAppStore.getState().setVaultId("vault-current");
+    useAppStore.getState().setLastAppliedSnapshotId("snapshot-current");
+
+    const analysis = inspectImportedLocalConfigBundle({
+      app: "TermSnip",
+      version: 2,
+      exportedAt: "2026-03-29T10:00:00.000Z",
+      vault: {
+        schema: "local-first-vault",
+        vaultId: "vault-current",
+        sourceDeviceId: "device-remote",
+        snapshotId: "snapshot-next",
+        baseSnapshotId: "snapshot-current",
+      },
+      hosts: [],
+      keys: [],
+      snippets: [],
+      knownHosts: [],
+    });
+
+    expect(analysis.strategy).toBe("fast_forward");
+    expect(analysis.currentSnapshotId).toBe("snapshot-current");
+    expect(analysis.importedSnapshotId).toBe("snapshot-next");
+    expect(analysis.importedBaseSnapshotId).toBe("snapshot-current");
   });
 
   it("imports durable config and clears stale sessions", () => {
@@ -111,6 +140,7 @@ describe("local config", () => {
         vaultId: "vault-imported",
         sourceDeviceId: "device-remote",
         snapshotId: "snapshot-1",
+        baseSnapshotId: "snapshot-root",
       },
       hosts: [
         {
@@ -189,6 +219,8 @@ describe("local config", () => {
       keyCount: 1,
       snippetCount: 1,
       knownHostCount: 1,
+      importStrategy: "adopt_vault",
+      snapshotId: "snapshot-1",
       vaultId: "vault-imported",
     });
     expect(useHostsStore.getState().hosts[0]?.id).toBe("host-b");
@@ -199,5 +231,6 @@ describe("local config", () => {
     expect(useTransfersStore.getState().activeHostId).toBe("host-b");
     expect(useAppStore.getState().vaultId).toBe("vault-imported");
     expect(useAppStore.getState().deviceId).toBe(baseAppState.deviceId);
+    expect(useAppStore.getState().lastAppliedSnapshotId).toBe("snapshot-1");
   });
 });

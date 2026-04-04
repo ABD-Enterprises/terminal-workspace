@@ -12,6 +12,7 @@ interface AppState {
   demoModeEnabled: boolean;
   vaultId: string;
   deviceId: string;
+  lastAppliedSnapshotId: string | null;
   setSidebarSearch: (search: string) => void;
   openCommandPalette: () => void;
   closeCommandPalette: () => void;
@@ -19,6 +20,7 @@ interface AppState {
   setSectionShortcutsEnabled: (enabled: boolean) => void;
   setDemoModeEnabled: (enabled: boolean) => void;
   setVaultId: (vaultId: string) => void;
+  setLastAppliedSnapshotId: (snapshotId: string | null) => void;
 }
 
 const fallbackStorage: StateStorage = {
@@ -37,6 +39,7 @@ interface PersistedAppState {
   workspaceDensity: WorkspaceDensity;
   vaultId: string;
   deviceId: string;
+  lastAppliedSnapshotId: string | null;
 }
 
 function createPersistentId() {
@@ -53,6 +56,7 @@ export const useAppStore = create<AppState>()(
       demoModeEnabled: getDefaultDemoModeEnabled(),
       vaultId: createPersistentId(),
       deviceId: createPersistentId(),
+      lastAppliedSnapshotId: null,
       setSidebarSearch: (sidebarSearch) => set({ sidebarSearch }),
       openCommandPalette: () => set({ commandPaletteOpen: true }),
       closeCommandPalette: () => set({ commandPaletteOpen: false }),
@@ -60,10 +64,11 @@ export const useAppStore = create<AppState>()(
       setSectionShortcutsEnabled: (sectionShortcutsEnabled) => set({ sectionShortcutsEnabled }),
       setDemoModeEnabled: (demoModeEnabled) => set({ demoModeEnabled }),
       setVaultId: (vaultId) => set({ vaultId }),
+      setLastAppliedSnapshotId: (lastAppliedSnapshotId) => set({ lastAppliedSnapshotId }),
     }),
     {
       name: "termsnip-app",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() =>
         typeof window === "undefined" ? fallbackStorage : window.localStorage
       ),
@@ -73,6 +78,7 @@ export const useAppStore = create<AppState>()(
         demoModeEnabled: state.demoModeEnabled,
         vaultId: state.vaultId,
         deviceId: state.deviceId,
+        lastAppliedSnapshotId: state.lastAppliedSnapshotId,
       }),
       migrate: (persistedState, version): PersistedAppState => {
         const state = (persistedState ?? {}) as Partial<PersistedAppState>;
@@ -86,6 +92,7 @@ export const useAppStore = create<AppState>()(
               : state.demoModeEnabled ?? getDefaultDemoModeEnabled(),
             vaultId: state.vaultId ?? createPersistentId(),
             deviceId: state.deviceId ?? createPersistentId(),
+            lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
           };
         }
 
@@ -95,6 +102,7 @@ export const useAppStore = create<AppState>()(
           demoModeEnabled: state.demoModeEnabled ?? getDefaultDemoModeEnabled(),
           vaultId: state.vaultId ?? createPersistentId(),
           deviceId: state.deviceId ?? createPersistentId(),
+          lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
         };
       },
     }

@@ -16,10 +16,12 @@ describe("app store preferences", () => {
     expect(state.demoModeEnabled).toBe(true);
     expect(state.vaultId).toBeTruthy();
     expect(state.deviceId).toBeTruthy();
+    expect(state.lastAppliedSnapshotId).toBeNull();
   });
 
   it("updates persisted shell preferences independently from transient UI state", () => {
     useAppStore.getState().setVaultId("vault-imported");
+    useAppStore.getState().setLastAppliedSnapshotId("snapshot-imported");
     useAppStore.getState().setWorkspaceDensity("comfortable");
     useAppStore.getState().setSectionShortcutsEnabled(false);
     useAppStore.getState().setDemoModeEnabled(false);
@@ -32,6 +34,7 @@ describe("app store preferences", () => {
     expect(state.sectionShortcutsEnabled).toBe(false);
     expect(state.demoModeEnabled).toBe(false);
     expect(state.vaultId).toBe("vault-imported");
+    expect(state.lastAppliedSnapshotId).toBe("snapshot-imported");
     expect(state.commandPaletteOpen).toBe(true);
     expect(state.sidebarSearch).toBe("local");
   });
