@@ -9,7 +9,7 @@ import {
 } from "../../lib/api";
 import { buildBackendConnection } from "../../lib/connections";
 import { ensureRuntimeSecrets } from "../../lib/runtime-secrets";
-import { formatBytes } from "../../lib/utils";
+import { formatBytes, formatHostAddress } from "../../lib/utils";
 import { useKnownHostsStore } from "../../store/known-hosts-store";
 import { useTransfersStore } from "../../store/transfers-store";
 import type { HostRecord } from "../../types/host";
@@ -430,7 +430,7 @@ export function FileBrowser({ host }: FileBrowserProps) {
         <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 px-3.5 py-2">
           <div className="min-w-0">
             <p className="truncate text-xs text-slate-400">
-              {host.username}@{host.hostname}:{host.port}
+              {formatHostAddress(host)}
             </p>
             <p className="mt-1 truncate text-[11px] text-slate-500">
               {selectedEntry
@@ -464,7 +464,7 @@ export function FileBrowser({ host }: FileBrowserProps) {
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
                 Browse requests stay passive until you explicitly unlock runtime credentials for{" "}
-                {host.username}@{host.hostname}.
+                {host.label}.
               </p>
               <button
                 type="button"

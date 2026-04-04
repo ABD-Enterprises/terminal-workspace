@@ -122,7 +122,117 @@
         "Users can resolve same-vault conflicts without discarding unrelated local records.",
         "Deletion semantics remain a separate follow-up because local-only records are still retained by default."
       ]
+    },
+    {
+      "id": "dec-vault-tombstone-deletions",
+      "date": "2026-04-04",
+      "title": "Persist tombstone deletions in local vault bundles",
+      "decision": "Track deleted hosts, keys, snippets, and known-host records in a dedicated persisted tombstone store, export those tombstones in version 3 local bundles, and apply them during same-vault merges before keeping local-only records.",
+      "consequences": [
+        "Same-vault imports can now remove superseded local records instead of always retaining them.",
+        "Future sync work needs tombstone retention and compaction rules so obsolete deletions do not accumulate indefinitely."
+      ]
+    },
+    {
+      "id": "dec-vault-remote-envelope-contract",
+      "date": "2026-04-04",
+      "title": "Represent remote vault sync as an encrypted envelope around local bundles",
+      "decision": "Define a versioned `termsnip-vault-sync` envelope with cleartext lineage and count metadata, opaque AES-256-GCM payload fields, and a SHA-256 digest across the header and cipher block so remote sync exchanges can be validated before decryption.",
+      "consequences": [
+        "Remote sync can reason about lineage and snapshot counts without exposing bundle contents.",
+        "Key rotation and trusted key-ID governance remain explicit follow-up work before live remote sync is implemented."
+      ]
+    },
+    {
+      "id": "dec-vault-tombstone-compaction",
+      "date": "2026-04-04",
+      "title": "Compact vault tombstones locally by age and count",
+      "decision": "Retain only recent tombstones, deduplicate them by entity ID, and cap each entity kind to a bounded number of deletion markers before persistence, import analysis, and export.",
+      "consequences": [
+        "Local vault snapshots no longer grow without bound from stale tombstones.",
+        "Future remote sync still needs explicit key-governance and trust rules for envelope producers."
+      ]
+    },
+    {
+      "id": "dec-vault-envelope-trust-policy",
+      "date": "2026-04-04",
+      "title": "Require explicit trusted-key policy for remote vault envelopes",
+      "decision": "Evaluate remote vault envelopes against a trust policy that scopes trusted key IDs by vault, validity window, rotation threshold, retirement cutoff, and replacement keys before accepting them for sync.",
+      "consequences": [
+        "Remote sync now has a concrete contract for key rotation and trusted envelope producers.",
+        "The next follow-up is persisting and loading that trust policy at real sync boundaries."
+      ]
+    },
+    {
+      "id": "dec-vault-persisted-trust-policy",
+      "date": "2026-04-04",
+      "title": "Persist trusted sync key policy and load it at runtime",
+      "decision": "Store trusted remote sync key policy in a dedicated persisted Zustand store and make runtime envelope inspection load both local vault context and the stored trust policy automatically.",
+      "consequences": [
+        "Remote envelope trust checks no longer depend on ad hoc caller-supplied policy objects.",
+        "A follow-up management and bootstrap surface is still needed so operators can edit and distribute trusted key records."
+      ]
+    },
+    {
+      "id": "dec-vault-trust-policy-management-surface",
+      "date": "2026-04-04",
+      "title": "Manage trusted sync key policy from Settings",
+      "decision": "Expose trusted sync key import/export, allow-unknown-key policy control, and direct trusted-key edits from Settings so operators can bootstrap and distribute remote sync trust policy locally.",
+      "consequences": [
+        "Runtime trust policy can now be managed without editing persisted storage manually.",
+        "Future remote sync delivery can assume a user-managed local trust policy bootstrap path already exists."
+      ]
+    },
+    {
+      "id": "dec-release-branch-verification-path",
+      "date": "2026-04-04",
+      "title": "Verify hosted macOS release on a dedicated phase branch",
+      "decision": "Run the hosted macOS release workflow from the verification branch, synthesize a preview tag/channel for branch pushes, and publish against the branch SHA so GitHub Actions can be exercised without a default-branch release tag.",
+      "consequences": [
+        "The release workflow can be verified live before merge.",
+        "Hosted preview verification now depends on branch-push execution rather than workflow_dispatch on the default branch."
+      ]
+    },
+    {
+      "id": "dec-release-secret-preflight",
+      "date": "2026-04-04",
+      "title": "Fail hosted release runs before signing when secrets are missing",
+      "decision": "Validate signing and notarization secrets in a dedicated preflight step and only upload release artifacts when the workflow has actually produced them.",
+      "consequences": [
+        "Hosted release failures now stop with an explicit missing-secret list instead of failing later in codesign or artifact upload steps.",
+        "The remaining blocker is external secret provisioning rather than workflow ambiguity."
+      ]
+    },
+    {
+      "id": "dec-workflow-action-major-upgrade",
+      "date": "2026-04-04",
+      "title": "Use current major GitHub action releases in all workflows",
+      "decision": "Upgrade the hosted workflows to `actions/checkout@v6`, `actions/setup-node@v6`, `actions/upload-artifact@v7`, and `pnpm/action-setup@v5`, and verify the hosted release run no longer emits the Node 20 runtime deprecation annotation.",
+      "consequences": [
+        "Hosted runs now use current action majors instead of relying on the temporary Node 24 compatibility override alone.",
+        "The remaining hosted release blocker is secret provisioning rather than action runtime drift."
+      ]
+    },
+    {
+      "id": "dec-release-secret-contract-tooling",
+      "date": "2026-04-04",
+      "title": "Reuse one release-secret contract across local tooling and hosted preflight",
+      "decision": "Use a single Node-based release-secret tool for GitHub audit, local env validation, and secret application, and call that same validation path from the hosted macOS release workflow.",
+      "consequences": [
+        "Hosted and local release-secret checks now share one contract instead of duplicate shell logic.",
+        "The remaining blocker is external secret material, not divergent validation behavior."
+      ]
+    },
+    {
+      "id": "dec-protocol-aware-hosts-and-local-shell",
+      "date": "2026-04-04",
+      "title": "Make hosts protocol-aware and ship a native local shell first",
+      "decision": "Hosts now carry explicit protocol metadata across inventory and session state, the native shell can launch a real macOS login shell through the Tauri PTY bridge, and SSH-only features remain gated behind protocol-aware UI guardrails.",
+      "consequences": [
+        "The desktop app now has a real local terminal path instead of relying solely on remote SSH sessions.",
+        "Telnet, serial, and mosh can reuse the same host model later, but they remain inventory-only until their transports are implemented."
+      ]
     }
   ],
-  "updated_at": "2026-04-04T15:38:18-04:00"
+  "updated_at": "2026-04-04T19:32:30-04:00"
 }

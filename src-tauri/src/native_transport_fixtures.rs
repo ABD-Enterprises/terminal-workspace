@@ -109,6 +109,7 @@ impl NativeTransportFixture {
             passphrase: passphrase.to_string(),
             port: jump_port,
             private_key_path: client_key_path.to_string_lossy().into_owned(),
+            protocol: "ssh".to_string(),
             sftp_root: None,
             username: username.clone(),
         };
@@ -127,6 +128,7 @@ impl NativeTransportFixture {
             passphrase: passphrase.to_string(),
             port: target_port,
             private_key_path: client_key_path.to_string_lossy().into_owned(),
+            protocol: "ssh".to_string(),
             sftp_root: Some(remote_root.to_string_lossy().into_owned()),
             username: username.clone(),
         };
@@ -145,6 +147,7 @@ impl NativeTransportFixture {
             passphrase: passphrase.to_string(),
             port: target_port,
             private_key_path: client_key_path.to_string_lossy().into_owned(),
+            protocol: "ssh".to_string(),
             sftp_root: Some(remote_root.to_string_lossy().into_owned()),
             username,
         };

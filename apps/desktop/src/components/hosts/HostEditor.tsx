@@ -1,6 +1,17 @@
 import { useEffect, useState } from "react";
 import { isTauriRuntime } from "../../lib/backend-runtime";
-import { emptyHostFormValues, hostToFormValues, type HostRecord, type HostFormValues } from "../../types/host";
+import { formatHostAddress } from "../../lib/utils";
+import {
+  emptyHostFormValues,
+  formatHostProtocol,
+  hostSupportsCredentialPrompt,
+  hostSupportsJumpHosts,
+  hostSupportsSftp,
+  hostSupportsTrustedKeys,
+  hostToFormValues,
+  type HostRecord,
+  type HostFormValues,
+} from "../../types/host";
 import { useConnectionSecretsStore } from "../../store/connection-secrets-store";
 import { useHostsStore } from "../../store/hosts-store";
 import { Modal } from "../common/Modal";
@@ -32,9 +43,18 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
       : emptyHostFormValues
   );
   const nativeSecretStorage = isTauriRuntime();
+  const supportsCredentials = hostSupportsCredentialPrompt(values.protocol);
+  const supportsJumpHosts = hostSupportsJumpHosts(values.protocol);
+  const supportsTrustedKeys = hostSupportsTrustedKeys(values.protocol);
+  const supportsSftp = hostSupportsSftp(values.protocol);
+  const supportsNetworkFields = values.protocol !== "localShell";
 
-  const isInvalid = !values.label.trim() || !values.hostname.trim() || !values.username.trim();
-  const jumpHostOptions = hosts.filter((candidate) => candidate.id !== host?.id);
+  const isInvalid =
+    !values.label.trim() ||
+    (supportsNetworkFields && (!values.hostname.trim() || !values.username.trim()));
+  const jumpHostOptions = hosts.filter(
+    (candidate) => candidate.id !== host?.id && candidate.protocol === "ssh"
+  );
 
   useEffect(() => {
     if (!open || !host) {
@@ -109,6 +129,45 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
           />
         </label>
         <label className="block">
+          <span className="text-sm text-slate-300">Protocol</span>
+          <select
+            value={values.protocol}
+            onChange={(event) => {
+              const protocol = event.target.value as HostFormValues["protocol"];
+              setValues((current) => ({
+                ...current,
+                protocol,
+                hostname: protocol === "localShell" ? "localhost" : current.hostname,
+                username: protocol === "localShell" ? current.username || "local" : current.username,
+                port: protocol === "localShell" ? "0" : current.port || "22",
+                authMethod: hostSupportsCredentialPrompt(protocol) ? current.authMethod : "none",
+                privateKeyPath: hostSupportsCredentialPrompt(protocol) ? current.privateKeyPath : "",
+                password: hostSupportsCredentialPrompt(protocol) ? current.password : "",
+                passphrase: hostSupportsCredentialPrompt(protocol) ? current.passphrase : "",
+                hostKeyPolicy: hostSupportsTrustedKeys(protocol) ? current.hostKeyPolicy : "allowUnknown",
+                jumpHostId: hostSupportsJumpHosts(protocol) ? current.jumpHostId : "",
+                agentForwarding: hostSupportsCredentialPrompt(protocol) ? current.agentForwarding : false,
+                keyLabel: hostSupportsCredentialPrompt(protocol) ? current.keyLabel : "",
+                sftpRoot: hostSupportsSftp(protocol) ? current.sftpRoot || "/home" : "",
+              }));
+            }}
+            className={fieldClassName}
+          >
+            <option value="ssh">SSH</option>
+            <option value="localShell">Local shell</option>
+            <option value="mosh">Mosh</option>
+            <option value="telnet">Telnet</option>
+            <option value="serial">Serial</option>
+          </select>
+        </label>
+        {supportsNetworkFields ? null : (
+          <div className="md:col-span-2 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 px-4 py-3 text-sm leading-6 text-emerald-100">
+            Local shell runs the current macOS login shell through the native bridge. No host trust,
+            network credentials, jump host, or SFTP metadata is required for this entry.
+          </div>
+        )}
+        {supportsNetworkFields ? (
+        <label className="block">
           <span className="text-sm text-slate-300">Hostname</span>
           <input
             value={values.hostname}
@@ -117,6 +176,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="bastion.acme.internal"
           />
         </label>
+        ) : null}
+        {supportsNetworkFields ? (
         <label className="block">
           <span className="text-sm text-slate-300">Username</span>
           <input
@@ -127,6 +188,19 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="ops"
           />
         </label>
+        ) : (
+          <label className="block">
+            <span className="text-sm text-slate-300">Shell label</span>
+            <input
+              autoComplete="username"
+              value={values.username}
+              onChange={(event) => setValues((current) => ({ ...current, username: event.target.value }))}
+              className={fieldClassName}
+              placeholder="local"
+            />
+          </label>
+        )}
+        {supportsNetworkFields ? (
         <label className="block">
           <span className="text-sm text-slate-300">Port</span>
           <input
@@ -136,6 +210,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="22"
           />
         </label>
+        ) : null}
+        {supportsCredentials ? (
         <label className="block">
           <span className="text-sm text-slate-300">Auth method</span>
           <select
@@ -153,6 +229,13 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             <option value="privateKey">Private key path</option>
           </select>
         </label>
+        ) : (
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-300">
+            {formatHostProtocol(values.protocol)} entries do not store runtime credentials in host
+            inventory.
+          </div>
+        )}
+        {supportsCredentials ? (
         <label className="block">
           <span className="text-sm text-slate-300">Private key path</span>
           <input
@@ -164,6 +247,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="~/.ssh/id_ed25519"
           />
         </label>
+        ) : null}
+        {supportsTrustedKeys ? (
         <label className="block">
           <span className="text-sm text-slate-300">Host key trust</span>
           <select
@@ -180,6 +265,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             <option value="requireTrusted">Require trusted key</option>
           </select>
         </label>
+        ) : null}
+        {supportsJumpHosts ? (
         <label className="block">
           <span className="text-sm text-slate-300">Jump host</span>
           <select
@@ -192,11 +279,13 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             <option value="">Direct connection</option>
             {jumpHostOptions.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>
-                {candidate.label} · {candidate.username}@{candidate.hostname}:{candidate.port}
+                {candidate.label} · {formatHostAddress(candidate)}
               </option>
             ))}
           </select>
         </label>
+        ) : null}
+        {supportsCredentials ? (
         <label className="flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-300">
           <input
             type="checkbox"
@@ -208,6 +297,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
           />
           Forward local SSH agent to this host
         </label>
+        ) : null}
+        {supportsCredentials ? (
         <label className="block">
           <span className="text-sm text-slate-300">Password</span>
           <input
@@ -225,6 +316,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             }
           />
         </label>
+        ) : null}
+        {supportsCredentials ? (
         <label className="block">
           <span className="text-sm text-slate-300">Key passphrase</span>
           <input
@@ -238,6 +331,7 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="Optional"
           />
         </label>
+        ) : null}
         <label className="block">
           <span className="text-sm text-slate-300">Group</span>
           <input
@@ -256,6 +350,7 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="prod, bastion, postgres"
           />
         </label>
+        {supportsCredentials ? (
         <label className="block">
           <span className="text-sm text-slate-300">Identity label</span>
           <input
@@ -265,6 +360,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="MacBook Pro ED25519"
           />
         </label>
+        ) : null}
+        {supportsSftp ? (
         <label className="block">
           <span className="text-sm text-slate-300">SFTP root</span>
           <input
@@ -274,6 +371,7 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="/srv"
           />
         </label>
+        ) : null}
         <label className="block">
           <span className="text-sm text-slate-300">Session environment</span>
           <textarea
@@ -297,22 +395,31 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
         </label>
       </div>
       <div className="mt-5 rounded-2xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm leading-6 text-amber-100">
-        {nativeSecretStorage
+        {!supportsCredentials
+          ? values.protocol === "localShell"
+            ? "Protocol metadata stays in the local inventory, while the local shell runtime stays native-only and avoids stored host secrets altogether."
+            : `${formatHostProtocol(values.protocol)} inventory entries are saved without transport secrets until their native runtime lands.`
+          : nativeSecretStorage
           ? "Passwords and passphrases stay outside the host inventory and persist through macOS Keychain in the native shell."
           : "Passwords and passphrases stay in memory only in the browser demo and are not exported with host metadata."}
       </div>
+      {supportsTrustedKeys ? (
       <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-slate-300">
         Require trusted key blocks SSH, SFTP, and snippet execution until the host key is scanned
         and trusted in the Keys workspace.
       </div>
+      ) : null}
+      {supportsJumpHosts ? (
       <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-slate-300">
         Jump hosts are one-hop only for now. If the selected bastion needs a password or key
         passphrase, the runtime prompt will ask for its secrets before connecting onward.
       </div>
+      ) : null}
       <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-slate-300">
         Session environment uses one <span className="font-mono text-[12px]">KEY=VALUE</span> pair
         per line. Agent forwarding reuses the current <span className="font-mono text-[12px]">$SSH_AUTH_SOCK</span> only
-        when it exists locally.
+        when it exists locally. Unsupported protocols can still be inventoried now and will gain
+        transport implementations in later parity slices.
       </div>
       <label className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-300">
         <input

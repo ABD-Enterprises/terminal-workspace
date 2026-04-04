@@ -1,12 +1,13 @@
 {
-  "summary": "The active branch is vault-sync-architecture. Local config bundles now export snapshot ancestry, the Settings flow previews merge impact, and same-vault imports can merge non-conflicting records or resolve conflicts by keeping local or preferring imported data before apply.",
+  "summary": "The active branch is phase/macos-protocol-hosts-and-local-shell. Hosts now carry explicit protocol metadata, the native Tauri bridge can launch a real macOS login shell session, and SSH-only features stay hidden or disabled for non-SSH entries. The release-secret blocker remains open but is no longer the active execution slice.",
   "next_steps": [
-    "Add deletion semantics and tombstones for vault snapshot merges instead of retaining local-only records by default.",
-    "Run .github/workflows/release-macos.yml once with live repository secrets to verify GitHub-hosted signing, notarization, promotion, and release upload."
+    "Implement executable telnet, serial, and mosh transports on top of the new protocol-aware host model.",
+    "Add solo-macOS daily-driver features that build on the local shell path, starting with session history/logging and richer runbook execution.",
+    "Preserve the blocked release-secret provisioning work until exportable signing and notarization material exists."
   ],
   "blockers": [
-    "Vault merge semantics do not yet model deletions, so local-only records are retained by default.",
-    "GitHub-hosted release publishing has not yet been exercised with live repository secrets."
+    "GitHub release secret provisioning is still blocked because the repository has no configured signing/notarization secrets and the current workstation state does not expose exportable certificate or notary credential material.",
+    "Telnet, serial, and mosh are modeled in inventory but do not yet have executable native transports."
   ],
-  "updated_at": "2026-04-04T15:38:18-04:00"
+  "updated_at": "2026-04-04T19:32:30-04:00"
 }

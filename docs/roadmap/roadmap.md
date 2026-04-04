@@ -2,32 +2,41 @@
 
 ## Current Focus
 
-Advance vault and sync architecture with user-selectable same-vault conflict resolution, then close
-the remaining deletion gap so local-first imports stop behaving like destructive last-writer wins.
+Build the first solo-macOS daily-driver slice: protocol-aware hosts, a real native local shell
+session path, and SSH-only guardrails so SFTP, trust, snippets, and forwards stay constrained to
+supported transports while the rest of the protocol matrix is staged behind explicit follow-up work.
 
 ## Active Phases
 
-- Vault and sync architecture
+- macOS solo protocols and local shell
 - Success criteria:
-  - local exports carry vault and snapshot ancestry metadata
-  - imports preview whether the bundle is a fast-forward, divergent replacement, same snapshot, or vault adoption
-  - same-vault imports can merge non-conflicting records instead of replacing unrelated local state
-  - same-vault conflicting records can be resolved by keeping local or preferring imported data
-  - applying an import records the imported snapshot as the local baseline
-  - `npm run test` and `npm --prefix ./apps/desktop run build` pass on the active branch
-
-## Upcoming Phases
-
-- Live GitHub release workflow verification
+  - hosts carry explicit protocol metadata without regressing existing SSH inventory, sync, or import flows
+  - the native shell can open a real local login-shell session through the Tauri bridge
+  - SSH-only features stay hidden or disabled for non-SSH protocols
+  - the repo test suite, desktop build, Rust tests, and runtime validator all pass
 
 ## Risks And Opportunities
 
-- Risk: the GitHub-hosted release workflow is implemented but has not yet been executed with live
-  repository secrets, so CI-backed release publishing still needs one real verification pass.
-- Risk: same-vault imports now merge non-conflicting and conflicting records, but deletion
-  semantics are still unimplemented so local-only records are retained by default.
+- Risk: the GitHub-hosted release workflow has now been exercised live on GitHub Actions, but it is
+  blocked because the required signing and notarization secrets are not configured there.
+- Risk: the local workstation exposes the Developer ID identity, but it does not currently expose
+  exportable certificate/password or notarization credential material, so automated GitHub secret
+  provisioning cannot complete from the repo alone.
+- Risk: telnet, serial, and mosh now exist in the host model, but they are still inventory-only and
+  not executable through the native runtime yet.
 - Opportunity: the repo now has a single canonical execution contract across roadmap, shared state,
   validator enforcement, CI, agents, and prompts.
 - Opportunity: the exported local vault snapshot now carries stable vault and device identifiers,
-  and the UI now previews and merges same-vault imports before apply, which gives the future sync
-  architecture a concrete lineage contract instead of a flat config dump.
+  the UI previews, merges, deletes, and governs same-vault records before apply, and remote
+  envelopes now carry encrypted lineage metadata plus persisted trusted-key governance with an
+  operator management/import/export surface, which gives the future sync architecture a concrete
+  contract instead of a flat config dump.
+- Opportunity: native local shell plus protocol-aware host inventory now provides the foundation for
+  local terminal, runbook, session history, and multi-protocol parity work that pushes the desktop
+  app toward a real Termius replacement instead of a browser demo.
+- Opportunity: the hosted release workflow now has a branch-safe preview path, explicit secret
+  preflight, branch-SHA release targeting, and shared Node-based secret validation, so once secret
+  material is supplied it can be rerun without additional workflow design work.
+- Opportunity: the workflows now use the current major releases of `actions/checkout`,
+  `actions/setup-node`, `actions/upload-artifact`, and `pnpm/action-setup`, and the hosted release
+  run no longer emits the Node 20 deprecation annotation.

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSessions } from "../../hooks/useSessions";
+import { describeHostRuntime, formatHostAddress } from "../../lib/utils";
 import { SearchInput } from "../common/SearchInput";
 import { buildHostSearchText } from "../../lib/utils";
 import { useHostsStore } from "../../store/hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
-import type { HostRecord } from "../../types/host";
+import { hostSupportsPortForwarding, type HostRecord } from "../../types/host";
 import { EmptyState } from "../common/EmptyState";
 import { PortForwardPanel } from "./PortForwardPanel";
 import { SplitLayout } from "./SplitLayout";
@@ -159,7 +160,7 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
           </p>
           <h3 className="mt-1 text-base font-semibold text-slate-50">{activeHost?.label}</h3>
           <p className="mt-0.5 text-sm text-slate-400">
-            {activeHost?.username}@{activeHost?.hostname}:{activeHost?.port}
+            {activeHost ? formatHostAddress(activeHost) : "No active host"}
           </p>
 
           <div className="mt-2.5 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
@@ -172,7 +173,9 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
             <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-2.5">
               <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Runtime</p>
               <p className="mt-1 text-sm leading-5 text-slate-300">
-                SSH traffic is routed through the local bridge for now.
+                {activeHost
+                  ? describeHostRuntime(activeHost)
+                  : "No runtime selected."}
               </p>
             </div>
           </div>
@@ -204,7 +207,7 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
                         {host.label}
                       </span>
                       <span className="mt-0.5 block truncate text-[11px] text-slate-500">
-                        {host.username}@{host.hostname}:{host.port}
+                        {formatHostAddress(host)}
                       </span>
                     </button>
                     <button
@@ -227,7 +230,11 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
           <PortForwardPanel
             key={activePane?.id ?? "no-pane"}
             sessionId={activePane?.backendSessionId}
-            disabled={activePane?.connectionState !== "connected"}
+            disabled={
+              activePane?.connectionState !== "connected" ||
+              !activeHost ||
+              !hostSupportsPortForwarding(activeHost.protocol)
+            }
           />
         </aside>
       </div>

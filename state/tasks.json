@@ -69,20 +69,66 @@
     {
       "id": "task-vault-sync-conflict-resolution",
       "title": "Handle record deletions and user-resolvable conflicts for vault snapshot merges",
-      "status": "in_progress",
+      "status": "completed",
       "phase": "vault-sync-architecture"
     },
     {
       "id": "task-vault-sync-deletion-semantics",
       "title": "Model deletions and tombstones for vault snapshot merges",
-      "status": "pending",
+      "status": "completed",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-remote-contract",
+      "title": "Define the remote vault exchange contract for encrypted snapshot sync",
+      "status": "completed",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-tombstone-retention",
+      "title": "Add tombstone retention and compaction rules for vault snapshot merges",
+      "status": "completed",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-crypto-material-plan",
+      "title": "Define key material rotation and authentication rules for remote vault envelopes",
+      "status": "completed",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-trust-policy-adoption",
+      "title": "Persist and apply trusted remote sync key policies at sync boundaries",
+      "status": "completed",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-trust-policy-management",
+      "title": "Expose trusted remote sync key policies for operator bootstrap and management",
+      "status": "completed",
+      "completed_at": "2026-04-04T17:47:46-04:00",
       "phase": "vault-sync-architecture"
     },
     {
       "id": "task-release-workflow-live-verification",
       "title": "Run the GitHub-hosted macOS release workflow with live repository secrets",
-      "status": "pending",
+      "status": "blocked",
       "phase": "release-workflow-live-verification"
+    },
+    {
+      "id": "task-release-workflow-secret-provisioning",
+      "title": "Provision required GitHub signing and notarization secrets for the hosted macOS release workflow",
+      "status": "blocked",
+      "phase": "release-workflow-secret-provisioning",
+      "blocked_at": "2026-04-04T18:54:29-04:00",
+      "blocked_reason": "GitHub has no configured release secrets and the local workstation only exposes the Developer ID identity, not exportable certificate/password or notarization credentials."
+    },
+    {
+      "id": "task-workflow-runtime-modernization",
+      "title": "Upgrade GitHub-hosted actions to native Node 24 targets where available",
+      "status": "completed",
+      "completed_at": "2026-04-04T18:40:56-04:00",
+      "phase": "workflow-runtime-modernization"
     },
     {
       "id": "task-bootstrap-state-contract",
@@ -101,7 +147,47 @@
       "title": "Enforce the runtime guardrail validator on pull requests",
       "status": "completed",
       "phase": "bootstrap"
+    },
+    {
+      "id": "task-release-secret-audit-tooling",
+      "title": "Add shared GitHub release secret audit, validation, and apply tooling",
+      "status": "completed",
+      "completed_at": "2026-04-04T18:54:29-04:00",
+      "phase": "release-workflow-secret-provisioning"
+    },
+    {
+      "id": "task-release-secret-source-material-capture",
+      "title": "Capture exportable signing certificate material and notarization credentials for GitHub secret provisioning",
+      "status": "pending",
+      "phase": "release-workflow-secret-provisioning"
+    },
+    {
+      "id": "task-host-protocol-model",
+      "title": "Make hosts protocol-aware across inventory, filters, and session creation",
+      "status": "completed",
+      "completed_at": "2026-04-04T19:32:30-04:00",
+      "phase": "macos-solo-protocols-and-local-shell"
+    },
+    {
+      "id": "task-native-local-shell-session",
+      "title": "Launch a real native local shell session through the Tauri PTY bridge",
+      "status": "completed",
+      "completed_at": "2026-04-04T19:32:30-04:00",
+      "phase": "macos-solo-protocols-and-local-shell"
+    },
+    {
+      "id": "task-protocol-aware-ui-guardrails",
+      "title": "Hide or disable SSH-only features for non-SSH protocols across host and session UI",
+      "status": "completed",
+      "completed_at": "2026-04-04T19:32:30-04:00",
+      "phase": "macos-solo-protocols-and-local-shell"
+    },
+    {
+      "id": "task-network-protocol-runtime-support",
+      "title": "Implement executable telnet, serial, and mosh transports on top of the protocol-aware host model",
+      "status": "pending",
+      "phase": "macos-network-protocol-execution"
     }
   ],
-  "updated_at": "2026-04-04T15:38:18-04:00"
+  "updated_at": "2026-04-04T19:32:30-04:00"
 }

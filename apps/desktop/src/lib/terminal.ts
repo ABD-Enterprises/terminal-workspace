@@ -1,51 +1,74 @@
-import type { HostRecord } from "../types/host";
+import { formatHostAddress } from "./utils";
+import { formatHostProtocol, type HostRecord } from "../types/host";
 
 export function buildTerminalIntro(
-  host: Pick<HostRecord, "hostname" | "label" | "port" | "username">,
+  host: Pick<HostRecord, "hostname" | "label" | "port" | "protocol" | "username">,
   connected: boolean,
   {
     demoModeEnabled = false,
     nativeBridgeEnabled = false,
+    unsupportedTransport = false,
   }: {
     demoModeEnabled?: boolean;
     nativeBridgeEnabled?: boolean;
+    unsupportedTransport?: boolean;
   } = {}
 ) {
+  const protocolLabel = formatHostProtocol(host.protocol);
   const stateLine = demoModeEnabled
     ? connected
-      ? "Demo transport ready."
-      : "Demo transport standing by."
+      ? `${protocolLabel} demo transport ready.`
+      : `${protocolLabel} demo transport standing by.`
+    : unsupportedTransport
+      ? `${protocolLabel} sessions are not executable in this build yet.`
     : connected
       ? nativeBridgeEnabled
-        ? "SSH session connected through the native shell bridge."
-        : "SSH session connected."
+        ? host.protocol === "localShell"
+          ? "Local shell connected through the native shell bridge."
+          : `${protocolLabel} session connected through the native shell bridge.`
+        : `${protocolLabel} session connected.`
       : nativeBridgeEnabled
-        ? "Native session bridge standing by."
-        : "Connecting to the local SSH backend...";
+        ? host.protocol === "localShell"
+          ? "Native local shell bridge standing by."
+          : "Native session bridge standing by."
+        : host.protocol === "localShell"
+          ? "Local shell requires the native desktop runtime."
+          : "Connecting to the local SSH backend...";
 
   const detailLine = demoModeEnabled
     ? "Demo mode keeps commands local while the UI remains fully interactive."
+    : unsupportedTransport
+      ? "This protocol can be inventoried now, but its transport implementation is scheduled for a later parity slice."
     : nativeBridgeEnabled
-      ? "SSH sessions, jump-host chains, terminal stream I/O, SFTP, forwards, and remote snippets route through the native shell bridge."
+      ? host.protocol === "localShell"
+        ? "The native bridge launches your macOS login shell locally and keeps the session off the network path."
+        : "SSH sessions, jump-host chains, terminal stream I/O, SFTP, forwards, and remote snippets route through the native shell bridge."
       : "Session lifecycle routes through the local backend while the browser UI stays decoupled from the transport.";
 
   return [
     "",
     `TermSnip session for ${host.label}`,
-    `${host.username}@${host.hostname}:${host.port}`,
+    formatHostAddress(host),
     stateLine,
     detailLine,
     "",
   ];
 }
 
-export function formatPrompt(host: Pick<HostRecord, "label" | "username">) {
+export function formatPrompt(host: Pick<HostRecord, "label" | "protocol" | "username">) {
+  if (host.protocol === "localShell") {
+    return `${host.label.toLowerCase().replace(/\s+/g, "-")} % `;
+  }
+
   return `${host.username}@${host.label.toLowerCase().replace(/\s+/g, "-")} % `;
 }
 
 export function buildMockCommandResponse(
   command: string,
-  host: Pick<HostRecord, "group" | "hostname" | "label" | "port" | "sftpRoot" | "tags" | "username">
+  host: Pick<
+    HostRecord,
+    "group" | "hostname" | "label" | "port" | "protocol" | "sftpRoot" | "tags" | "username"
+  >
 ) {
   const trimmed = command.trim();
 
@@ -66,23 +89,26 @@ export function buildMockCommandResponse(
   if (trimmed === "host") {
     return [
       `label: ${host.label}`,
-      `address: ${host.username}@${host.hostname}:${host.port}`,
+      `protocol: ${formatHostProtocol(host.protocol)}`,
+      `address: ${formatHostAddress(host)}`,
       `group: ${host.group || "Ungrouped"}`,
       `tags: ${host.tags.join(", ") || "none"}`,
-      `sftp root: ${host.sftpRoot}`,
+      `sftp root: ${host.sftpRoot || "not applicable"}`,
     ];
   }
 
   if (trimmed === "status") {
     return [
       "transport: mock",
-      "ssh runtime: demo transport active",
+      `runtime: ${formatHostProtocol(host.protocol)} demo transport active`,
       `time: ${new Date().toLocaleTimeString()}`,
     ];
   }
 
   return [
     `Executed locally in mock mode: ${trimmed}`,
-    `No remote command was sent to ${host.hostname}.`,
+    host.protocol === "localShell"
+      ? "No native shell was opened in this surface."
+      : `No remote command was sent to ${host.hostname}.`,
   ];
 }

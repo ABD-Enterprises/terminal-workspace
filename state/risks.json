@@ -58,9 +58,27 @@
       "id": "risk-github-release-workflow-not-live-validated",
       "title": "GitHub release workflow has not been executed with live repository secrets",
       "severity": "low",
+      "status": "resolved",
+      "summary": "The GitHub-hosted release workflow now runs on the verification branch and reaches the hosted preflight gate on Actions.",
+      "assigned_phase": "release-workflow-live-verification",
+      "resolved_at": "2026-04-04T18:09:48-04:00"
+    },
+    {
+      "id": "risk-github-release-workflow-missing-secrets",
+      "title": "GitHub-hosted release workflow is missing signing and notarization secrets",
+      "severity": "high",
       "status": "open",
-      "summary": "The CI release workflow and GitHub publish script are implemented and dry-run validated locally, but they still need one live repository-backed run.",
-      "assigned_phase": "release-workflow-live-verification"
+      "summary": "The live hosted run on Actions now fails deterministically in the release-secret preflight because `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_KEYCHAIN_PASSWORD`, `MACOS_SIGN_IDENTITY`, and all notarization credential paths are unset in GitHub.",
+      "assigned_phase": "release-workflow-secret-provisioning"
+    },
+    {
+      "id": "risk-github-actions-node20-runtime-targets",
+      "title": "Pinned GitHub actions still target the deprecated Node 20 runtime",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "The workflows now use the current action majors (`actions/checkout@v6`, `actions/setup-node@v6`, `actions/upload-artifact@v7`, and `pnpm/action-setup@v5`), and the hosted release run on the modernization branch no longer emits the Node 20 runtime deprecation annotation.",
+      "assigned_phase": "workflow-runtime-modernization",
+      "resolved_at": "2026-04-04T18:40:56-04:00"
     },
     {
       "id": "risk-vault-imports-replace-local-state",
@@ -75,10 +93,63 @@
       "id": "risk-vault-merge-deletions-and-conflicts",
       "title": "Vault merges do not yet model deletions or user-resolvable conflicts",
       "severity": "medium",
+      "status": "resolved",
+      "summary": "Same-vault imports now carry tombstone deletions, remove superseded local records during merge, and allow timestamp-tied conflicts to keep local or prefer imported state.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T16:52:13-04:00"
+    },
+    {
+      "id": "risk-vault-tombstones-have-no-retention-policy",
+      "title": "Vault tombstones have no retention or compaction policy",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Deletion tombstones are now deduplicated, age-limited, and capped per entity kind before persistence, import analysis, and local export, preventing unbounded local snapshot growth.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:18:36-04:00"
+    },
+    {
+      "id": "risk-vault-remote-envelope-has-no-key-rotation-rules",
+      "title": "Remote vault envelopes do not yet define key rotation or signer trust rules",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Remote vault envelopes now have an explicit trust policy model with allowed vault scopes, key validity windows, rotation thresholds, retirement cutoffs, and replacement key IDs.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:31:36-04:00"
+    },
+    {
+      "id": "risk-vault-trust-policy-not-persisted",
+      "title": "Remote sync trust policies are not yet persisted or enforced by runtime workflows",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Remote sync trust policies now persist in a dedicated store and the runtime envelope inspection path loads local vault context plus that policy automatically before accepting envelopes.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:41:32-04:00"
+    },
+    {
+      "id": "risk-vault-trust-policy-has-no-management-surface",
+      "title": "Trusted sync key policies have no operator management or bootstrap surface",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Settings now exposes trusted sync key import/export, allow-unknown-key policy control, explicit trusted-key edits, and operator bootstrap distribution for persisted remote sync trust rules.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:47:46-04:00"
+    },
+    {
+      "id": "risk-local-release-secret-source-material-missing",
+      "title": "Local workstation does not expose exportable release secret material",
+      "severity": "high",
       "status": "open",
-      "summary": "Same-vault imports now merge additive records and can resolve equal-timestamp conflicts by keeping local or preferring imported data, but the merge path still keeps local-only records by default because deletion tombstones are not modeled.",
-      "assigned_phase": "vault-sync-architecture"
+      "summary": "The repo can detect the local Developer ID identity, but there is no P12 bundle, certificate password, keychain password, or notarization credential material in env files or accessible local export paths, so automated GitHub secret provisioning cannot complete from this machine state alone.",
+      "assigned_phase": "release-workflow-secret-provisioning"
+    },
+    {
+      "id": "risk-non-ssh-protocols-inventory-only",
+      "title": "Telnet, serial, and mosh are modeled but not executable yet",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The host model and UI now understand multiple protocols and a real native local shell session exists, but telnet, serial, and mosh entries still stop at inventory and cannot open a live transport yet.",
+      "assigned_phase": "macos-network-protocol-execution"
     }
   ],
-  "updated_at": "2026-04-04T15:38:18-04:00"
+  "updated_at": "2026-04-04T19:32:30-04:00"
 }

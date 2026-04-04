@@ -193,8 +193,14 @@ struct BackendHostConnection {
     passphrase: String,
     port: u16,
     private_key_path: String,
+    #[serde(default = "default_backend_protocol")]
+    protocol: String,
     sftp_root: Option<String>,
     username: String,
+}
+
+fn default_backend_protocol() -> String {
+    "ssh".to_string()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -763,10 +769,18 @@ fn emit_native_session_error(
 }
 
 fn should_use_native_session(host: &BackendHostConnection) -> bool {
-    host.auth_method != "none"
+    match host.protocol.as_str() {
+        "localShell" => true,
+        "ssh" => host.auth_method != "none",
+        _ => false,
+    }
 }
 
-fn validate_session_host(host: &BackendHostConnection) -> Result<(), String> {
+fn validate_ssh_host(host: &BackendHostConnection) -> Result<(), String> {
+    if host.protocol != "ssh" {
+        return Err(format!("Unsupported SSH transport protocol: {}", host.protocol));
+    }
+
     if host.hostname.trim().is_empty() || host.username.trim().is_empty() || host.port == 0 {
         return Err("Missing host connection fields".to_string());
     }
@@ -783,7 +797,19 @@ fn validate_session_host(host: &BackendHostConnection) -> Result<(), String> {
         return Err("Host is configured without SSH auth".to_string());
     }
 
+    if let Some(jump_host) = &host.jump_host {
+        validate_ssh_host(jump_host)?;
+    }
+
     Ok(())
+}
+
+fn validate_session_target(host: &BackendHostConnection) -> Result<(), String> {
+    match host.protocol.as_str() {
+        "localShell" => Ok(()),
+        "ssh" => validate_ssh_host(host),
+        other => Err(format!("Unsupported session protocol: {other}")),
+    }
 }
 
 fn authenticate_native_session(
@@ -951,6 +977,199 @@ fn spawn_jump_session_reader(
             }
         }
     });
+}
+
+fn spawn_local_session_reader(
+    mut reader: Box<dyn Read + Send>,
+    sender: std::sync::mpsc::Sender<JumpSessionEvent>,
+) {
+    thread::spawn(move || {
+        let mut buffer = [0u8; NATIVE_SESSION_READ_CHUNK_SIZE];
+
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    let _ = sender.send(JumpSessionEvent::Eof);
+                    break;
+                }
+                Ok(count) => {
+                    let output = String::from_utf8_lossy(&buffer[..count]).to_string();
+                    let _ = sender.send(JumpSessionEvent::Output(output));
+                }
+                Err(error) => {
+                    let _ = sender.send(JumpSessionEvent::Error(error.to_string()));
+                    break;
+                }
+            }
+        }
+    });
+}
+
+fn run_local_shell_session_loop(
+    app: AppHandle,
+    registry: NativeSessionRegistry,
+    forward_registry: NativeForwardRegistry,
+    session_id: String,
+    state: Arc<Mutex<NativeSessionState>>,
+    host: BackendHostConnection,
+    mut receiver: UnboundedReceiver<NativeSessionCommand>,
+) {
+    let result = (|| -> Result<(), String> {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: DEFAULT_TERMINAL_ROWS,
+                cols: DEFAULT_TERMINAL_COLS,
+                pixel_width: DEFAULT_TERMINAL_PIXEL_WIDTH,
+                pixel_height: DEFAULT_TERMINAL_PIXEL_HEIGHT,
+            })
+            .map_err(|error| error.to_string())?;
+
+        let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let mut command = CommandBuilder::new(shell);
+        command.arg("-l");
+        if let Some(home_dir) = env::var_os("HOME") {
+            command.cwd(PathBuf::from(home_dir));
+        }
+        if let Some(environment) = get_channel_environment(&host.environment) {
+            for (key, value) in environment {
+                command.env(key, value);
+            }
+        }
+
+        let mut child = pair
+            .slave
+            .spawn_command(command)
+            .map_err(|error| error.to_string())?;
+        drop(pair.slave);
+
+        let writer = Arc::new(Mutex::new(
+            pair.master
+                .take_writer()
+                .map_err(|error| error.to_string())?,
+        ));
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|error| error.to_string())?;
+        let mut master = pair.master;
+        let (output_sender, output_receiver) = std::sync::mpsc::channel();
+
+        spawn_local_session_reader(reader, output_sender);
+        set_native_session_connection_state(&app, &session_id, &state, "connected");
+
+        let mut should_close = false;
+        let mut reported_error = false;
+
+        while !should_close {
+            let mut did_work = false;
+
+            loop {
+                match receiver.try_recv() {
+                    Ok(NativeSessionCommand::Close) => {
+                        should_close = true;
+                        break;
+                    }
+                    Ok(NativeSessionCommand::Input(input)) => {
+                        did_work = true;
+                        write_jump_session_input(&writer, &input)?;
+                    }
+                    Ok(NativeSessionCommand::Resize { cols, rows }) => {
+                        did_work = true;
+                        resize_jump_session_pty(&mut master, cols, rows)?;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        should_close = true;
+                        break;
+                    }
+                }
+            }
+
+            loop {
+                match output_receiver.try_recv() {
+                    Ok(JumpSessionEvent::Output(output)) => {
+                        did_work = true;
+                        emit_native_session_output(&app, &session_id, &state, output);
+                    }
+                    Ok(JumpSessionEvent::Error(error)) => {
+                        emit_native_session_error(&app, &session_id, &state, error);
+                        set_native_session_connection_state(&app, &session_id, &state, "error");
+                        reported_error = true;
+                        should_close = true;
+                        break;
+                    }
+                    Ok(JumpSessionEvent::Eof) => {
+                        should_close = true;
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        should_close = true;
+                        break;
+                    }
+                }
+            }
+
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    if !status.success() && !reported_error {
+                        emit_native_session_error(
+                            &app,
+                            &session_id,
+                            &state,
+                            format!("Local shell exited with status {status}."),
+                        );
+                        set_native_session_connection_state(&app, &session_id, &state, "error");
+                    }
+                    should_close = true;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    emit_native_session_error(&app, &session_id, &state, error.to_string());
+                    set_native_session_connection_state(&app, &session_id, &state, "error");
+                    should_close = true;
+                }
+            }
+
+            if !did_work && !should_close {
+                thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
+            }
+        }
+
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(master);
+
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        emit_native_session_error(&app, &session_id, &state, error);
+        set_native_session_connection_state(&app, &session_id, &state, "error");
+    }
+
+    close_native_forwards_for_session(&forward_registry, &session_id);
+    remove_native_session(&registry, &session_id);
+    set_native_session_connection_state(&app, &session_id, &state, "disconnected");
+
+    let stream_id = {
+        let mut state = state.lock().expect("native session state lock poisoned");
+        state.stream_id.take()
+    };
+
+    if let Some(stream_id) = stream_id {
+        emit_session_stream_event(
+            &app,
+            SessionStreamEvent {
+                data: None,
+                kind: "close",
+                message: None,
+                session_id: session_id.clone(),
+                stream_id,
+            },
+        );
+    }
 }
 
 fn run_jump_host_session_loop(
@@ -1521,7 +1740,7 @@ async fn termsnip_scan_known_host(
 
 #[tauri::command]
 fn termsnip_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirectoryResponse, String> {
-    validate_session_host(&request.host)?;
+    validate_ssh_host(&request.host)?;
     let target_path = resolve_remote_path(
         request.host.sftp_root.as_deref().unwrap_or("/"),
         &request.path,
@@ -1542,7 +1761,7 @@ fn termsnip_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirector
 
 #[tauri::command]
 fn termsnip_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPathResponse, String> {
-    validate_session_host(&request.host)?;
+    validate_ssh_host(&request.host)?;
     let target_path = resolve_remote_path(
         request.host.sftp_root.as_deref().unwrap_or("/"),
         &request.path,
@@ -1561,7 +1780,7 @@ fn termsnip_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPat
 
 #[tauri::command]
 fn termsnip_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathResponse, String> {
-    validate_session_host(&request.host)?;
+    validate_ssh_host(&request.host)?;
     let source_path = resolve_remote_path(
         request.host.sftp_root.as_deref().unwrap_or("/"),
         &request.current_path,
@@ -1590,7 +1809,7 @@ fn termsnip_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathR
 fn termsnip_sftp_delete_entry(
     request: SftpDeleteRequest,
 ) -> Result<BackendBooleanResponse, String> {
-    validate_session_host(&request.host)?;
+    validate_ssh_host(&request.host)?;
     let target_path = resolve_remote_path(
         request.host.sftp_root.as_deref().unwrap_or("/"),
         &request.path,
@@ -1613,7 +1832,7 @@ fn termsnip_sftp_delete_entry(
 
 #[tauri::command]
 fn termsnip_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathResponse, String> {
-    validate_session_host(&request.host)?;
+    validate_ssh_host(&request.host)?;
     let target_path = resolve_remote_path(
         request.host.sftp_root.as_deref().unwrap_or("/"),
         &request.path,
@@ -1645,7 +1864,7 @@ fn termsnip_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathRe
 fn termsnip_sftp_download_file(
     request: SftpPathRequest,
 ) -> Result<BackendBinaryProxyResponse, String> {
-    validate_session_host(&request.host)?;
+    validate_ssh_host(&request.host)?;
     let target_path = resolve_remote_path(
         request.host.sftp_root.as_deref().unwrap_or("/"),
         &request.path,
@@ -1775,7 +1994,7 @@ async fn termsnip_create_backend_session(
     app: AppHandle,
     request: CreateBackendSessionRequest,
 ) -> Result<CreateSessionResponse, String> {
-    validate_session_host(&request.host)?;
+    validate_session_target(&request.host)?;
 
     if !should_use_native_session(&request.host) {
         return proxy_json(
@@ -1800,7 +2019,28 @@ async fn termsnip_create_backend_session(
     let app_handle = app.clone();
     let session_id_for_thread = session_id.clone();
     let state_for_thread = state.clone();
-    let command_sender = if host.jump_host.is_some() {
+    let command_sender = if host.protocol == "localShell" {
+        let (command_sender, command_receiver) = unbounded_channel();
+        let registry_for_thread = native_registry.clone();
+        let forward_registry_for_thread = forward_registry.clone();
+        let thread_app = app_handle.clone();
+        let thread_session_id = session_id_for_thread.clone();
+        let thread_state = state_for_thread.clone();
+
+        thread::spawn(move || {
+            run_local_shell_session_loop(
+                thread_app,
+                registry_for_thread,
+                forward_registry_for_thread,
+                thread_session_id,
+                thread_state,
+                host,
+                command_receiver,
+            );
+        });
+
+        command_sender
+    } else if host.jump_host.is_some() {
         let (command_sender, command_receiver) = unbounded_channel();
         let registry_for_thread = native_registry.clone();
         let forward_registry_for_thread = forward_registry.clone();
@@ -2199,6 +2439,7 @@ mod tests {
                 passphrase: "jump-passphrase".to_string(),
                 port: 2222,
                 private_key_path: "~/.ssh/jump".to_string(),
+                protocol: "ssh".to_string(),
                 sftp_root: None,
                 username: "jump".to_string(),
             })),
@@ -2208,6 +2449,7 @@ mod tests {
             passphrase: "".to_string(),
             port: 2223,
             private_key_path: "".to_string(),
+            protocol: "ssh".to_string(),
             sftp_root: None,
             username: "deploy".to_string(),
         }

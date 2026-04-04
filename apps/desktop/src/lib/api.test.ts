@@ -57,6 +57,7 @@ const hostFixture: BackendHostConnection = {
   passphrase: "",
   port: 22,
   privateKeyPath: "~/.ssh/id_ed25519",
+  protocol: "ssh",
   username: "ops",
 };
 

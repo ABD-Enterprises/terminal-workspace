@@ -997,7 +997,7 @@ pub(crate) fn execute_native_snippet_target(
     target: SnippetExecutionTarget,
     command: String,
 ) -> SnippetExecutionResult {
-    match validate_session_host(&target.host) {
+    match validate_ssh_host(&target.host) {
         Ok(()) => {}
         Err(error) => {
             return SnippetExecutionResult {

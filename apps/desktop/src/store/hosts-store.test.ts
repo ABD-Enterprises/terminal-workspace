@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultHostKeyPolicy, emptyHostFormValues, sampleHosts } from "../types/host";
+import { defaultHostKeyPolicy, defaultHostProtocol, emptyHostFormValues, sampleHosts } from "../types/host";
 import {
   applyHostFilters,
   createHostRecord,
@@ -24,6 +24,7 @@ describe("hosts store helpers", () => {
 
     const created = createHostRecord(draft);
     expect(created.label).toBe("Docs Box");
+    expect(created.protocol).toBe("ssh");
     expect(created.tags).toEqual(["docs", "staging"]);
     expect(created.hostKeyPolicy).toBe(defaultHostKeyPolicy);
     expect(created.agentForwarding).toBe(true);
@@ -81,10 +82,35 @@ describe("hosts store helpers", () => {
     ]);
 
     expect(normalized[0]?.hostKeyPolicy).toBe(defaultHostKeyPolicy);
+    expect(normalized[0]?.protocol).toBe(defaultHostProtocol);
     expect(normalized[0]?.agentForwarding).toBe(false);
     expect(normalized[0]?.environment).toEqual({});
     expect(normalized[0]?.tags).not.toContain("favorite");
     expect("password" in (normalized[0] ?? {})).toBe(false);
     expect("passphrase" in (normalized[0] ?? {})).toBe(false);
+  });
+
+  it("normalizes local shell entries without ssh-only fields", () => {
+    const created = createHostRecord({
+      ...emptyHostFormValues,
+      label: "Native Shell",
+      protocol: "localShell",
+      username: "",
+      hostname: "",
+      port: "",
+      authMethod: "privateKey",
+      privateKeyPath: "~/.ssh/id_local",
+      keyLabel: "Should Clear",
+      jumpHostId: sampleHosts[0].id,
+      sftpRoot: "/srv",
+    });
+
+    expect(created.hostname).toBe("localhost");
+    expect(created.port).toBe(0);
+    expect(created.authMethod).toBe("none");
+    expect(created.privateKeyPath).toBe("");
+    expect(created.keyLabel).toBe("");
+    expect(created.jumpHostId).toBeUndefined();
+    expect(created.sftpRoot).toBe("");
   });
 });

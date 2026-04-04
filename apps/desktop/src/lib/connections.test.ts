@@ -28,6 +28,7 @@ const baseHost = {
   label: "Local SSH Test",
   port: 2222,
   privateKeyPath: "/tmp/test-key",
+  protocol: "ssh" as const,
   sftpRoot: "/tmp",
   username: "deffenda",
 };
@@ -46,6 +47,7 @@ describe("connection helpers", () => {
     expect(connection.passphrase).toBe("phrase");
     expect(connection.agentForwarding).toBe(true);
     expect(connection.environment).toEqual(baseHost.environment);
+    expect(connection.protocol).toBe("ssh");
   });
 
   it("requires a trusted host key in strict mode", () => {
@@ -112,5 +114,29 @@ describe("connection helpers", () => {
     expect(connection.jumpHost?.jumpHost).toBeUndefined();
     expect(connection.jumpHost?.agentForwarding).toBe(true);
     expect(connection.jumpHost?.environment).toEqual(baseHost.environment);
+  });
+
+  it("builds local shell connections without trust or jump host requirements", () => {
+    const connection = buildBackendConnection(
+      {
+        ...baseHost,
+        id: "local-shell",
+        label: "Local Shell",
+        protocol: "localShell",
+        hostname: "localhost",
+        username: "local",
+        port: 0,
+        authMethod: "none",
+        privateKeyPath: "",
+        jumpHostId: "jump-host",
+        sftpRoot: "",
+      },
+      []
+    );
+
+    expect(connection.protocol).toBe("localShell");
+    expect(connection.jumpHost).toBeUndefined();
+    expect(connection.password).toBe("");
+    expect(connection.port).toBe(0);
   });
 });

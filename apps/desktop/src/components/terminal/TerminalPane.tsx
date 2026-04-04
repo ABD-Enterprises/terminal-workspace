@@ -13,7 +13,7 @@ import { isTauriRuntime } from "../../lib/backend-runtime";
 import { buildBackendConnectionFromKnownHost, findKnownHostMatch } from "../../lib/connections";
 import { canRestoreSessionWithoutPrompt, ensureRuntimeSecrets } from "../../lib/runtime-secrets";
 import { buildMockCommandResponse, buildTerminalIntro, formatPrompt } from "../../lib/terminal";
-import { cn } from "../../lib/utils";
+import { cn, formatHostAddress } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
 import { useKnownHostsStore } from "../../store/known-hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
@@ -98,6 +98,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     label,
     port,
     privateKeyPath,
+    protocol,
     sftpRoot,
     tags,
     username,
@@ -127,11 +128,14 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const dispatchCommandRef = useRef<(command: string) => void>(() => undefined);
   const processedCommandIdRef = useRef<string | undefined>(undefined);
   const trustedKnownHost = useMemo(
-    () => findKnownHostMatch(knownHosts, { hostname, port }),
-    [hostname, knownHosts, port]
+    () => (protocol === "ssh" ? findKnownHostMatch(knownHosts, { hostname, port }) : undefined),
+    [hostname, knownHosts, port, protocol]
   );
-  const useMockTransport = demoModeEnabled || authMethod === "none";
-  const nativeBridgeEnabled = !useMockTransport && isTauriRuntime();
+  const useMockTransport = demoModeEnabled || (protocol === "ssh" && authMethod === "none");
+  const unsupportedTransport =
+    (protocol !== "ssh" && protocol !== "localShell") ||
+    (protocol === "localShell" && !demoModeEnabled && !isTauriRuntime());
+  const nativeBridgeEnabled = !useMockTransport && !unsupportedTransport && isTauriRuntime();
 
   useEffect(() => {
     transportRef.current = pane.transport;
@@ -177,7 +181,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     let disposed = false;
 
     const writePrompt = () => {
-      const prompt = formatPrompt({ label, username });
+      const prompt = formatPrompt({ label, protocol, username });
       commandBufferRef.current = "";
       terminal.write(`\r\n${prompt}`);
     };
@@ -205,6 +209,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           hostname,
           label,
           port,
+          protocol,
           sftpRoot,
           tags,
           username,
@@ -240,7 +245,10 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         try {
           fitAddon.fit();
 
-          if (transportRef.current === "ssh" && backendSessionIdRef.current) {
+          if (
+            (transportRef.current === "ssh" || transportRef.current === "localShell") &&
+            backendSessionIdRef.current
+          ) {
             void resizeBackendSession(backendSessionIdRef.current, {
               cols: terminal.cols,
               rows: terminal.rows,
@@ -254,7 +262,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       });
     };
 
-    const connectSsh = async ({
+    const connectNativeSession = async ({
       announce = false,
       allowPendingSecrets = false,
       promptForSecrets = true,
@@ -271,9 +279,10 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         return;
       }
 
+      const requiresSecrets = protocol === "ssh" && authMethod !== "none";
       const hasReusableBackendSession = Boolean(backendSessionIdRef.current);
       const canConnectWithoutPrompt =
-        hasReusableBackendSession || (await canRestoreSessionWithoutPrompt(host));
+        hasReusableBackendSession || !requiresSecrets || (await canRestoreSessionWithoutPrompt(host));
 
       if (!hasReusableBackendSession) {
         if (!promptForSecrets && !canConnectWithoutPrompt) {
@@ -286,7 +295,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           return;
         }
 
-        if (promptForSecrets) {
+        if (promptForSecrets && requiresSecrets) {
           const readyForConnection = await ensureRuntimeSecrets(
             host,
             allowPendingSecrets ? "Resume SSH session" : "Open SSH session"
@@ -313,12 +322,16 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
       pendingSecretsNoticeShownRef.current = false;
       connectingRef.current = true;
-      transportRef.current = "ssh";
-      setPaneTransport(pane.id, "ssh");
+      transportRef.current = protocol === "localShell" ? "localShell" : "ssh";
+      setPaneTransport(pane.id, protocol === "localShell" ? "localShell" : "ssh");
       setPaneState(pane.id, "connecting");
 
       if (announce) {
-        terminal.writeln(`\r\nConnecting to ${hostname}...`);
+        terminal.writeln(
+          protocol === "localShell"
+            ? "\r\nOpening local shell..."
+            : `\r\nConnecting to ${hostname}...`
+        );
       }
 
       try {
@@ -339,6 +352,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
                   label,
                   port,
                   privateKeyPath,
+                  protocol,
                   sftpRoot,
                   username,
                 },
@@ -397,8 +411,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             clearBackendSession();
           }
 
-          if (!connectedOnceRef.current && reusedExistingSession && authMethod !== "none") {
-            void connectSsh({
+          if (!connectedOnceRef.current && reusedExistingSession && protocol === "ssh" && authMethod !== "none") {
+            void connectNativeSession({
               allowPendingSecrets: true,
               promptForSecrets: false,
             });
@@ -423,7 +437,9 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        terminal.writeln(`\r\nSSH connect failed: ${message}`);
+        terminal.writeln(
+          `\r\n${protocol === "localShell" ? "Local shell" : "SSH"} connect failed: ${message}`
+        );
         connectionStateRef.current = "error";
         setPaneState(pane.id, "error");
         clearBackendSession();
@@ -432,7 +448,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       }
     };
 
-    const disconnectSsh = async () => {
+    const disconnectNativeSession = async () => {
       const sessionId = backendSessionIdRef.current;
       socketRef.current?.close();
       socketRef.current = null;
@@ -448,15 +464,26 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
       connectionStateRef.current = "disconnected";
       setPaneState(pane.id, "disconnected");
-      terminal.writeln("\r\nSSH session closed.");
+      terminal.writeln(
+        `\r\n${protocol === "localShell" ? "Local shell" : "SSH"} session closed.`
+      );
     };
 
     const toggleConnection = () => {
+      if (unsupportedTransport) {
+        connectionStateRef.current = "error";
+        transportRef.current = "unsupported";
+        setPaneTransport(pane.id, "unsupported");
+        setPaneState(pane.id, "error");
+        terminal.writeln("\r\nThis saved protocol is not executable yet.");
+        return;
+      }
+
       if (!useMockTransport) {
         if (connectionStateRef.current === "connected") {
-          void disconnectSsh();
+          void disconnectNativeSession();
         } else {
-          void connectSsh({
+          void connectNativeSession({
             announce: true,
             allowPendingSecrets: connectionStateRef.current === "pendingSecrets",
           });
@@ -477,7 +504,11 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       } else {
         connectionStateRef.current = "connected";
         setPaneState(pane.id, "connected");
-        terminal.writeln("\r\nMock session connected.");
+        terminal.writeln(
+          protocol === "localShell"
+            ? "\r\nLocal shell demo session connected."
+            : "\r\nMock session connected."
+        );
         writePrompt();
       }
     };
@@ -495,8 +526,12 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         return;
       }
 
+      if (unsupportedTransport) {
+        return;
+      }
+
       if (connectionStateRef.current !== "connected") {
-        void connectSsh({
+        void connectNativeSession({
           announce: true,
           allowPendingSecrets:
             connectionStateRef.current === "pendingSecrets" || reconnectOnRestoreRef.current,
@@ -509,7 +544,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         return;
       }
 
-      if (transportRef.current === "ssh") {
+      if (transportRef.current === "ssh" || transportRef.current === "localShell") {
         if (socketRef.current?.readyState === WebSocket.OPEN && connectionStateRef.current === "connected") {
           socketRef.current.send(JSON.stringify({ type: "input", data: `${command}\r` }));
         }
@@ -532,18 +567,22 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     fitAddonRef.current = fitAddon;
 
     buildTerminalIntro(
-      { hostname, label, port, username },
+      { hostname, label, port, protocol, username },
       connectionStateRef.current === "connected",
       {
         demoModeEnabled,
         nativeBridgeEnabled,
+        unsupportedTransport,
       }
     ).forEach((line) => {
       terminal.writeln(line);
     });
 
     const disposable = terminal.onData((data) => {
-      if (transportRef.current === "ssh" && socketRef.current?.readyState === WebSocket.OPEN) {
+      if (
+        (transportRef.current === "ssh" || transportRef.current === "localShell") &&
+        socketRef.current?.readyState === WebSocket.OPEN
+      ) {
         socketRef.current.send(JSON.stringify({ type: "input", data }));
         return;
       }
@@ -578,6 +617,14 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     scheduleFit();
 
     const initializeTransport = async () => {
+      if (unsupportedTransport) {
+        transportRef.current = "unsupported";
+        setPaneTransport(pane.id, "unsupported");
+        connectionStateRef.current = "disconnected";
+        setPaneState(pane.id, "disconnected");
+        return;
+      }
+
       if (useMockTransport) {
         transportRef.current = "mock";
         setPaneTransport(pane.id, "mock");
@@ -588,7 +635,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       }
 
       if (backendSessionIdRef.current) {
-        await connectSsh({
+        await connectNativeSession({
           allowPendingSecrets: true,
           promptForSecrets: false,
         });
@@ -599,8 +646,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         reconnectOnRestoreRef.current ||
         connectionStateRef.current === "pendingSecrets"
       ) {
-        if (await canRestoreSessionWithoutPrompt(host)) {
-          await connectSsh({
+        if (protocol === "localShell" || (await canRestoreSessionWithoutPrompt(host))) {
+          await connectNativeSession({
             allowPendingSecrets: true,
             promptForSecrets: false,
           });
@@ -611,7 +658,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       }
 
       if (connectionStateRef.current !== "disconnected") {
-        await connectSsh();
+        await connectNativeSession();
       }
     };
 
@@ -644,6 +691,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     id,
     label,
     demoModeEnabled,
+    protocol,
     trustedKnownHost,
     port,
     pane.id,
@@ -655,6 +703,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     setPaneTransport,
     sftpRoot,
     tags,
+    unsupportedTransport,
     useMockTransport,
     username,
   ]);
@@ -672,7 +721,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     }
 
     const sshTransportPending =
-      pane.transport === "ssh" && socketRef.current?.readyState !== WebSocket.OPEN;
+      (pane.transport === "ssh" || pane.transport === "localShell") &&
+      socketRef.current?.readyState !== WebSocket.OPEN;
 
     if (pane.connectionState !== "connected" || sshTransportPending) {
       ensureConnectedRef.current();
@@ -696,7 +746,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-slate-100">{host.label}</p>
           <p className="truncate text-xs text-slate-500">
-            {host.username}@{host.hostname}:{host.port}
+            {formatHostAddress(host)}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

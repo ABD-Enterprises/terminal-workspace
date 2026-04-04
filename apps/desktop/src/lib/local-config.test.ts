@@ -12,6 +12,10 @@ import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useSessionsStore } from "../store/sessions-store";
 import { useSnippetsStore } from "../store/snippets-store";
 import { useTransfersStore } from "../store/transfers-store";
+import {
+  useVaultSyncStore,
+  VAULT_TOMBSTONE_RETENTION_DAYS,
+} from "../store/vault-sync-store";
 
 const baseHostState = useHostsStore.getState();
 const baseKeyState = useKeysStore.getState();
@@ -20,6 +24,7 @@ const baseKnownHostState = useKnownHostsStore.getState();
 const baseSessionState = useSessionsStore.getState();
 const baseTransferState = useTransfersStore.getState();
 const baseAppState = useAppStore.getState();
+const baseVaultSyncState = useVaultSyncStore.getState();
 
 afterEach(() => {
   useAppStore.setState(baseAppState);
@@ -29,16 +34,31 @@ afterEach(() => {
   useKnownHostsStore.setState(baseKnownHostState);
   useSessionsStore.setState(baseSessionState);
   useTransfersStore.setState(baseTransferState);
+  useVaultSyncStore.setState(baseVaultSyncState);
 });
 
 describe("local config", () => {
   it("exports the current durable config bundle", () => {
+    const staleDeletedAt = new Date(
+      Date.now() - (VAULT_TOMBSTONE_RETENTION_DAYS + 1) * 24 * 60 * 60 * 1000
+    ).toISOString();
+    useVaultSyncStore.getState().replaceDeletions({
+      hosts: [
+        { id: "host-stale", deletedAt: staleDeletedAt },
+        { id: "host-live", deletedAt: "2026-03-29T10:30:00.000Z" },
+      ],
+      keys: [],
+      snippets: [],
+      knownHosts: [],
+    });
+
     useHostsStore.setState({
       ...baseHostState,
       hosts: [
         {
           id: "host-a",
           label: "Host A",
+          protocol: "ssh",
           hostname: "127.0.0.1",
           username: "deffenda",
           port: 22,
@@ -63,12 +83,18 @@ describe("local config", () => {
 
     const bundle = buildLocalConfigBundle();
     expect(bundle.app).toBe("TermSnip");
-    expect(bundle.version).toBe(2);
+    expect(bundle.version).toBe(3);
     expect(bundle.vault.schema).toBe("local-first-vault");
     expect(bundle.vault.vaultId).toBe(baseAppState.vaultId);
     expect(bundle.vault.sourceDeviceId).toBe(baseAppState.deviceId);
     expect(bundle.vault.snapshotId).toBeTruthy();
     expect(bundle.vault.baseSnapshotId).toBeNull();
+    expect(bundle.deletions).toEqual({
+      hosts: [{ id: "host-live", deletedAt: "2026-03-29T10:30:00.000Z" }],
+      keys: [],
+      snippets: [],
+      knownHosts: [],
+    });
     expect(bundle.hosts).toHaveLength(1);
     expect(bundle.hosts[0]?.id).toBe("host-a");
   });
@@ -137,7 +163,7 @@ describe("local config", () => {
 
     const bundle: LocalConfigBundle = {
       app: "TermSnip",
-      version: 2,
+      version: 3,
       exportedAt: "2026-03-29T10:00:00.000Z",
       vault: {
         schema: "local-first-vault",
@@ -146,10 +172,17 @@ describe("local config", () => {
         snapshotId: "snapshot-1",
         baseSnapshotId: "snapshot-root",
       },
+      deletions: {
+        hosts: [],
+        keys: [],
+        snippets: [],
+        knownHosts: [],
+      },
       hosts: [
         {
           id: "host-b",
           label: "Host B",
+          protocol: "ssh",
           hostname: "127.0.0.1",
           username: "deffenda",
           port: 2222,
@@ -250,6 +283,7 @@ describe("local config", () => {
         {
           id: "host-local",
           label: "Local Host",
+          protocol: "ssh",
           hostname: "10.0.0.1",
           username: "ops",
           port: 22,
@@ -274,7 +308,7 @@ describe("local config", () => {
 
     const bundle: LocalConfigBundle = {
       app: "TermSnip",
-      version: 2,
+      version: 3,
       exportedAt: "2026-03-29T11:00:00.000Z",
       vault: {
         schema: "local-first-vault",
@@ -283,10 +317,17 @@ describe("local config", () => {
         snapshotId: "snapshot-next",
         baseSnapshotId: "snapshot-current",
       },
+      deletions: {
+        hosts: [],
+        keys: [],
+        snippets: [],
+        knownHosts: [],
+      },
       hosts: [
         {
           id: "host-remote",
           label: "Remote Host",
+          protocol: "ssh",
           hostname: "10.0.0.2",
           username: "deploy",
           port: 22,
@@ -325,6 +366,7 @@ describe("local config", () => {
     expect(summary.mergePlan?.hosts).toEqual({
       added: 1,
       updated: 0,
+      removed: 0,
       retainedLocal: 1,
       unchanged: 0,
       conflicts: 0,
@@ -346,6 +388,7 @@ describe("local config", () => {
         {
           id: "host-shared",
           label: "Local Label",
+          protocol: "ssh",
           hostname: "10.0.0.10",
           username: "ops",
           port: 22,
@@ -370,7 +413,7 @@ describe("local config", () => {
 
     const bundle: LocalConfigBundle = {
       app: "TermSnip",
-      version: 2,
+      version: 3,
       exportedAt: "2026-03-29T11:30:00.000Z",
       vault: {
         schema: "local-first-vault",
@@ -379,10 +422,17 @@ describe("local config", () => {
         snapshotId: "snapshot-next",
         baseSnapshotId: "snapshot-current",
       },
+      deletions: {
+        hosts: [],
+        keys: [],
+        snippets: [],
+        knownHosts: [],
+      },
       hosts: [
         {
           id: "host-shared",
           label: "Imported Label",
+          protocol: "ssh",
           hostname: "10.0.0.10",
           username: "ops",
           port: 22,
@@ -426,6 +476,7 @@ describe("local config", () => {
         {
           id: "host-shared",
           label: "Local Label",
+          protocol: "ssh",
           hostname: "10.0.0.10",
           username: "ops",
           port: 22,
@@ -456,5 +507,71 @@ describe("local config", () => {
     });
     expect(preferImportedSummary.conflictResolution).toBe("prefer-imported");
     expect(useHostsStore.getState().hosts[0]?.label).toBe("Imported Label");
+  });
+
+  it("removes records when imported tombstones supersede local updates", () => {
+    useAppStore.getState().setVaultId("vault-current");
+    useAppStore.getState().setLastAppliedSnapshotId("snapshot-current");
+    useHostsStore.setState({
+      ...baseHostState,
+      hosts: [
+        {
+          id: "host-remove",
+          label: "Remove Me",
+          protocol: "ssh",
+          hostname: "10.0.0.99",
+          username: "ops",
+          port: 22,
+          authMethod: "privateKey",
+          privateKeyPath: "/tmp/id_remove",
+          group: "Ops",
+          tags: ["remove"],
+          note: "Local record",
+          favorite: false,
+          keyLabel: "Remove Key",
+          hostKeyPolicy: "allowUnknown",
+          agentForwarding: false,
+          environment: {},
+          sftpRoot: "/srv",
+          snippetCount: 0,
+          forwardingCount: 0,
+          createdAt: "2026-03-29T10:00:00.000Z",
+          updatedAt: "2026-03-29T10:30:00.000Z",
+        },
+      ],
+    });
+
+    const bundle: LocalConfigBundle = {
+      app: "TermSnip",
+      version: 3,
+      exportedAt: "2026-03-29T11:30:00.000Z",
+      vault: {
+        schema: "local-first-vault",
+        vaultId: "vault-current",
+        sourceDeviceId: "device-remote",
+        snapshotId: "snapshot-next",
+        baseSnapshotId: "snapshot-current",
+      },
+      deletions: {
+        hosts: [{ id: "host-remove", deletedAt: "2026-03-29T11:00:00.000Z" }],
+        keys: [],
+        snippets: [],
+        knownHosts: [],
+      },
+      hosts: [],
+      keys: [],
+      snippets: [],
+      knownHosts: [],
+    };
+
+    const analysis = inspectImportedLocalConfigBundle(bundle);
+    expect(analysis.mergePlan?.hosts.removed).toBe(1);
+
+    const summary = applyImportedLocalConfigBundle(bundle, { mode: "merge" });
+    expect(summary.hostCount).toBe(0);
+    expect(useHostsStore.getState().hosts).toEqual([]);
+    expect(useVaultSyncStore.getState().deletions.hosts).toEqual([
+      { id: "host-remove", deletedAt: "2026-03-29T11:00:00.000Z" },
+    ]);
   });
 });

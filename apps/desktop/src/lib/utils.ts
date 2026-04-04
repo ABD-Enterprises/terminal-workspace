@@ -1,4 +1,4 @@
-import type { HostRecord } from "../types/host";
+import { formatHostProtocol, type HostRecord } from "../types/host";
 
 export function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -68,8 +68,57 @@ export function formatRelativeTime(isoString?: string) {
   return "Just now";
 }
 
-export function formatHostAddress(host: Pick<HostRecord, "username" | "hostname" | "port">) {
+export function formatHostAddress(
+  host: Pick<HostRecord, "hostname" | "port" | "protocol" | "username">
+) {
+  if (host.protocol === "localShell") {
+    return "Native login shell";
+  }
+
+  if (host.protocol === "telnet") {
+    return `${host.hostname}:${host.port}`;
+  }
+
+  if (host.protocol === "serial") {
+    return host.hostname;
+  }
+
   return `${host.username}@${host.hostname}:${host.port}`;
+}
+
+export function describeHostRuntime(
+  host: Pick<
+    HostRecord,
+    | "agentForwarding"
+    | "authMethod"
+    | "hostKeyPolicy"
+    | "hostname"
+    | "jumpHostId"
+    | "port"
+    | "protocol"
+  >,
+  jumpHostLabel?: string
+) {
+  if (host.protocol === "localShell") {
+    return "Native macOS shell bridge";
+  }
+
+  if (host.protocol !== "ssh") {
+    return `${formatHostProtocol(host.protocol)} inventory entry`;
+  }
+
+  return [
+    host.authMethod === "privateKey"
+      ? "Private key"
+      : host.authMethod === "password"
+        ? "Password"
+        : "Auth unset",
+    host.hostKeyPolicy === "requireTrusted" ? "Trusted key required" : "Unknown key allowed",
+    jumpHostLabel ? `via ${jumpHostLabel}` : "",
+    host.agentForwarding ? "agent" : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export function formatBytes(value?: number) {
@@ -109,6 +158,8 @@ export function formatTimestamp(isoString?: string) {
 export function buildHostSearchText(host: HostRecord) {
   return [
     host.label,
+    host.protocol,
+    formatHostProtocol(host.protocol),
     host.hostname,
     host.username,
     host.authMethod,

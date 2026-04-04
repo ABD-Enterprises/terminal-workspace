@@ -7,6 +7,7 @@ import {
   sampleKnownHosts,
   type KnownHostRecord,
 } from "../types/known-host";
+import { useVaultSyncStore } from "./vault-sync-store";
 
 const fallbackStorage: StateStorage = {
   getItem: () => null,
@@ -32,6 +33,7 @@ export const useKnownHostsStore = create<KnownHostsState>()(
         set((state) => {
           const record = createKnownHostRecord(entry);
           const existingId = createKnownHostId(record);
+          useVaultSyncStore.getState().clearDeleted("knownHosts", existingId);
 
           return {
             knownHosts: sortKnownHosts([
@@ -41,11 +43,14 @@ export const useKnownHostsStore = create<KnownHostsState>()(
           };
         }),
       removeKnownHost: (knownHostId) =>
-        set((state) => ({
-          knownHosts: sortKnownHosts(
-            state.knownHosts.filter((knownHost) => knownHost.id !== knownHostId)
-          ),
-        })),
+        set((state) => {
+          useVaultSyncStore.getState().markDeleted("knownHosts", knownHostId);
+          return {
+            knownHosts: sortKnownHosts(
+              state.knownHosts.filter((knownHost) => knownHost.id !== knownHostId)
+            ),
+          };
+        }),
     }),
     {
       name: "termsnip-known-hosts",

@@ -5,6 +5,12 @@ import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useSessionsStore } from "../store/sessions-store";
 import { useSnippetsStore } from "../store/snippets-store";
 import { useTransfersStore } from "../store/transfers-store";
+import {
+  compactDeletionMap,
+  useVaultSyncStore,
+  type VaultDeletionEntry,
+  type VaultDeletionMap,
+} from "../store/vault-sync-store";
 import type { HostRecord } from "../types/host";
 import type { KeyRecord } from "../types/key";
 import type { KnownHostRecord } from "../types/known-host";
@@ -20,19 +26,31 @@ export interface LocalVaultMetadata {
 
 export interface LocalConfigBundle {
   app: "TermSnip";
-  version: 2;
+  version: 3;
   exportedAt: string;
   vault: LocalVaultMetadata;
   hosts: HostRecord[];
   keys: KeyRecord[];
   snippets: SnippetRecord[];
   knownHosts: KnownHostRecord[];
+  deletions: VaultDeletionMap;
 }
 
 interface LegacyLocalConfigBundle {
   app: "TermSnip";
   version: 1;
   exportedAt: string;
+  hosts: HostRecord[];
+  keys: KeyRecord[];
+  snippets: SnippetRecord[];
+  knownHosts: KnownHostRecord[];
+}
+
+interface Version2LocalConfigBundle {
+  app: "TermSnip";
+  version: 2;
+  exportedAt: string;
+  vault: LocalVaultMetadata;
   hosts: HostRecord[];
   keys: KeyRecord[];
   snippets: SnippetRecord[];
@@ -63,13 +81,14 @@ export interface LocalConfigImportAnalysis {
 }
 
 export interface PreparedLocalConfigImport {
-  bundle: LocalConfigBundle | LegacyLocalConfigBundle;
+  bundle: LocalConfigBundle | Version2LocalConfigBundle | LegacyLocalConfigBundle;
   analysis: LocalConfigImportAnalysis;
 }
 
 export interface LocalConfigMergeSection {
   added: number;
   updated: number;
+  removed: number;
   retainedLocal: number;
   unchanged: number;
   conflicts: number;
@@ -92,10 +111,19 @@ interface PreparedLocalConfigCollections {
   knownHosts: KnownHostRecord[];
 }
 
+interface PreparedLocalConfigDeletions {
+  hosts: VaultDeletionEntry[];
+  keys: VaultDeletionEntry[];
+  snippets: VaultDeletionEntry[];
+  knownHosts: VaultDeletionEntry[];
+}
+
 interface MergeResult<T> {
   records: T[];
   section: LocalConfigMergeSection;
 }
+
+type ImportedLocalConfigBundle = LocalConfigBundle | Version2LocalConfigBundle | LegacyLocalConfigBundle;
 
 export interface ApplyLocalConfigOptions {
   mode?: "replace" | "merge";
@@ -118,6 +146,7 @@ function createEmptyMergeSection(): LocalConfigMergeSection {
   return {
     added: 0,
     updated: 0,
+    removed: 0,
     retainedLocal: 0,
     unchanged: 0,
     conflicts: 0,
@@ -162,8 +191,56 @@ function isKnownHostArray(value: unknown): value is KnownHostRecord[] {
   return Array.isArray(value);
 }
 
+function isDeletionArray(value: unknown): value is VaultDeletionEntry[] {
+  return Array.isArray(value);
+}
+
+function normalizeDeletions(deletions?: Partial<VaultDeletionMap> | null): PreparedLocalConfigDeletions {
+  const compacted = compactDeletionMap({
+    hosts: isDeletionArray(deletions?.hosts)
+      ? deletions.hosts.filter(
+          (entry): entry is VaultDeletionEntry =>
+            isRecord(entry) &&
+            typeof entry.id === "string" &&
+            typeof entry.deletedAt === "string"
+        )
+      : [],
+    keys: isDeletionArray(deletions?.keys)
+      ? deletions.keys.filter(
+          (entry): entry is VaultDeletionEntry =>
+            isRecord(entry) &&
+            typeof entry.id === "string" &&
+            typeof entry.deletedAt === "string"
+        )
+      : [],
+    snippets: isDeletionArray(deletions?.snippets)
+      ? deletions.snippets.filter(
+          (entry): entry is VaultDeletionEntry =>
+            isRecord(entry) &&
+            typeof entry.id === "string" &&
+            typeof entry.deletedAt === "string"
+        )
+      : [],
+    knownHosts: isDeletionArray(deletions?.knownHosts)
+      ? deletions.knownHosts.filter(
+          (entry): entry is VaultDeletionEntry =>
+            isRecord(entry) &&
+            typeof entry.id === "string" &&
+            typeof entry.deletedAt === "string"
+        )
+      : [],
+  });
+
+  return {
+    hosts: compacted.hosts,
+    keys: compacted.keys,
+    snippets: compacted.snippets,
+    knownHosts: compacted.knownHosts,
+  };
+}
+
 function prepareImportedCollections(
-  importedBundle: LocalConfigBundle | LegacyLocalConfigBundle,
+  importedBundle: ImportedLocalConfigBundle,
   hostIds?: Set<string>
 ): PreparedLocalConfigCollections {
   const importedHosts = sortHostCollection(importedBundle.hosts);
@@ -190,21 +267,121 @@ function prepareImportedCollections(
   };
 }
 
+function prepareImportedDeletions(
+  importedBundle: ImportedLocalConfigBundle
+): PreparedLocalConfigDeletions {
+  if (importedBundle.version !== 3 || !("deletions" in importedBundle)) {
+    return normalizeDeletions();
+  }
+
+  return normalizeDeletions(importedBundle.deletions);
+}
+
+function getImportedVaultMetadata(importedBundle: ImportedLocalConfigBundle): LocalVaultMetadata | null {
+  if (
+    (importedBundle.version === 2 || importedBundle.version === 3) &&
+    importedBundle.vault?.schema === "local-first-vault"
+  ) {
+    return importedBundle.vault;
+  }
+
+  return null;
+}
+
+function mergeDeletionEntries(
+  localEntries: VaultDeletionEntry[],
+  importedEntries: VaultDeletionEntry[],
+  survivingIds: Set<string>
+) {
+  const mergedById = new Map<string, VaultDeletionEntry>();
+
+  for (const entry of [...localEntries, ...importedEntries]) {
+    if (survivingIds.has(entry.id)) {
+      continue;
+    }
+
+    const existing = mergedById.get(entry.id);
+    if (!existing || entry.deletedAt > existing.deletedAt) {
+      mergedById.set(entry.id, entry);
+    }
+  }
+
+  return [...mergedById.values()].sort((left, right) => right.deletedAt.localeCompare(left.deletedAt));
+}
+
+function buildAppliedDeletionMap(
+  mode: "replace" | "merge",
+  importedDeletions: PreparedLocalConfigDeletions,
+  appliedCollections: PreparedLocalConfigCollections
+): VaultDeletionMap {
+  if (mode === "replace") {
+    return importedDeletions;
+  }
+
+  const localDeletions = useVaultSyncStore.getState().deletions;
+  const survivingHostIds = new Set(appliedCollections.hosts.map((record) => record.id));
+  const survivingKeyIds = new Set(appliedCollections.keys.map((record) => record.id));
+  const survivingSnippetIds = new Set(appliedCollections.snippets.map((record) => record.id));
+  const survivingKnownHostIds = new Set(appliedCollections.knownHosts.map((record) => record.id));
+
+  return {
+    hosts: mergeDeletionEntries(localDeletions.hosts, importedDeletions.hosts, survivingHostIds),
+    keys: mergeDeletionEntries(localDeletions.keys, importedDeletions.keys, survivingKeyIds),
+    snippets: mergeDeletionEntries(localDeletions.snippets, importedDeletions.snippets, survivingSnippetIds),
+    knownHosts: mergeDeletionEntries(
+      localDeletions.knownHosts,
+      importedDeletions.knownHosts,
+      survivingKnownHostIds
+    ),
+  };
+}
+
 function mergeCollection<T extends { id: string; updatedAt: string }>(
   localRecords: T[],
   importedRecords: T[],
   sortRecords: (records: T[]) => T[],
+  deletions: VaultDeletionEntry[] = [],
   conflictResolution: "block" | "keep-local" | "prefer-imported" = "block"
 ): MergeResult<T> {
   const section = createEmptyMergeSection();
   const mergedRecords: T[] = [];
   const localById = new Map(localRecords.map((record) => [record.id, record]));
   const importedById = new Map(importedRecords.map((record) => [record.id, record]));
+  const deletionById = new Map(deletions.map((entry) => [entry.id, entry]));
   const allIds = new Set([...localById.keys(), ...importedById.keys()]);
 
   for (const id of allIds) {
     const localRecord = localById.get(id);
     const importedRecord = importedById.get(id);
+    const deletion = deletionById.get(id);
+
+    if (deletion && !importedRecord) {
+      if (!localRecord) {
+        continue;
+      }
+
+      if (localRecord.updatedAt < deletion.deletedAt) {
+        section.removed += 1;
+        continue;
+      }
+
+      if (localRecord.updatedAt > deletion.deletedAt) {
+        mergedRecords.push(localRecord);
+        section.retainedLocal += 1;
+        continue;
+      }
+
+      section.conflicts += 1;
+      section.conflictingIds.push(id);
+
+      if (conflictResolution === "prefer-imported") {
+        section.removed += 1;
+        continue;
+      }
+
+      mergedRecords.push(localRecord);
+      continue;
+    }
 
     if (!localRecord && importedRecord) {
       mergedRecords.push(importedRecord);
@@ -259,9 +436,15 @@ function mergeCollection<T extends { id: string; updatedAt: string }>(
 
 function buildMergePlan(
   localCollections: PreparedLocalConfigCollections,
-  importedCollections: PreparedLocalConfigCollections
+  importedCollections: PreparedLocalConfigCollections,
+  importedDeletions: PreparedLocalConfigDeletions
 ): LocalConfigMergePlan {
-  const mergedHosts = mergeCollection(localCollections.hosts, importedCollections.hosts, sortHostCollection);
+  const mergedHosts = mergeCollection(
+    localCollections.hosts,
+    importedCollections.hosts,
+    sortHostCollection,
+    importedDeletions.hosts
+  );
   const mergedHostIds = new Set(mergedHosts.records.map((host) => host.id));
   const normalizedLocalKeys = sortKeys(
     localCollections.keys.map((key) => ({
@@ -287,12 +470,23 @@ function buildMergePlan(
       targetHostIds: snippet.targetHostIds.filter((hostId) => mergedHostIds.has(hostId)),
     }))
   );
-  const mergedKeys = mergeCollection(normalizedLocalKeys, normalizedImportedKeys, sortKeys);
-  const mergedSnippets = mergeCollection(normalizedLocalSnippets, normalizedImportedSnippets, sortSnippets);
+  const mergedKeys = mergeCollection(
+    normalizedLocalKeys,
+    normalizedImportedKeys,
+    sortKeys,
+    importedDeletions.keys
+  );
+  const mergedSnippets = mergeCollection(
+    normalizedLocalSnippets,
+    normalizedImportedSnippets,
+    sortSnippets,
+    importedDeletions.snippets
+  );
   const mergedKnownHosts = mergeCollection(
     localCollections.knownHosts,
     importedCollections.knownHosts,
-    sortKnownHosts
+    sortKnownHosts,
+    importedDeletions.knownHosts
   );
   const hasConflicts =
     mergedHosts.section.conflicts > 0 ||
@@ -313,12 +507,14 @@ function buildMergePlan(
 function mergePreparedCollections(
   localCollections: PreparedLocalConfigCollections,
   importedCollections: PreparedLocalConfigCollections,
+  importedDeletions: PreparedLocalConfigDeletions,
   conflictResolution: "block" | "keep-local" | "prefer-imported" = "block"
 ) {
   const mergedHosts = mergeCollection(
     localCollections.hosts,
     importedCollections.hosts,
     sortHostCollection,
+    importedDeletions.hosts,
     conflictResolution
   );
   const mergedHostIds = new Set(mergedHosts.records.map((host) => host.id));
@@ -336,6 +532,7 @@ function mergePreparedCollections(
       }))
     ),
     sortKeys,
+    importedDeletions.keys,
     conflictResolution
   );
   const mergedSnippets = mergeCollection(
@@ -352,12 +549,14 @@ function mergePreparedCollections(
       }))
     ),
     sortSnippets,
+    importedDeletions.snippets,
     conflictResolution
   );
   const mergedKnownHosts = mergeCollection(
     localCollections.knownHosts,
     importedCollections.knownHosts,
     sortKnownHosts,
+    importedDeletions.knownHosts,
     conflictResolution
   );
 
@@ -374,7 +573,7 @@ export function buildLocalConfigBundle(): LocalConfigBundle {
 
   return {
     app: "TermSnip",
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     vault: {
       schema: "local-first-vault",
@@ -387,6 +586,7 @@ export function buildLocalConfigBundle(): LocalConfigBundle {
     keys: useKeysStore.getState().keys,
     snippets: useSnippetsStore.getState().snippets,
     knownHosts: useKnownHostsStore.getState().knownHosts,
+    deletions: compactDeletionMap(useVaultSyncStore.getState().deletions),
   };
 }
 
@@ -397,7 +597,7 @@ function parseImportedLocalConfigBundle(bundle: unknown): PreparedLocalConfigImp
 
   if (
     bundle.app !== "TermSnip" ||
-    (bundle.version !== 1 && bundle.version !== 2)
+    (bundle.version !== 1 && bundle.version !== 2 && bundle.version !== 3)
   ) {
     throw new Error("Config import failed: unsupported TermSnip config version.");
   }
@@ -418,13 +618,11 @@ function parseImportedLocalConfigBundle(bundle: unknown): PreparedLocalConfigImp
     throw new Error("Config import failed: known hosts are missing or invalid.");
   }
 
-  const importedBundle = bundle as unknown as LocalConfigBundle | LegacyLocalConfigBundle;
+  const importedBundle = bundle as unknown as ImportedLocalConfigBundle;
   const appState = useAppStore.getState();
   const importedCollections = prepareImportedCollections(importedBundle);
-  const importedVault =
-    importedBundle.version === 2 && importedBundle.vault?.schema === "local-first-vault"
-      ? importedBundle.vault
-      : null;
+  const importedDeletions = prepareImportedDeletions(importedBundle);
+  const importedVault = getImportedVaultMetadata(importedBundle);
   let strategy: LocalConfigImportStrategy = "legacy";
 
   if (importedVault) {
@@ -466,7 +664,8 @@ function parseImportedLocalConfigBundle(bundle: unknown): PreparedLocalConfigImp
                 snippets: useSnippetsStore.getState().snippets,
                 knownHosts: useKnownHostsStore.getState().knownHosts,
               },
-              importedCollections
+              importedCollections,
+              importedDeletions
             )
           : null,
     },
@@ -495,11 +694,13 @@ export function applyImportedLocalConfigBundle(bundle: unknown, options: ApplyLo
     knownHosts: useKnownHostsStore.getState().knownHosts,
   };
   const importedCollections = prepareImportedCollections(importedBundle);
+  const importedDeletions = prepareImportedDeletions(importedBundle);
   const mergedCollections =
     mode === "merge"
       ? mergePreparedCollections(
           currentCollections,
           importedCollections,
+          importedDeletions,
           options.conflictResolution ? conflictResolution : "block"
         )
       : null;
@@ -524,18 +725,22 @@ export function applyImportedLocalConfigBundle(bundle: unknown, options: ApplyLo
     mode === "merge" ? mergedCollections?.snippets.records ?? [] : importedCollections.snippets;
   const appliedKnownHosts =
     mode === "merge" ? mergedCollections?.knownHosts.records ?? [] : importedCollections.knownHosts;
+  const nextDeletions = buildAppliedDeletionMap(mode, importedDeletions, {
+    hosts: appliedHosts,
+    keys: appliedKeys,
+    snippets: appliedSnippets,
+    knownHosts: appliedKnownHosts,
+  });
 
   useHostsStore.setState((state) => ({ ...state, hosts: appliedHosts }));
   useKeysStore.setState((state) => ({ ...state, keys: appliedKeys }));
   useSnippetsStore.setState((state) => ({ ...state, snippets: appliedSnippets }));
   useKnownHostsStore.setState((state) => ({ ...state, knownHosts: appliedKnownHosts }));
-  if (
-    importedBundle.version === 2 &&
-    importedBundle.vault?.schema === "local-first-vault" &&
-    importedBundle.vault.vaultId
-  ) {
-    useAppStore.getState().setVaultId(importedBundle.vault.vaultId);
-    useAppStore.getState().setLastAppliedSnapshotId(importedBundle.vault.snapshotId);
+  useVaultSyncStore.getState().replaceDeletions(nextDeletions);
+  const importedVault = getImportedVaultMetadata(importedBundle);
+  if (importedVault?.vaultId) {
+    useAppStore.getState().setVaultId(importedVault.vaultId);
+    useAppStore.getState().setLastAppliedSnapshotId(importedVault.snapshotId);
   } else {
     useAppStore.getState().setLastAppliedSnapshotId(null);
   }
@@ -567,13 +772,7 @@ export function applyImportedLocalConfigBundle(bundle: unknown, options: ApplyLo
     mode,
     mergePlan: preparedImport.analysis.mergePlan,
     conflictResolution: mode === "merge" ? (hasMergeConflicts ? conflictResolution : null) : null,
-    snapshotId:
-      importedBundle.version === 2 && importedBundle.vault?.snapshotId
-        ? importedBundle.vault.snapshotId
-        : null,
-    vaultId:
-      importedBundle.version === 2 && importedBundle.vault?.vaultId
-        ? importedBundle.vault.vaultId
-        : useAppStore.getState().vaultId,
+    snapshotId: importedVault?.snapshotId ?? null,
+    vaultId: importedVault?.vaultId ?? useAppStore.getState().vaultId,
   };
 }

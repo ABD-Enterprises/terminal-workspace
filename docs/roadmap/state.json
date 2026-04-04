@@ -1,10 +1,10 @@
 {
-  "updated_at": "2026-04-04T15:38:18-04:00",
-  "last_updated": "2026-04-04T15:38:18-04:00",
+  "updated_at": "2026-04-04T19:32:30-04:00",
+  "last_updated": "2026-04-04T19:32:30-04:00",
   "version": "0.1.0",
-  "current_phase": "vault-sync-architecture",
+  "current_phase": "macos-solo-protocols-and-local-shell",
   "current_phase_status": "in_progress",
-  "current_phase_branch": "phase/vault-sync-architecture",
+  "current_phase_branch": "phase/macos-protocol-hosts-and-local-shell",
   "completed_phases": [
     {
       "id": "web-demo-quality",
@@ -47,17 +47,38 @@
       "title": "Bootstrap",
       "status": "completed",
       "completed_at": "2026-04-04T15:09:15-04:00"
+    },
+    {
+      "id": "vault-sync-architecture",
+      "title": "Vault and sync architecture",
+      "status": "completed",
+      "completed_at": "2026-04-04T17:47:46-04:00"
+    },
+    {
+      "id": "workflow-runtime-modernization",
+      "title": "GitHub Actions runtime modernization",
+      "status": "completed",
+      "completed_at": "2026-04-04T18:40:56-04:00"
     }
   ],
   "upcoming_phases": [
+    {
+      "id": "macos-network-protocol-execution",
+      "title": "Executable telnet, serial, and mosh transports",
+      "priority": 1,
+      "depends_on": [
+        "macos-solo-protocols-and-local-shell"
+      ],
+      "rationale": "Hosts are now protocol-aware and the native shell supports a real local session, but telnet, serial, and mosh remain inventory-only until their runtime surfaces and UX guardrails are implemented."
+    },
     {
       "id": "release-workflow-live-verification",
       "title": "Live GitHub release workflow verification",
       "priority": 1,
       "depends_on": [
-        "release-credential-portability-hardening"
+        "release-workflow-secret-provisioning"
       ],
-      "rationale": "The CI release workflow and GitHub publish script are implemented and dry-run validated, but they still need one live repository-backed execution with production secrets."
+      "rationale": "The hosted release workflow now has a shared secret-contract tool and a branch-safe preview path, but it still needs real signing and notarization secret values before a live run can progress past preflight."
     }
   ],
   "risk_remediation_phases": [
@@ -104,7 +125,17 @@
       "source_risk_ids": [
         "risk-github-release-workflow-not-live-validated"
       ],
-      "rationale": "The repository now has a CI release workflow and publish script, but the GitHub-hosted signing, notarization, promotion, and release-upload path still needs one live run with repository secrets."
+      "rationale": "The repository now has a GitHub-hosted release workflow, and the verification branch has executed it live; the remaining blocker is provisioning the required secrets so the run can proceed past preflight."
+    },
+    {
+      "id": "release-workflow-secret-provisioning",
+      "title": "GitHub release secret provisioning",
+      "priority": "high",
+      "source_risk_ids": [
+        "risk-github-release-workflow-missing-secrets",
+        "risk-local-release-secret-source-material-missing"
+      ],
+      "rationale": "The hosted release workflow now shares one audited secret contract and deterministic preflight, but GitHub still lacks the required secrets and the local workstation does not expose exportable signing/notary material for automated provisioning."
     }
   ],
   "tasks": [
@@ -178,20 +209,72 @@
     {
       "id": "task-vault-sync-conflict-resolution",
       "title": "Handle record deletions and user-resolvable conflicts for vault snapshot merges",
-      "status": "in_progress",
+      "status": "completed",
+      "completed_at": "2026-04-04T16:52:13-04:00",
       "phase": "vault-sync-architecture"
     },
     {
       "id": "task-vault-sync-deletion-semantics",
       "title": "Model deletions and tombstones for vault snapshot merges",
-      "status": "pending",
+      "status": "completed",
+      "completed_at": "2026-04-04T16:52:13-04:00",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-remote-contract",
+      "title": "Define the remote vault exchange contract for encrypted snapshot sync",
+      "status": "completed",
+      "completed_at": "2026-04-04T17:14:32-04:00",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-tombstone-retention",
+      "title": "Add tombstone retention and compaction rules for vault snapshot merges",
+      "status": "completed",
+      "completed_at": "2026-04-04T17:18:36-04:00",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-crypto-material-plan",
+      "title": "Define key material rotation and authentication rules for remote vault envelopes",
+      "status": "completed",
+      "completed_at": "2026-04-04T17:31:36-04:00",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-trust-policy-adoption",
+      "title": "Persist and apply trusted remote sync key policies at sync boundaries",
+      "status": "completed",
+      "completed_at": "2026-04-04T17:41:32-04:00",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-vault-sync-trust-policy-management",
+      "title": "Expose trusted remote sync key policies for operator bootstrap and management",
+      "status": "completed",
+      "completed_at": "2026-04-04T17:47:46-04:00",
       "phase": "vault-sync-architecture"
     },
     {
       "id": "task-release-workflow-live-verification",
       "title": "Run the GitHub-hosted macOS release workflow with live repository secrets",
-      "status": "pending",
+      "status": "blocked",
       "phase": "release-workflow-live-verification"
+    },
+    {
+      "id": "task-release-workflow-secret-provisioning",
+      "title": "Provision required GitHub signing and notarization secrets for the hosted macOS release workflow",
+      "status": "blocked",
+      "phase": "release-workflow-secret-provisioning",
+      "blocked_at": "2026-04-04T18:54:29-04:00",
+      "blocked_reason": "GitHub has no configured release secrets and the local workstation only exposes the Developer ID identity, not exportable certificate/password or notarization credentials."
+    },
+    {
+      "id": "task-workflow-runtime-modernization",
+      "title": "Upgrade GitHub-hosted actions to native Node 24 targets where available",
+      "status": "completed",
+      "completed_at": "2026-04-04T18:40:56-04:00",
+      "phase": "workflow-runtime-modernization"
     },
     {
       "id": "task-bootstrap-state-contract",
@@ -210,6 +293,46 @@
       "title": "Enforce the runtime guardrail validator on pull requests",
       "status": "completed",
       "phase": "bootstrap"
+    },
+    {
+      "id": "task-release-secret-audit-tooling",
+      "title": "Add shared GitHub release secret audit, validation, and apply tooling",
+      "status": "completed",
+      "completed_at": "2026-04-04T18:54:29-04:00",
+      "phase": "release-workflow-secret-provisioning"
+    },
+    {
+      "id": "task-release-secret-source-material-capture",
+      "title": "Capture exportable signing certificate material and notarization credentials for GitHub secret provisioning",
+      "status": "pending",
+      "phase": "release-workflow-secret-provisioning"
+    },
+    {
+      "id": "task-host-protocol-model",
+      "title": "Make hosts protocol-aware across inventory, filters, and session creation",
+      "status": "completed",
+      "completed_at": "2026-04-04T19:32:30-04:00",
+      "phase": "macos-solo-protocols-and-local-shell"
+    },
+    {
+      "id": "task-native-local-shell-session",
+      "title": "Launch a real native local shell session through the Tauri PTY bridge",
+      "status": "completed",
+      "completed_at": "2026-04-04T19:32:30-04:00",
+      "phase": "macos-solo-protocols-and-local-shell"
+    },
+    {
+      "id": "task-protocol-aware-ui-guardrails",
+      "title": "Hide or disable SSH-only features for non-SSH protocols across host and session UI",
+      "status": "completed",
+      "completed_at": "2026-04-04T19:32:30-04:00",
+      "phase": "macos-solo-protocols-and-local-shell"
+    },
+    {
+      "id": "task-network-protocol-runtime-support",
+      "title": "Implement executable telnet, serial, and mosh transports on top of the protocol-aware host model",
+      "status": "pending",
+      "phase": "macos-network-protocol-execution"
     }
   ],
   "risks": [
@@ -271,9 +394,27 @@
       "id": "risk-github-release-workflow-not-live-validated",
       "title": "GitHub release workflow has not been executed with live repository secrets",
       "severity": "low",
+      "status": "resolved",
+      "summary": "The GitHub-hosted release workflow now runs on the verification branch and reaches the hosted preflight gate on Actions.",
+      "assigned_phase": "release-workflow-live-verification",
+      "resolved_at": "2026-04-04T18:09:48-04:00"
+    },
+    {
+      "id": "risk-github-release-workflow-missing-secrets",
+      "title": "GitHub-hosted release workflow is missing signing and notarization secrets",
+      "severity": "high",
       "status": "open",
-      "summary": "The CI release workflow and GitHub publish script are implemented and dry-run validated locally, but the repository has not yet executed that workflow with real signing and notarization secrets.",
-      "assigned_phase": "release-workflow-live-verification"
+      "summary": "The live hosted run on Actions now fails deterministically in the release-secret preflight because `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_KEYCHAIN_PASSWORD`, `MACOS_SIGN_IDENTITY`, and all notarization credential paths are unset in GitHub.",
+      "assigned_phase": "release-workflow-secret-provisioning"
+    },
+    {
+      "id": "risk-github-actions-node20-runtime-targets",
+      "title": "Pinned GitHub actions still target the deprecated Node 20 runtime",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "The workflows now use the current action majors (`actions/checkout@v6`, `actions/setup-node@v6`, `actions/upload-artifact@v7`, and `pnpm/action-setup@v5`), and the hosted release run on the modernization branch no longer emits the Node 20 runtime deprecation annotation.",
+      "assigned_phase": "workflow-runtime-modernization",
+      "resolved_at": "2026-04-04T18:40:56-04:00"
     },
     {
       "id": "risk-vault-imports-replace-local-state",
@@ -288,9 +429,62 @@
       "id": "risk-vault-merge-deletions-and-conflicts",
       "title": "Vault merges do not yet model deletions or user-resolvable conflicts",
       "severity": "medium",
+      "status": "resolved",
+      "summary": "Same-vault imports now carry tombstone deletions, remove superseded local records during merge, and let timestamp-tied conflicts keep local or prefer imported state.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T16:52:13-04:00"
+    },
+    {
+      "id": "risk-vault-tombstones-have-no-retention-policy",
+      "title": "Vault tombstones have no retention or compaction policy",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Deletion tombstones are now deduplicated, age-limited, and capped per entity kind before persistence, import analysis, and local export, preventing unbounded local snapshot growth.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:18:36-04:00"
+    },
+    {
+      "id": "risk-vault-remote-envelope-has-no-key-rotation-rules",
+      "title": "Remote vault envelopes do not yet define key rotation or signer trust rules",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Remote vault envelopes now have an explicit trust policy model with allowed vault scopes, key validity windows, rotation thresholds, retirement cutoffs, and replacement key IDs.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:31:36-04:00"
+    },
+    {
+      "id": "risk-vault-trust-policy-not-persisted",
+      "title": "Remote sync trust policies are not yet persisted or enforced by runtime workflows",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Remote sync trust policies now persist in a dedicated store and the runtime envelope inspection path loads local vault context plus that policy automatically before accepting envelopes.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:41:32-04:00"
+    },
+    {
+      "id": "risk-vault-trust-policy-has-no-management-surface",
+      "title": "Trusted sync key policies have no operator management or bootstrap surface",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Settings now exposes trusted sync key import/export, allow-unknown-key policy control, explicit trusted-key edits, and operator bootstrap distribution for persisted remote sync trust rules.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:47:46-04:00"
+    },
+    {
+      "id": "risk-local-release-secret-source-material-missing",
+      "title": "Local workstation does not expose exportable release secret material",
+      "severity": "high",
       "status": "open",
-      "summary": "Same-vault imports now merge additive records and can resolve equal-timestamp conflicts by keeping local or preferring imported data, but the merge path still keeps local-only records by default because deletion tombstones are not modeled.",
-      "assigned_phase": "vault-sync-architecture"
+      "summary": "The repo can detect the local Developer ID identity, but there is no P12 bundle, certificate password, keychain password, or notarization credential material in env files or accessible local export paths, so automated GitHub secret provisioning cannot complete from this machine state alone.",
+      "assigned_phase": "release-workflow-secret-provisioning"
+    },
+    {
+      "id": "risk-non-ssh-protocols-inventory-only",
+      "title": "Telnet, serial, and mosh are modeled but not executable yet",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The host model and UI now understand multiple protocols and a real native local shell session exists, but telnet, serial, and mosh entries still stop at inventory and cannot open a live transport yet.",
+      "assigned_phase": "macos-network-protocol-execution"
     }
   ],
   "opportunities": [
@@ -309,17 +503,35 @@
       "impact": "high",
       "effort": "high",
       "assigned_phase": "vault-sync-architecture",
-      "summary": "Local vault snapshots now carry stable `vaultId`, `sourceDeviceId`, `snapshotId`, and `baseSnapshotId` metadata, and the UI previews same-vault imports, merges non-conflicting records, and offers explicit conflict resolution modes before apply.",
-      "status": "conflict-resolution-established"
+      "summary": "Local vault snapshots now carry stable lineage metadata, same-vault imports merge and delete records before apply, tombstones compact automatically, remote exchange envelopes include persisted trusted-key policy enforcement with digest verification plus rotation and retirement rules, and operators can now import, export, and manage trusted sync keys in Settings.",
+      "status": "architecture-defined"
     },
     {
       "id": "opp-notarized-release-publishing",
       "title": "Publish promoted notarized artifacts through CI-backed release channels",
       "impact": "medium",
       "effort": "medium",
-      "assigned_phase": "release-workflow-live-verification",
-      "summary": "The repo now includes a CI release workflow plus a GitHub publish script and promoted release notes, and the remaining step is one live GitHub-backed verification run.",
-      "status": "implemented-awaiting-live-verification"
+      "assigned_phase": "release-workflow-secret-provisioning",
+      "summary": "The repo now includes a CI release workflow plus a GitHub publish script, the workflow has been executed live on GitHub Actions, and the remaining step is provisioning release secrets so the hosted path can complete.",
+      "status": "live-run-blocked-by-secrets"
+    },
+    {
+      "id": "opp-workflow-runtime-modernization",
+      "title": "Keep workflow dependencies aligned with current hosted action runtimes",
+      "impact": "low",
+      "effort": "low",
+      "assigned_phase": "workflow-runtime-modernization",
+      "summary": "The workflows now run on current major action releases and no longer emit the Node 20 hosted runtime deprecation warning during live GitHub Actions execution.",
+      "status": "realized"
+    },
+    {
+      "id": "opp-local-shell-daily-driver",
+      "title": "Use protocol-aware hosts and a native local shell as the solo-macOS foundation",
+      "impact": "high",
+      "effort": "medium",
+      "assigned_phase": "macos-solo-protocols-and-local-shell",
+      "summary": "Hosts now carry explicit protocol metadata and the native bridge can launch a real local login shell, which establishes the foundation for local terminal workflows, runbooks, session history, and broader protocol parity on top of one inventory model.",
+      "status": "foundation-established"
     }
   ],
   "incidents": [
@@ -346,6 +558,24 @@
       "date": "2026-04-04",
       "status": "resolved",
       "summary": "The first signed release rebuild surfaced stale forward/snippet test payloads and a reused Response test harness bug; both were fixed before the final validation pass."
+    },
+    {
+      "id": "incident-2026-04-04-release-workflow-yaml",
+      "date": "2026-04-04",
+      "status": "resolved",
+      "summary": "The hosted release workflow initially parsed into zero-job failures because the certificate import heredoc was not valid YAML; the workflow now parses locally and runs real jobs on GitHub Actions."
+    },
+    {
+      "id": "incident-2026-04-04-release-workflow-missing-secrets",
+      "date": "2026-04-04",
+      "status": "blocked-external",
+      "summary": "The first real hosted release runs now fail in a deterministic preflight because the required signing and notarization secrets are not configured in GitHub."
+    },
+    {
+      "id": "incident-2026-04-04-actions-node20-warning",
+      "date": "2026-04-04",
+      "status": "resolved",
+      "summary": "The initial live hosted release verification emitted Node 20 deprecation annotations from pinned action versions; upgrading to the latest major action releases removed the warning on the modernization-branch run."
     }
   ],
   "decisions": [
@@ -390,10 +620,34 @@
       "date": "2026-04-04",
       "title": "Carry stable vault metadata in local snapshot exports",
       "summary": "The exported local snapshot format now includes a shared vault identifier, source device identifier, and snapshot identifier so future sync work can build on stable identities instead of a flat config dump."
+    },
+    {
+      "id": "dec-release-branch-verification-path",
+      "date": "2026-04-04",
+      "title": "Verify hosted macOS release on a dedicated phase branch",
+      "summary": "The hosted release workflow now runs on the dedicated verification branch, synthesizes a preview tag/channel for branch pushes, and publishes against the branch SHA so GitHub Actions can be exercised safely before a default-branch release."
+    },
+    {
+      "id": "dec-release-secret-preflight",
+      "date": "2026-04-04",
+      "title": "Fail hosted release runs before signing when secrets are missing",
+      "summary": "The GitHub-hosted release workflow now validates signing and notarization secrets in a dedicated preflight step and only uploads artifacts when release artifacts actually exist."
+    },
+    {
+      "id": "dec-workflow-action-major-upgrade",
+      "date": "2026-04-04",
+      "title": "Use current major GitHub action releases in all workflows",
+      "summary": "The CI, validation, and hosted release workflows now use `actions/checkout@v6`, `actions/setup-node@v6`, `actions/upload-artifact@v7`, and `pnpm/action-setup@v5` so hosted runs no longer emit the Node 20 runtime deprecation annotation."
+    },
+    {
+      "id": "dec-protocol-aware-hosts-and-local-shell",
+      "date": "2026-04-04",
+      "title": "Make hosts protocol-aware and ship a native local shell first",
+      "summary": "Hosts now carry explicit protocol metadata across inventory and session state, the native shell can launch a real macOS login shell through the Tauri PTY bridge, and SSH-only features remain gated behind protocol-aware UI guardrails."
     }
   ],
   "environment_status": {
-    "branch": "phase/release-credential-portability-hardening",
+    "branch": "phase/macos-protocol-hosts-and-local-shell",
     "dirty": true,
     "os": "macos",
     "node": "v25.9.0",
@@ -412,7 +666,10 @@
     "validate": "passed",
     "deployment": "not_deployed",
     "native_notary_auth_test": "passed",
-    "native_publish_dry_run": "passed"
+    "native_publish_dry_run": "passed",
+    "github_release_workflow_live_run": "failed (missing signing/notary secrets)",
+    "github_release_workflow_node24_opt_in": "enabled",
+    "github_release_workflow_current_action_majors": "passed"
   },
   "deployment_history": [],
   "promotion_history": [

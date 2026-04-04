@@ -1,5 +1,5 @@
 import type { PortForwardRecord } from "../types/forward";
-import type { HostAuthMethod } from "../types/host";
+import type { HostAuthMethod, HostProtocol } from "../types/host";
 import type { KeyGenerationType } from "../types/key";
 import type { RemoteFileEntry } from "../types/transfer";
 
@@ -30,6 +30,7 @@ export interface BackendHostConnection {
   passphrase: string;
   port: number;
   privateKeyPath: string;
+  protocol: HostProtocol;
   sftpRoot?: string;
   username: string;
 }
