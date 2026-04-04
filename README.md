@@ -4,10 +4,9 @@ A local-first macOS SSH client starter repo inspired by the usability patterns o
 
 ## Current Focus
 
-The active branch completes native trust and key tooling: the React/Vite workspace already boots
-from a fresh checkout, browser smoke coverage still protects the demo path, and the native macOS
-shell now owns key inspection, key generation, and known-host scanning in addition to the existing
-Rust-backed session, SFTP, snippet, and forward flows.
+The active phase is packaging and release hardening: the native macOS shell already owns sessions,
+SFTP, snippets, forwards, trust, and key tooling, and this branch adds release manifests, signed
+bundle verification, preview release artifacts in CI, and explicit macOS packaging diagnostics.
 
 ## Quick Start
 
@@ -25,12 +24,15 @@ Rust-backed session, SFTP, snippet, and forward flows.
 - `npm run native:key` runs the fast local native key inspection and generation fixture.
 - `npm run native:trust` runs the macOS localhost trust/key fixture for native key inspection,
   generation, and known-host scans.
+- `npm run native:release:check` builds the native app bundle, writes a release manifest into
+  `artifacts/release/`, and verifies the signed macOS package contract.
 - `TERMSNIP_RUN_E2E=1 npm run validate` runs lint, unit/integration tests, build, macOS native
   trust tooling when available, and browser e2e.
 
 ## Demo Mode
 
-Demo mode is enabled by default and can be toggled in Settings. When enabled:
+Demo mode is enabled by default in the browser review surface and disabled by default in the native
+Tauri shell. It can be toggled in Settings. When enabled:
 
 - sessions stay on the in-app mock terminal transport
 - SFTP uses a deterministic in-memory filesystem
@@ -54,8 +56,8 @@ The native-shell bridge now covers the app-facing transport seam:
   verification
 - runtime passwords and passphrases persist through macOS Keychain in native mode
 
-The browser build still uses the backend path by design, while the native shell keeps shrinking the
-Node-owned surface ahead of packaging and release hardening.
+The browser build still uses the backend path by design, while the native shell now adds a release
+manifest, signed bundle verification, and CI preview artifacts ahead of notarization and promotion.
 
 ## Scope
 
@@ -84,6 +86,8 @@ Node-owned surface ahead of packaging and release hardening.
 - `npm run native:trust` runs the macOS localhost trust/key fixture for key inspection, generation,
   and known-host scans
 - `npm run native:fixtures` runs the macOS localhost transport fixture for direct SSH, jump-host SSH, SFTP, forwards, and snippets
+- `npm run native:release:check` writes `artifacts/release/latest-macos-release.json` plus the
+  versioned zip, manifest, and signing logs for the current native bundle
 - `npm run native:build` regenerates icons and runs `cargo build --manifest-path src-tauri/Cargo.toml`
 
 More setup and milestone detail lives in [docs/development.md](/Users/deffenda/Code/term-snip/docs/development.md) and [docs/roadmap/roadmap.md](/Users/deffenda/Code/term-snip/docs/roadmap/roadmap.md).

@@ -19,7 +19,18 @@
         "Local validation stays focused and fast for the current phase.",
         "The broader localhost transport fixture remains explicit and can be tracked separately when local sandboxing interferes."
       ]
+    },
+    {
+      "id": "dec-release-manifest-and-sign-mode",
+      "date": "2026-04-04",
+      "title": "Make macOS packaging explicit and machine-readable",
+      "decision": "Use `MACOS_SIGN_MODE=require` for the local signed release gate, keep `MACOS_SIGN_MODE=skip` for CI preview artifacts, and emit release manifests plus verification logs into `artifacts/release/`.",
+      "consequences": [
+        "Release validation now has a machine-readable contract instead of relying on ad hoc terminal output.",
+        "CI can build preview release artifacts without access to signing secrets.",
+        "Notarization remains a separate tracked release blocker because `spctl` still reports `not_accepted`."
+      ]
     }
   ],
-  "updated_at": "2026-04-04T05:04:59-04:00"
+  "updated_at": "2026-04-04T08:23:51-04:00"
 }

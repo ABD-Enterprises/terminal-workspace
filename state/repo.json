@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-04-04T05:04:59-04:00",
+  "generated_at": "2026-04-04T08:23:51-04:00",
   "repo_root": "/Users/deffenda/Code/term-snip",
-  "branch": "phase/native-trust-and-key-tooling",
-  "commit": "b473857861dcbd73d427755778239f7fa5a9f0a6",
+  "branch": "phase/packaging-and-release-hardening",
+  "commit": "55ade978d075588a54d369421648f7ae74cdc321",
   "dirty": true,
   "name": "terminal-workspace",
   "version": "0.1.0"

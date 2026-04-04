@@ -2,6 +2,22 @@
 
 ## 2026-04-04
 
+### Packaging And Release Hardening
+
+- `MACOS_SIGN_MODE=skip npm run native:release:check`
+  - built the native bundle, wrote the versioned zip plus JSON manifest, and verified the preview
+    packaging path
+- `npm run native:release:check`
+  - built the signed native bundle with `MACOS_SIGN_MODE=require`
+  - confirmed the final manifest now reports `com.abdenterprises.terminalworkspace`
+  - `codesign` verification passed
+  - `spctl` assessment returned `not_accepted`, which is now tracked as the notarization blocker
+- `TERMSNIP_RUN_E2E=1 npm run validate` from an unsandboxed shell
+  - Vitest passed 12 files and 33 tests
+  - desktop production build passed
+  - `native_transport_fixtures::native_trust_tooling_fixture_flow` passed
+  - Playwright passed 5 route and workflow specs
+
 ### Passed
 
 - `npm run native:check`

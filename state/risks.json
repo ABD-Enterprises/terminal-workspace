@@ -15,7 +15,7 @@
       "severity": "medium",
       "status": "open",
       "summary": "Browser mode still uses backend transport while native mode uses Tauri/Rust, so regressions need both browser e2e and macOS native fixture coverage.",
-      "assigned_phase": "packaging-and-release-hardening"
+      "assigned_phase": "multi-surface-regression-hardening"
     },
     {
       "id": "risk-local-fixtures-need-unsandboxed-runtime",
@@ -24,7 +24,24 @@
       "status": "open",
       "summary": "Temporary localhost sshd fixtures fail inside the default desktop sandbox and need an unsandboxed shell to produce valid trust and transport results.",
       "assigned_phase": "local-fixture-sandbox-hardening"
+    },
+    {
+      "id": "risk-placeholder-bundle-identifier",
+      "title": "Native bundle still used a placeholder macOS bundle identifier",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "The signed bundle and release manifest still emitted `com.example.terminalworkspace`, which is invalid release metadata for a real macOS package.",
+      "assigned_phase": "packaging-and-release-hardening",
+      "resolved_at": "2026-04-04T08:23:51-04:00"
+    },
+    {
+      "id": "risk-macos-bundle-not-notarized",
+      "title": "Signed macOS bundle is not notarized",
+      "severity": "high",
+      "status": "open",
+      "summary": "The package now signs cleanly and produces release manifests, but `spctl` still reports `not_accepted`, so the artifact is not ready for broad Gatekeeper-safe distribution.",
+      "assigned_phase": "notarization-and-release-promotion"
     }
   ],
-  "updated_at": "2026-04-04T05:04:59-04:00"
+  "updated_at": "2026-04-04T08:23:51-04:00"
 }

@@ -2,27 +2,29 @@
 
 ## Current Focus
 
-Complete native trust and key tooling so the macOS app can own SSH trust establishment and key
-management end-to-end while the browser/demo path stays stable for screenshots, review, and
-contract coverage.
+Harden packaging and release diagnostics so the native macOS app can produce a repeatable signed
+bundle, release manifest, CI preview artifact, and machine-readable verification evidence before
+notarization and promotion.
 
 ## Active Phases
 
-- Native trust and key tooling
+- Packaging and release hardening
 - Success criteria:
-  - native mode routes key inspection, key generation, and known-host scans through Tauri/Rust
-  - `npm run native:trust` passes on macOS runners and locally when the fixture SSH daemon can run
-  - browser mode retains the backend path without changing the UI contract
-  - `src-tauri/src/main.rs` stays focused on app boot and command wiring instead of trust/key internals
+  - `npm run native:release:check` writes a release manifest, zipped bundle, and verification logs
+  - signed local macOS packaging verifies with `codesign`
+  - CI publishes a native preview artifact without requiring signing secrets
+  - release metadata no longer ships placeholder bundle identifiers
 
 ## Upcoming Phases
 
-- Packaging and release hardening
+- Notarization and release promotion
+- Multi-surface regression hardening
 - Native transport fixture hardening
 
 ## Risks And Opportunities
 
 - Risk: the browser path and native path intentionally diverge now, so transport regressions need both browser validation and macOS-native fixture coverage.
+- Risk: the local macOS bundle is signed, but it is still not notarized, so Gatekeeper assessment remains a release blocker.
 - Risk: the broader macOS localhost transport fixture still depends on an unsandboxed local runtime, so desktop-shell sandboxing can hide valid transport regressions if the wrong command context is used.
 - Opportunity: route-level code splitting, the backend proxy seam, Keychain-backed runtime secrets, Rust-owned SSH sessions, forwarding, snippets, native SFTP, and the new localhost fixture harness now give the app a tighter path toward a fully native transport stack.
-- Opportunity: trust/key tooling is now on the same native seam as the rest of the connection lifecycle, which makes packaging, signing, notarization, and release diagnostics the next highest-value phase.
+- Opportunity: the packaging branch now produces release manifests and CI preview artifacts, which makes notarization and promotion automation the next highest-value release phase.

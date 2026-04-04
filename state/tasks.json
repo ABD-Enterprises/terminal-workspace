@@ -21,8 +21,20 @@
     {
       "id": "task-packaging-release-hardening",
       "title": "Add packaging, signing, notarization, and release diagnostics hardening",
-      "status": "pending",
+      "status": "completed",
       "phase": "packaging-and-release-hardening"
+    },
+    {
+      "id": "task-notarization-release-promotion",
+      "title": "Automate notarization, stapling, and release promotion for the macOS bundle",
+      "status": "pending",
+      "phase": "notarization-and-release-promotion"
+    },
+    {
+      "id": "task-multi-surface-regression-hardening",
+      "title": "Expand regression coverage across browser and native transport surfaces",
+      "status": "pending",
+      "phase": "multi-surface-regression-hardening"
     },
     {
       "id": "task-local-fixture-sandbox-hardening",
@@ -31,5 +43,5 @@
       "phase": "local-fixture-sandbox-hardening"
     }
   ],
-  "updated_at": "2026-04-04T05:04:59-04:00"
+  "updated_at": "2026-04-04T08:23:51-04:00"
 }

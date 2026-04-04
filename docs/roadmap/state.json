@@ -1,9 +1,9 @@
 {
-  "updated_at": "2026-04-04T05:04:59-04:00",
+  "updated_at": "2026-04-04T08:23:51-04:00",
   "version": "0.1.0",
-  "current_phase": "native-trust-and-key-tooling",
+  "current_phase": "packaging-and-release-hardening",
   "current_phase_status": "validated",
-  "current_phase_branch": "phase/native-trust-and-key-tooling",
+  "current_phase_branch": "phase/packaging-and-release-hardening",
   "completed_phases": [
     {
       "id": "web-demo-quality",
@@ -20,25 +20,34 @@
   ],
   "upcoming_phases": [
     {
-      "id": "packaging-and-release-hardening",
-      "title": "Packaging and release hardening",
+      "id": "notarization-and-release-promotion",
+      "title": "Notarization and release promotion",
       "priority": 1,
       "depends_on": [
-        "native-trust-and-key-tooling"
+        "packaging-and-release-hardening"
       ],
-      "rationale": "Native trust and key tooling now sits on the same Tauri seam as sessions, SFTP, forwards, and snippets, so packaging, notarization, signing diagnostics, and release observability are the next highest-value work."
+      "rationale": "The repo now produces signed bundles, versioned zip artifacts, and release manifests, but Gatekeeper still rejects the bundle because notarization and promotion automation are not complete."
     },
     {
       "id": "vault-sync-architecture",
       "title": "Vault and sync architecture",
       "priority": 2,
       "depends_on": [
-        "packaging-and-release-hardening"
+        "notarization-and-release-promotion"
       ],
       "rationale": "With local-first native parity established, the next product opportunity is designing encrypted vaults, sync, and future team collaboration without reopening the transport boundary."
     }
   ],
   "risk_remediation_phases": [
+    {
+      "id": "multi-surface-regression-hardening",
+      "title": "Multi-surface regression hardening",
+      "priority": "medium",
+      "source_risk_ids": [
+        "risk-browser-native-divergence"
+      ],
+      "rationale": "Browser mode and native mode still use different transport stacks, so long-lived regression coverage needs a more explicit cross-surface matrix than the current browser validate path plus native fixtures."
+    },
     {
       "id": "local-fixture-sandbox-hardening",
       "title": "Local fixture sandbox hardening",
@@ -47,6 +56,15 @@
         "risk-local-fixtures-need-unsandboxed-runtime"
       ],
       "rationale": "The broader localhost SSH fixtures produce valid results when run unsandboxed, but desktop sandboxing still obscures them during local validation and should be hardened into a documented, lower-friction path."
+    },
+    {
+      "id": "notarization-and-release-promotion",
+      "title": "Notarization and release promotion",
+      "priority": "high",
+      "source_risk_ids": [
+        "risk-macos-bundle-not-notarized"
+      ],
+      "rationale": "The packaging phase now produces signed release artifacts and logs, but the macOS bundle still fails Gatekeeper assessment until notarization, stapling, and promotion are automated."
     }
   ],
   "risks": [
@@ -65,7 +83,7 @@
       "severity": "medium",
       "status": "open",
       "summary": "Browser mode still uses backend transport while native mode uses Tauri/Rust, so regressions need both browser e2e and macOS native fixture coverage.",
-      "assigned_phase": "packaging-and-release-hardening"
+      "assigned_phase": "multi-surface-regression-hardening"
     },
     {
       "id": "risk-local-fixtures-need-unsandboxed-runtime",
@@ -74,6 +92,23 @@
       "status": "open",
       "summary": "Temporary localhost sshd fixtures fail inside the default desktop sandbox and need an unsandboxed shell to produce valid trust and transport results.",
       "assigned_phase": "local-fixture-sandbox-hardening"
+    },
+    {
+      "id": "risk-placeholder-bundle-identifier",
+      "title": "Native bundle still used a placeholder macOS bundle identifier",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "The signed bundle and release manifest still emitted `com.example.terminalworkspace`, which is invalid release metadata for a real macOS package.",
+      "resolved_at": "2026-04-04T08:23:51-04:00",
+      "assigned_phase": "packaging-and-release-hardening"
+    },
+    {
+      "id": "risk-macos-bundle-not-notarized",
+      "title": "Signed macOS bundle is not notarized",
+      "severity": "high",
+      "status": "open",
+      "summary": "The package now signs cleanly and produces release manifests, but `spctl` still reports `not_accepted`, so the artifact is not ready for broad Gatekeeper-safe distribution.",
+      "assigned_phase": "notarization-and-release-promotion"
     }
   ],
   "opportunities": [
@@ -83,7 +118,8 @@
       "impact": "high",
       "effort": "medium",
       "assigned_phase": "packaging-and-release-hardening",
-      "summary": "The native shell now owns sessions, SFTP, snippets, forwards, trust, and key tooling, which makes packaging, notarization, and release diagnostics the next leverage point."
+      "status": "realized",
+      "summary": "The native shell now produces signed bundles, versioned release archives, machine-readable manifests, and CI preview artifacts."
     },
     {
       "id": "opp-vault-sync",
@@ -106,6 +142,12 @@
       "date": "2026-04-04",
       "status": "resolved-with-runbook",
       "summary": "Local macOS sshd fixtures failed inside the desktop sandbox; rerunning the native trust and transport suites unsandboxed produced valid passing results."
+    },
+    {
+      "id": "incident-2026-04-04-spctl-not-accepted",
+      "date": "2026-04-04",
+      "status": "open",
+      "summary": "The signed packaging gate now passes `codesign` but still records `spctl: not_accepted`, confirming notarization remains a release blocker."
     }
   ],
   "decisions": [
@@ -120,10 +162,16 @@
       "date": "2026-04-04",
       "title": "Split native validation by scope",
       "summary": "Keep `native:key` as the fast key regression, `native:trust` as the phase gate, and `native:fixtures` as the broader localhost transport suite that requires explicit unsandboxed execution."
+    },
+    {
+      "id": "dec-release-manifest-and-sign-mode",
+      "date": "2026-04-04",
+      "title": "Make macOS packaging explicit and machine-readable",
+      "summary": "Use an explicit `MACOS_SIGN_MODE=require` path for local signed bundles, a `skip` preview path for CI artifact generation, and emit release manifests plus verification logs into `artifacts/release/`."
     }
   ],
   "environment_status": {
-    "branch": "phase/native-trust-and-key-tooling",
+    "branch": "phase/packaging-and-release-hardening",
     "dirty": true,
     "os": "macos",
     "node": "v25.9.0",
@@ -134,6 +182,8 @@
     "native_key": "passed",
     "native_trust": "passed (unsandboxed)",
     "native_fixtures": "passed (unsandboxed)",
+    "native_release_preview": "passed",
+    "native_release_signed": "passed (codesign), spctl not_accepted",
     "validate": "passed (unsandboxed)",
     "deployment": "not_deployed"
   },

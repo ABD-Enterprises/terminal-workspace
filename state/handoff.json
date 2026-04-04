@@ -1,13 +1,13 @@
 {
-  "summary": "The native trust and key tooling phase is implemented and validated on phase/native-trust-and-key-tooling. Native mode now owns key inspection, key generation, and known-host scans; browser mode retains the backend path. Repo validation passed after refreshing stale Playwright selectors. Local macOS localhost SSH fixtures must be run unsandboxed for valid results.",
+  "summary": "The packaging-and-release-hardening phase is validated on phase/packaging-and-release-hardening. The repo now emits signed macOS release zips plus JSON manifests, CI preview release artifacts, and explicit signing diagnostics; the bundle identifier is no longer a placeholder. `codesign` passes, but `spctl` still reports `not_accepted`, so notarization remains the next release blocker.",
   "next_steps": [
-    "Start packaging-and-release-hardening on a new phase branch after review.",
-    "Reduce local desktop sandbox friction for localhost SSH fixtures in the dedicated remediation phase.",
-    "Decide when to promote the validated phase branch to CI review and merge."
+    "Execute notarization-and-release-promotion so the signed macOS bundle can pass Gatekeeper assessment and support promotion.",
+    "Execute multi-surface-regression-hardening to reduce the intentional browser/native transport drift risk.",
+    "Reduce local desktop sandbox friction for localhost SSH fixtures in the dedicated remediation phase."
   ],
   "blockers": [
-    "No code blocker remains for native trust/key tooling itself.",
-    "Packaging and release hardening still needs its own execution phase."
+    "The macOS release artifact is signed but not notarized.",
+    "Local macOS localhost SSH fixture suites still require an unsandboxed shell for valid results."
   ],
-  "updated_at": "2026-04-04T05:04:59-04:00"
+  "updated_at": "2026-04-04T08:23:51-04:00"
 }
