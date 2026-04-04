@@ -1,9 +1,10 @@
 {
-  "updated_at": "2026-04-04T09:07:17-04:00",
+  "updated_at": "2026-04-04T15:09:15-04:00",
+  "last_updated": "2026-04-04T15:09:15-04:00",
   "version": "0.1.0",
-  "current_phase": "release-credential-portability-hardening",
+  "current_phase": "bootstrap",
   "current_phase_status": "validated",
-  "current_phase_branch": "phase/release-credential-portability-hardening",
+  "current_phase_branch": "phase/bootstrap",
   "completed_phases": [
     {
       "id": "web-demo-quality",
@@ -107,6 +108,86 @@
         "risk-github-release-workflow-not-live-validated"
       ],
       "rationale": "The repository now has a CI release workflow and publish script, but the GitHub-hosted signing, notarization, promotion, and release-upload path still needs one live run with repository secrets."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-native-key-command-bridge",
+      "title": "Move native key inspection, generation, and known-host scanning into Tauri",
+      "status": "completed",
+      "phase": "native-trust-and-key-tooling"
+    },
+    {
+      "id": "task-native-trust-validation",
+      "title": "Add native trust and key regression coverage plus repo validation updates",
+      "status": "completed",
+      "phase": "native-trust-and-key-tooling"
+    },
+    {
+      "id": "task-docs-and-state-writeback",
+      "title": "Update docs, roadmap, validation log, bootstrap, and shared state",
+      "status": "completed",
+      "phase": "native-trust-and-key-tooling"
+    },
+    {
+      "id": "task-packaging-release-hardening",
+      "title": "Add packaging, signing, notarization, and release diagnostics hardening",
+      "status": "completed",
+      "phase": "packaging-and-release-hardening"
+    },
+    {
+      "id": "task-notarization-release-promotion",
+      "title": "Automate notarization, stapling, and release promotion for the macOS bundle",
+      "status": "completed",
+      "phase": "notarization-and-release-promotion"
+    },
+    {
+      "id": "task-multi-surface-regression-hardening",
+      "title": "Expand regression coverage across browser and native transport surfaces",
+      "status": "completed",
+      "phase": "multi-surface-regression-hardening"
+    },
+    {
+      "id": "task-release-credential-portability-hardening",
+      "title": "Move release credentials and promotion into a portable CI-backed release path",
+      "status": "completed",
+      "phase": "release-credential-portability-hardening"
+    },
+    {
+      "id": "task-local-fixture-sandbox-hardening",
+      "title": "Reduce local desktop sandbox friction for macOS localhost SSH fixtures",
+      "status": "completed",
+      "phase": "local-fixture-sandbox-hardening"
+    },
+    {
+      "id": "task-vault-snapshot-foundation",
+      "title": "Add stable vault metadata to local snapshot exports and imports",
+      "status": "completed",
+      "phase": "vault-sync-architecture"
+    },
+    {
+      "id": "task-release-workflow-live-verification",
+      "title": "Run the GitHub-hosted macOS release workflow with live repository secrets",
+      "status": "pending",
+      "phase": "release-workflow-live-verification"
+    },
+    {
+      "id": "task-bootstrap-state-contract",
+      "title": "Normalize canonical roadmap, shared state, agents, and prompts for bootstrap execution",
+      "status": "completed",
+      "phase": "bootstrap"
+    },
+    {
+      "id": "task-bootstrap-validator-enforcement",
+      "title": "Install runtime guardrail validation and record bootstrap evidence",
+      "status": "completed",
+      "phase": "bootstrap"
+    },
+    {
+      "id": "task-bootstrap-ci-gate",
+      "title": "Enforce the runtime guardrail validator on pull requests",
+      "status": "completed",
+      "phase": "bootstrap"
     }
   ],
   "risks": [

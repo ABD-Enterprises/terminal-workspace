@@ -59,7 +59,25 @@
       "title": "Run the GitHub-hosted macOS release workflow with live repository secrets",
       "status": "pending",
       "phase": "release-workflow-live-verification"
+    },
+    {
+      "id": "task-bootstrap-state-contract",
+      "title": "Normalize canonical roadmap, shared state, agents, and prompts for bootstrap execution",
+      "status": "completed",
+      "phase": "bootstrap"
+    },
+    {
+      "id": "task-bootstrap-validator-enforcement",
+      "title": "Install runtime guardrail validation and record bootstrap evidence",
+      "status": "completed",
+      "phase": "bootstrap"
+    },
+    {
+      "id": "task-bootstrap-ci-gate",
+      "title": "Enforce the runtime guardrail validator on pull requests",
+      "status": "completed",
+      "phase": "bootstrap"
     }
   ],
-  "updated_at": "2026-04-04T09:07:17-04:00"
+  "updated_at": "2026-04-04T15:09:15-04:00"
 }

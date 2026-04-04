@@ -1,56 +1,31 @@
 {
-  "branch": "phase/release-credential-portability-hardening",
-  "current_run_id": "2026-04-04-release-credential-portability-hardening",
-  "current_task": "Harden release credential portability, browser/native regression coverage, localhost native fixture execution, and vault snapshot metadata.",
-  "current_phase": "release-credential-portability-hardening",
-  "started_at": "2026-04-04T08:26:00-04:00",
-  "summary": "Implemented portable notary auth and CI publish workflow, added localhost fixture preflight plus broader native coverage, expanded browser/native seam tests, and upgraded local exports into sync-ready vault snapshots.",
-  "updated_at": "2026-04-04T09:07:17-04:00",
+  "branch": "phase/bootstrap",
+  "current_run_id": "2026-04-04-bootstrap",
+  "current_task": "Normalize canonical roadmap/state, install runtime guardrail validation, and wire pull-request CI enforcement.",
+  "current_phase": "bootstrap",
+  "started_at": "2026-04-04T15:05:24-04:00",
+  "summary": "Created the bootstrap agent and prompt contracts, added a runtime guardrails validator, wired a pull-request CI workflow, and recorded setup, test, and build evidence for the bootstrap branch.",
+  "updated_at": "2026-04-04T15:09:15-04:00",
   "status": "validated",
   "validation": [
     {
-      "id": "validation-native-notary-auth-test",
-      "command": "npm run native:notary:auth:test",
+      "id": "validation-bootstrap-setup",
+      "command": "npm run setup",
       "result": "passed"
     },
     {
-      "id": "validation-native-fixture-preflight",
-      "command": "bash ./scripts/native-fixture-preflight.sh trust",
+      "id": "validation-bootstrap-tests",
+      "command": "npm run test",
       "result": "passed"
     },
     {
-      "id": "validation-native-trust",
-      "command": "npm run native:trust",
+      "id": "validation-bootstrap-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
       "result": "passed"
     },
     {
-      "id": "validation-native-fixtures",
-      "command": "npm run native:fixtures",
-      "result": "passed"
-    },
-    {
-      "id": "validation-native-release-check",
-      "command": "npm run native:release:check",
-      "result": "passed"
-    },
-    {
-      "id": "validation-native-notarize-portable",
-      "command": "MACOS_NOTARY_PROFILE=BugNarratorNotary npm run native:notarize",
-      "result": "passed"
-    },
-    {
-      "id": "validation-native-promote-portable",
-      "command": "npm run native:promote",
-      "result": "passed"
-    },
-    {
-      "id": "validation-native-publish-dry-run",
-      "command": "npm run native:publish:dry-run",
-      "result": "passed"
-    },
-    {
-      "id": "validation-validate-hardening",
-      "command": "TERMSNIP_RUN_E2E=1 npm run validate",
+      "id": "validation-bootstrap-guardrails",
+      "command": "node ./tools/validators/enforce-runtime-guardrails.js --base phase/release-credential-portability-hardening",
       "result": "passed"
     }
   ]

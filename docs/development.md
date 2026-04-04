@@ -19,7 +19,18 @@
 - `npm run native:fixtures`: macOS localhost transport fixture test
 - `npm run native:notary:auth:test`: portable notarization auth dry run
 - `npm run native:publish:dry-run`: promoted GitHub release publish dry run
+- `npm run validate:guardrails`: execution/state/evidence validator
 - `TERMSNIP_RUN_E2E=1 npm run validate`: full lint/test/build/e2e pass
+
+## Execution Contracts
+
+- [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json) is canonical.
+- `/state/session.json`, `/state/tasks.json`, `/state/risks.json`, and `/state/decisions.json`
+  are the shared execution state layer.
+- [tools/validators/enforce-runtime-guardrails.js](/Users/deffenda/Code/term-snip/tools/validators/enforce-runtime-guardrails.js)
+  is the authoritative enforcement layer for evidence, phase, and risk integrity.
+- [.github/workflows/ci.yml](/Users/deffenda/Code/term-snip/.github/workflows/ci.yml) runs the
+  validator plus repo test/build gates on pull requests.
 
 ## Environment Files
 

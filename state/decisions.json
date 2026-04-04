@@ -72,7 +72,27 @@
         "Imports can adopt a shared vault identity without moving runtime secrets.",
         "Future sync and conflict-handling work can build on stable identifiers."
       ]
+    },
+    {
+      "id": "dec-bootstrap-canonical-state",
+      "date": "2026-04-04",
+      "title": "Treat roadmap state as the canonical execution contract",
+      "decision": "Use `docs/roadmap/state.json` as the canonical phase source and keep `/state/*` synchronized with it for every execution-bearing change.",
+      "consequences": [
+        "Phase, task, and risk drift now fail the validator instead of relying on reviewer memory.",
+        "Bootstrap execution leaves the repo with one authoritative state source instead of parallel trackers."
+      ]
+    },
+    {
+      "id": "dec-bootstrap-validator-gate",
+      "date": "2026-04-04",
+      "title": "Make runtime guardrails the pull-request gatekeeper",
+      "decision": "Run `tools/validators/enforce-runtime-guardrails.js` on every pull request before repo tests and build.",
+      "consequences": [
+        "Execution changes without state or evidence now fail fast in CI.",
+        "Deploy and docs phases can share one enforcement path instead of a parallel policy system."
+      ]
     }
   ],
-  "updated_at": "2026-04-04T09:07:17-04:00"
+  "updated_at": "2026-04-04T15:06:48-04:00"
 }
