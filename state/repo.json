@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-04-04T08:36:52-04:00",
+  "generated_at": "2026-04-04T08:39:18-04:00",
   "repo_root": "/Users/deffenda/Code/term-snip",
   "branch": "phase/notarization-and-release-promotion",
-  "commit": "eb6d7969d5d1a14828b02fc6ac6b3708b8d196a6",
-  "dirty": true,
+  "commit": "a08568b94d6cef565ea7b7f3a6c0be9b1bd1af8c",
+  "dirty": false,
   "name": "terminal-workspace",
   "version": "0.1.0"
 }

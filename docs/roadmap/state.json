@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-04-04T08:36:52-04:00",
+  "updated_at": "2026-04-04T08:39:18-04:00",
   "version": "0.1.0",
   "current_phase": "notarization-and-release-promotion",
   "current_phase_status": "validated",
@@ -219,7 +219,7 @@
   ],
   "environment_status": {
     "branch": "phase/notarization-and-release-promotion",
-    "dirty": true,
+    "dirty": false,
     "os": "macos",
     "node": "v25.9.0",
     "npm": "11.12.1",
