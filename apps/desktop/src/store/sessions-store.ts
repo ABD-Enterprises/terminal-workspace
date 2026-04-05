@@ -24,28 +24,53 @@ const fallbackStorage: StateStorage = {
 const SESSION_HISTORY_LIMIT = 200;
 const SESSION_HISTORY_OUTPUT_LIMIT = 600;
 
+function normalizePersistedPane(pane: SessionPane): SessionPane {
+  return {
+    ...pane,
+    persistOutputPreview: pane.persistOutputPreview ?? true,
+  };
+}
+
 function sanitizePersistedWorkspace(
   workspace: Pick<SessionWorkspaceState, "tabs" | "panes" | "activeTabId" | "lastRestoredAt">
 ) {
   return {
     ...workspace,
     panes: Object.fromEntries(
-      Object.entries(workspace.panes).map(([paneId, pane]) => [
-        paneId,
-        {
-          ...pane,
-          backendSessionId: undefined,
-          connectionState: "disconnected" as const,
-          queuedCommands: [],
-          reconnectOnRestore: pane.connectionState === "connected" || pane.reconnectOnRestore,
-        },
-      ])
+      Object.entries(workspace.panes).map(([paneId, pane]) => {
+        const normalizedPane = normalizePersistedPane(pane);
+
+        return [
+          paneId,
+          {
+            ...normalizedPane,
+            backendSessionId: undefined,
+            connectionState: "disconnected" as const,
+            queuedCommands: [],
+            reconnectOnRestore:
+              normalizedPane.connectionState === "connected" || normalizedPane.reconnectOnRestore,
+          },
+        ];
+      })
     ),
   };
 }
 
-function sanitizePersistedCommandHistory(commandHistory: SessionCommandHistoryEntry[]) {
-  return commandHistory.slice(0, SESSION_HISTORY_LIMIT);
+export function sanitizePersistedCommandHistory(
+  commandHistory: SessionCommandHistoryEntry[],
+  panes: Record<string, SessionPane>
+) {
+  return commandHistory.slice(0, SESSION_HISTORY_LIMIT).map<SessionCommandHistoryEntry>((entry) => {
+    const pane = panes[entry.paneId];
+    const persistOutputPreview = pane ? normalizePersistedPane(pane).persistOutputPreview : true;
+    if (persistOutputPreview) {
+      return entry;
+    }
+
+    const { outputPreview: _outputPreview, outputUpdatedAt: _outputUpdatedAt, ...redactedEntry } =
+      entry;
+    return redactedEntry;
+  });
 }
 
 function normalizeCommandHistoryOutput(output: string) {
@@ -279,6 +304,30 @@ export function updatePaneReconnectPreference(
   };
 }
 
+export function updatePanePreviewPersistence<T extends SessionWorkspaceState>(
+  state: T,
+  paneId: string,
+  persistOutputPreview: boolean
+): T;
+export function updatePanePreviewPersistence<T extends SessionWorkspaceState>(
+  state: T,
+  paneId: string,
+  persistOutputPreview: boolean
+): T {
+  const pane = state.panes[paneId];
+  if (!pane) {
+    return state;
+  }
+
+  return {
+    ...state,
+    panes: {
+      ...state.panes,
+      [paneId]: touchPane(pane, { persistOutputPreview }),
+    },
+  } as T;
+}
+
 export function updatePaneTransport(
   state: SessionWorkspaceState,
   paneId: string,
@@ -421,7 +470,7 @@ export function recordPaneCommandHistory(
 
   return {
     ...state,
-    commandHistory: sanitizePersistedCommandHistory([entry, ...state.commandHistory]),
+    commandHistory: sanitizePersistedCommandHistory([entry, ...state.commandHistory], state.panes),
   };
 }
 
@@ -467,6 +516,7 @@ export interface SessionsState extends SessionWorkspaceState {
   selectPane: (tabId: string, paneId: string) => void;
   setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
+  setPanePersistOutputPreview: (paneId: string, persistOutputPreview: boolean) => void;
   setPaneTransport: (paneId: string, transport: SessionTransport) => void;
   setPaneBackendSession: (paneId: string, backendSessionId?: string) => void;
   queuePaneCommand: (paneId: string, command: string, label?: string) => void;
@@ -510,6 +560,8 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => updatePaneConnectionState(state, paneId, connectionState)),
       setPaneReconnectOnRestore: (paneId, reconnectOnRestore) =>
         set((state) => updatePaneReconnectPreference(state, paneId, reconnectOnRestore)),
+      setPanePersistOutputPreview: (paneId, persistOutputPreview) =>
+        set((state) => updatePanePreviewPersistence(state, paneId, persistOutputPreview)),
       setPaneTransport: (paneId, transport) =>
         set((state) => updatePaneTransport(state, paneId, transport)),
       setPaneBackendSession: (paneId, backendSessionId) =>
@@ -567,28 +619,40 @@ export const useSessionsStore = create<SessionsState>()(
       storage: createJSONStorage(() =>
         typeof window === "undefined" ? fallbackStorage : window.localStorage
       ),
-      partialize: (state) => ({
-        ...sanitizePersistedWorkspace({
+      partialize: (state) => {
+        const persistedWorkspace = sanitizePersistedWorkspace({
           tabs: state.tabs,
           panes: state.panes,
           activeTabId: state.activeTabId,
           lastRestoredAt: new Date().toISOString(),
-        }),
-        commandHistory: sanitizePersistedCommandHistory(state.commandHistory),
-      }),
-      merge: (persistedState, currentState) => ({
-        ...currentState,
-        ...sanitizePersistedWorkspace(
+        });
+
+        return {
+          ...persistedWorkspace,
+          commandHistory: sanitizePersistedCommandHistory(
+            state.commandHistory,
+            persistedWorkspace.panes
+          ),
+        };
+      },
+      merge: (persistedState, currentState) => {
+        const persistedWorkspace = sanitizePersistedWorkspace(
           persistedState as Pick<
             SessionWorkspaceState,
             "tabs" | "panes" | "activeTabId" | "lastRestoredAt"
           >
-        ),
-        commandHistory: sanitizePersistedCommandHistory(
-          ((persistedState as { commandHistory?: SessionCommandHistoryEntry[] }).commandHistory ??
-            currentState.commandHistory) as SessionCommandHistoryEntry[]
-        ),
-      }),
+        );
+
+        return {
+          ...currentState,
+          ...persistedWorkspace,
+          commandHistory: sanitizePersistedCommandHistory(
+            ((persistedState as { commandHistory?: SessionCommandHistoryEntry[] }).commandHistory ??
+              currentState.commandHistory) as SessionCommandHistoryEntry[],
+            persistedWorkspace.panes
+          ),
+        };
+      },
     }
   )
 );

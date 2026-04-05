@@ -10,9 +10,11 @@ import {
   queuePaneCommand,
   recordPaneCommandHistory,
   removeSessionPane,
+  sanitizePersistedCommandHistory,
   setTabSplitDirection,
   splitSessionPane,
   updatePaneConnectionState,
+  updatePanePreviewPersistence,
   updatePaneReconnectPreference,
 } from "./sessions-store";
 
@@ -179,9 +181,42 @@ describe("sessions store helpers", () => {
       entryId,
       "\u001b[32mload average: 1.00\r\nusers: 2\u001b[0m"
     );
+    const persisted = sanitizePersistedCommandHistory(updated.commandHistory, updated.panes);
 
     expect(updated.commandHistory[0]?.outputPreview).toBe("load average: 1.00\nusers: 2");
     expect(updated.commandHistory[0]?.outputUpdatedAt).toBeDefined();
+    expect(persisted[0]?.outputPreview).toBe("load average: 1.00\nusers: 2");
+  });
+
+  it("redacts persisted output previews when a pane opts out", () => {
+    const opened = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      sampleHosts[0]
+    );
+    const paneId = opened.tabs[0]!.paneIds[0]!;
+    const recorded = recordPaneCommandHistory(
+      {
+        ...opened,
+        commandHistory: [],
+      },
+      paneId,
+      "uptime",
+      "queued"
+    );
+    const entryId = recorded.commandHistory[0]!.id;
+    const updated = appendPaneCommandHistoryOutput(recorded, entryId, "load average: 1.00");
+    const optedOut = updatePanePreviewPersistence(updated, paneId, false);
+    const persisted = sanitizePersistedCommandHistory(optedOut.commandHistory, optedOut.panes);
+
+    expect(persisted[0]).toMatchObject({
+      paneId,
+      hostId: sampleHosts[0].id,
+      transport: "ssh",
+      command: "uptime",
+      source: "queued",
+    });
+    expect(persisted[0]?.outputPreview).toBeUndefined();
+    expect(persisted[0]?.outputUpdatedAt).toBeUndefined();
   });
 
   it("maps protocol-aware panes to their executable transports", () => {

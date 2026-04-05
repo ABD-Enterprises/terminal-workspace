@@ -14,8 +14,9 @@
 ## Per-task acceptance
 
 ### T1
-- session output previews can be suppressed or redacted before persistence
-- sessions-store coverage proves the redaction behavior
+- `TerminalPane.tsx` exposes a pane-level output-preview persistence control
+- sessions-store persistence omits `outputPreview` and related preview timestamps for panes that disable preview persistence
+- sessions-store coverage proves both the default-enabled path and the opt-out path
 
 Validation commands:
 - `npm run test -- apps/desktop/src/store/sessions-store.test.ts`
