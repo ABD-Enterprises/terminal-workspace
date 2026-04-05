@@ -109,10 +109,12 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
 
   useEffect(() => {
     if (!open) {
+      setRuntimeStatusMessage(null);
       return;
     }
 
     let cancelled = false;
+    setRuntimeStatusMessage(null);
 
     void getProtocolRuntimeStatus(values.protocol)
       .then((status) => {
