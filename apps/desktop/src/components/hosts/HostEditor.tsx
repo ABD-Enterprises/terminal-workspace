@@ -1,6 +1,21 @@
 import { useEffect, useState } from "react";
+import { getProtocolRuntimeStatus } from "../../lib/api";
 import { isTauriRuntime } from "../../lib/backend-runtime";
-import { emptyHostFormValues, hostToFormValues, type HostRecord, type HostFormValues } from "../../types/host";
+import { formatHostAddress } from "../../lib/utils";
+import {
+  emptyHostFormValues,
+  formatHostProtocol,
+  hostSupportsCredentialPrompt,
+  hostSupportsJumpHosts,
+  hostSupportsLiveTransport,
+  hostSupportsSftp,
+  hostSupportsTrustedKeys,
+  hostToFormValues,
+  protocolDefaultPort,
+  protocolRequiresUsername,
+  type HostRecord,
+  type HostFormValues,
+} from "../../types/host";
 import { useConnectionSecretsStore } from "../../store/connection-secrets-store";
 import { useHostsStore } from "../../store/hosts-store";
 import { Modal } from "../common/Modal";
@@ -32,9 +47,57 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
       : emptyHostFormValues
   );
   const nativeSecretStorage = isTauriRuntime();
+  const [runtimeStatusMessage, setRuntimeStatusMessage] = useState<{
+    available: boolean;
+    installHint?: string;
+    message: string;
+  } | null>(null);
+  const supportsCredentials = hostSupportsCredentialPrompt(values.protocol);
+  const supportsJumpHosts = hostSupportsJumpHosts(values.protocol);
+  const supportsTrustedKeys = hostSupportsTrustedKeys(values.protocol);
+  const supportsSftp = hostSupportsSftp(values.protocol);
+  const supportsNetworkFields = values.protocol !== "localShell";
+  const requiresUsername = protocolRequiresUsername(values.protocol);
+  const hostnameLabel = values.protocol === "serial" ? "Device path" : "Hostname";
+  const hostnamePlaceholder =
+    values.protocol === "serial" ? "/dev/cu.usbserial-1410" : "bastion.acme.internal";
+  const portLabel =
+    values.protocol === "serial" ? "Baud rate" : values.protocol === "telnet" ? "Port" : "Port";
+  const portPlaceholder = String(protocolDefaultPort(values.protocol));
+  const infoMessage =
+    values.protocol === "localShell"
+      ? "Local shell runs the current macOS login shell through the native bridge. No host trust, network credentials, jump host, or SFTP metadata is required for this entry."
+      : values.protocol === "telnet"
+        ? "Telnet sessions launch through the native bridge and keep only network location metadata in inventory."
+        : values.protocol === "serial"
+          ? "Serial sessions treat the device path as the host and the port field as the baud rate."
+          : values.protocol === "mosh"
+            ? "Mosh sessions launch through the native bridge and can reuse local SSH credentials when you store them here."
+            : null;
 
-  const isInvalid = !values.label.trim() || !values.hostname.trim() || !values.username.trim();
-  const jumpHostOptions = hosts.filter((candidate) => candidate.id !== host?.id);
+  const isInvalid =
+    !values.label.trim() ||
+    (supportsNetworkFields && !values.hostname.trim()) ||
+    (requiresUsername && !values.username.trim());
+  const jumpHostOptions = hosts.filter(
+    (candidate) => candidate.id !== host?.id && candidate.protocol === "ssh"
+  );
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setValues(
+      host
+        ? {
+            ...hostToFormValues(host),
+            password: runtimeSecrets?.password ?? "",
+            passphrase: runtimeSecrets?.passphrase ?? "",
+          }
+        : emptyHostFormValues
+    );
+  }, [host, open, runtimeSecrets?.passphrase, runtimeSecrets?.password]);
 
   useEffect(() => {
     if (!open || !host) {
@@ -59,6 +122,44 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
       cancelled = true;
     };
   }, [host, hydrateHostSecrets, open]);
+
+  useEffect(() => {
+    if (!open) {
+      setRuntimeStatusMessage(null);
+      return;
+    }
+
+    let cancelled = false;
+    setRuntimeStatusMessage(null);
+
+    void getProtocolRuntimeStatus(values.protocol)
+      .then((status) => {
+        if (cancelled) {
+          return;
+        }
+
+        setRuntimeStatusMessage({
+          available: status.available,
+          installHint: status.installHint,
+          message: status.message,
+        });
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setRuntimeStatusMessage({
+          available: false,
+          message:
+            error instanceof Error ? error.message : "Unable to determine protocol runtime availability.",
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, values.protocol]);
 
   return (
     <Modal
@@ -109,14 +210,59 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
           />
         </label>
         <label className="block">
-          <span className="text-sm text-slate-300">Hostname</span>
+          <span className="text-sm text-slate-300">Protocol</span>
+          <select
+            value={values.protocol}
+            onChange={(event) => {
+              const protocol = event.target.value as HostFormValues["protocol"];
+              setValues((current) => ({
+                ...current,
+                protocol,
+                hostname: protocol === "localShell" ? "localhost" : current.hostname,
+                username:
+                  protocol === "localShell"
+                    ? current.username || "local"
+                    : protocolRequiresUsername(protocol)
+                      ? current.username || "root"
+                      : "",
+                port: String(protocolDefaultPort(protocol)),
+                authMethod: hostSupportsCredentialPrompt(protocol) ? current.authMethod : "none",
+                privateKeyPath: hostSupportsCredentialPrompt(protocol) ? current.privateKeyPath : "",
+                password: hostSupportsCredentialPrompt(protocol) ? current.password : "",
+                passphrase: hostSupportsCredentialPrompt(protocol) ? current.passphrase : "",
+                hostKeyPolicy: hostSupportsTrustedKeys(protocol) ? current.hostKeyPolicy : "allowUnknown",
+                jumpHostId: hostSupportsJumpHosts(protocol) ? current.jumpHostId : "",
+                agentForwarding: hostSupportsCredentialPrompt(protocol) ? current.agentForwarding : false,
+                keyLabel: hostSupportsCredentialPrompt(protocol) ? current.keyLabel : "",
+                sftpRoot: hostSupportsSftp(protocol) ? current.sftpRoot || "/home" : "",
+              }));
+            }}
+            className={fieldClassName}
+          >
+            <option value="ssh">SSH</option>
+            <option value="localShell">Local shell</option>
+            <option value="mosh">Mosh</option>
+            <option value="telnet">Telnet</option>
+            <option value="serial">Serial</option>
+          </select>
+        </label>
+        {supportsNetworkFields ? null : (
+          <div className="md:col-span-2 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 px-4 py-3 text-sm leading-6 text-emerald-100">
+            {infoMessage}
+          </div>
+        )}
+        {supportsNetworkFields ? (
+        <label className="block">
+          <span className="text-sm text-slate-300">{hostnameLabel}</span>
           <input
             value={values.hostname}
             onChange={(event) => setValues((current) => ({ ...current, hostname: event.target.value }))}
             className={fieldClassName}
-            placeholder="bastion.acme.internal"
+            placeholder={hostnamePlaceholder}
           />
         </label>
+        ) : null}
+        {supportsNetworkFields && requiresUsername ? (
         <label className="block">
           <span className="text-sm text-slate-300">Username</span>
           <input
@@ -127,15 +273,34 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="ops"
           />
         </label>
+        ) : !supportsNetworkFields ? (
+          <label className="block">
+            <span className="text-sm text-slate-300">Shell label</span>
+            <input
+              autoComplete="username"
+              value={values.username}
+              onChange={(event) => setValues((current) => ({ ...current, username: event.target.value }))}
+              className={fieldClassName}
+            placeholder="local"
+          />
+        </label>
+        ) : (
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-300">
+            {formatHostProtocol(values.protocol)} sessions connect without a stored username.
+          </div>
+        )}
+        {supportsNetworkFields ? (
         <label className="block">
-          <span className="text-sm text-slate-300">Port</span>
+          <span className="text-sm text-slate-300">{portLabel}</span>
           <input
             value={values.port}
             onChange={(event) => setValues((current) => ({ ...current, port: event.target.value }))}
             className={fieldClassName}
-            placeholder="22"
+            placeholder={portPlaceholder}
           />
         </label>
+        ) : null}
+        {supportsCredentials ? (
         <label className="block">
           <span className="text-sm text-slate-300">Auth method</span>
           <select
@@ -153,6 +318,13 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             <option value="privateKey">Private key path</option>
           </select>
         </label>
+        ) : (
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-300">
+            {formatHostProtocol(values.protocol)} entries do not store runtime credentials in host
+            inventory.
+          </div>
+        )}
+        {supportsCredentials ? (
         <label className="block">
           <span className="text-sm text-slate-300">Private key path</span>
           <input
@@ -164,6 +336,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="~/.ssh/id_ed25519"
           />
         </label>
+        ) : null}
+        {supportsTrustedKeys ? (
         <label className="block">
           <span className="text-sm text-slate-300">Host key trust</span>
           <select
@@ -180,6 +354,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             <option value="requireTrusted">Require trusted key</option>
           </select>
         </label>
+        ) : null}
+        {supportsJumpHosts ? (
         <label className="block">
           <span className="text-sm text-slate-300">Jump host</span>
           <select
@@ -192,11 +368,13 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             <option value="">Direct connection</option>
             {jumpHostOptions.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>
-                {candidate.label} · {candidate.username}@{candidate.hostname}:{candidate.port}
+                {candidate.label} · {formatHostAddress(candidate)}
               </option>
             ))}
           </select>
         </label>
+        ) : null}
+        {supportsCredentials ? (
         <label className="flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-300">
           <input
             type="checkbox"
@@ -208,6 +386,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
           />
           Forward local SSH agent to this host
         </label>
+        ) : null}
+        {supportsCredentials ? (
         <label className="block">
           <span className="text-sm text-slate-300">Password</span>
           <input
@@ -225,6 +405,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             }
           />
         </label>
+        ) : null}
+        {supportsCredentials ? (
         <label className="block">
           <span className="text-sm text-slate-300">Key passphrase</span>
           <input
@@ -238,6 +420,7 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="Optional"
           />
         </label>
+        ) : null}
         <label className="block">
           <span className="text-sm text-slate-300">Group</span>
           <input
@@ -256,6 +439,7 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="prod, bastion, postgres"
           />
         </label>
+        {supportsCredentials ? (
         <label className="block">
           <span className="text-sm text-slate-300">Identity label</span>
           <input
@@ -265,6 +449,8 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="MacBook Pro ED25519"
           />
         </label>
+        ) : null}
+        {supportsSftp ? (
         <label className="block">
           <span className="text-sm text-slate-300">SFTP root</span>
           <input
@@ -274,6 +460,7 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
             placeholder="/srv"
           />
         </label>
+        ) : null}
         <label className="block">
           <span className="text-sm text-slate-300">Session environment</span>
           <textarea
@@ -297,22 +484,48 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
         </label>
       </div>
       <div className="mt-5 rounded-2xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm leading-6 text-amber-100">
-        {nativeSecretStorage
+        {!supportsCredentials
+          ? values.protocol === "localShell"
+            ? "Protocol metadata stays in the local inventory, while the local shell runtime stays native-only and avoids stored host secrets altogether."
+            : values.protocol === "telnet" || values.protocol === "serial"
+              ? `${formatHostProtocol(values.protocol)} sessions stay native and do not persist transport credentials in inventory.`
+              : `${formatHostProtocol(values.protocol)} sessions can reuse local SSH defaults even when no runtime secret is stored in inventory.`
+          : nativeSecretStorage
           ? "Passwords and passphrases stay outside the host inventory and persist through macOS Keychain in the native shell."
           : "Passwords and passphrases stay in memory only in the browser demo and are not exported with host metadata."}
       </div>
+      {runtimeStatusMessage ? (
+      <div
+        className={`mt-4 rounded-2xl border px-4 py-3 text-sm leading-6 ${
+          runtimeStatusMessage.available
+            ? "border-emerald-400/20 bg-emerald-400/5 text-emerald-100"
+            : "border-rose-400/30 bg-rose-400/10 text-rose-100"
+        }`}
+      >
+        {runtimeStatusMessage.message}
+        {runtimeStatusMessage.installHint ? (
+          <p className="mt-2 text-xs text-rose-100/80">{runtimeStatusMessage.installHint}</p>
+        ) : null}
+      </div>
+      ) : null}
+      {supportsTrustedKeys ? (
       <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-slate-300">
         Require trusted key blocks SSH, SFTP, and snippet execution until the host key is scanned
         and trusted in the Keys workspace.
       </div>
+      ) : null}
+      {supportsJumpHosts ? (
       <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-slate-300">
         Jump hosts are one-hop only for now. If the selected bastion needs a password or key
         passphrase, the runtime prompt will ask for its secrets before connecting onward.
       </div>
+      ) : null}
       <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-slate-300">
         Session environment uses one <span className="font-mono text-[12px]">KEY=VALUE</span> pair
         per line. Agent forwarding reuses the current <span className="font-mono text-[12px]">$SSH_AUTH_SOCK</span> only
-        when it exists locally.
+        when it exists locally. {hostSupportsLiveTransport(values.protocol)
+          ? `${formatHostProtocol(values.protocol)} sessions can be opened natively from this inventory entry.`
+          : "This protocol is inventory-only in the current build."}
       </div>
       <label className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-300">
         <input

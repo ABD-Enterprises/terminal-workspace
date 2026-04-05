@@ -6,6 +6,7 @@ import { SnippetEditor } from "../components/snippets/SnippetEditor";
 import { SnippetList } from "../components/snippets/SnippetList";
 import { buildBackendConnection } from "../lib/connections";
 import { ensureRuntimeSecrets } from "../lib/runtime-secrets";
+import { formatHostAddress } from "../lib/utils";
 import { executeSnippetOnHosts, type SnippetExecutionResult } from "../lib/api";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
@@ -42,6 +43,7 @@ export function SnippetsPage() {
     () => Object.fromEntries(hosts.map((host) => [host.id, host])),
     [hosts]
   );
+  const snippetHosts = useMemo(() => hosts.filter((host) => host.protocol === "ssh"), [hosts]);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const activePane = activeTab ? panes[activeTab.activePaneId] : undefined;
 
@@ -92,7 +94,7 @@ export function SnippetsPage() {
       return;
     }
 
-    const targetHosts = hosts.filter((host) => selectedHostIds.includes(host.id));
+    const targetHosts = snippetHosts.filter((host) => selectedHostIds.includes(host.id));
     setBroadcastBusy(true);
 
     try {
@@ -278,18 +280,20 @@ export function SnippetsPage() {
                             type="button"
                             onClick={() =>
                               setSelectedHostIdsOverride(
-                                selectedHostIds.length === hosts.length ? [] : hosts.map((host) => host.id)
+                                selectedHostIds.length === snippetHosts.length
+                                  ? []
+                                  : snippetHosts.map((host) => host.id)
                               )
                             }
                             className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-white"
                           >
-                            {selectedHostIds.length === hosts.length ? "Clear all" : "Select all"}
+                            {selectedHostIds.length === snippetHosts.length ? "Clear all" : "Select all"}
                           </button>
                         </div>
                       </div>
 
                       <div className="mt-2 grid gap-2 md:grid-cols-2">
-                        {hosts.map((host) => {
+                        {snippetHosts.map((host) => {
                           const selected = selectedHostIds.includes(host.id);
 
                           return (
@@ -320,7 +324,7 @@ export function SnippetsPage() {
                                   {host.label}
                                 </span>
                                 <span className="mt-0.5 block truncate text-[11px] text-slate-500">
-                                  {host.username}@{host.hostname}:{host.port}
+                                  {formatHostAddress(host)}
                                 </span>
                               </span>
                             </label>

@@ -3,11 +3,19 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 import { buildHostSearchText, parseEnvironmentVariables, splitCommaList } from "../lib/utils";
 import {
   defaultHostKeyPolicy,
+  defaultHostProtocol,
+  hostSupportsCredentialPrompt,
+  hostSupportsJumpHosts,
+  protocolDefaultPort,
+  protocolRequiresUsername,
+  hostSupportsSftp,
+  hostSupportsTrustedKeys,
   sampleHosts,
   type HostFormValues,
   type HostKeyPolicy,
   type HostRecord,
 } from "../types/host";
+import { useVaultSyncStore } from "./vault-sync-store";
 
 export interface HostFilters {
   query: string;
@@ -44,35 +52,54 @@ function normalizeHostRecord(host: HostRecord): HostRecord {
 
   return {
     ...rest,
+    protocol: rest.protocol ?? defaultHostProtocol,
     hostKeyPolicy: (rest as HostRecord & { hostKeyPolicy?: HostKeyPolicy }).hostKeyPolicy ?? defaultHostKeyPolicy,
     agentForwarding: rest.agentForwarding ?? false,
     environment: normalizeEnvironment(rest.environment),
     tags: normalizeTags(Array.isArray(rest.tags) ? rest.tags : []),
-    jumpHostId: rest.jumpHostId || undefined,
+    jumpHostId:
+      hostSupportsJumpHosts(rest.protocol ?? defaultHostProtocol) && rest.jumpHostId
+        ? rest.jumpHostId
+        : undefined,
+    sftpRoot:
+      hostSupportsSftp(rest.protocol ?? defaultHostProtocol) && rest.sftpRoot?.trim()
+        ? rest.sftpRoot
+        : "",
   };
 }
 
 export function createHostRecord(values: HostFormValues, currentHost?: HostRecord): HostRecord {
   const now = new Date().toISOString();
+  const protocol = values.protocol;
+  const supportsCredentials = hostSupportsCredentialPrompt(protocol);
+  const supportsJumpHosts = hostSupportsJumpHosts(protocol);
+  const supportsTrustedKeys = hostSupportsTrustedKeys(protocol);
+  const supportsSftp = hostSupportsSftp(protocol);
 
   return {
     id: currentHost?.id ?? crypto.randomUUID(),
     label: values.label.trim(),
-    hostname: values.hostname.trim(),
-    username: values.username.trim(),
-    port: Number.parseInt(values.port, 10) || 22,
-    authMethod: values.authMethod,
-    privateKeyPath: values.privateKeyPath.trim(),
+    protocol,
+    hostname: protocol === "localShell" ? "localhost" : values.hostname.trim(),
+    username:
+      protocol === "localShell"
+        ? values.username.trim() || "local"
+        : protocolRequiresUsername(protocol)
+          ? values.username.trim()
+          : "",
+    port: Number.parseInt(values.port, 10) || protocolDefaultPort(protocol),
+    authMethod: supportsCredentials ? values.authMethod : "none",
+    privateKeyPath: supportsCredentials ? values.privateKeyPath.trim() : "",
     group: values.group.trim(),
     tags: normalizeTags(splitCommaList(values.tags)),
     note: values.note.trim(),
     favorite: values.favorite,
-    keyLabel: values.keyLabel.trim(),
-    hostKeyPolicy: values.hostKeyPolicy,
-    agentForwarding: values.agentForwarding,
+    keyLabel: supportsCredentials ? values.keyLabel.trim() : "",
+    hostKeyPolicy: supportsTrustedKeys ? values.hostKeyPolicy : defaultHostKeyPolicy,
+    agentForwarding: supportsCredentials ? values.agentForwarding : false,
     environment: parseEnvironmentVariables(values.environment),
-    jumpHostId: values.jumpHostId || undefined,
-    sftpRoot: values.sftpRoot.trim() || "/home",
+    jumpHostId: supportsJumpHosts ? values.jumpHostId || undefined : undefined,
+    sftpRoot: supportsSftp ? values.sftpRoot.trim() || "/home" : "",
     snippetCount: currentHost?.snippetCount ?? 0,
     forwardingCount: currentHost?.forwardingCount ?? 0,
     createdAt: currentHost?.createdAt ?? now,
@@ -128,6 +155,7 @@ export function assignKeyInCollection(
             authMethod: "privateKey",
             keyLabel: key.label,
             privateKeyPath: key.privateKeyPath,
+            protocol: host.protocol,
             updatedAt: new Date().toISOString(),
           }
         : host
@@ -232,18 +260,23 @@ export const useHostsStore = create<HostsState>()(
         set((state) => ({
           hosts: sortHostCollection([...state.hosts, host]),
         }));
+        useVaultSyncStore.getState().clearDeleted("hosts", host.id);
         return host.id;
       },
       updateHost: (hostId, values) => {
         set((state) => ({
           hosts: upsertHostCollection(state.hosts, values, hostId),
         }));
+        useVaultSyncStore.getState().clearDeleted("hosts", hostId);
         return hostId;
       },
       deleteHost: (hostId) =>
-        set((state) => ({
-          hosts: deleteHostFromCollection(state.hosts, hostId),
-        })),
+        set((state) => {
+          useVaultSyncStore.getState().markDeleted("hosts", hostId);
+          return {
+            hosts: deleteHostFromCollection(state.hosts, hostId),
+          };
+        }),
       toggleFavorite: (hostId) =>
         set((state) => ({
           hosts: toggleHostFavoriteInCollection(state.hosts, hostId),

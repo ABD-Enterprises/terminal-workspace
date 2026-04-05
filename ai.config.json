@@ -1,0 +1,23 @@
+{
+  "run_profile": "standard",
+  "requires_test_evidence": true,
+  "requires_deploy_evidence": true,
+  "allowed_phases_without_tests": [
+    "planning",
+    "docs"
+  ],
+  "strict_mode": true,
+  "evidence_directories": [
+    "artifacts/"
+  ],
+  "meta_directories": [],
+  "allowed_metadata_only_evidence_types": [
+    "build",
+    "test",
+    "run",
+    "deploy"
+  ],
+  "protected_environment_paths": [
+    "brew/"
+  ]
+}

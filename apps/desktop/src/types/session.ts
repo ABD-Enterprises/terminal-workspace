@@ -7,12 +7,26 @@ export type SessionConnectionState =
   | "pendingSecrets"
   | "error";
 export type SplitDirection = "vertical" | "horizontal";
-export type SessionTransport = "mock" | "ssh";
+export type SessionTransport = "localShell" | "mock" | "mosh" | "serial" | "ssh" | "telnet" | "unsupported";
 
 export interface QueuedPaneCommand {
   id: string;
   command: string;
   label?: string;
+  createdAt: string;
+}
+
+export type SessionCommandHistorySource = "queued";
+
+export interface SessionCommandHistoryEntry {
+  id: string;
+  paneId: string;
+  hostId: string;
+  transport: SessionTransport;
+  command: string;
+  source: SessionCommandHistorySource;
+  outputPreview?: string;
+  outputUpdatedAt?: string;
   createdAt: string;
 }
 
@@ -49,13 +63,27 @@ export interface SessionWorkspaceState {
 
 export function createSessionPane(host: HostRecord, title = host.label): SessionPane {
   const now = new Date().toISOString();
+  const transport =
+    host.protocol === "localShell"
+      ? "localShell"
+      : host.protocol === "ssh"
+        ? host.authMethod === "none"
+          ? "mock"
+          : "ssh"
+        : host.protocol === "telnet"
+          ? "telnet"
+          : host.protocol === "serial"
+            ? "serial"
+            : host.protocol === "mosh"
+              ? "mosh"
+              : "unsupported";
 
   return {
     id: crypto.randomUUID(),
     hostId: host.id,
     title,
     connectionState: "connecting",
-    transport: host.authMethod === "none" ? "mock" : "ssh",
+    transport,
     queuedCommands: [],
     reconnectOnRestore: false,
     createdAt: now,

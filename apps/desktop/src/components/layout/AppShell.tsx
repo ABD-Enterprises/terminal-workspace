@@ -3,12 +3,13 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCommandPalette } from "../../hooks/useCommandPalette";
 import { navigationItems } from "../../lib/navigation";
 import { formatPrimaryShortcut, isPrimaryShortcut } from "../../lib/shortcuts";
-import { cn } from "../../lib/utils";
+import { cn, formatHostAddress } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
 import { applyHostFilters, useHostsStore } from "../../store/hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
 import { useSnippetsStore } from "../../store/snippets-store";
 import { useTransfersStore } from "../../store/transfers-store";
+import { hostSupportsSftp, hostSupportsTrustedKeys } from "../../types/host";
 import { SessionRestoreManager } from "../terminal/SessionRestoreManager";
 import { Sidebar } from "./Sidebar";
 
@@ -400,7 +401,7 @@ export function AppShell() {
                               {host.label}
                             </span>
                             <span className="mt-1 block truncate text-xs text-slate-400">
-                              {host.username}@{host.hostname}:{host.port}
+                              {formatHostAddress(host)}
                             </span>
                           </button>
                           <div className="flex shrink-0 gap-1.5">
@@ -411,20 +412,24 @@ export function AppShell() {
                             >
                               Open
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => openHostTransfers(host.id)}
-                              className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-white"
-                            >
-                              Files
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => manageHostTrust(host.id)}
-                              className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-white"
-                            >
-                              Trust
-                            </button>
+                            {hostSupportsSftp(host.protocol) ? (
+                              <button
+                                type="button"
+                                onClick={() => openHostTransfers(host.id)}
+                                className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-white"
+                              >
+                                Files
+                              </button>
+                            ) : null}
+                            {hostSupportsTrustedKeys(host.protocol) ? (
+                              <button
+                                type="button"
+                                onClick={() => manageHostTrust(host.id)}
+                                className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-white"
+                              >
+                                Trust
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               onClick={() => focusHost(host.id)}

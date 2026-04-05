@@ -2,8 +2,7 @@
 
 use std::{
     collections::HashMap,
-    env,
-    fs,
+    env, fs,
     io::{self, Read, Write},
     net::TcpStream,
     path::PathBuf,
@@ -25,7 +24,9 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use ssh2::{Channel, Session};
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{
+    error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender,
+};
 use tokio_tungstenite::tungstenite::Message;
 
 mod keychain_support;
@@ -59,7 +60,8 @@ struct BackendBridge {
 impl BackendBridge {
     fn new() -> Self {
         let base_url = std::env::var("TERMSNIP_BACKEND_BASE_URL").unwrap_or_else(|_| {
-            let port = std::env::var("TERMSNIP_BACKEND_PORT").unwrap_or_else(|_| "8790".to_string());
+            let port =
+                std::env::var("TERMSNIP_BACKEND_PORT").unwrap_or_else(|_| "8790".to_string());
             format!("http://127.0.0.1:{port}")
         });
 
@@ -156,6 +158,13 @@ enum JumpSessionEvent {
     Output(String),
 }
 
+struct ExternalCommandSessionSpec {
+    command: CommandBuilder,
+    exit_label: String,
+    prompt_responses: Vec<PromptResponse>,
+    cleanup_dir: Option<PathBuf>,
+}
+
 struct NativeSshControlContext {
     config_path: PathBuf,
     session_dir: PathBuf,
@@ -189,10 +198,16 @@ struct BackendHostConnection {
     known_host_public_key: Option<String>,
     password: String,
     passphrase: String,
-    port: u16,
+    port: u32,
     private_key_path: String,
+    #[serde(default = "default_backend_protocol")]
+    protocol: String,
     sftp_root: Option<String>,
     username: String,
+}
+
+fn default_backend_protocol() -> String {
+    "ssh".to_string()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -243,6 +258,73 @@ struct RemoteFileEntry {
 struct SftpDirectoryResponse {
     entries: Vec<RemoteFileEntry>,
     path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyPathRequest {
+    path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtocolRuntimeStatusRequest {
+    protocol: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtocolRuntimeStatusResponse {
+    available: bool,
+    client: Option<String>,
+    install_hint: Option<String>,
+    message: String,
+    protocol: String,
+    resolved_path: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyMetadata {
+    algorithm: String,
+    bits: u32,
+    fingerprint: String,
+    comment: String,
+    private_key_path: String,
+    public_key_path: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GenerateKeyRequest {
+    comment: String,
+    passphrase: String,
+    path: String,
+    #[serde(rename = "type")]
+    key_type: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KnownHostScanRequest {
+    hostname: String,
+    port: u16,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KnownHostScanResult {
+    algorithm: String,
+    fingerprint: String,
+    hostname: String,
+    port: u16,
+    public_key: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KnownHostScanResponse {
+    entries: Vec<KnownHostScanResult>,
 }
 
 #[derive(Serialize)]
@@ -487,11 +569,396 @@ fn expand_home(pathname: &str) -> PathBuf {
     PathBuf::from(pathname)
 }
 
+fn resolve_command_path(candidates: &[&str]) -> Option<PathBuf> {
+    for candidate in candidates {
+        let candidate_path = PathBuf::from(candidate);
+        if candidate_path.is_absolute() {
+            if candidate_path.is_file() {
+                return Some(candidate_path);
+            }
+            continue;
+        }
+
+        if let Some(paths) = env::var_os("PATH") {
+            for directory in env::split_paths(&paths) {
+                let resolved = directory.join(candidate);
+                if resolved.is_file() {
+                    return Some(resolved);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn resolve_command_path_with_override(
+    override_env: Option<&str>,
+    candidates: &[&str],
+) -> Option<PathBuf> {
+    if let Some(override_env) = override_env {
+        if let Some(path) = env::var_os(override_env) {
+            let candidate = PathBuf::from(path);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    resolve_command_path(candidates)
+}
+
+fn shell_quote(value: &str) -> String {
+    if value
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || "/._:-=@".contains(character))
+    {
+        return value.to_string();
+    }
+
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn configure_command_environment(command: &mut CommandBuilder, host: &BackendHostConnection) {
+    if let Some(environment) = get_channel_environment(&host.environment) {
+        for (key, value) in environment {
+            command.env(key, value);
+        }
+    }
+}
+
+fn protocol_runtime_response(
+    protocol: &str,
+    available: bool,
+    client: Option<&str>,
+    resolved_path: Option<String>,
+    message: String,
+    install_hint: Option<String>,
+) -> ProtocolRuntimeStatusResponse {
+    ProtocolRuntimeStatusResponse {
+        available,
+        client: client.map(str::to_string),
+        install_hint,
+        message,
+        protocol: protocol.to_string(),
+        resolved_path,
+    }
+}
+
+fn build_protocol_runtime_status(protocol: &str) -> ProtocolRuntimeStatusResponse {
+    match protocol {
+        "ssh" => protocol_runtime_response(
+            protocol,
+            true,
+            None,
+            None,
+            "SSH sessions are available through the native transport stack.".to_string(),
+            None,
+        ),
+        "localShell" => {
+            let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+            protocol_runtime_response(
+                protocol,
+                true,
+                Some("shell"),
+                Some(shell.clone()),
+                format!("Local shell sessions will launch with {shell}."),
+                None,
+            )
+        }
+        "telnet" => match resolve_command_path_with_override(
+            Some("TERMSNIP_TELNET_PATH"),
+            &["/usr/bin/telnet", "telnet"],
+        ) {
+            Some(path) => protocol_runtime_response(
+                protocol,
+                true,
+                Some("telnet"),
+                Some(path.to_string_lossy().into_owned()),
+                "Telnet client resolved for native session launch.".to_string(),
+                None,
+            ),
+            None => protocol_runtime_response(
+                protocol,
+                false,
+                Some("telnet"),
+                None,
+                "Telnet client is not installed on this workstation.".to_string(),
+                Some(
+                    "Install a telnet client or save this host as SSH/local shell until one is available."
+                        .to_string(),
+                ),
+            ),
+        },
+        "serial" => {
+            if let Some(path) = resolve_command_path_with_override(
+                Some("TERMSNIP_SCREEN_PATH"),
+                &["/usr/bin/screen", "screen"],
+            ) {
+                protocol_runtime_response(
+                    protocol,
+                    true,
+                    Some("screen"),
+                    Some(path.to_string_lossy().into_owned()),
+                    "Serial sessions will launch with screen.".to_string(),
+                    None,
+                )
+            } else if let Some(path) =
+                resolve_command_path_with_override(Some("TERMSNIP_CU_PATH"), &["/usr/bin/cu", "cu"])
+            {
+                protocol_runtime_response(
+                    protocol,
+                    true,
+                    Some("cu"),
+                    Some(path.to_string_lossy().into_owned()),
+                    "Serial sessions will launch with cu.".to_string(),
+                    None,
+                )
+            } else {
+                protocol_runtime_response(
+                    protocol,
+                    false,
+                    Some("screen|cu"),
+                    None,
+                    "Serial runtime requires either screen or cu.".to_string(),
+                    Some(
+                        "Install `screen` or `cu` so this workstation can open serial sessions."
+                            .to_string(),
+                    ),
+                )
+            }
+        }
+        "mosh" => match resolve_command_path_with_override(
+            Some("TERMSNIP_MOSH_PATH"),
+            &[
+                "/opt/homebrew/bin/mosh",
+                "/usr/local/bin/mosh",
+                "/usr/bin/mosh",
+                "mosh",
+            ],
+        ) {
+            Some(path) => protocol_runtime_response(
+                protocol,
+                true,
+                Some("mosh"),
+                Some(path.to_string_lossy().into_owned()),
+                "Mosh client resolved for native session launch.".to_string(),
+                None,
+            ),
+            None => protocol_runtime_response(
+                protocol,
+                false,
+                Some("mosh"),
+                None,
+                "Mosh client is not installed on this workstation.".to_string(),
+                Some(
+                    "Install `mosh` so the native client can launch this session, or use SSH until it is available."
+                        .to_string(),
+                ),
+            ),
+        },
+        other => protocol_runtime_response(
+            other,
+            false,
+            None,
+            None,
+            format!("Unsupported protocol runtime: {other}."),
+            None,
+        ),
+    }
+}
+
+fn validate_network_host(host: &BackendHostConnection, require_username: bool) -> Result<(), String> {
+    if host.hostname.trim().is_empty() || host.port == 0 {
+        return Err("Missing host connection fields".to_string());
+    }
+
+    if require_username && host.username.trim().is_empty() {
+        return Err("Missing host connection fields".to_string());
+    }
+
+    Ok(())
+}
+
+fn validate_mosh_host(host: &BackendHostConnection) -> Result<(), String> {
+    validate_network_host(host, true)?;
+
+    if host.auth_method == "password" && host.password.is_empty() {
+        return Err("Password auth selected but no password provided".to_string());
+    }
+
+    if host.auth_method == "privateKey" && host.private_key_path.trim().is_empty() {
+        return Err("Private key auth selected but no key path provided".to_string());
+    }
+
+    Ok(())
+}
+
+fn build_mosh_ssh_command(
+    host: &BackendHostConnection,
+    known_hosts_path: Option<&PathBuf>,
+) -> String {
+    let mut arguments = vec![
+        "/usr/bin/ssh".to_string(),
+        "-p".to_string(),
+        host.port.to_string(),
+        "-o".to_string(),
+        "BatchMode=no".to_string(),
+        "-o".to_string(),
+        "GlobalKnownHostsFile=/dev/null".to_string(),
+    ];
+
+    if let Some(known_hosts_path) = known_hosts_path {
+        arguments.push("-o".to_string());
+        arguments.push(format!(
+            "UserKnownHostsFile={}",
+            known_hosts_path.to_string_lossy()
+        ));
+    }
+
+    if host.known_host_public_key.is_some() && host.known_host_algorithm.is_some() {
+        arguments.push("-o".to_string());
+        arguments.push("StrictHostKeyChecking=yes".to_string());
+    } else {
+        arguments.push("-o".to_string());
+        arguments.push("StrictHostKeyChecking=accept-new".to_string());
+    }
+
+    if host.agent_forwarding && env::var_os("SSH_AUTH_SOCK").is_some() {
+        arguments.push("-A".to_string());
+    }
+
+    if host.auth_method == "privateKey" && !host.private_key_path.trim().is_empty() {
+        arguments.push("-i".to_string());
+        arguments.push(expand_home(&host.private_key_path).to_string_lossy().into_owned());
+        arguments.push("-o".to_string());
+        arguments.push("IdentitiesOnly=yes".to_string());
+    }
+
+    arguments
+        .iter()
+        .map(|argument| shell_quote(argument))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn build_external_command_session_spec(
+    host: &BackendHostConnection,
+    session_id: &str,
+) -> Result<ExternalCommandSessionSpec, String> {
+    match host.protocol.as_str() {
+        "localShell" => {
+            let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+            let mut command = CommandBuilder::new(shell);
+            command.arg("-l");
+            if let Some(home_dir) = env::var_os("HOME") {
+                command.cwd(PathBuf::from(home_dir));
+            }
+            configure_command_environment(&mut command, host);
+
+            Ok(ExternalCommandSessionSpec {
+                command,
+                exit_label: "Local shell".to_string(),
+                prompt_responses: Vec::new(),
+                cleanup_dir: None,
+            })
+        }
+        "telnet" => {
+            let executable =
+                resolve_command_path_with_override(Some("TERMSNIP_TELNET_PATH"), &["/usr/bin/telnet", "telnet"])
+                    .ok_or_else(|| "Telnet client is not installed on this workstation".to_string())?;
+            let mut command = CommandBuilder::new(executable);
+            command.arg(host.hostname.clone());
+            command.arg(host.port.to_string());
+            configure_command_environment(&mut command, host);
+
+            Ok(ExternalCommandSessionSpec {
+                command,
+                exit_label: "Telnet session".to_string(),
+                prompt_responses: Vec::new(),
+                cleanup_dir: None,
+            })
+        }
+        "serial" => {
+            let mut command = if let Some(executable) = resolve_command_path_with_override(
+                Some("TERMSNIP_SCREEN_PATH"),
+                &["/usr/bin/screen", "screen"],
+            )
+            {
+                let mut command = CommandBuilder::new(executable);
+                command.arg(host.hostname.clone());
+                command.arg(host.port.to_string());
+                command
+            } else if let Some(executable) =
+                resolve_command_path_with_override(Some("TERMSNIP_CU_PATH"), &["/usr/bin/cu", "cu"])
+            {
+                let mut command = CommandBuilder::new(executable);
+                command.arg("-l");
+                command.arg(host.hostname.clone());
+                command.arg("-s");
+                command.arg(host.port.to_string());
+                command
+            } else {
+                return Err(
+                    "Serial runtime requires either `screen` or `cu` to be installed".to_string(),
+                );
+            };
+            configure_command_environment(&mut command, host);
+
+            Ok(ExternalCommandSessionSpec {
+                command,
+                exit_label: "Serial session".to_string(),
+                prompt_responses: Vec::new(),
+                cleanup_dir: None,
+            })
+        }
+        "mosh" => {
+            let executable = resolve_command_path_with_override(
+                Some("TERMSNIP_MOSH_PATH"),
+                &[
+                    "/opt/homebrew/bin/mosh",
+                    "/usr/local/bin/mosh",
+                    "/usr/bin/mosh",
+                    "mosh",
+                ],
+            )
+            .ok_or_else(|| "Mosh client is not installed on this workstation".to_string())?;
+            let cleanup_dir = if host.known_host_public_key.is_some() {
+                Some(create_native_ssh_session_dir(session_id)?)
+            } else {
+                None
+            };
+            let known_hosts_path = match cleanup_dir.as_ref() {
+                Some(session_dir) => Some(write_native_known_hosts(host, session_dir)?),
+                None => None,
+            };
+            let mut command = CommandBuilder::new(executable);
+            command.arg(format!("{}@{}", host.username, host.hostname));
+            command.arg(format!(
+                "--ssh={}",
+                build_mosh_ssh_command(host, known_hosts_path.as_ref())
+            ));
+            configure_command_environment(&mut command, host);
+
+            Ok(ExternalCommandSessionSpec {
+                command,
+                exit_label: "Mosh session".to_string(),
+                prompt_responses: build_prompt_responses(host),
+                cleanup_dir,
+            })
+        }
+        other => Err(format!("Unsupported external session protocol: {other}")),
+    }
+}
+
 fn emit_session_stream_event(app: &AppHandle, event: SessionStreamEvent) {
     let _ = app.emit(SESSION_STREAM_EVENT_NAME, event);
 }
 
-fn get_session_stream(registry: &SessionStreamRegistry, session_id: &str) -> Option<SessionStreamBridge> {
+fn get_session_stream(
+    registry: &SessionStreamRegistry,
+    session_id: &str,
+) -> Option<SessionStreamBridge> {
     registry
         .bridges
         .lock()
@@ -528,7 +995,10 @@ fn remove_session_stream_if_current(
     }
 }
 
-fn get_native_session(registry: &NativeSessionRegistry, session_id: &str) -> Option<NativeSessionHandle> {
+fn get_native_session(
+    registry: &NativeSessionRegistry,
+    session_id: &str,
+) -> Option<NativeSessionHandle> {
     registry
         .sessions
         .lock()
@@ -549,7 +1019,10 @@ fn insert_native_session(
         .insert(session_id.to_string(), handle);
 }
 
-fn remove_native_session(registry: &NativeSessionRegistry, session_id: &str) -> Option<NativeSessionHandle> {
+fn remove_native_session(
+    registry: &NativeSessionRegistry,
+    session_id: &str,
+) -> Option<NativeSessionHandle> {
     registry
         .sessions
         .lock()
@@ -569,7 +1042,10 @@ fn insert_native_forward(
         .insert(forward_id.to_string(), handle);
 }
 
-fn remove_native_forward(registry: &NativeForwardRegistry, forward_id: &str) -> Option<NativeForwardHandle> {
+fn remove_native_forward(
+    registry: &NativeForwardRegistry,
+    forward_id: &str,
+) -> Option<NativeForwardHandle> {
     registry
         .forwards
         .lock()
@@ -577,7 +1053,10 @@ fn remove_native_forward(registry: &NativeForwardRegistry, forward_id: &str) -> 
         .remove(forward_id)
 }
 
-fn list_native_forwards(registry: &NativeForwardRegistry, session_id: &str) -> Vec<PortForwardRecord> {
+fn list_native_forwards(
+    registry: &NativeForwardRegistry,
+    session_id: &str,
+) -> Vec<PortForwardRecord> {
     registry
         .forwards
         .lock()
@@ -696,12 +1175,27 @@ fn emit_native_session_error(
 }
 
 fn should_use_native_session(host: &BackendHostConnection) -> bool {
-    host.auth_method != "none"
+    match host.protocol.as_str() {
+        "localShell" => true,
+        "telnet" => true,
+        "serial" => true,
+        "mosh" => true,
+        "ssh" => host.auth_method != "none",
+        _ => false,
+    }
 }
 
-fn validate_session_host(host: &BackendHostConnection) -> Result<(), String> {
+fn validate_ssh_host(host: &BackendHostConnection) -> Result<(), String> {
+    if host.protocol != "ssh" {
+        return Err(format!("Unsupported SSH transport protocol: {}", host.protocol));
+    }
+
     if host.hostname.trim().is_empty() || host.username.trim().is_empty() || host.port == 0 {
         return Err("Missing host connection fields".to_string());
+    }
+
+    if host.port > u32::from(u16::MAX) {
+        return Err("SSH port must be between 1 and 65535".to_string());
     }
 
     if host.auth_method == "password" && host.password.is_empty() {
@@ -716,7 +1210,22 @@ fn validate_session_host(host: &BackendHostConnection) -> Result<(), String> {
         return Err("Host is configured without SSH auth".to_string());
     }
 
+    if let Some(jump_host) = &host.jump_host {
+        validate_ssh_host(jump_host)?;
+    }
+
     Ok(())
+}
+
+fn validate_session_target(host: &BackendHostConnection) -> Result<(), String> {
+    match host.protocol.as_str() {
+        "localShell" => Ok(()),
+        "ssh" => validate_ssh_host(host),
+        "telnet" => validate_network_host(host, false),
+        "serial" => validate_network_host(host, false),
+        "mosh" => validate_mosh_host(host),
+        other => Err(format!("Unsupported session protocol: {other}")),
+    }
 }
 
 fn authenticate_native_session(
@@ -751,7 +1260,9 @@ fn authenticate_native_session(
 }
 
 fn open_native_channel(session: &Session, host: &BackendHostConnection) -> Result<Channel, String> {
-    let mut channel = session.channel_session().map_err(|error| error.to_string())?;
+    let mut channel = session
+        .channel_session()
+        .map_err(|error| error.to_string())?;
     channel
         .request_pty(
             "xterm-256color",
@@ -782,7 +1293,10 @@ fn open_native_channel(session: &Session, host: &BackendHostConnection) -> Resul
 }
 
 fn connect_native_session(host: &BackendHostConnection) -> Result<(Session, Channel), String> {
-    let tcp_stream = TcpStream::connect((host.hostname.as_str(), host.port))
+    let tcp_stream = TcpStream::connect((
+        host.hostname.as_str(),
+        u16::try_from(host.port).map_err(|_| "SSH port must be between 1 and 65535".to_string())?,
+    ))
         .map_err(|error| error.to_string())?;
     let _ = tcp_stream.set_nodelay(true);
 
@@ -813,16 +1327,18 @@ fn write_jump_session_input(
     writer: &Arc<Mutex<Box<dyn Write + Send>>>,
     input: &str,
 ) -> Result<(), String> {
-    let mut writer = writer
-        .lock()
-        .expect("jump session writer lock poisoned");
+    let mut writer = writer.lock().expect("jump session writer lock poisoned");
     writer
         .write_all(input.as_bytes())
         .map_err(|error| error.to_string())?;
     writer.flush().map_err(|error| error.to_string())
 }
 
-fn resize_jump_session_pty(master: &mut Box<dyn MasterPty + Send>, cols: u16, rows: u16) -> Result<(), String> {
+fn resize_jump_session_pty(
+    master: &mut Box<dyn MasterPty + Send>,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
     master
         .resize(PtySize {
             rows,
@@ -858,11 +1374,14 @@ fn spawn_jump_session_reader(
                     }
 
                     while let Some(kind) = detect_prompt_kind(&prompt_window) {
-                        let Some(response) = take_prompt_response(&mut prompt_responses, kind) else {
+                        let Some(response) = take_prompt_response(&mut prompt_responses, kind)
+                        else {
                             break;
                         };
 
-                        if write_jump_session_input(&writer, &format!("{}\n", response.value)).is_err() {
+                        if write_jump_session_input(&writer, &format!("{}\n", response.value))
+                            .is_err()
+                        {
                             break;
                         }
                         prompt_window.clear();
@@ -877,6 +1396,203 @@ fn spawn_jump_session_reader(
             }
         }
     });
+}
+
+fn spawn_local_session_reader(
+    mut reader: Box<dyn Read + Send>,
+    sender: std::sync::mpsc::Sender<JumpSessionEvent>,
+) {
+    thread::spawn(move || {
+        let mut buffer = [0u8; NATIVE_SESSION_READ_CHUNK_SIZE];
+
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    let _ = sender.send(JumpSessionEvent::Eof);
+                    break;
+                }
+                Ok(count) => {
+                    let output = String::from_utf8_lossy(&buffer[..count]).to_string();
+                    let _ = sender.send(JumpSessionEvent::Output(output));
+                }
+                Err(error) => {
+                    let _ = sender.send(JumpSessionEvent::Error(error.to_string()));
+                    break;
+                }
+            }
+        }
+    });
+}
+
+fn run_external_command_session_loop(
+    app: AppHandle,
+    registry: NativeSessionRegistry,
+    forward_registry: NativeForwardRegistry,
+    session_id: String,
+    state: Arc<Mutex<NativeSessionState>>,
+    host: BackendHostConnection,
+    mut receiver: UnboundedReceiver<NativeSessionCommand>,
+) {
+    let mut cleanup_dir = None;
+    let result = (|| -> Result<(), String> {
+        let ExternalCommandSessionSpec {
+            command,
+            exit_label,
+            prompt_responses,
+            cleanup_dir: spec_cleanup_dir,
+        } = build_external_command_session_spec(&host, &session_id)?;
+        cleanup_dir = spec_cleanup_dir.clone();
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: DEFAULT_TERMINAL_ROWS,
+                cols: DEFAULT_TERMINAL_COLS,
+                pixel_width: DEFAULT_TERMINAL_PIXEL_WIDTH,
+                pixel_height: DEFAULT_TERMINAL_PIXEL_HEIGHT,
+            })
+            .map_err(|error| error.to_string())?;
+
+        let mut child = pair
+            .slave
+            .spawn_command(command)
+            .map_err(|error| error.to_string())?;
+        drop(pair.slave);
+
+        let writer = Arc::new(Mutex::new(
+            pair.master
+                .take_writer()
+                .map_err(|error| error.to_string())?,
+        ));
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|error| error.to_string())?;
+        let mut master = pair.master;
+        let (output_sender, output_receiver) = std::sync::mpsc::channel();
+
+        if prompt_responses.is_empty() {
+            spawn_local_session_reader(reader, output_sender);
+        } else {
+            spawn_jump_session_reader(reader, writer.clone(), prompt_responses, output_sender);
+        }
+        set_native_session_connection_state(&app, &session_id, &state, "connected");
+
+        let mut should_close = false;
+        let mut reported_error = false;
+
+        while !should_close {
+            let mut did_work = false;
+
+            loop {
+                match receiver.try_recv() {
+                    Ok(NativeSessionCommand::Close) => {
+                        should_close = true;
+                        break;
+                    }
+                    Ok(NativeSessionCommand::Input(input)) => {
+                        did_work = true;
+                        write_jump_session_input(&writer, &input)?;
+                    }
+                    Ok(NativeSessionCommand::Resize { cols, rows }) => {
+                        did_work = true;
+                        resize_jump_session_pty(&mut master, cols, rows)?;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        should_close = true;
+                        break;
+                    }
+                }
+            }
+
+            loop {
+                match output_receiver.try_recv() {
+                    Ok(JumpSessionEvent::Output(output)) => {
+                        did_work = true;
+                        emit_native_session_output(&app, &session_id, &state, output);
+                    }
+                    Ok(JumpSessionEvent::Error(error)) => {
+                        emit_native_session_error(&app, &session_id, &state, error);
+                        set_native_session_connection_state(&app, &session_id, &state, "error");
+                        reported_error = true;
+                        should_close = true;
+                        break;
+                    }
+                    Ok(JumpSessionEvent::Eof) => {
+                        should_close = true;
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        should_close = true;
+                        break;
+                    }
+                }
+            }
+
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    if !status.success() && !reported_error {
+                        emit_native_session_error(
+                            &app,
+                            &session_id,
+                            &state,
+                            format!("{exit_label} exited with status {status}."),
+                        );
+                        set_native_session_connection_state(&app, &session_id, &state, "error");
+                    }
+                    should_close = true;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    emit_native_session_error(&app, &session_id, &state, error.to_string());
+                    set_native_session_connection_state(&app, &session_id, &state, "error");
+                    should_close = true;
+                }
+            }
+
+            if !did_work && !should_close {
+                thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
+            }
+        }
+
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(master);
+
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        emit_native_session_error(&app, &session_id, &state, error);
+        set_native_session_connection_state(&app, &session_id, &state, "error");
+    }
+
+    close_native_forwards_for_session(&forward_registry, &session_id);
+    remove_native_session(&registry, &session_id);
+    set_native_session_connection_state(&app, &session_id, &state, "disconnected");
+
+    if let Some(cleanup_dir) = cleanup_dir {
+        let _ = fs::remove_dir_all(cleanup_dir);
+    }
+
+    let stream_id = {
+        let mut state = state.lock().expect("native session state lock poisoned");
+        state.stream_id.take()
+    };
+
+    if let Some(stream_id) = stream_id {
+        emit_session_stream_event(
+            &app,
+            SessionStreamEvent {
+                data: None,
+                kind: "close",
+                message: None,
+                session_id: session_id.clone(),
+                stream_id,
+            },
+        );
+    }
 }
 
 fn run_jump_host_session_loop(
@@ -939,7 +1655,12 @@ fn run_jump_host_session_loop(
         let mut master = pair.master;
         let (output_sender, output_receiver) = std::sync::mpsc::channel();
 
-        spawn_jump_session_reader(reader, writer.clone(), build_prompt_responses(&host), output_sender);
+        spawn_jump_session_reader(
+            reader,
+            writer.clone(),
+            build_prompt_responses(&host),
+            output_sender,
+        );
         set_native_session_connection_state(&app, &session_id, &state, "connected");
 
         let mut should_close = false;
@@ -1375,6 +2096,13 @@ fn termsnip_transport_info(bridge: State<'_, BackendBridge>) -> BackendTransport
 }
 
 #[tauri::command]
+fn termsnip_protocol_runtime_status(
+    request: ProtocolRuntimeStatusRequest,
+) -> ProtocolRuntimeStatusResponse {
+    build_protocol_runtime_status(&request.protocol)
+}
+
+#[tauri::command]
 async fn termsnip_backend_status(
     bridge: State<'_, BackendBridge>,
 ) -> Result<BackendStatusResponse, String> {
@@ -1418,15 +2146,42 @@ async fn termsnip_proxy_backend_binary(
 }
 
 #[tauri::command]
+async fn termsnip_inspect_private_key(request: KeyPathRequest) -> Result<KeyMetadata, String> {
+    tauri::async_runtime::spawn_blocking(move || inspect_private_key(&request.path))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn termsnip_generate_private_key(request: GenerateKeyRequest) -> Result<KeyMetadata, String> {
+    tauri::async_runtime::spawn_blocking(move || generate_key_pair(&request))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn termsnip_scan_known_host(
+    request: KnownHostScanRequest,
+) -> Result<KnownHostScanResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || scan_known_host(&request))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn termsnip_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirectoryResponse, String> {
-    validate_session_host(&request.host)?;
-    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
-    let output = with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-        run_sftp_batch_commands(
-            context,
-            &[format!("@ls -la {}", escape_sftp_argument(&target_path))],
-        )
-    })?;
+    validate_ssh_host(&request.host)?;
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.path,
+    );
+    let output =
+        with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+            run_sftp_batch_commands(
+                context,
+                &[format!("@ls -la {}", escape_sftp_argument(&target_path))],
+            )
+        })?;
 
     Ok(SftpDirectoryResponse {
         entries: parse_sftp_directory_listing(&target_path, &output),
@@ -1436,8 +2191,11 @@ fn termsnip_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirector
 
 #[tauri::command]
 fn termsnip_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPathResponse, String> {
-    validate_session_host(&request.host)?;
-    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+    validate_ssh_host(&request.host)?;
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.path,
+    );
     with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
         run_sftp_batch_commands(
             context,
@@ -1452,11 +2210,15 @@ fn termsnip_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPat
 
 #[tauri::command]
 fn termsnip_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathResponse, String> {
-    validate_session_host(&request.host)?;
-    let source_path =
-        resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.current_path);
-    let target_path =
-        resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.next_path);
+    validate_ssh_host(&request.host)?;
+    let source_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.current_path,
+    );
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.next_path,
+    );
     with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
         run_sftp_batch_commands(
             context,
@@ -1474,9 +2236,14 @@ fn termsnip_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathR
 }
 
 #[tauri::command]
-fn termsnip_sftp_delete_entry(request: SftpDeleteRequest) -> Result<BackendBooleanResponse, String> {
-    validate_session_host(&request.host)?;
-    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+fn termsnip_sftp_delete_entry(
+    request: SftpDeleteRequest,
+) -> Result<BackendBooleanResponse, String> {
+    validate_ssh_host(&request.host)?;
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.path,
+    );
     with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
         run_sftp_batch_commands(
             context,
@@ -1495,8 +2262,11 @@ fn termsnip_sftp_delete_entry(request: SftpDeleteRequest) -> Result<BackendBoole
 
 #[tauri::command]
 fn termsnip_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathResponse, String> {
-    validate_session_host(&request.host)?;
-    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+    validate_ssh_host(&request.host)?;
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.path,
+    );
     let contents = BASE64_STANDARD
         .decode(request.contents_base64.as_bytes())
         .map_err(|error| error.to_string())?;
@@ -1521,9 +2291,14 @@ fn termsnip_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathRe
 }
 
 #[tauri::command]
-fn termsnip_sftp_download_file(request: SftpPathRequest) -> Result<BackendBinaryProxyResponse, String> {
-    validate_session_host(&request.host)?;
-    let target_path = resolve_remote_path(request.host.sftp_root.as_deref().unwrap_or("/"), &request.path);
+fn termsnip_sftp_download_file(
+    request: SftpPathRequest,
+) -> Result<BackendBinaryProxyResponse, String> {
+    validate_ssh_host(&request.host)?;
+    let target_path = resolve_remote_path(
+        request.host.sftp_root.as_deref().unwrap_or("/"),
+        &request.path,
+    );
     with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
         let filename = sanitize_filename(
             target_path
@@ -1578,11 +2353,9 @@ fn termsnip_delete_forward(
 async fn termsnip_execute_snippet_on_hosts(
     request: SnippetExecutionRequest,
 ) -> Result<SnippetExecutionResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        execute_native_snippet_request(request)
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || execute_native_snippet_request(request))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1606,7 +2379,11 @@ async fn termsnip_store_host_secrets(
     request: StoreHostSecretsRequest,
 ) -> Result<BackendBooleanResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        store_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id, &request.password)?;
+        store_keychain_secret(
+            KEYCHAIN_PASSWORD_SERVICE,
+            &request.host_id,
+            &request.password,
+        )?;
         store_keychain_secret(
             KEYCHAIN_PASSPHRASE_SERVICE,
             &request.host_id,
@@ -1647,7 +2424,7 @@ async fn termsnip_create_backend_session(
     app: AppHandle,
     request: CreateBackendSessionRequest,
 ) -> Result<CreateSessionResponse, String> {
-    validate_session_host(&request.host)?;
+    validate_session_target(&request.host)?;
 
     if !should_use_native_session(&request.host) {
         return proxy_json(
@@ -1672,7 +2449,32 @@ async fn termsnip_create_backend_session(
     let app_handle = app.clone();
     let session_id_for_thread = session_id.clone();
     let state_for_thread = state.clone();
-    let command_sender = if host.jump_host.is_some() {
+    let command_sender = if host.protocol == "localShell"
+        || host.protocol == "telnet"
+        || host.protocol == "serial"
+        || host.protocol == "mosh"
+    {
+        let (command_sender, command_receiver) = unbounded_channel();
+        let registry_for_thread = native_registry.clone();
+        let forward_registry_for_thread = forward_registry.clone();
+        let thread_app = app_handle.clone();
+        let thread_session_id = session_id_for_thread.clone();
+        let thread_state = state_for_thread.clone();
+
+        thread::spawn(move || {
+            run_external_command_session_loop(
+                thread_app,
+                registry_for_thread,
+                forward_registry_for_thread,
+                thread_session_id,
+                thread_state,
+                host,
+                command_receiver,
+            );
+        });
+
+        command_sender
+    } else if host.jump_host.is_some() {
         let (command_sender, command_receiver) = unbounded_channel();
         let registry_for_thread = native_registry.clone();
         let forward_registry_for_thread = forward_registry.clone();
@@ -1979,9 +2781,15 @@ fn termsnip_close_backend_session_stream(
     }
 
     let bridge = match request.stream_id {
-        Some(stream_id) => remove_session_stream_if_current(&registry, &request.session_id, &stream_id),
+        Some(stream_id) => {
+            remove_session_stream_if_current(&registry, &request.session_id, &stream_id)
+        }
         None => get_session_stream(&registry, &request.session_id).and_then(|active_bridge| {
-            remove_session_stream_if_current(&registry, &request.session_id, &active_bridge.stream_id)
+            remove_session_stream_if_current(
+                &registry,
+                &request.session_id,
+                &active_bridge.stream_id,
+            )
         }),
     };
 
@@ -2003,9 +2811,13 @@ fn main() {
         .manage(NativeForwardRegistry::default())
         .invoke_handler(tauri::generate_handler![
             termsnip_transport_info,
+            termsnip_protocol_runtime_status,
             termsnip_backend_status,
             termsnip_proxy_backend_json,
             termsnip_proxy_backend_binary,
+            termsnip_inspect_private_key,
+            termsnip_generate_private_key,
+            termsnip_scan_known_host,
             termsnip_sftp_list_directory,
             termsnip_sftp_create_directory,
             termsnip_sftp_rename_entry,
@@ -2037,7 +2849,7 @@ mod native_transport_fixtures;
 mod tests {
     use super::*;
     use std::{
-        process,
+        env, process,
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -2045,7 +2857,10 @@ mod tests {
         BackendHostConnection {
             agent_forwarding: true,
             auth_method: "password".to_string(),
-            environment: Some(HashMap::from([("APP_ENV".to_string(), "production".to_string())])),
+            environment: Some(HashMap::from([(
+                "APP_ENV".to_string(),
+                "production".to_string(),
+            )])),
             hostname: "target.internal".to_string(),
             jump_host: Some(Box::new(BackendHostConnection {
                 agent_forwarding: false,
@@ -2059,6 +2874,7 @@ mod tests {
                 passphrase: "jump-passphrase".to_string(),
                 port: 2222,
                 private_key_path: "~/.ssh/jump".to_string(),
+                protocol: "ssh".to_string(),
                 sftp_root: None,
                 username: "jump".to_string(),
             })),
@@ -2068,6 +2884,7 @@ mod tests {
             passphrase: "".to_string(),
             port: 2223,
             private_key_path: "".to_string(),
+            protocol: "ssh".to_string(),
             sftp_root: None,
             username: "deploy".to_string(),
         }
@@ -2109,6 +2926,87 @@ mod tests {
     }
 
     #[test]
+    fn validates_telnet_serial_and_mosh_session_targets() {
+        let telnet_host = BackendHostConnection {
+            agent_forwarding: false,
+            auth_method: "none".to_string(),
+            environment: None,
+            hostname: "legacy.internal".to_string(),
+            jump_host: None,
+            known_host_algorithm: None,
+            known_host_public_key: None,
+            password: "".to_string(),
+            passphrase: "".to_string(),
+            port: 23,
+            private_key_path: "".to_string(),
+            protocol: "telnet".to_string(),
+            sftp_root: None,
+            username: "".to_string(),
+        };
+        let serial_host = BackendHostConnection {
+            hostname: "/dev/cu.usbserial-1410".to_string(),
+            port: 115200,
+            protocol: "serial".to_string(),
+            ..telnet_host.clone()
+        };
+        let mosh_host = BackendHostConnection {
+            auth_method: "privateKey".to_string(),
+            hostname: "ops.internal".to_string(),
+            port: 22,
+            private_key_path: "~/.ssh/id_ops".to_string(),
+            protocol: "mosh".to_string(),
+            username: "ops".to_string(),
+            ..telnet_host.clone()
+        };
+
+        assert!(should_use_native_session(&telnet_host));
+        assert!(should_use_native_session(&serial_host));
+        assert!(should_use_native_session(&mosh_host));
+        assert!(validate_session_target(&telnet_host).is_ok());
+        assert!(validate_session_target(&serial_host).is_ok());
+        assert!(validate_session_target(&mosh_host).is_ok());
+    }
+
+    #[test]
+    fn reports_builtin_and_unknown_protocol_runtime_status() {
+        let ssh_status = build_protocol_runtime_status("ssh");
+        let unknown_status = build_protocol_runtime_status("gopher");
+
+        assert!(ssh_status.available);
+        assert_eq!(ssh_status.protocol, "ssh");
+        assert!(!unknown_status.available);
+        assert!(unknown_status.message.contains("Unsupported protocol runtime"));
+    }
+
+    #[test]
+    fn builds_mosh_ssh_command_with_known_hosts_and_key_path() {
+        let host = BackendHostConnection {
+            agent_forwarding: true,
+            auth_method: "privateKey".to_string(),
+            environment: None,
+            hostname: "ops.internal".to_string(),
+            jump_host: None,
+            known_host_algorithm: Some("ssh-ed25519".to_string()),
+            known_host_public_key: Some("AAAATESTMOSH".to_string()),
+            password: "".to_string(),
+            passphrase: "passphrase".to_string(),
+            port: 60022,
+            private_key_path: "~/.ssh/id_ops".to_string(),
+            protocol: "mosh".to_string(),
+            sftp_root: None,
+            username: "ops".to_string(),
+        };
+        let known_hosts_path = PathBuf::from("/tmp/termsnip-known-hosts");
+        let ssh_command = build_mosh_ssh_command(&host, Some(&known_hosts_path));
+
+        assert!(ssh_command.contains("/usr/bin/ssh"));
+        assert!(ssh_command.contains("-p 60022"));
+        assert!(ssh_command.contains("UserKnownHostsFile=/tmp/termsnip-known-hosts"));
+        assert!(ssh_command.contains("StrictHostKeyChecking=yes"));
+        assert!(ssh_command.contains("IdentitiesOnly=yes"));
+    }
+
+    #[test]
     fn parses_sftp_directory_listing_output() {
         let output = r#"
 Connected to target.internal.
@@ -2129,6 +3027,22 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
         assert_eq!(entries[1].path, "/srv/current");
         assert_eq!(entries[2].name, "README.md");
         assert_eq!(entries[2].permissions.as_deref(), Some("644"));
+    }
+
+    #[test]
+    fn normalizes_private_key_algorithms() {
+        assert_eq!(normalize_key_algorithm("ssh-ed25519"), "ED25519");
+        assert_eq!(normalize_key_algorithm("ecdsa-sha2-nistp521"), "ECDSA");
+        assert_eq!(normalize_key_algorithm("rsa-sha2-512"), "RSA");
+        assert_eq!(normalize_key_algorithm("ssh-dss"), "UNKNOWN");
+    }
+
+    #[test]
+    fn computes_known_host_scan_fingerprints() {
+        assert_eq!(
+            compute_public_key_fingerprint("SGVsbG8=").as_deref(),
+            Ok("SHA256:GF+NsyJx/iX1Yab8k4suJkMG7DBO2lGAB9F2SCY4GWk")
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -2152,5 +3066,28 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
         let cleared = load_keychain_secret(&service, &account)
             .expect("loading deleted test keychain secret should succeed");
         assert_eq!(cleared, None);
+    }
+
+    #[test]
+    fn public_known_host_scan_smoke() {
+        let Ok(hostname) = env::var("TERMSNIP_PUBLIC_SCAN_HOST") else {
+            eprintln!("Skipping public known-host scan smoke; TERMSNIP_PUBLIC_SCAN_HOST is unset");
+            return;
+        };
+        let port = env::var("TERMSNIP_PUBLIC_SCAN_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or(22);
+
+        let result = scan_known_host(&KnownHostScanRequest { hostname, port })
+            .expect("public known-host scan should succeed");
+
+        assert!(!result.entries.is_empty());
+        assert!(result.entries.iter().all(|entry| {
+            entry.port == port
+                && !entry.algorithm.trim().is_empty()
+                && !entry.public_key.trim().is_empty()
+                && entry.fingerprint.starts_with("SHA256:")
+        }));
     }
 }

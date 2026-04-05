@@ -14,9 +14,19 @@ echo "[validate] unit and integration tests"
 echo "[validate] desktop build"
 npm --prefix ./apps/desktop run build
 
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  echo "[validate] native trust tooling"
+  bash ./scripts/native-trust-tooling-test.sh
+else
+  echo "[validate] native trust tooling skipped (macOS only)"
+fi
+
 if [[ "${TERMSNIP_RUN_E2E:-0}" == "1" ]]; then
   echo "[validate] browser e2e"
   ./node_modules/.bin/playwright test --config playwright.config.ts
 else
   echo "[validate] browser e2e skipped (set TERMSNIP_RUN_E2E=1 to include)"
 fi
+
+echo "[validate] guardrails"
+node ./tools/validators/enforce-runtime-guardrails.js --repo . --config ai.config.json

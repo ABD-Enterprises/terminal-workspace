@@ -6,6 +6,7 @@ import {
   type SnippetFormValues,
   type SnippetRecord,
 } from "../types/snippet";
+import { useVaultSyncStore } from "./vault-sync-store";
 
 const fallbackStorage: StateStorage = {
   getItem: () => null,
@@ -35,6 +36,7 @@ export const useSnippetsStore = create<SnippetsState>()(
         set((state) => ({
           snippets: sortSnippets([...state.snippets, snippet]),
         }));
+        useVaultSyncStore.getState().clearDeleted("snippets", snippet.id);
         return snippet.id;
       },
       updateSnippet: (snippetId, values) => {
@@ -45,12 +47,16 @@ export const useSnippetsStore = create<SnippetsState>()(
             )
           ),
         }));
+        useVaultSyncStore.getState().clearDeleted("snippets", snippetId);
         return snippetId;
       },
       deleteSnippet: (snippetId) =>
-        set((state) => ({
-          snippets: sortSnippets(state.snippets.filter((snippet) => snippet.id !== snippetId)),
-        })),
+        set((state) => {
+          useVaultSyncStore.getState().markDeleted("snippets", snippetId);
+          return {
+            snippets: sortSnippets(state.snippets.filter((snippet) => snippet.id !== snippetId)),
+          };
+        }),
       duplicateSnippet: (snippetId) => {
         const source = get().snippets.find((snippet) => snippet.id === snippetId);
         if (!source) {
@@ -74,6 +80,7 @@ export const useSnippetsStore = create<SnippetsState>()(
         set((state) => ({
           snippets: sortSnippets([snippet, ...state.snippets]),
         }));
+        useVaultSyncStore.getState().clearDeleted("snippets", snippet.id);
 
         return snippet.id;
       },

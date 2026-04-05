@@ -27,7 +27,8 @@ pub(crate) fn run_security_command(args: &[&str]) -> Result<Output, String> {
 }
 
 pub(crate) fn load_keychain_secret(service: &str, account: &str) -> Result<Option<String>, String> {
-    let output = run_security_command(&["find-generic-password", "-a", account, "-s", service, "-w"])?;
+    let output =
+        run_security_command(&["find-generic-password", "-a", account, "-s", service, "-w"])?;
     if output.status.success() {
         return Ok(Some(trim_security_output(&output.stdout)));
     }
@@ -48,7 +49,11 @@ pub(crate) fn delete_keychain_secret(service: &str, account: &str) -> Result<(),
     Err(format_security_error(&output))
 }
 
-pub(crate) fn store_keychain_secret(service: &str, account: &str, value: &str) -> Result<(), String> {
+pub(crate) fn store_keychain_secret(
+    service: &str,
+    account: &str,
+    value: &str,
+) -> Result<(), String> {
     if value.is_empty() {
         return delete_keychain_secret(service, account);
     }

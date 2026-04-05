@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from "react";
-import { cn, formatHostAddress, formatRelativeTime } from "../../lib/utils";
-import type { HostRecord } from "../../types/host";
+import { cn, describeHostRuntime, formatHostAddress, formatRelativeTime } from "../../lib/utils";
+import { formatHostProtocol, type HostRecord } from "../../types/host";
 import { EmptyState } from "../common/EmptyState";
 
 function getVisibleTags(tags: string[]) {
@@ -77,31 +77,28 @@ export function HostList({
                 <button type="button" onClick={() => onSelect(host.id)} className="min-w-0 text-left">
                   <span className="block truncate font-medium text-slate-100">{host.label}</span>
                   <p className="mt-0.5 truncate text-[11px] text-slate-500">
-                    {visibleTags.slice(0, 3).join(" · ") || "No tags"}
+                    {[formatHostProtocol(host.protocol), ...visibleTags].slice(0, 3).join(" · ") || "No tags"}
                   </p>
                 </button>
 
                 <button type="button" onClick={() => onSelect(host.id)} className="min-w-0 text-left">
                   <p className="truncate text-sm text-slate-200">{formatHostAddress(host)}</p>
                   <p className="mt-0.5 truncate text-[11px] text-slate-500">
-                    {host.authMethod === "privateKey"
-                      ? "Private key"
-                      : host.authMethod === "password"
-                        ? "Password"
-                        : "Auth unset"}
-                    {" · "}
-                    {host.hostKeyPolicy === "requireTrusted" ? "Trusted key required" : "Unknown key allowed"}
-                    {host.jumpHostId && hostsById[host.jumpHostId]
-                      ? ` · via ${hostsById[host.jumpHostId].label}`
-                      : ""}
-                    {host.agentForwarding ? " · agent" : ""}
+                    {describeHostRuntime(
+                      host,
+                      host.jumpHostId && hostsById[host.jumpHostId]
+                        ? hostsById[host.jumpHostId].label
+                        : undefined
+                    )}
                   </p>
                 </button>
 
                 <button type="button" onClick={() => onSelect(host.id)} className="min-w-0 text-left">
                   <p className="truncate text-sm text-slate-200">{host.keyLabel || "Unassigned"}</p>
                   <p className="mt-0.5 text-[11px] text-slate-500">
-                    {host.snippetCount} snips · {host.forwardingCount} fwd · {Object.keys(host.environment).length} env
+                    {host.protocol === "ssh"
+                      ? `${host.snippetCount} snips · ${host.forwardingCount} fwd · ${Object.keys(host.environment).length} env`
+                      : `${Object.keys(host.environment).length} env · ${formatHostProtocol(host.protocol)}`}
                   </p>
                 </button>
 

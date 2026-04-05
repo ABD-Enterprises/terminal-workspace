@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import { sampleKeys, type KeyMetadata, type KeyRecord, type KeySource } from "../types/key";
+import { useVaultSyncStore } from "./vault-sync-store";
 
 const fallbackStorage: StateStorage = {
   getItem: () => null,
@@ -87,6 +88,9 @@ export const useKeysStore = create<KeysState>()(
         }));
 
         const nextKey = get().keys.find((key) => key.privateKeyPath === metadata.privateKeyPath);
+        if (nextKey) {
+          useVaultSyncStore.getState().clearDeleted("keys", nextKey.id);
+        }
         return nextKey?.id ?? "";
       },
       addGeneratedKey: (label, metadata, hasPassphrase) => {
@@ -95,6 +99,9 @@ export const useKeysStore = create<KeysState>()(
         }));
 
         const nextKey = get().keys.find((key) => key.privateKeyPath === metadata.privateKeyPath);
+        if (nextKey) {
+          useVaultSyncStore.getState().clearDeleted("keys", nextKey.id);
+        }
         return nextKey?.id ?? "";
       },
       deleteKey: (keyId) => {
@@ -102,6 +109,9 @@ export const useKeysStore = create<KeysState>()(
         set((state) => ({
           keys: sortKeys(state.keys.filter((entry) => entry.id !== keyId)),
         }));
+        if (key) {
+          useVaultSyncStore.getState().markDeleted("keys", key.id);
+        }
         return key;
       },
       assignHost: (keyId, hostId) =>

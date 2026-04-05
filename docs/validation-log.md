@@ -1,5 +1,103 @@
 # Validation Log
 
+## 2026-04-04
+
+### Release Credential Portability And Regression Hardening
+
+- `npm run native:notary:auth:test`
+  - validated App Store Connect key auth resolution
+  - validated Apple ID auth resolution
+  - validated local keychain-profile auth resolution
+- `bash ./scripts/native-fixture-preflight.sh trust`
+  - confirmed the local shell can launch and scan a temporary localhost `sshd`
+- `npm run native:fixtures`
+  - preflight passed
+  - `native_transport_fixtures::localhost_ssh_transport_fixture_flow` passed
+- `npm run native:release:check`
+  - rebuilt the signed bundle after the portability changes
+  - manifest now includes artifact basenames and relative paths
+- `MACOS_NOTARY_PROFILE=BugNarratorNotary npm run native:notarize`
+  - accepted Apple submission `fdbe1c4b-27a6-47fe-a726-ddaa01cfb723`
+  - after the auth dry-run addition, accepted Apple submission `c7f60fa5-9560-4f94-894c-f399f0afbc6e`
+  - stapling passed
+  - post-notary `spctl` reported `accepted`
+- `npm run native:promote`
+  - wrote promoted release notes and updated the stable manifest
+- `npm run native:publish:dry-run`
+  - validated the promoted GitHub release asset list and release-note path
+- `TERMSNIP_RUN_E2E=1 npm run validate`
+  - passed after the parity tests, vault snapshot metadata, and fixture preflight changes
+  - Vitest passed 12 files and 39 tests
+  - desktop production build passed
+  - `native_transport_fixtures::native_trust_tooling_fixture_flow` passed with preflight
+  - Playwright passed 5 route and workflow specs
+
+### Notarization And Release Promotion
+
+- `MACOS_NOTARY_PROFILE=BugNarratorNotary npm run native:notarize`
+  - Apple notarization submission `cdcc26c4-de7c-46c3-9908-fffee66dfd7f` accepted during the first
+    local proof pass
+  - after the implementation commit, Apple notarization submission
+    `0a91fc93-73af-4f5b-b41c-4def1ee41594` accepted on the committed release automation
+  - stapling passed
+  - post-notary `spctl` reported `accepted`
+- `npm run native:promote`
+  - promoted the notarized artifact into `artifacts/release/promoted/stable/v0.1.0`
+- `xcrun stapler validate -v src-tauri/target/release/bundle/macos/Terminal Workspace.app`
+  - passed after notarization
+- `spctl --assess --type execute --verbose=4 src-tauri/target/release/bundle/macos/Terminal Workspace.app`
+  - reported `accepted`
+- `TERMSNIP_RUN_E2E=1 npm run validate`
+  - passed after the notarization/promotion implementation commit
+
+### Packaging And Release Hardening
+
+- `MACOS_SIGN_MODE=skip npm run native:release:check`
+  - built the native bundle, wrote the versioned zip plus JSON manifest, and verified the preview
+    packaging path
+- `npm run native:release:check`
+  - built the signed native bundle with `MACOS_SIGN_MODE=require`
+  - confirmed the final manifest now reports `com.abdenterprises.terminalworkspace`
+  - `codesign` verification passed
+  - `spctl` assessment returned `not_accepted`, which is now tracked as the notarization blocker
+- `TERMSNIP_RUN_E2E=1 npm run validate` from an unsandboxed shell
+  - Vitest passed 12 files and 33 tests
+  - desktop production build passed
+  - `native_transport_fixtures::native_trust_tooling_fixture_flow` passed
+  - Playwright passed 5 route and workflow specs
+
+### Passed
+
+- `npm run native:check`
+- `npm run native:key`
+  - `native_transport_fixtures::native_key_tooling_fixture_flow` passed
+- `bash ./scripts/native-trust-tooling-test.sh` from an unsandboxed shell
+  - `native_transport_fixtures::native_trust_tooling_fixture_flow` passed
+- `npm run native:fixtures` from an unsandboxed shell
+  - `native_transport_fixtures::localhost_ssh_transport_fixture_flow` passed
+- `TERMSNIP_RUN_E2E=1 npm run validate` from an unsandboxed shell
+  - Vitest passed 12 files and 33 tests
+  - desktop production build passed
+  - `native_transport_fixtures::native_trust_tooling_fixture_flow` passed
+  - Playwright passed 5 route and workflow specs
+
+### Fix And Retest Notes
+
+- The first `validate` pass failed in Playwright because `tests/e2e/hosts.spec.ts` and
+  `tests/e2e/app-launch.spec.ts` still expected the old host heading and the old Settings runtime
+  copy.
+- After updating those expectations to match the current decluttered host list and `Runtime mode`
+  wording, `TERMSNIP_RUN_E2E=1 npm run validate` passed cleanly.
+
+### Environment Notes
+
+- Local macOS localhost SSH fixtures need an unsandboxed shell in this desktop environment because
+  temporary `sshd` children cannot complete preauth correctly inside the default sandbox.
+- `native:key` is the fast local native key regression.
+- `native:trust` is the phase gate for native trust and key tooling.
+- `native:fixtures` remains the broader localhost transport regression and now runs as an explicit
+  ignored test.
+
 ## 2026-03-29
 
 ### Passed

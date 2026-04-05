@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileBrowser } from "../components/sftp/FileBrowser";
+import { formatHostAddress } from "../lib/utils";
 import { TransferQueue } from "../components/sftp/TransferQueue";
 import { useHostsStore } from "../store/hosts-store";
 import { useSessionsStore } from "../store/sessions-store";
@@ -8,7 +9,7 @@ import { useTransfersStore } from "../store/transfers-store";
 
 export function TransfersPage() {
   const navigate = useNavigate();
-  const hosts = useHostsStore((state) => state.hosts);
+  const hosts = useHostsStore((state) => state.hosts.filter((host) => host.protocol === "ssh"));
   const markConnected = useHostsStore((state) => state.markConnected);
   const openSession = useSessionsStore((state) => state.openSession);
   const activeHostId = useTransfersStore((state) => state.activeHostId);
@@ -55,7 +56,7 @@ export function TransfersPage() {
           <div className="min-w-0 rounded-[18px] border border-slate-800 bg-slate-950/60 px-3.5 py-3">
             <p className="truncate text-sm font-medium text-slate-100">{activeHost.label}</p>
             <p className="mt-1 truncate text-xs text-slate-400">
-              {activeHost.username}@{activeHost.hostname}:{activeHost.port}
+              {formatHostAddress(activeHost)}
             </p>
             <p className="mt-2 truncate text-[11px] text-slate-500">
               Root {activeHost.sftpRoot} • Auth {activeHost.authMethod}

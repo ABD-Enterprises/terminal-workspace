@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Modal } from "../common/Modal";
+import { formatHostAddress } from "../../lib/utils";
 import { emptySnippetFormValues, snippetToFormValues, type SnippetFormValues, type SnippetRecord } from "../../types/snippet";
 import type { HostRecord } from "../../types/host";
 
@@ -17,7 +18,10 @@ export function SnippetEditor({ open, snippet, hosts, onClose, onSave }: Snippet
   );
 
   const hostOptions = useMemo(
-    () => hosts.map((host) => ({ id: host.id, label: host.label, address: `${host.username}@${host.hostname}:${host.port}` })),
+    () =>
+      hosts
+        .filter((host) => host.protocol === "ssh")
+        .map((host) => ({ id: host.id, label: host.label, address: formatHostAddress(host) })),
     [hosts]
   );
 

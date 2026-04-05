@@ -28,6 +28,6 @@ test("walks the primary routes and captures browser screenshots", async ({ page 
 
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Settings" }).first()).toBeVisible();
-  await expect(page.getByText("Demo backend enabled")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Demo backend" })).toBeVisible();
   await capture(page, "settings-route.png");
 });

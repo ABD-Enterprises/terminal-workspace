@@ -1,0 +1,307 @@
+{
+  "branch": "phase/macos-session-history-and-runbooks",
+  "current_run_id": "2026-04-05-macos-session-history-and-runbooks-output-history",
+  "current_task": "App-dispatched session history now stores bounded output excerpts and surfaces them in Sessions.",
+  "current_phase": "macos-session-history-and-runbooks",
+  "started_at": "2026-04-05T07:10:24Z",
+  "summary": "This run completed the output-history slice for the session-history phase by storing bounded output previews for app-dispatched commands, rendering those excerpts in Sessions, and expanding history search to cover output text.",
+  "updated_at": "2026-04-05T07:10:24Z",
+  "status": "in_progress",
+  "validation": [
+    {
+      "id": "validation-vault-sync-targeted-tests-deletions",
+      "command": "npm run test -- apps/desktop/src/lib/local-config.test.ts apps/desktop/src/store/app-store.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-vault-sync-tests",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-vault-sync-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-vault-sync-validator",
+      "command": "node ./tools/validators/enforce-runtime-guardrails.js --base d494b7df10f30c76a7d4e9785a32be975ff575c7",
+      "result": "passed"
+    },
+    {
+      "id": "validation-vault-sync-targeted-tests-remote-contract",
+      "command": "npm run test -- apps/desktop/src/lib/vault-sync-contract.test.ts apps/desktop/src/lib/local-config.test.ts apps/desktop/src/store/app-store.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-vault-sync-targeted-tests-retention",
+      "command": "npm run test -- apps/desktop/src/store/vault-sync-store.test.ts apps/desktop/src/lib/local-config.test.ts apps/desktop/src/store/app-store.test.ts apps/desktop/src/lib/vault-sync-contract.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-vault-sync-targeted-tests-trust-policy",
+      "command": "npm run test -- apps/desktop/src/lib/vault-sync-contract.test.ts apps/desktop/src/store/vault-sync-store.test.ts apps/desktop/src/lib/local-config.test.ts apps/desktop/src/store/app-store.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-vault-sync-targeted-tests-trust-store-runtime",
+      "command": "npm run test -- apps/desktop/src/store/vault-sync-trust-store.test.ts apps/desktop/src/lib/vault-sync-runtime.test.ts apps/desktop/src/lib/vault-sync-contract.test.ts apps/desktop/src/store/vault-sync-store.test.ts apps/desktop/src/lib/local-config.test.ts apps/desktop/src/store/app-store.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-vault-sync-full-suite-after-management-surface",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-vault-sync-desktop-build-after-management-surface",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-vault-sync-json-state",
+      "command": "python3 -m json.tool docs/roadmap/state.json state/tasks.json state/risks.json state/decisions.json state/session.json state/handoff.json state/repo.json",
+      "result": "passed"
+    },
+    {
+      "id": "validation-release-workflow-yaml",
+      "command": "ruby -e 'require \"yaml\"; %w[.github/workflows/release-macos.yml .github/workflows/validate.yml .github/workflows/ci.yml].each { |f| YAML.load_file(f) }; puts \"PASS\"'",
+      "result": "passed"
+    },
+    {
+      "id": "validation-release-publish-dry-run-target",
+      "command": "RELEASE_TARGET=test-sha GITHUB_REPOSITORY=deffenda/term-snip npm run native:publish:dry-run",
+      "result": "passed"
+    },
+    {
+      "id": "validation-release-workflow-live-run-initial",
+      "command": "gh run watch 23988564897 --interval 10 --exit-status",
+      "result": "failed_missing_secrets"
+    },
+    {
+      "id": "validation-release-workflow-live-run-preflight",
+      "command": "gh run watch 23988585485 --interval 10 --exit-status",
+      "result": "failed_missing_secrets"
+    },
+    {
+      "id": "validation-release-workflow-live-run-node24",
+      "command": "gh run watch 23988609667 --interval 10 --exit-status",
+      "result": "failed_missing_secrets"
+    },
+    {
+      "id": "validation-workflow-runtime-yaml",
+      "command": "ruby -e 'require \"yaml\"; %w[.github/workflows/release-macos.yml .github/workflows/validate.yml .github/workflows/ci.yml].each { |f| YAML.load_file(f) }; puts \"PASS\"'",
+      "result": "passed"
+    },
+    {
+      "id": "validation-workflow-runtime-live-run",
+      "command": "gh run watch 23989103141 --interval 10 --exit-status",
+      "result": "failed_missing_secrets_without_node20_warning"
+    },
+    {
+      "id": "validation-release-secret-tool-node-check",
+      "command": "node --check ./scripts/github-release-secrets.mjs",
+      "result": "passed"
+    },
+    {
+      "id": "validation-release-secret-tool-targeted-tests",
+      "command": "npm run test -- tests/integration/github-release-secrets.integration.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-release-secret-workflow-yaml",
+      "command": "ruby -e 'require \"yaml\"; YAML.load_file(\".github/workflows/release-macos.yml\"); puts \"PASS\"'",
+      "result": "passed"
+    },
+    {
+      "id": "validation-release-secret-apply-dry-run",
+      "command": "MACOS_CERTIFICATE_P12_BASE64=ZmFrZS1wMTI= MACOS_CERTIFICATE_PASSWORD=certificate-password MACOS_KEYCHAIN_PASSWORD=keychain-password MACOS_SIGN_IDENTITY='Developer ID Application: ABD Enterprises, Inc. (2R4WAH4R53)' MACOS_NOTARY_KEY_ID=ABC123DEF4 MACOS_NOTARY_ISSUER=11111111-2222-3333-4444-555555555555 MACOS_NOTARY_KEY_BASE64=ZmFrZS1wOA== npm run release:secrets:apply-env:dry-run -- --json --repo deffenda/term-snip",
+      "result": "passed"
+    },
+    {
+      "id": "validation-release-secret-full-test-suite",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-release-secret-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-release-secret-github-audit",
+      "command": "npm run release:secrets:audit -- --json --repo deffenda/term-snip",
+      "result": "failed_missing_github_and_local_release_secrets"
+    },
+    {
+      "id": "validation-release-secret-local-env-check",
+      "command": "npm run release:secrets:validate-env -- --json",
+      "result": "failed_missing_local_release_secrets"
+    },
+    {
+      "id": "validation-release-secret-local-env-check-synthetic",
+      "command": "MACOS_CERTIFICATE_P12_BASE64=ZmFrZS1wMTI= MACOS_CERTIFICATE_PASSWORD=certificate-password MACOS_KEYCHAIN_PASSWORD=keychain-password MACOS_SIGN_IDENTITY='Developer ID Application: ABD Enterprises, Inc. (2R4WAH4R53)' MACOS_NOTARY_KEY_ID=ABC123DEF4 MACOS_NOTARY_ISSUER=11111111-2222-3333-4444-555555555555 MACOS_NOTARY_KEY_BASE64=ZmFrZS1wOA== npm run release:secrets:validate-env -- --json",
+      "result": "passed"
+    },
+    {
+      "id": "validation-protocol-hosts-targeted-tests",
+      "command": "npm run test -- apps/desktop/src/store/hosts-store.test.ts apps/desktop/src/store/sessions-store.test.ts apps/desktop/src/lib/connections.test.ts apps/desktop/src/lib/api.test.ts apps/desktop/src/lib/backend-runtime.test.ts apps/desktop/src/lib/local-config.test.ts apps/desktop/src/lib/vault-sync-contract.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-protocol-hosts-full-vitest",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-protocol-hosts-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-protocol-hosts-cargo-test",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-protocol-hosts-cargo-check",
+      "command": "cargo check --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-protocol-hosts-validator",
+      "command": "node ./tools/validators/enforce-runtime-guardrails.js --base c80b1f6bda72fe063af07c4d0f0b5730ed104921",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-targeted-tests",
+      "command": "npm run test -- apps/desktop/src/store/hosts-store.test.ts apps/desktop/src/store/sessions-store.test.ts apps/desktop/src/lib/connections.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-full-vitest",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-cargo-test",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-preflight-targeted-tests",
+      "command": "npm run test -- apps/desktop/src/lib/api.test.ts apps/desktop/src/store/hosts-store.test.ts apps/desktop/src/store/sessions-store.test.ts apps/desktop/src/lib/connections.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-preflight-cargo-test",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-preflight-full-vitest",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-preflight-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-fixture-cargo",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml native_external_protocol_runtime_fixture_flow -- --test-threads=1",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-fixture-script",
+      "command": "bash ./scripts/native-transport-test.sh",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-full-cargo",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-full-vitest",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-validator",
+      "command": "node ./tools/validators/enforce-runtime-guardrails.js --base 34310cc",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-targeted-tests",
+      "command": "npm run test -- apps/desktop/src/store/sessions-store.test.ts apps/desktop/src/lib/api.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-full-vitest",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-cargo-test",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-validator",
+      "command": "node ./tools/validators/enforce-runtime-guardrails.js --base 1256c83",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-json-state",
+      "command": "python3 -m json.tool docs/roadmap/state.json state/tasks.json state/risks.json state/decisions.json state/session.json state/repo.json state/handoff.json",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-targeted-tests",
+      "command": "npm run test -- apps/desktop/src/store/sessions-store.test.ts apps/desktop/src/lib/api.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-full-vitest",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-cargo-test",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-validator",
+      "command": "node ./tools/validators/enforce-runtime-guardrails.js --base aa3a3fb",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-json-state",
+      "command": "python3 -m json.tool docs/roadmap/state.json state/tasks.json state/risks.json state/decisions.json state/session.json state/repo.json state/handoff.json",
+      "result": "passed"
+    }
+  ]
+}

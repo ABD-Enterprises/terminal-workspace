@@ -1,0 +1,289 @@
+{
+  "decisions": [
+    {
+      "id": "dec-native-key-tooling-tauri",
+      "date": "2026-04-04",
+      "title": "Move native trust and key tooling into Tauri",
+      "decision": "Native mode now handles key inspection, key generation, and known-host scanning in Rust via Tauri commands and system OpenSSH tooling.",
+      "consequences": [
+        "Browser mode keeps the backend path.",
+        "Native mode no longer depends on the backend for trust establishment or local key generation."
+      ]
+    },
+    {
+      "id": "dec-native-validation-split",
+      "date": "2026-04-04",
+      "title": "Split native validation by scope",
+      "decision": "Keep `native:key` as the fast key regression, `native:trust` as the trust/key phase gate, and `native:fixtures` as the broader localhost transport suite.",
+      "consequences": [
+        "Local validation stays focused and fast for the current phase.",
+        "The broader localhost transport fixture remains explicit and can be tracked separately when local sandboxing interferes."
+      ]
+    },
+    {
+      "id": "dec-release-manifest-and-sign-mode",
+      "date": "2026-04-04",
+      "title": "Make macOS packaging explicit and machine-readable",
+      "decision": "Use `MACOS_SIGN_MODE=require` for the local signed release gate, keep `MACOS_SIGN_MODE=skip` for CI preview artifacts, and emit release manifests plus verification logs into `artifacts/release/`.",
+      "consequences": [
+        "Release validation now has a machine-readable contract instead of relying on ad hoc terminal output.",
+        "CI can build preview release artifacts without access to signing secrets.",
+        "Notarization remains a separate tracked release blocker because `spctl` still reports `not_accepted`."
+      ]
+    },
+    {
+      "id": "dec-local-notarize-and-promote-flow",
+      "date": "2026-04-04",
+      "title": "Automate local notarization and stable promotion",
+      "decision": "Drive notarization with a local `notarytool` keychain profile, staple and validate the accepted app bundle, then promote the notarized artifact into a stable-channel directory with manifest and checksum outputs.",
+      "consequences": [
+        "The repo now has a repeatable local notarization and stable promotion path.",
+        "Release provenance includes Apple submission IDs, stapler logs, Gatekeeper assessment, and promotion metadata.",
+        "Credential portability remains a separate follow-up because the release flow still depends on a machine-local keychain profile."
+      ]
+    },
+    {
+      "id": "dec-portable-notary-auth-and-publish",
+      "date": "2026-04-04",
+      "title": "Prefer portable notary auth and CI-backed release publishing",
+      "decision": "Resolve App Store Connect key auth first, Apple ID second, and local keychain profiles last, then build a GitHub-release-ready promoted asset set and CI workflow around the same manifest.",
+      "consequences": [
+        "Local notarization still works with the existing keychain profile.",
+        "CI can publish promoted artifacts without depending on a developer workstation profile.",
+        "A live GitHub workflow verification is still required."
+      ]
+    },
+    {
+      "id": "dec-localhost-fixture-preflight",
+      "date": "2026-04-04",
+      "title": "Preflight localhost fixture capability before Cargo SSH suites",
+      "decision": "Run a dedicated temporary sshd and ssh-keyscan preflight before the native trust and transport Cargo fixtures.",
+      "consequences": [
+        "Unsupported shells fail early with explicit guidance.",
+        "The broader native fixture failures are easier to distinguish from real transport regressions."
+      ]
+    },
+    {
+      "id": "dec-vault-snapshot-metadata",
+      "date": "2026-04-04",
+      "title": "Carry stable vault metadata in local snapshot exports",
+      "decision": "Persist vault and device identifiers in app state and include them in exported/imported local snapshots.",
+      "consequences": [
+        "Imports can adopt a shared vault identity without moving runtime secrets.",
+        "Future sync and conflict-handling work can build on stable identifiers."
+      ]
+    },
+    {
+      "id": "dec-bootstrap-canonical-state",
+      "date": "2026-04-04",
+      "title": "Treat roadmap state as the canonical execution contract",
+      "decision": "Use `docs/roadmap/state.json` as the canonical phase source and keep `/state/*` synchronized with it for every execution-bearing change.",
+      "consequences": [
+        "Phase, task, and risk drift now fail the validator instead of relying on reviewer memory.",
+        "Bootstrap execution leaves the repo with one authoritative state source instead of parallel trackers."
+      ]
+    },
+    {
+      "id": "dec-bootstrap-validator-gate",
+      "date": "2026-04-04",
+      "title": "Make runtime guardrails the pull-request gatekeeper",
+      "decision": "Run `tools/validators/enforce-runtime-guardrails.js` on every pull request before repo tests and build.",
+      "consequences": [
+        "Execution changes without state or evidence now fail fast in CI.",
+        "Deploy and docs phases can share one enforcement path instead of a parallel policy system."
+      ]
+    },
+    {
+      "id": "dec-vault-import-lineage-preview",
+      "date": "2026-04-04",
+      "title": "Classify vault snapshots before replacing local state",
+      "decision": "Persist the last applied snapshot ID locally, export `baseSnapshotId` ancestry in vault bundles, and require the settings flow to preview whether an import is a same-snapshot reset, fast-forward, divergent replacement, or cross-vault adoption.",
+      "consequences": [
+        "Vault sync now has a concrete lineage contract instead of a flat export/import file.",
+        "Local imports remain full-replace operations, but the UI can warn about destructive divergent or cross-vault steps before execution."
+      ]
+    },
+    {
+      "id": "dec-vault-same-vault-merge",
+      "date": "2026-04-04",
+      "title": "Merge same-vault imports before replacing local state",
+      "decision": "Allow same-vault imports to merge non-conflicting host, key, snippet, and known-host records using `updatedAt` ordering, while blocking timestamp-tied conflicts and keeping local-only records until deletion semantics exist.",
+      "consequences": [
+        "Fast-forward and divergent imports can preserve unrelated local records instead of forcing a full replace.",
+        "Deletion tombstones and record-level conflict resolution remain explicit follow-up work."
+      ]
+    },
+    {
+      "id": "dec-vault-merge-conflict-choice",
+      "date": "2026-04-04",
+      "title": "Expose explicit same-vault conflict resolution choices",
+      "decision": "When same-vault records conflict at the same timestamp, allow the import flow to merge by keeping local records or preferring imported records instead of forcing a full replace.",
+      "consequences": [
+        "Users can resolve same-vault conflicts without discarding unrelated local records.",
+        "Deletion semantics remain a separate follow-up because local-only records are still retained by default."
+      ]
+    },
+    {
+      "id": "dec-vault-tombstone-deletions",
+      "date": "2026-04-04",
+      "title": "Persist tombstone deletions in local vault bundles",
+      "decision": "Track deleted hosts, keys, snippets, and known-host records in a dedicated persisted tombstone store, export those tombstones in version 3 local bundles, and apply them during same-vault merges before keeping local-only records.",
+      "consequences": [
+        "Same-vault imports can now remove superseded local records instead of always retaining them.",
+        "Future sync work needs tombstone retention and compaction rules so obsolete deletions do not accumulate indefinitely."
+      ]
+    },
+    {
+      "id": "dec-vault-remote-envelope-contract",
+      "date": "2026-04-04",
+      "title": "Represent remote vault sync as an encrypted envelope around local bundles",
+      "decision": "Define a versioned `termsnip-vault-sync` envelope with cleartext lineage and count metadata, opaque AES-256-GCM payload fields, and a SHA-256 digest across the header and cipher block so remote sync exchanges can be validated before decryption.",
+      "consequences": [
+        "Remote sync can reason about lineage and snapshot counts without exposing bundle contents.",
+        "Key rotation and trusted key-ID governance remain explicit follow-up work before live remote sync is implemented."
+      ]
+    },
+    {
+      "id": "dec-vault-tombstone-compaction",
+      "date": "2026-04-04",
+      "title": "Compact vault tombstones locally by age and count",
+      "decision": "Retain only recent tombstones, deduplicate them by entity ID, and cap each entity kind to a bounded number of deletion markers before persistence, import analysis, and export.",
+      "consequences": [
+        "Local vault snapshots no longer grow without bound from stale tombstones.",
+        "Future remote sync still needs explicit key-governance and trust rules for envelope producers."
+      ]
+    },
+    {
+      "id": "dec-vault-envelope-trust-policy",
+      "date": "2026-04-04",
+      "title": "Require explicit trusted-key policy for remote vault envelopes",
+      "decision": "Evaluate remote vault envelopes against a trust policy that scopes trusted key IDs by vault, validity window, rotation threshold, retirement cutoff, and replacement keys before accepting them for sync.",
+      "consequences": [
+        "Remote sync now has a concrete contract for key rotation and trusted envelope producers.",
+        "The next follow-up is persisting and loading that trust policy at real sync boundaries."
+      ]
+    },
+    {
+      "id": "dec-vault-persisted-trust-policy",
+      "date": "2026-04-04",
+      "title": "Persist trusted sync key policy and load it at runtime",
+      "decision": "Store trusted remote sync key policy in a dedicated persisted Zustand store and make runtime envelope inspection load both local vault context and the stored trust policy automatically.",
+      "consequences": [
+        "Remote envelope trust checks no longer depend on ad hoc caller-supplied policy objects.",
+        "A follow-up management and bootstrap surface is still needed so operators can edit and distribute trusted key records."
+      ]
+    },
+    {
+      "id": "dec-vault-trust-policy-management-surface",
+      "date": "2026-04-04",
+      "title": "Manage trusted sync key policy from Settings",
+      "decision": "Expose trusted sync key import/export, allow-unknown-key policy control, and direct trusted-key edits from Settings so operators can bootstrap and distribute remote sync trust policy locally.",
+      "consequences": [
+        "Runtime trust policy can now be managed without editing persisted storage manually.",
+        "Future remote sync delivery can assume a user-managed local trust policy bootstrap path already exists."
+      ]
+    },
+    {
+      "id": "dec-release-branch-verification-path",
+      "date": "2026-04-04",
+      "title": "Verify hosted macOS release on a dedicated phase branch",
+      "decision": "Run the hosted macOS release workflow from the verification branch, synthesize a preview tag/channel for branch pushes, and publish against the branch SHA so GitHub Actions can be exercised without a default-branch release tag.",
+      "consequences": [
+        "The release workflow can be verified live before merge.",
+        "Hosted preview verification now depends on branch-push execution rather than workflow_dispatch on the default branch."
+      ]
+    },
+    {
+      "id": "dec-release-secret-preflight",
+      "date": "2026-04-04",
+      "title": "Fail hosted release runs before signing when secrets are missing",
+      "decision": "Validate signing and notarization secrets in a dedicated preflight step and only upload release artifacts when the workflow has actually produced them.",
+      "consequences": [
+        "Hosted release failures now stop with an explicit missing-secret list instead of failing later in codesign or artifact upload steps.",
+        "The remaining blocker is external secret provisioning rather than workflow ambiguity."
+      ]
+    },
+    {
+      "id": "dec-workflow-action-major-upgrade",
+      "date": "2026-04-04",
+      "title": "Use current major GitHub action releases in all workflows",
+      "decision": "Upgrade the hosted workflows to `actions/checkout@v6`, `actions/setup-node@v6`, `actions/upload-artifact@v7`, and `pnpm/action-setup@v5`, and verify the hosted release run no longer emits the Node 20 runtime deprecation annotation.",
+      "consequences": [
+        "Hosted runs now use current action majors instead of relying on the temporary Node 24 compatibility override alone.",
+        "The remaining hosted release blocker is secret provisioning rather than action runtime drift."
+      ]
+    },
+    {
+      "id": "dec-release-secret-contract-tooling",
+      "date": "2026-04-04",
+      "title": "Reuse one release-secret contract across local tooling and hosted preflight",
+      "decision": "Use a single Node-based release-secret tool for GitHub audit, local env validation, and secret application, and call that same validation path from the hosted macOS release workflow.",
+      "consequences": [
+        "Hosted and local release-secret checks now share one contract instead of duplicate shell logic.",
+        "The remaining blocker is external secret material, not divergent validation behavior."
+      ]
+    },
+    {
+      "id": "dec-protocol-aware-hosts-and-local-shell",
+      "date": "2026-04-04",
+      "title": "Make hosts protocol-aware and ship a native local shell first",
+      "decision": "Hosts now carry explicit protocol metadata across inventory and session state, the native shell can launch a real macOS login shell through the Tauri PTY bridge, and SSH-only features remain gated behind protocol-aware UI guardrails.",
+      "consequences": [
+        "The desktop app now has a real local terminal path instead of relying solely on remote SSH sessions.",
+        "Telnet, serial, and mosh can reuse the same host model later, but they remain inventory-only until their transports are implemented."
+      ]
+    },
+    {
+      "id": "dec-native-external-protocol-pty",
+      "date": "2026-04-05",
+      "title": "Run telnet, serial, and mosh through the native PTY bridge",
+      "decision": "Launch telnet, serial, and mosh as native external commands under the Tauri PTY bridge, reuse SSH-style prompt handling for mosh where credentials exist, and preserve serial baud rates without forcing them through an SSH-only `u16` port assumption.",
+      "consequences": [
+        "The macOS client now has a real local runtime path for the non-SSH protocols already modeled in inventory.",
+        "Client binary availability and live end-to-end fixtures remain explicit follow-up work instead of silent runtime failures."
+      ]
+    },
+    {
+      "id": "dec-network-protocol-client-preflight",
+      "date": "2026-04-05",
+      "title": "Preflight native protocol clients before session launch",
+      "decision": "Use one Tauri runtime-status command to resolve client availability for telnet, mosh, screen, and cu, and surface that status inline in the host editor and terminal pane before connect attempts.",
+      "consequences": [
+        "Missing client binaries now fail early with actionable install guidance instead of a later session-spawn error.",
+        "The remaining network-protocol gap is live end-to-end validation rather than hidden workstation prerequisites."
+      ]
+    },
+    {
+      "id": "dec-network-protocol-live-fixtures",
+      "date": "2026-04-05",
+      "title": "Validate non-SSH protocol launches with deterministic native fixture clients",
+      "decision": "Use explicit telnet, screen, cu, and mosh command-path overrides in the native runtime so tests can point the PTY launcher at deterministic fixture executables and verify real launch behavior.",
+      "consequences": [
+        "The repo can validate telnet, serial, and mosh launch paths without relying on external servers or workstation-specific client installations.",
+        "Real workstation clients still work by default when overrides are unset."
+      ]
+    },
+    {
+      "id": "dec-session-history-explicit-dispatch-only",
+      "date": "2026-04-05",
+      "title": "Start session history with app-dispatched commands only",
+      "decision": "Persist session history only for app-managed dispatch paths such as queued commands and history replay, capture bounded output excerpts for those dispatched commands, and do not capture arbitrary interactive terminal input until stronger redaction rules exist.",
+      "consequences": [
+        "The searchable history surface now includes useful command-result context without storing full transcripts by default.",
+        "Manual terminal commands remain excluded, and redaction controls for sensitive output previews remain explicit follow-up work in the session-history phase."
+      ]
+    },
+    {
+      "id": "dec-enterprise-validator-config-alignment",
+      "date": "2026-04-05",
+      "title": "Use the config-driven enterprise validator contract locally",
+      "decision": "Vendor the latest enterprise validator, keep a repo-local `ai.config.json`, record evidence in `state/artifacts.json`, and run the validator through `--repo . --config ai.config.json` from package scripts, CI, bootstrap, prompts, and agent guidance.",
+      "consequences": [
+        "Local and CI enforcement now evaluate the same phase, evidence, and handoff contract without relying on implied defaults.",
+        "Future work must write file-backed build, test, and run evidence into `artifacts/` whenever non-doc code or config changes land."
+      ]
+    }
+  ],
+  "updated_at": "2026-04-05T11:48:23Z",
+  "last_updated": "2026-04-05T11:48:23Z"
+}

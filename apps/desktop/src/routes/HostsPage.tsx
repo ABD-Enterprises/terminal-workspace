@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useHosts } from "../hooks/useHosts";
-import { formatEnvironmentVariables, formatRelativeTime } from "../lib/utils";
+import { describeHostRuntime, formatEnvironmentVariables, formatHostAddress, formatRelativeTime } from "../lib/utils";
 import { useAppStore } from "../store/app-store";
 import { useConnectionSecretsStore } from "../store/connection-secrets-store";
 import { useHostsStore } from "../store/hosts-store";
@@ -11,6 +11,13 @@ import { HostEditor } from "../components/hosts/HostEditor";
 import { HostFilterBar } from "../components/hosts/HostFilterBar";
 import { HostList } from "../components/hosts/HostList";
 import { ConfirmDialog } from "../components/common/ConfirmDialog";
+import {
+  formatHostProtocol,
+  hostSupportsJumpHosts,
+  hostSupportsPortForwarding,
+  hostSupportsSftp,
+  hostSupportsTrustedKeys,
+} from "../types/host";
 
 export function HostsPage() {
   const navigate = useNavigate();
@@ -130,9 +137,11 @@ export function HostsPage() {
             onToggleFavorite={toggleFavorite}
             onCreateHost={() => updateParams({ new: "1", edit: null })}
             renderExpandedContent={(host) => {
-              const trustedKnownHost = knownHosts.find(
-                (knownHost) => knownHost.hostname === host.hostname && knownHost.port === host.port
-              );
+              const trustedKnownHost = hostSupportsTrustedKeys(host.protocol)
+                ? knownHosts.find(
+                    (knownHost) => knownHost.hostname === host.hostname && knownHost.port === host.port
+                  )
+                : undefined;
               const environmentLines = formatEnvironmentVariables(host.environment)
                 .split("\n")
                 .filter(Boolean);
@@ -144,6 +153,9 @@ export function HostsPage() {
                 <>
                   {visibleTags.length ? (
                     <div className="flex flex-wrap gap-1.5">
+                      <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-[11px] text-emerald-100">
+                        {formatHostProtocol(host.protocol)}
+                      </span>
                       {visibleTags.map((tag) => (
                         <span
                           key={tag}
@@ -160,17 +172,42 @@ export function HostsPage() {
                       <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
                         Identity
                       </dt>
-                      <dd className="mt-1 text-sm text-slate-100">{host.keyLabel || "Not assigned yet"}</dd>
+                      <dd className="mt-1 text-sm text-slate-100">
+                        {host.protocol === "ssh" ? host.keyLabel || "Not assigned yet" : formatHostAddress(host)}
+                      </dd>
                       <p className="mt-1 text-[11px] text-slate-500">
-                        {host.agentForwarding ? "SSH agent forwarded" : "Agent not forwarded"}
+                        {describeHostRuntime(
+                          host,
+                          host.jumpHostId && hostsById[host.jumpHostId]
+                            ? hostsById[host.jumpHostId].label
+                            : undefined
+                        )}
                       </p>
                     </div>
+                    {hostSupportsSftp(host.protocol) ? (
                     <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
                       <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
                         SFTP root
                       </dt>
                       <dd className="mt-1 text-sm text-slate-100">{host.sftpRoot}</dd>
                     </div>
+                    ) : null}
+                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
+                      <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                        Runtime
+                      </dt>
+                      <dd className="mt-1 text-sm text-slate-100">
+                        {host.protocol === "ssh"
+                          ? hostSupportsPortForwarding(host.protocol)
+                            ? `${host.forwardingCount} forwards configured`
+                            : formatHostProtocol(host.protocol)
+                          : "Native shell bridge"}
+                      </dd>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {environmentLines.length ? `${environmentLines.length} env vars` : "No env overrides"}
+                      </p>
+                    </div>
+                    {hostSupportsJumpHosts(host.protocol) ? (
                     <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
                       <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
                         Jump host
@@ -181,6 +218,7 @@ export function HostsPage() {
                           : "Direct"}
                       </dd>
                     </div>
+                    ) : null}
                     <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
                       <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
                         Last used
@@ -189,17 +227,7 @@ export function HostsPage() {
                         {formatRelativeTime(host.lastConnectedAt)}
                       </dd>
                     </div>
-                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
-                      <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        Runtime
-                      </dt>
-                      <dd className="mt-1 text-sm text-slate-100">
-                        {environmentLines.length ? `${environmentLines.length} env vars` : "No env overrides"}
-                      </dd>
-                      <p className="mt-1 text-[11px] text-slate-500">
-                        {host.agentForwarding ? "Agent forwarding enabled" : "Direct credentials only"}
-                      </p>
-                    </div>
+                    {hostSupportsTrustedKeys(host.protocol) ? (
                     <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
                       <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
                         Known host
@@ -237,6 +265,23 @@ export function HostsPage() {
                         ) : null}
                       </div>
                     </div>
+                    ) : (
+                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
+                      <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                        Trust
+                      </dt>
+                      <dd className="mt-1 text-sm text-slate-100">No network trust required</dd>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {host.protocol === "localShell"
+                          ? "Local shell sessions stay on this workstation."
+                          : host.protocol === "telnet"
+                            ? "Telnet sessions use the native PTY bridge and do not rely on SSH trust metadata."
+                            : host.protocol === "serial"
+                              ? "Serial sessions connect to a local device path and do not use network trust."
+                              : `${formatHostProtocol(host.protocol)} sessions use the native bridge without separate SSH trust metadata.`}
+                      </p>
+                    </div>
+                    )}
                   </dl>
 
                   <div className="mt-3 grid gap-2.5 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">

@@ -4,6 +4,8 @@ import type { HostRecord } from "../types/host";
 import {
   createSessionPane,
   createSessionTab,
+  type SessionCommandHistoryEntry,
+  type SessionCommandHistorySource,
   type QueuedPaneCommand,
   type SessionConnectionState,
   type SessionPane,
@@ -18,6 +20,9 @@ const fallbackStorage: StateStorage = {
   setItem: () => undefined,
   removeItem: () => undefined,
 };
+
+const SESSION_HISTORY_LIMIT = 200;
+const SESSION_HISTORY_OUTPUT_LIMIT = 600;
 
 function sanitizePersistedWorkspace(
   workspace: Pick<SessionWorkspaceState, "tabs" | "panes" | "activeTabId" | "lastRestoredAt">
@@ -37,6 +42,18 @@ function sanitizePersistedWorkspace(
       ])
     ),
   };
+}
+
+function sanitizePersistedCommandHistory(commandHistory: SessionCommandHistoryEntry[]) {
+  return commandHistory.slice(0, SESSION_HISTORY_LIMIT);
+}
+
+function normalizeCommandHistoryOutput(output: string) {
+  return output
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\r/g, "")
+    .replace(/\u0007/g, "")
+    .trim();
 }
 
 function touchTab(tab: SessionTab, update?: Partial<SessionTab>): SessionTab {
@@ -380,7 +397,67 @@ export function setTabSplitDirection(
   };
 }
 
+export function recordPaneCommandHistory(
+  state: SessionWorkspaceState & { commandHistory: SessionCommandHistoryEntry[] },
+  paneId: string,
+  command: string,
+  source: SessionCommandHistorySource
+) {
+  const pane = state.panes[paneId];
+  const trimmedCommand = command.trim();
+  if (!pane || !trimmedCommand) {
+    return state;
+  }
+
+  const entry: SessionCommandHistoryEntry = {
+    id: crypto.randomUUID(),
+    paneId,
+    hostId: pane.hostId,
+    transport: pane.transport,
+    command: trimmedCommand,
+    source,
+    createdAt: new Date().toISOString(),
+  };
+
+  return {
+    ...state,
+    commandHistory: sanitizePersistedCommandHistory([entry, ...state.commandHistory]),
+  };
+}
+
+export function appendPaneCommandHistoryOutput(
+  state: SessionWorkspaceState & { commandHistory: SessionCommandHistoryEntry[] },
+  entryId: string,
+  output: string
+) {
+  const normalizedOutput = normalizeCommandHistoryOutput(output);
+  if (!normalizedOutput) {
+    return state;
+  }
+
+  const nextCommandHistory = state.commandHistory.map((entry) => {
+    if (entry.id !== entryId) {
+      return entry;
+    }
+
+    const outputPreview = `${entry.outputPreview ? `${entry.outputPreview}\n` : ""}${normalizedOutput}`
+      .slice(-SESSION_HISTORY_OUTPUT_LIMIT)
+      .trim();
+    return {
+      ...entry,
+      outputPreview,
+      outputUpdatedAt: new Date().toISOString(),
+    };
+  });
+
+  return {
+    ...state,
+    commandHistory: nextCommandHistory,
+  };
+}
+
 export interface SessionsState extends SessionWorkspaceState {
+  commandHistory: SessionCommandHistoryEntry[];
   openSession: (host: HostRecord) => string;
   duplicateSession: (host: HostRecord, baseTitle?: string) => string;
   selectTab: (tabId: string) => void;
@@ -394,6 +471,13 @@ export interface SessionsState extends SessionWorkspaceState {
   setPaneBackendSession: (paneId: string, backendSessionId?: string) => void;
   queuePaneCommand: (paneId: string, command: string, label?: string) => void;
   consumePaneCommand: (paneId: string, commandId: string) => void;
+  recordPaneCommand: (
+    paneId: string,
+    command: string,
+    source?: SessionCommandHistorySource
+  ) => string | undefined;
+  appendCommandOutput: (entryId: string, output: string) => void;
+  clearCommandHistory: () => void;
   queueCommandForHosts: (hosts: HostRecord[], command: string, label?: string) => string[];
   togglePaneConnection: (paneId: string) => void;
   setSplitDirection: (tabId: string, splitDirection: SplitDirection) => void;
@@ -404,6 +488,7 @@ export const useSessionsStore = create<SessionsState>()(
     (set, get) => ({
       tabs: [],
       panes: {},
+      commandHistory: [],
       activeTabId: undefined,
       lastRestoredAt: undefined,
       openSession: (host) => {
@@ -433,6 +518,14 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => queuePaneCommand(state, paneId, command, label)),
       consumePaneCommand: (paneId, commandId) =>
         set((state) => consumePaneCommand(state, paneId, commandId)),
+      recordPaneCommand: (paneId, command, source = "queued") => {
+        const nextState = recordPaneCommandHistory(get(), paneId, command, source);
+        set(nextState);
+        return nextState.commandHistory[0]?.id;
+      },
+      appendCommandOutput: (entryId, output) =>
+        set((state) => appendPaneCommandHistoryOutput(state, entryId, output)),
+      clearCommandHistory: () => set(() => ({ commandHistory: [] })),
       queueCommandForHosts: (hosts, command, label) => {
         const paneIds: string[] = [];
 
@@ -481,6 +574,7 @@ export const useSessionsStore = create<SessionsState>()(
           activeTabId: state.activeTabId,
           lastRestoredAt: new Date().toISOString(),
         }),
+        commandHistory: sanitizePersistedCommandHistory(state.commandHistory),
       }),
       merge: (persistedState, currentState) => ({
         ...currentState,
@@ -489,6 +583,10 @@ export const useSessionsStore = create<SessionsState>()(
             SessionWorkspaceState,
             "tabs" | "panes" | "activeTabId" | "lastRestoredAt"
           >
+        ),
+        commandHistory: sanitizePersistedCommandHistory(
+          ((persistedState as { commandHistory?: SessionCommandHistoryEntry[] }).commandHistory ??
+            currentState.commandHistory) as SessionCommandHistoryEntry[]
         ),
       }),
     }

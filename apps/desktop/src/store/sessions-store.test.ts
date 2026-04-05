@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { sampleHosts } from "../types/host";
 import { formatSessionConnectionState } from "../types/session";
 import {
+  appendPaneCommandHistoryOutput,
   closeSessionTab,
   consumePaneCommand,
   duplicateSessionWorkspace,
   openSessionWorkspace,
   queuePaneCommand,
+  recordPaneCommandHistory,
   removeSessionPane,
   setTabSplitDirection,
   splitSessionPane,
@@ -126,5 +128,105 @@ describe("sessions store helpers", () => {
 
     const consumed = consumePaneCommand(queued, paneId, queued.panes[paneId]!.queuedCommands[0]!.id);
     expect(consumed.panes[paneId]?.queuedCommands).toHaveLength(0);
+  });
+
+  it("records executed pane commands in persisted history", () => {
+    const opened = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      sampleHosts[0]
+    );
+    const paneId = opened.tabs[0]!.paneIds[0]!;
+
+    const recorded = recordPaneCommandHistory(
+      {
+        ...opened,
+        commandHistory: [],
+      },
+      paneId,
+      "uptime",
+      "queued"
+    );
+
+    expect(recorded.commandHistory).toHaveLength(1);
+    expect(recorded.commandHistory[0]).toMatchObject({
+      paneId,
+      hostId: sampleHosts[0].id,
+      transport: "ssh",
+      command: "uptime",
+      source: "queued",
+    });
+  });
+
+  it("appends sanitized output previews to recorded history entries", () => {
+    const opened = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      sampleHosts[0]
+    );
+    const paneId = opened.tabs[0]!.paneIds[0]!;
+    const recorded = recordPaneCommandHistory(
+      {
+        ...opened,
+        commandHistory: [],
+      },
+      paneId,
+      "uptime",
+      "queued"
+    );
+    const entryId = recorded.commandHistory[0]!.id;
+
+    const updated = appendPaneCommandHistoryOutput(
+      recorded,
+      entryId,
+      "\u001b[32mload average: 1.00\r\nusers: 2\u001b[0m"
+    );
+
+    expect(updated.commandHistory[0]?.outputPreview).toBe("load average: 1.00\nusers: 2");
+    expect(updated.commandHistory[0]?.outputUpdatedAt).toBeDefined();
+  });
+
+  it("maps protocol-aware panes to their executable transports", () => {
+    const telnetHost = {
+      ...sampleHosts[0],
+      id: "telnet-host",
+      label: "Legacy Telnet",
+      protocol: "telnet" as const,
+      username: "",
+      port: 23,
+      authMethod: "none" as const,
+    };
+    const serialHost = {
+      ...sampleHosts[0],
+      id: "serial-host",
+      label: "Serial Console",
+      protocol: "serial" as const,
+      hostname: "/dev/cu.usbserial-1410",
+      username: "",
+      port: 115200,
+      authMethod: "none" as const,
+    };
+    const moshHost = {
+      ...sampleHosts[0],
+      id: "mosh-host",
+      label: "Ops Mosh",
+      protocol: "mosh" as const,
+      authMethod: "none" as const,
+    };
+
+    const telnetWorkspace = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      telnetHost
+    );
+    const serialWorkspace = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      serialHost
+    );
+    const moshWorkspace = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      moshHost
+    );
+
+    expect(telnetWorkspace.panes[telnetWorkspace.tabs[0]!.paneIds[0]!]!.transport).toBe("telnet");
+    expect(serialWorkspace.panes[serialWorkspace.tabs[0]!.paneIds[0]!]!.transport).toBe("serial");
+    expect(moshWorkspace.panes[moshWorkspace.tabs[0]!.paneIds[0]!]!.transport).toBe("mosh");
   });
 });

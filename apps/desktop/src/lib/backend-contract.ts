@@ -1,5 +1,5 @@
 import type { PortForwardRecord } from "../types/forward";
-import type { HostAuthMethod } from "../types/host";
+import type { HostAuthMethod, HostProtocol } from "../types/host";
 import type { KeyGenerationType } from "../types/key";
 import type { RemoteFileEntry } from "../types/transfer";
 
@@ -12,6 +12,15 @@ export interface BackendStatusResponse {
 export interface BackendTransportInfo {
   backendBaseUrl: string;
   sessionBridge: "browser" | "tauri-proxy";
+}
+
+export interface ProtocolRuntimeStatusResponse {
+  available: boolean;
+  client?: string;
+  installHint?: string;
+  message: string;
+  protocol: HostProtocol;
+  resolvedPath?: string;
 }
 
 export interface CreateSessionResponse {
@@ -30,6 +39,7 @@ export interface BackendHostConnection {
   passphrase: string;
   port: number;
   privateKeyPath: string;
+  protocol: HostProtocol;
   sftpRoot?: string;
   username: string;
 }

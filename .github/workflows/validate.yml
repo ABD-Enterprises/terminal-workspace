@@ -8,6 +8,9 @@ on:
     branches:
       - main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -15,15 +18,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 10.33.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -39,7 +42,7 @@ jobs:
 
       - name: Upload browser artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-artifacts
           if-no-files-found: ignore
@@ -54,15 +57,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 10.33.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -73,11 +76,52 @@ jobs:
       - name: Bootstrap repo
         run: npm run setup
 
+      - name: Run shared unit and integration tests
+        run: npm run test
+
       - name: Run native check
         run: npm run native:check
 
       - name: Run macOS keychain round-trip test
         run: cargo test --manifest-path src-tauri/Cargo.toml keychain_secret_round_trip
 
+      - name: Run native trust tooling fixture test
+        run: npm run native:trust
+
       - name: Run native transport fixture test
         run: npm run native:fixtures
+
+  native-release-preview:
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Bootstrap repo
+        run: npm run setup
+
+      - name: Build unsigned macOS preview bundle
+        run: MACOS_SIGN_MODE=skip npm run native:release:check
+
+      - name: Upload macOS preview artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-release-preview
+          if-no-files-found: error
+          path: artifacts/release

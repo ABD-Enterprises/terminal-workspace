@@ -1,5 +1,6 @@
 import { isDemoModeEnabled } from "../store/app-store";
 import type { PortForwardRecord } from "../types/forward";
+import type { HostProtocol } from "../types/host";
 import type { KeyMetadata } from "../types/key";
 import type {
   BackendBooleanResponse,
@@ -9,6 +10,7 @@ import type {
   GenerateKeyPayload,
   KnownHostScanResult,
   ListForwardsResponse,
+  ProtocolRuntimeStatusResponse,
   ResizeSessionPayload,
   SftpDirectoryResponse,
   SnippetExecutionResult,
@@ -107,6 +109,35 @@ export async function getBackendStatus() {
   }
 
   return getSessionBackendStatus();
+}
+
+export async function getProtocolRuntimeStatus(protocol: HostProtocol) {
+  if (isDemoModeEnabled()) {
+    return {
+      available: true,
+      message: "Demo mode bypasses native protocol runtime checks.",
+      protocol,
+    } satisfies ProtocolRuntimeStatusResponse;
+  }
+
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<ProtocolRuntimeStatusResponse>("termsnip_protocol_runtime_status", {
+      request: { protocol },
+    });
+  }
+
+  return {
+    available: protocol === "ssh",
+    installHint:
+      protocol === "ssh"
+        ? undefined
+        : "Open this host in the native macOS app to use its protocol runtime.",
+    message:
+      protocol === "ssh"
+        ? "SSH is available through the browser/backend transport."
+        : "This protocol requires the native macOS runtime.",
+    protocol,
+  } satisfies ProtocolRuntimeStatusResponse;
 }
 
 export async function createBackendSession(host: BackendHostConnection) {
@@ -286,6 +317,12 @@ export async function inspectPrivateKey(path: string) {
     return inspectDemoPrivateKey(path);
   }
 
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<KeyMetadata>("termsnip_inspect_private_key", {
+      request: { path },
+    });
+  }
+
   return backendFetch<KeyMetadata>("/api/backend/keys/inspect", {
     method: "POST",
     body: JSON.stringify({ path }),
@@ -297,6 +334,12 @@ export async function generatePrivateKey(payload: GenerateKeyPayload) {
     return generateDemoPrivateKey(payload);
   }
 
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<KeyMetadata>("termsnip_generate_private_key", {
+      request: payload,
+    });
+  }
+
   return backendFetch<KeyMetadata>("/api/backend/keys/generate", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -306,6 +349,12 @@ export async function generatePrivateKey(payload: GenerateKeyPayload) {
 export async function scanKnownHost(hostname: string, port: number) {
   if (isDemoModeEnabled()) {
     return scanDemoKnownHost(hostname, port);
+  }
+
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<{ entries: KnownHostScanResult[] }>("termsnip_scan_known_host", {
+      request: { hostname, port },
+    });
   }
 
   return backendFetch<{ entries: KnownHostScanResult[] }>("/api/backend/known-hosts/scan", {

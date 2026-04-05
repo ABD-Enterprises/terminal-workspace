@@ -1,0 +1,24 @@
+{
+  "summary": "The repo now uses the latest enterprise validator contract locally: prompts, agents, bootstrap, package scripts, CI, and evidence state all point at the config-driven runtime guardrails path while the macOS session history phase stays active.",
+  "next_action": "Implement redaction and sensitivity controls for persisted session output previews under the normalized build/test/run evidence contract.",
+  "discovered_issues": [
+    {
+      "id": "issue-release-secret-provisioning-blocker",
+      "summary": "The hosted macOS release workflow still cannot pass preflight because GitHub lacks signing and notarization secrets and this workstation still does not expose exportable release credential material.",
+      "risk_ids": [
+        "risk-github-release-workflow-missing-secrets",
+        "risk-local-release-secret-source-material-missing"
+      ]
+    }
+  ],
+  "next_steps": [
+    "Add redaction and sensitivity controls for persisted output previews.",
+    "Upgrade snippets into structured runbooks with parameter input, preview, execution records, and retained results.",
+    "Preserve the blocked release-secret provisioning work until exportable signing and notarization material exists."
+  ],
+  "blockers": [
+    "GitHub release secret provisioning is still blocked because the repository has no configured signing/notarization secrets and the current workstation state does not expose exportable certificate or notary credential material."
+  ],
+  "updated_at": "2026-04-05T11:48:23Z",
+  "last_updated": "2026-04-05T11:48:23Z"
+}

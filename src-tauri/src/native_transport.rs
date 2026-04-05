@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
 pub(crate) fn normalize_remote_path(pathname: &str) -> String {
     let mut segments = Vec::new();
@@ -102,7 +103,9 @@ pub(crate) fn escape_shell_value(value: &str) -> String {
     format!("'{}'", value.replace('\'', r#"'\"'\"'"#))
 }
 
-pub(crate) fn build_environment_export_prefix(environment: &Option<HashMap<String, String>>) -> String {
+pub(crate) fn build_environment_export_prefix(
+    environment: &Option<HashMap<String, String>>,
+) -> String {
     get_channel_environment(environment)
         .unwrap_or_default()
         .into_iter()
@@ -111,7 +114,9 @@ pub(crate) fn build_environment_export_prefix(environment: &Option<HashMap<Strin
         .join("; ")
 }
 
-pub(crate) fn build_interactive_shell_command(environment: &Option<HashMap<String, String>>) -> Option<String> {
+pub(crate) fn build_interactive_shell_command(
+    environment: &Option<HashMap<String, String>>,
+) -> Option<String> {
     let export_prefix = build_environment_export_prefix(environment);
     if export_prefix.is_empty() {
         None
@@ -120,13 +125,231 @@ pub(crate) fn build_interactive_shell_command(environment: &Option<HashMap<Strin
     }
 }
 
-pub(crate) fn build_exec_command(command: &str, environment: &Option<HashMap<String, String>>) -> String {
+pub(crate) fn build_exec_command(
+    command: &str,
+    environment: &Option<HashMap<String, String>>,
+) -> String {
     let export_prefix = build_environment_export_prefix(environment);
     if export_prefix.is_empty() {
         command.to_string()
     } else {
         format!("{export_prefix}; {command}")
     }
+}
+
+pub(crate) fn normalize_key_algorithm(value: &str) -> String {
+    let algorithm = value.to_ascii_uppercase();
+
+    if algorithm.contains("ED25519") {
+        "ED25519".to_string()
+    } else if algorithm.contains("ECDSA") {
+        "ECDSA".to_string()
+    } else if algorithm.contains("RSA") {
+        "RSA".to_string()
+    } else {
+        "UNKNOWN".to_string()
+    }
+}
+
+pub(crate) fn parse_ssh_keygen_summary(
+    summary: &str,
+    resolved_path: &str,
+) -> Result<KeyMetadata, String> {
+    let trimmed = summary.trim();
+    let parts = trimmed.split_whitespace().collect::<Vec<_>>();
+    if parts.len() < 4 {
+        return Err(format!("Unexpected ssh-keygen output: {trimmed}"));
+    }
+
+    let bits = parts[0].parse::<u32>().unwrap_or(0);
+    let fingerprint = parts[1].to_string();
+    let (comment_prefix, algorithm_suffix) = trimmed
+        .rsplit_once(" (")
+        .ok_or_else(|| format!("Unexpected ssh-keygen output: {trimmed}"))?;
+    let algorithm_raw = algorithm_suffix
+        .strip_suffix(')')
+        .ok_or_else(|| format!("Unexpected ssh-keygen output: {trimmed}"))?;
+    let comment = comment_prefix
+        .strip_prefix(&format!("{} {} ", parts[0], fingerprint))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            PathBuf::from(resolved_path)
+                .file_name()
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Imported key".to_string())
+        });
+    let public_key_path = {
+        let candidate = PathBuf::from(format!("{resolved_path}.pub"));
+        if candidate.exists() {
+            Some(candidate.to_string_lossy().into_owned())
+        } else {
+            None
+        }
+    };
+
+    Ok(KeyMetadata {
+        algorithm: normalize_key_algorithm(algorithm_raw),
+        bits,
+        fingerprint,
+        comment,
+        private_key_path: resolved_path.to_string(),
+        public_key_path,
+    })
+}
+
+pub(crate) fn inspect_private_key(pathname: &str) -> Result<KeyMetadata, String> {
+    let resolved_path = expand_home(pathname);
+    fs::metadata(&resolved_path).map_err(|error| error.to_string())?;
+    let resolved_path = resolved_path.to_string_lossy().into_owned();
+    let output = Command::new("/usr/bin/ssh-keygen")
+        .args(["-lf", &resolved_path])
+        .output()
+        .map_err(|error| error.to_string())?;
+    let stdout = trim_ssh_output(&String::from_utf8_lossy(&output.stdout));
+    let stderr = trim_ssh_output(&String::from_utf8_lossy(&output.stderr));
+
+    if !output.status.success() {
+        return Err(if stderr.is_empty() {
+            if stdout.is_empty() {
+                format!("ssh-keygen exited with status {}", output.status)
+            } else {
+                stdout
+            }
+        } else {
+            stderr
+        });
+    }
+
+    parse_ssh_keygen_summary(&stdout, &resolved_path)
+}
+
+pub(crate) fn generate_key_pair(request: &GenerateKeyRequest) -> Result<KeyMetadata, String> {
+    if request.path.trim().is_empty() {
+        return Err("Target private key path is required".to_string());
+    }
+
+    let key_type = request.key_type.trim().to_ascii_lowercase();
+    if !matches!(key_type.as_str(), "ed25519" | "ecdsa" | "rsa") {
+        return Err("Unsupported key type".to_string());
+    }
+
+    let resolved_path = expand_home(&request.path);
+    if let Some(parent) = resolved_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    if resolved_path.exists() {
+        return Err("Target private key path already exists".to_string());
+    }
+
+    let resolved_path_string = resolved_path.to_string_lossy().into_owned();
+    let mut args = vec![
+        "-q".to_string(),
+        "-t".to_string(),
+        key_type.clone(),
+        "-f".to_string(),
+        resolved_path_string.clone(),
+        "-N".to_string(),
+        request.passphrase.clone(),
+        "-C".to_string(),
+        request.comment.clone(),
+    ];
+
+    if key_type == "rsa" {
+        args.splice(3..3, ["-b".to_string(), "4096".to_string()]);
+    } else if key_type == "ecdsa" {
+        args.splice(3..3, ["-b".to_string(), "521".to_string()]);
+    }
+
+    let output = Command::new("/usr/bin/ssh-keygen")
+        .args(args)
+        .output()
+        .map_err(|error| error.to_string())?;
+    let stdout = trim_ssh_output(&String::from_utf8_lossy(&output.stdout));
+    let stderr = trim_ssh_output(&String::from_utf8_lossy(&output.stderr));
+    if !output.status.success() {
+        return Err(if stderr.is_empty() {
+            if stdout.is_empty() {
+                format!("ssh-keygen exited with status {}", output.status)
+            } else {
+                stdout
+            }
+        } else {
+            stderr
+        });
+    }
+
+    inspect_private_key(&resolved_path_string)
+}
+
+pub(crate) fn compute_public_key_fingerprint(public_key: &str) -> Result<String, String> {
+    let decoded_key = BASE64_STANDARD
+        .decode(public_key.as_bytes())
+        .map_err(|error| error.to_string())?;
+    let digest = Sha256::digest(decoded_key);
+    Ok(format!(
+        "SHA256:{}",
+        BASE64_STANDARD.encode(digest).trim_end_matches('=')
+    ))
+}
+
+pub(crate) fn scan_known_host(
+    request: &KnownHostScanRequest,
+) -> Result<KnownHostScanResponse, String> {
+    if request.hostname.trim().is_empty() {
+        return Err("Hostname is required for host key scans".to_string());
+    }
+
+    if request.port == 0 {
+        return Err("Port must be greater than zero".to_string());
+    }
+
+    let output = Command::new("/usr/bin/ssh-keyscan")
+        .args([
+            "-p",
+            &request.port.to_string(),
+            "-T",
+            "5",
+            &request.hostname,
+        ])
+        .output()
+        .map_err(|error| error.to_string())?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = trim_ssh_output(&String::from_utf8_lossy(&output.stderr));
+
+    let entries = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let _scanned_host = parts.next()?;
+            let algorithm = parts.next()?.to_string();
+            let public_key = parts.next()?.to_string();
+            Some((algorithm, public_key))
+        })
+        .map(|(algorithm, public_key)| {
+            Ok(KnownHostScanResult {
+                algorithm,
+                fingerprint: compute_public_key_fingerprint(&public_key)?,
+                hostname: request.hostname.clone(),
+                port: request.port,
+                public_key,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    if entries.is_empty() {
+        return Err(if stderr.is_empty() {
+            "No host keys returned from ssh-keyscan".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    Ok(KnownHostScanResponse { entries })
 }
 
 pub(crate) fn known_hosts_host_pattern(host: &BackendHostConnection) -> String {
@@ -137,7 +360,10 @@ pub(crate) fn known_hosts_host_pattern(host: &BackendHostConnection) -> String {
     }
 }
 
-pub(crate) fn append_connection_chain<'a>(host: &'a BackendHostConnection, chain: &mut Vec<&'a BackendHostConnection>) {
+pub(crate) fn append_connection_chain<'a>(
+    host: &'a BackendHostConnection,
+    chain: &mut Vec<&'a BackendHostConnection>,
+) {
     if let Some(jump_host) = host.jump_host.as_deref() {
         append_connection_chain(jump_host, chain);
     }
@@ -199,7 +425,9 @@ pub(crate) fn take_prompt_response(
     responses: &mut Vec<PromptResponse>,
     kind: PromptResponseKind,
 ) -> Option<PromptResponse> {
-    let index = responses.iter().position(|response| response.kind == kind)?;
+    let index = responses
+        .iter()
+        .position(|response| response.kind == kind)?;
     Some(responses.remove(index))
 }
 
@@ -380,10 +608,16 @@ pub(crate) fn parse_sftp_modified_at(month: &str, day: &str, time_or_year: &str)
 
     let year = time_or_year.parse::<i32>().ok()?;
     let date = NaiveDate::from_ymd_opt(year, month, day)?;
-    Some(Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0)?).to_rfc3339())
+    Some(
+        Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0)?)
+            .to_rfc3339(),
+    )
 }
 
-pub(crate) fn parse_sftp_directory_listing(target_path: &str, output: &str) -> Vec<RemoteFileEntry> {
+pub(crate) fn parse_sftp_directory_listing(
+    target_path: &str,
+    output: &str,
+) -> Vec<RemoteFileEntry> {
     let mut entries = output
         .lines()
         .filter_map(|line| {
@@ -402,12 +636,12 @@ pub(crate) fn parse_sftp_directory_listing(target_path: &str, output: &str) -> V
 
             let mode = parts[0];
             let raw_name = parts[8..].join(" ");
-            let raw_name = raw_name.split(" -> ").next().unwrap_or(&raw_name).to_string();
-            let name = raw_name
-                .rsplit('/')
+            let raw_name = raw_name
+                .split(" -> ")
                 .next()
                 .unwrap_or(&raw_name)
                 .to_string();
+            let name = raw_name.rsplit('/').next().unwrap_or(&raw_name).to_string();
             if name == "." || name == ".." {
                 return None;
             }
@@ -430,17 +664,20 @@ pub(crate) fn parse_sftp_directory_listing(target_path: &str, output: &str) -> V
         })
         .collect::<Vec<_>>();
 
-    entries.sort_by(|left, right| match (left.kind.as_str(), right.kind.as_str()) {
-        ("directory", "file") => std::cmp::Ordering::Less,
-        ("file", "directory") => std::cmp::Ordering::Greater,
-        _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-    });
+    entries.sort_by(
+        |left, right| match (left.kind.as_str(), right.kind.as_str()) {
+            ("directory", "file") => std::cmp::Ordering::Less,
+            ("file", "directory") => std::cmp::Ordering::Greater,
+            _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+        },
+    );
 
     entries
 }
 
 pub(crate) fn trim_ssh_output(value: &str) -> String {
-    value.lines()
+    value
+        .lines()
         .map(str::trim_end)
         .filter(|line| !line.trim().is_empty())
         .collect::<Vec<_>>()
@@ -481,7 +718,9 @@ pub(crate) fn run_sftp_batch_commands(
             .map_err(|error| error.to_string())?;
     }
 
-    let output = child.wait_with_output().map_err(|error| error.to_string())?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
     let stdout = trim_ssh_output(&String::from_utf8_lossy(&output.stdout));
     let stderr = trim_ssh_output(&String::from_utf8_lossy(&output.stderr));
     if !output.status.success() {
@@ -508,15 +747,14 @@ pub(crate) fn run_sftp_batch_commands(
 pub(crate) fn open_native_ssh_control_session(
     host: &BackendHostConnection,
     session_label: &str,
-)
-    -> Result<
-        (
-            NativeSshControlContext,
-            Box<dyn Child + Send + Sync>,
-            Box<dyn MasterPty + Send>,
-        ),
-        String,
-    > {
+) -> Result<
+    (
+        NativeSshControlContext,
+        Box<dyn Child + Send + Sync>,
+        Box<dyn MasterPty + Send>,
+    ),
+    String,
+> {
     let session_dir = create_native_ssh_session_dir(session_label)?;
     let result = (|| -> Result<
         (
@@ -696,7 +934,10 @@ pub(crate) fn run_native_ssh_control_command(
         }
     } else if stderr.is_empty() {
         if stdout.is_empty() {
-            Err(format!("ssh control command exited with status {}", output.status))
+            Err(format!(
+                "ssh control command exited with status {}",
+                output.status
+            ))
         } else {
             Err(stdout)
         }
@@ -756,7 +997,7 @@ pub(crate) fn execute_native_snippet_target(
     target: SnippetExecutionTarget,
     command: String,
 ) -> SnippetExecutionResult {
-    match validate_session_host(&target.host) {
+    match validate_ssh_host(&target.host) {
         Ok(()) => {}
         Err(error) => {
             return SnippetExecutionResult {
@@ -831,11 +1072,18 @@ pub(crate) fn create_native_forward(
     let session = get_native_session(native_sessions, &request.session_id)
         .ok_or_else(|| "Session not found".to_string())?;
     let forward_id = next_native_forward_id();
-    let (context, mut child, master) =
-        open_native_ssh_control_session(&session.host, &forward_id)?;
-    let forward_flag = if request.direction == "remote" { "-R" } else { "-L" };
-    let forward_output =
-        run_native_ssh_control_command(&context, "forward", forward_flag, &build_forward_spec(&request));
+    let (context, mut child, master) = open_native_ssh_control_session(&session.host, &forward_id)?;
+    let forward_flag = if request.direction == "remote" {
+        "-R"
+    } else {
+        "-L"
+    };
+    let forward_output = run_native_ssh_control_command(
+        &context,
+        "forward",
+        forward_flag,
+        &build_forward_spec(&request),
+    );
 
     let assigned_remote_port = match forward_output {
         Ok(output) => {
