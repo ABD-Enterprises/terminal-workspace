@@ -8,5 +8,5 @@ owner: Codex
 current_state: ready_for_review
 failure_type: none
 acceptance_criteria_reference: /ai/acceptance.md#t1
-last_action: Stabilized the Transfers route by removing the filtered Zustand selector crash, added an SSH control-session readiness check before native SFTP batch commands, reran the failing Playwright specs, and passed the default Rust test suite while the ignored localhost fixture still reached the later local-forward sandbox limit locally.
-next_action: Let GitHub PR #1 rerun `validate` and `native-macos` on the updated `codex/t1-output-preview-persistence-control` branch.
+last_action: Materialized per-session decrypted identity copies for passphrase-protected native SSH keys, reran `npm run native:fixtures`, and restored the ignored localhost transport fixture to green.
+next_action: Let GitHub PR #1 rerun validation on `codex/t1-output-preview-persistence-control`, then address any new CI or review feedback on the same task.

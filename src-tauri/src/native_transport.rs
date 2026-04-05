@@ -1,6 +1,8 @@
 use super::*;
 use sha2::{Digest, Sha256};
 use std::path::Path;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 pub(crate) fn normalize_remote_path(pathname: &str) -> String {
     let mut segments = Vec::new();
@@ -411,7 +413,7 @@ pub(crate) fn build_prompt_responses(host: &BackendHostConnection) -> Vec<Prompt
 pub(crate) fn detect_prompt_kind(buffer: &str) -> Option<PromptResponseKind> {
     let lowercase = buffer.to_ascii_lowercase();
 
-    if lowercase.contains("enter passphrase for key") || lowercase.contains("passphrase for key") {
+    if lowercase.contains("passphrase for key") && lowercase.contains(':') {
         return Some(PromptResponseKind::Passphrase);
     }
 
@@ -465,6 +467,53 @@ pub(crate) fn write_native_known_hosts(
 
     fs::write(&known_hosts_path, entries.join("\n")).map_err(|error| error.to_string())?;
     Ok(known_hosts_path)
+}
+
+pub(crate) fn prepare_native_identity_file(
+    connection: &BackendHostConnection,
+    session_dir: &Path,
+    alias: &str,
+) -> Result<String, String> {
+    let resolved_path = expand_home(&connection.private_key_path);
+    if connection.passphrase.trim().is_empty() {
+        return Ok(resolved_path.to_string_lossy().into_owned());
+    }
+
+    let target_path = session_dir.join(format!("{alias}-identity"));
+    fs::copy(&resolved_path, &target_path).map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    fs::set_permissions(&target_path, fs::Permissions::from_mode(0o600))
+        .map_err(|error| error.to_string())?;
+
+    let target_path_string = target_path.to_string_lossy().into_owned();
+    let output = Command::new("/usr/bin/ssh-keygen")
+        .args([
+            "-p",
+            "-P",
+            &connection.passphrase,
+            "-N",
+            "",
+            "-f",
+            &target_path_string,
+        ])
+        .output()
+        .map_err(|error| error.to_string())?;
+    let stdout = trim_ssh_output(&String::from_utf8_lossy(&output.stdout));
+    let stderr = trim_ssh_output(&String::from_utf8_lossy(&output.stderr));
+
+    if !output.status.success() {
+        return Err(if stderr.is_empty() {
+            if stdout.is_empty() {
+                format!("ssh-keygen exited with status {}", output.status)
+            } else {
+                stdout
+            }
+        } else {
+            stderr
+        });
+    }
+
+    Ok(target_path_string)
 }
 
 pub(crate) fn build_native_ssh_config(
@@ -521,9 +570,10 @@ pub(crate) fn build_native_ssh_config(
 
         match connection.auth_method.as_str() {
             "privateKey" => {
+                let identity_path = prepare_native_identity_file(connection, session_dir, &alias)?;
                 lines.push(format!(
                     "  IdentityFile {}",
-                    expand_home(&connection.private_key_path).to_string_lossy()
+                    identity_path
                 ));
                 lines.push("  IdentitiesOnly yes".to_string());
                 lines.push("  PreferredAuthentications publickey".to_string());
@@ -686,63 +736,67 @@ pub(crate) fn trim_ssh_output(value: &str) -> String {
 }
 
 pub(crate) fn run_sftp_batch_commands(
+    host: &BackendHostConnection,
     context: &NativeSshControlContext,
     commands: &[String],
 ) -> Result<String, String> {
-    let mut child = Command::new("/usr/bin/sftp")
-        .arg("-q")
-        .arg("-b")
-        .arg("-")
-        .arg("-o")
-        .arg("RequestTTY=no")
-        .arg("-F")
-        .arg(&context.config_path)
-        .arg(&context.target_alias)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: DEFAULT_TERMINAL_ROWS,
+            cols: DEFAULT_TERMINAL_COLS,
+            pixel_width: DEFAULT_TERMINAL_PIXEL_WIDTH,
+            pixel_height: DEFAULT_TERMINAL_PIXEL_HEIGHT,
+        })
         .map_err(|error| error.to_string())?;
 
-    {
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "Failed to open sftp stdin".to_string())?;
-        let script = if commands.is_empty() {
-            "@bye\n".to_string()
-        } else {
-            format!("{}\n@bye\n", commands.join("\n"))
-        };
-        stdin
-            .write_all(script.as_bytes())
-            .map_err(|error| error.to_string())?;
-    }
+    let mut command = CommandBuilder::new("/usr/bin/sftp");
+    command.arg("-q");
+    command.arg("-o");
+    command.arg("RequestTTY=no");
+    command.arg("-F");
+    command.arg(context.config_path.to_string_lossy().into_owned());
+    command.arg(context.target_alias.clone());
 
-    let output = child
-        .wait_with_output()
+    let mut child = pair
+        .slave
+        .spawn_command(command)
         .map_err(|error| error.to_string())?;
-    let stdout = trim_ssh_output(&String::from_utf8_lossy(&output.stdout));
-    let stderr = trim_ssh_output(&String::from_utf8_lossy(&output.stderr));
-    if !output.status.success() {
-        return Err(if stderr.is_empty() {
-            if stdout.is_empty() {
-                format!("sftp exited with status {}", output.status)
-            } else {
-                stdout
-            }
-        } else {
-            stderr
-        });
-    }
+    drop(pair.slave);
 
-    if stdout.is_empty() {
-        Ok(stderr)
-    } else if stderr.is_empty() {
-        Ok(stdout)
-    } else {
-        Ok(format!("{stdout}\n{stderr}"))
-    }
+    let writer = Arc::new(Mutex::new(
+        pair.master
+            .take_writer()
+            .map_err(|error| error.to_string())?,
+    ));
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| error.to_string())?;
+    let master = pair.master;
+    let (output_sender, output_receiver) = std::sync::mpsc::channel();
+    spawn_jump_session_reader(reader, writer.clone(), build_prompt_responses(host), output_sender);
+
+    let result = (|| -> Result<String, String> {
+        let mut session_output = wait_for_sftp_prompt(&mut child, &output_receiver, "")?;
+
+        for command in commands {
+            let interactive_command = command.trim_start_matches('@');
+            write_jump_session_input(&writer, &format!("{interactive_command}\n"))?;
+            let command_output =
+                wait_for_sftp_prompt(&mut child, &output_receiver, interactive_command)?;
+            session_output.push_str(&command_output);
+        }
+
+        write_jump_session_input(&writer, "bye\n")?;
+        Ok(trim_ssh_output(&session_output))
+    })();
+
+    let _ = child.kill();
+    let _ = child.wait();
+    drop(master);
+
+    result
 }
 
 pub(crate) fn check_native_ssh_control_session(
@@ -775,6 +829,94 @@ pub(crate) fn check_native_ssh_control_session(
         }
     } else {
         Err(stderr)
+    }
+}
+
+pub(crate) fn extract_sftp_prompt_output(output: &str, pending_command: &str) -> Option<String> {
+    let normalized = output.replace("\r", "");
+    let prompt_index = normalized.rfind("sftp>")?;
+    let command_echo = pending_command.trim();
+    let mut body = normalized[..prompt_index].to_string();
+
+    if !command_echo.is_empty() {
+        let trimmed = body.trim_start_matches('\n');
+        let echo_with_newline = format!("{command_echo}\n");
+        if let Some(remainder) = trimmed.strip_prefix(&echo_with_newline) {
+            body = remainder.to_string();
+        } else if trimmed == command_echo {
+            body.clear();
+        }
+    }
+
+    Some(body)
+}
+
+pub(crate) fn wait_for_sftp_prompt(
+    child: &mut Box<dyn Child + Send + Sync>,
+    output_receiver: &std::sync::mpsc::Receiver<JumpSessionEvent>,
+    pending_command: &str,
+) -> Result<String, String> {
+    let started_at = Instant::now();
+    let mut captured_output = String::new();
+
+    loop {
+        loop {
+            match output_receiver.try_recv() {
+                Ok(JumpSessionEvent::Output(output)) => {
+                    captured_output.push_str(&output);
+                    if let Some(prompt_output) =
+                        extract_sftp_prompt_output(&captured_output, pending_command)
+                    {
+                        return Ok(prompt_output);
+                    }
+                }
+                Ok(JumpSessionEvent::Error(error)) => {
+                    captured_output.push_str(&error);
+                    return Err(trim_ssh_output(&captured_output));
+                }
+                Ok(JumpSessionEvent::Eof) => {
+                    let message = trim_ssh_output(&captured_output);
+                    return Err(if message.is_empty() {
+                        "sftp exited before becoming ready".to_string()
+                    } else {
+                        message
+                    });
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    let message = trim_ssh_output(&captured_output);
+                    return Err(if message.is_empty() {
+                        "sftp output stream disconnected unexpectedly".to_string()
+                    } else {
+                        message
+                    });
+                }
+            }
+        }
+
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let message = trim_ssh_output(&captured_output);
+                return Err(if message.is_empty() {
+                    format!("sftp exited with status {status}")
+                } else {
+                    message
+                });
+            }
+            Ok(None) => {}
+            Err(error) => return Err(error.to_string()),
+        }
+
+        if started_at.elapsed() > Duration::from_millis(NATIVE_SSH_CONTROL_READY_TIMEOUT_MS) {
+            let message = trim_ssh_output(&captured_output);
+            return Err(if message.is_empty() {
+                "Timed out while waiting for the sftp prompt".to_string()
+            } else {
+                message
+            });
+        }
+
+        thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
     }
 }
 

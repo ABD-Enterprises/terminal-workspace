@@ -6,7 +6,7 @@ use std::{
     io::{self, Read, Write},
     net::TcpStream,
     path::PathBuf,
-    process::{Command, Output, Stdio},
+    process::{Command, Output},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -1358,6 +1358,7 @@ fn spawn_jump_session_reader(
     thread::spawn(move || {
         let mut buffer = [0u8; NATIVE_SESSION_READ_CHUNK_SIZE];
         let mut prompt_window = String::new();
+        let reusable_responses = prompt_responses.clone();
 
         loop {
             match reader.read(&mut buffer) {
@@ -1374,8 +1375,14 @@ fn spawn_jump_session_reader(
                     }
 
                     while let Some(kind) = detect_prompt_kind(&prompt_window) {
-                        let Some(response) = take_prompt_response(&mut prompt_responses, kind)
-                        else {
+                        let response = take_prompt_response(&mut prompt_responses, kind).or_else(|| {
+                            reusable_responses
+                                .iter()
+                                .rev()
+                                .find(|response| response.kind == kind)
+                                .cloned()
+                        });
+                        let Some(response) = response else {
                             break;
                         };
 
@@ -2178,6 +2185,7 @@ fn termsnip_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirector
     let output =
         with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
             run_sftp_batch_commands(
+                &request.host,
                 context,
                 &[format!("@ls -la {}", escape_sftp_argument(&target_path))],
             )
@@ -2198,6 +2206,7 @@ fn termsnip_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPat
     );
     with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
         run_sftp_batch_commands(
+            &request.host,
             context,
             &[format!("@mkdir {}", escape_sftp_argument(&target_path))],
         )
@@ -2221,6 +2230,7 @@ fn termsnip_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathR
     );
     with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
         run_sftp_batch_commands(
+            &request.host,
             context,
             &[format!(
                 "@rename {} {}",
@@ -2246,6 +2256,7 @@ fn termsnip_sftp_delete_entry(
     );
     with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
         run_sftp_batch_commands(
+            &request.host,
             context,
             &[format!(
                 "@{} {}",
@@ -2276,6 +2287,7 @@ fn termsnip_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathRe
             .join(format!("upload-{}", sanitize_filename(&request.filename)));
         fs::write(&upload_path, &contents).map_err(|error| error.to_string())?;
         run_sftp_batch_commands(
+            &request.host,
             context,
             &[format!(
                 "@put {} {}",
@@ -2308,6 +2320,7 @@ fn termsnip_sftp_download_file(
         );
         let download_path = context.session_dir.join(format!("download-{filename}"));
         run_sftp_batch_commands(
+            &request.host,
             context,
             &[format!(
                 "@get {} {}",
@@ -2907,6 +2920,18 @@ mod tests {
             vec![PromptResponseKind::Passphrase, PromptResponseKind::Password]
         );
         assert_eq!(values, vec!["jump-passphrase", "target-password"]);
+    }
+
+    #[test]
+    fn detects_only_complete_passphrase_prompts() {
+        assert_eq!(
+            detect_prompt_kind("Enter passphrase for key '/tmp/id_fixture_ed25519':"),
+            Some(PromptResponseKind::Passphrase)
+        );
+        assert_eq!(
+            detect_prompt_kind("Enter passphrase for key '/tmp/id_fixture_ed25519"),
+            None
+        );
     }
 
     #[test]
