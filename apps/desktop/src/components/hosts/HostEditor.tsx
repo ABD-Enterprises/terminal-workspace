@@ -114,17 +114,29 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
 
     let cancelled = false;
 
-    void getProtocolRuntimeStatus(values.protocol).then((status) => {
-      if (cancelled) {
-        return;
-      }
+    void getProtocolRuntimeStatus(values.protocol)
+      .then((status) => {
+        if (cancelled) {
+          return;
+        }
 
-      setRuntimeStatusMessage({
-        available: status.available,
-        installHint: status.installHint,
-        message: status.message,
+        setRuntimeStatusMessage({
+          available: status.available,
+          installHint: status.installHint,
+          message: status.message,
+        });
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setRuntimeStatusMessage({
+          available: false,
+          message:
+            error instanceof Error ? error.message : "Unable to determine protocol runtime availability.",
+        });
       });
-    });
 
     return () => {
       cancelled = true;
