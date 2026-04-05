@@ -1,5 +1,6 @@
 use super::*;
 use sha2::{Digest, Sha256};
+use std::path::Path;
 
 pub(crate) fn normalize_remote_path(pathname: &str) -> String {
     let mut segments = Vec::new();
@@ -744,6 +745,39 @@ pub(crate) fn run_sftp_batch_commands(
     }
 }
 
+pub(crate) fn check_native_ssh_control_session(
+    config_path: &Path,
+    target_alias: &str,
+) -> Result<(), String> {
+    let output = Command::new("/usr/bin/ssh")
+        .arg("-F")
+        .arg(config_path)
+        .arg("-o")
+        .arg("RequestTTY=no")
+        .arg("-O")
+        .arg("check")
+        .arg(target_alias)
+        .output()
+        .map_err(|error| error.to_string())?;
+    let stdout = trim_ssh_output(&String::from_utf8_lossy(&output.stdout));
+    let stderr = trim_ssh_output(&String::from_utf8_lossy(&output.stderr));
+
+    if output.status.success() {
+        Ok(())
+    } else if stderr.is_empty() {
+        if stdout.is_empty() {
+            Err(format!(
+                "ssh control check exited with status {}",
+                output.status
+            ))
+        } else {
+            Err(stdout)
+        }
+    } else {
+        Err(stderr)
+    }
+}
+
 pub(crate) fn open_native_ssh_control_session(
     host: &BackendHostConnection,
     session_label: &str,
@@ -824,7 +858,9 @@ pub(crate) fn open_native_ssh_control_session(
                 }
             }
 
-            if control_path.exists() {
+            if control_path.exists()
+                && check_native_ssh_control_session(&config_path, &target_alias).is_ok()
+            {
                 break;
             }
 

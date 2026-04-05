@@ -8,5 +8,5 @@ owner: Codex
 current_state: ready_for_review
 failure_type: none
 acceptance_criteria_reference: /ai/acceptance.md#t1
-last_action: Preserved pane preview-persistence intent after pane removal, added regression coverage for removed panes, and reran the targeted store test, desktop build, lint, native check, and guardrails validation on the T1 branch.
-next_action: Let GitHub PR #1 rerun review and CI on the updated `codex/t1-output-preview-persistence-control` branch.
+last_action: Stabilized the Transfers route by removing the filtered Zustand selector crash, added an SSH control-session readiness check before native SFTP batch commands, reran the failing Playwright specs, and passed the default Rust test suite while the ignored localhost fixture still reached the later local-forward sandbox limit locally.
+next_action: Let GitHub PR #1 rerun `validate` and `native-macos` on the updated `codex/t1-output-preview-persistence-control` branch.
