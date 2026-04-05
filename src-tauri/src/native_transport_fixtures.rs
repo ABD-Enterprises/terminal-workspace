@@ -1016,11 +1016,13 @@ fn native_external_protocol_runtime_fixture_flow() {
     let serial_status = build_protocol_runtime_status("serial");
     let mosh_status = build_protocol_runtime_status("mosh");
     assert!(telnet_status.available);
+    assert_eq!(telnet_status.client.as_deref(), Some("telnet"));
     assert_eq!(telnet_status.resolved_path.as_deref(), Some(telnet_path.to_string_lossy().as_ref()));
     assert!(serial_status.available);
     assert_eq!(serial_status.client.as_deref(), Some("screen"));
     assert_eq!(serial_status.resolved_path.as_deref(), Some(screen_path.to_string_lossy().as_ref()));
     assert!(mosh_status.available);
+    assert_eq!(mosh_status.client.as_deref(), Some("mosh"));
     assert_eq!(mosh_status.resolved_path.as_deref(), Some(mosh_path.to_string_lossy().as_ref()));
 
     let telnet_output =
