@@ -110,6 +110,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const setPaneTransport = useSessionsStore((state) => state.setPaneTransport);
   const setPaneBackendSession = useSessionsStore((state) => state.setPaneBackendSession);
   const consumePaneCommand = useSessionsStore((state) => state.consumePaneCommand);
+  const recordPaneCommand = useSessionsStore((state) => state.recordPaneCommand);
   const knownHosts = useKnownHostsStore((state) => state.knownHosts);
   const demoModeEnabled = useAppStore((state) => state.demoModeEnabled);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -614,14 +615,18 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       }
     };
     dispatchCommandRef.current = (command) => {
-      if (!command.trim()) {
+      const trimmedCommand = command.trim();
+
+      if (!trimmedCommand) {
         writePrompt();
         return;
       }
 
+      recordPaneCommand(pane.id, trimmedCommand, "queued");
+
       if (transportRef.current !== "mock" && transportRef.current !== "unsupported") {
         if (socketRef.current?.readyState === WebSocket.OPEN && connectionStateRef.current === "connected") {
-          socketRef.current.send(JSON.stringify({ type: "input", data: `${command}\r` }));
+          socketRef.current.send(JSON.stringify({ type: "input", data: `${trimmedCommand}\r` }));
         }
         return;
       }
@@ -630,9 +635,9 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         return;
       }
 
-      terminal.write(command);
-      commandBufferRef.current = command;
-      runMockCommand(command);
+      terminal.write(trimmedCommand);
+      commandBufferRef.current = trimmedCommand;
+      runMockCommand(trimmedCommand);
     };
 
     terminal.loadAddon(fitAddon);
@@ -779,6 +784,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     pane.id,
     privateKeyPath,
     nativeBridgeEnabled,
+    recordPaneCommand,
     setPaneBackendSession,
     setPaneReconnectOnRestore,
     setPaneState,

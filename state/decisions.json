@@ -262,7 +262,17 @@
         "The repo can validate telnet, serial, and mosh launch paths without relying on external servers or workstation-specific client installations.",
         "Real workstation clients still work by default when overrides are unset."
       ]
+    },
+    {
+      "id": "dec-session-history-explicit-dispatch-only",
+      "date": "2026-04-05",
+      "title": "Start session history with app-dispatched commands only",
+      "decision": "Persist session history only for app-managed dispatch paths such as queued commands and history replay, and do not capture arbitrary interactive terminal input until output capture and redaction rules exist.",
+      "consequences": [
+        "The first searchable history slice avoids recording passwords or other sensitive interactive input from live shells.",
+        "Manual terminal commands and output transcripts remain explicit follow-up work in the session-history phase."
+      ]
     }
   ],
-  "updated_at": "2026-04-05T06:35:41.515Z"
+  "updated_at": "2026-04-05T06:48:47Z"
 }

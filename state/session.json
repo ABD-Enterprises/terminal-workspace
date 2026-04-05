@@ -1,12 +1,12 @@
 {
-  "branch": "phase/macos-network-protocol-execution",
-  "current_run_id": "2026-04-05-macos-network-protocol-execution-live-validation",
-  "current_task": "macOS network protocol execution is complete; live telnet, serial, and mosh fixtures now run through the native PTY bridge.",
-  "current_phase": "macos-network-protocol-execution",
-  "started_at": "2026-04-05T02:19:42-04:00",
-  "summary": "This run added deterministic live telnet, serial, and mosh fixtures on top of the native command-launch path, wired them into the native transport script, and closed the remaining live-validation gap for protocol execution.",
-  "updated_at": "2026-04-05T06:35:41.515Z",
-  "status": "completed",
+  "branch": "phase/macos-session-history-and-runbooks",
+  "current_run_id": "2026-04-05-macos-session-history-and-runbooks-command-history",
+  "current_task": "Persisted app-dispatched session command history is wired into the session store and surfaced in Sessions with search and replay.",
+  "current_phase": "macos-session-history-and-runbooks",
+  "started_at": "2026-04-05T06:48:47Z",
+  "summary": "This run started the session-history and runbooks phase by persisting app-dispatched commands in the session store, rendering a searchable history panel in Sessions, and adding replay actions for saved commands.",
+  "updated_at": "2026-04-05T06:48:47Z",
+  "status": "in_progress",
   "validation": [
     {
       "id": "validation-vault-sync-targeted-tests-deletions",
@@ -241,6 +241,36 @@
     {
       "id": "validation-network-protocol-live-validator",
       "command": "node ./tools/validators/enforce-runtime-guardrails.js --base 34310cc",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-targeted-tests",
+      "command": "npm run test -- apps/desktop/src/store/sessions-store.test.ts apps/desktop/src/lib/api.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-full-vitest",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-cargo-test",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-validator",
+      "command": "node ./tools/validators/enforce-runtime-guardrails.js --base 1256c83",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-history-json-state",
+      "command": "python3 -m json.tool docs/roadmap/state.json state/tasks.json state/risks.json state/decisions.json state/session.json state/repo.json state/handoff.json",
       "result": "passed"
     }
   ]

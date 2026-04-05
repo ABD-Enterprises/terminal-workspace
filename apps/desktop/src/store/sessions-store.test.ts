@@ -7,6 +7,7 @@ import {
   duplicateSessionWorkspace,
   openSessionWorkspace,
   queuePaneCommand,
+  recordPaneCommandHistory,
   removeSessionPane,
   setTabSplitDirection,
   splitSessionPane,
@@ -126,6 +127,33 @@ describe("sessions store helpers", () => {
 
     const consumed = consumePaneCommand(queued, paneId, queued.panes[paneId]!.queuedCommands[0]!.id);
     expect(consumed.panes[paneId]?.queuedCommands).toHaveLength(0);
+  });
+
+  it("records executed pane commands in persisted history", () => {
+    const opened = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      sampleHosts[0]
+    );
+    const paneId = opened.tabs[0]!.paneIds[0]!;
+
+    const recorded = recordPaneCommandHistory(
+      {
+        ...opened,
+        commandHistory: [],
+      },
+      paneId,
+      "uptime",
+      "queued"
+    );
+
+    expect(recorded.commandHistory).toHaveLength(1);
+    expect(recorded.commandHistory[0]).toMatchObject({
+      paneId,
+      hostId: sampleHosts[0].id,
+      transport: "ssh",
+      command: "uptime",
+      source: "queued",
+    });
   });
 
   it("maps protocol-aware panes to their executable transports", () => {

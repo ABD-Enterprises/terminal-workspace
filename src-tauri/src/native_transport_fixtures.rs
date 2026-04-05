@@ -1064,6 +1064,7 @@ fn native_external_protocol_runtime_fixture_flow() {
 
     let mosh_output = run_external_protocol_fixture(&mosh_host, "MOSH_AUTH:fixture-secret", None);
     assert!(mosh_output.contains("MOSH:ops@ops.internal:"));
+    assert!(mosh_output.contains("60022"));
     assert!(mosh_output.contains("--ssh="));
     assert!(mosh_output.contains("password:"));
     assert!(mosh_output.contains("MOSH_AUTH:fixture-secret"));

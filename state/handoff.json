@@ -1,11 +1,12 @@
 {
-  "summary": "The macOS network protocol execution phase is complete. Telnet, serial, and mosh now have live PTY-backed fixture coverage, and the native transport script runs that validation before the broader localhost SSH fixture.",
+  "summary": "The repo is now in the macOS session history and runbooks phase. App-dispatched commands persist in the session store, Sessions exposes searchable history plus replay actions, and the release-secret provisioning blocker remains external.",
   "next_steps": [
-    "Start macOS session history and structured runbooks on top of the validated multi-protocol native client.",
+    "Capture output excerpts and manual-command-safe history semantics on top of the new command-history foundation.",
+    "Upgrade snippets into structured runbooks with parameter input, preview, execution records, and retained results.",
     "Preserve the blocked release-secret provisioning work until exportable signing and notarization material exists."
   ],
   "blockers": [
     "GitHub release secret provisioning is still blocked because the repository has no configured signing/notarization secrets and the current workstation state does not expose exportable certificate or notary credential material."
   ],
-  "updated_at": "2026-04-05T06:35:41.515Z"
+  "updated_at": "2026-04-05T06:48:47Z"
 }

@@ -1,10 +1,10 @@
 {
-  "updated_at": "2026-04-05T06:35:41.515Z",
-  "last_updated": "2026-04-05T06:35:41.515Z",
+  "updated_at": "2026-04-05T06:48:47Z",
+  "last_updated": "2026-04-05T06:48:47Z",
   "version": "0.1.0",
-  "current_phase": "macos-network-protocol-execution",
-  "current_phase_status": "completed",
-  "current_phase_branch": "phase/macos-network-protocol-execution",
+  "current_phase": "macos-session-history-and-runbooks",
+  "current_phase_status": "in_progress",
+  "current_phase_branch": "phase/macos-session-history-and-runbooks",
   "completed_phases": [
     {
       "id": "web-demo-quality",
@@ -74,15 +74,6 @@
     }
   ],
   "upcoming_phases": [
-    {
-      "id": "macos-session-history-and-runbooks",
-      "title": "Session history and structured runbooks",
-      "priority": 1,
-      "depends_on": [
-        "macos-network-protocol-execution"
-      ],
-      "rationale": "The native client can now open SSH, local shell, telnet, serial, and mosh sessions, so the next solo-macOS differentiator is durable session history, searchable command logs, and runbooks that go beyond raw snippets."
-    },
     {
       "id": "release-workflow-live-verification",
       "title": "Live GitHub release workflow verification",
@@ -360,6 +351,25 @@
       "status": "completed",
       "phase": "macos-network-protocol-execution",
       "completed_at": "2026-04-05T06:35:41.515Z"
+    },
+    {
+      "id": "task-session-command-history",
+      "title": "Persist searchable session command history for app-dispatched commands",
+      "status": "completed",
+      "phase": "macos-session-history-and-runbooks",
+      "completed_at": "2026-04-05T06:48:47Z"
+    },
+    {
+      "id": "task-session-output-history",
+      "title": "Capture searchable session output excerpts alongside command history",
+      "status": "pending",
+      "phase": "macos-session-history-and-runbooks"
+    },
+    {
+      "id": "task-structured-runbook-foundation",
+      "title": "Upgrade snippets into parameterized structured runbooks with execution records",
+      "status": "pending",
+      "phase": "macos-session-history-and-runbooks"
     }
   ],
   "risks": [
@@ -531,6 +541,14 @@
       "summary": "Live protocol fixtures now drive telnet, serial, and mosh through the native PTY launch path with deterministic client overrides, and the native transport script runs that coverage before the broader localhost SSH fixture.",
       "assigned_phase": "macos-network-protocol-execution",
       "resolved_at": "2026-04-05T06:35:41.515Z"
+    },
+    {
+      "id": "risk-session-history-explicit-dispatch-only",
+      "title": "Session history currently covers app-dispatched commands only",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The first session-history slice intentionally records only commands launched through app-managed dispatch paths so interactive prompts and password entry are not captured, but manual terminal input and output excerpts are not yet persisted.",
+      "assigned_phase": "macos-session-history-and-runbooks"
     }
   ],
   "opportunities": [
@@ -577,6 +595,15 @@
       "effort": "medium",
       "assigned_phase": "macos-solo-protocols-and-local-shell",
       "summary": "Hosts now carry explicit protocol metadata and the native bridge can launch a real local login shell, which establishes the foundation for local terminal workflows, runbooks, session history, and broader protocol parity on top of one inventory model.",
+      "status": "foundation-established"
+    },
+    {
+      "id": "opp-session-history-surface",
+      "title": "Use the persisted Sessions history surface as the base for richer runbook evidence",
+      "impact": "medium",
+      "effort": "medium",
+      "assigned_phase": "macos-session-history-and-runbooks",
+      "summary": "Sessions now exposes a searchable persisted command history rail with replay actions, which gives output capture, runbook evidence, and safer history semantics a real user-facing surface to build on.",
       "status": "foundation-established"
     }
   ],
@@ -708,10 +735,16 @@
       "date": "2026-04-05",
       "title": "Validate non-SSH protocol launches with deterministic native fixture clients",
       "summary": "Native telnet, serial, and mosh validation now uses command-path overrides to point the PTY launch path at fixture executables, so the repo can exercise live protocol sessions without depending on workstation-installed services or remote endpoints."
+    },
+    {
+      "id": "dec-session-history-explicit-dispatch-only",
+      "date": "2026-04-05",
+      "title": "Start session history with app-dispatched commands only",
+      "summary": "The first session-history slice persists queued and replayed commands only, which gives Sessions a real searchable history surface without capturing arbitrary interactive input before redaction and output rules exist."
     }
   ],
   "environment_status": {
-    "branch": "phase/macos-network-protocol-execution",
+    "branch": "phase/macos-session-history-and-runbooks",
     "dirty": true,
     "os": "macos",
     "node": "v25.9.0",
@@ -736,7 +769,8 @@
     "github_release_workflow_current_action_majors": "passed",
     "native_protocol_runtime": "passed (vitest + desktop build + cargo test + live protocol fixtures)",
     "native_protocol_preflight": "passed",
-    "native_protocol_live_validation": "passed (cargo external protocol fixture + native transport script)"
+    "native_protocol_live_validation": "passed (cargo external protocol fixture + native transport script)",
+    "session_command_history": "passed (vitest + desktop build + cargo test + validator)"
   },
   "deployment_history": [],
   "promotion_history": [

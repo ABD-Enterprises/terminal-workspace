@@ -16,6 +16,18 @@ export interface QueuedPaneCommand {
   createdAt: string;
 }
 
+export type SessionCommandHistorySource = "queued";
+
+export interface SessionCommandHistoryEntry {
+  id: string;
+  paneId: string;
+  hostId: string;
+  transport: SessionTransport;
+  command: string;
+  source: SessionCommandHistorySource;
+  createdAt: string;
+}
+
 export interface SessionPane {
   id: string;
   hostId: string;

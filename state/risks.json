@@ -168,7 +168,15 @@
       "summary": "Live protocol fixtures now drive telnet, serial, and mosh through the native PTY launch path with deterministic client overrides, and the native transport script runs that coverage before the broader localhost SSH fixture.",
       "assigned_phase": "macos-network-protocol-execution",
       "resolved_at": "2026-04-05T06:35:41.515Z"
+    },
+    {
+      "id": "risk-session-history-explicit-dispatch-only",
+      "title": "Session history currently covers app-dispatched commands only",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The first session-history slice intentionally records only commands launched through app-managed dispatch paths so interactive prompts and password entry are not captured, but manual terminal input and output excerpts are not yet persisted.",
+      "assigned_phase": "macos-session-history-and-runbooks"
     }
   ],
-  "updated_at": "2026-04-05T06:35:41.515Z"
+  "updated_at": "2026-04-05T06:48:47Z"
 }

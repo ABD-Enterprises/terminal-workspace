@@ -4,6 +4,8 @@ import type { HostRecord } from "../types/host";
 import {
   createSessionPane,
   createSessionTab,
+  type SessionCommandHistoryEntry,
+  type SessionCommandHistorySource,
   type QueuedPaneCommand,
   type SessionConnectionState,
   type SessionPane,
@@ -18,6 +20,8 @@ const fallbackStorage: StateStorage = {
   setItem: () => undefined,
   removeItem: () => undefined,
 };
+
+const SESSION_HISTORY_LIMIT = 200;
 
 function sanitizePersistedWorkspace(
   workspace: Pick<SessionWorkspaceState, "tabs" | "panes" | "activeTabId" | "lastRestoredAt">
@@ -37,6 +41,10 @@ function sanitizePersistedWorkspace(
       ])
     ),
   };
+}
+
+function sanitizePersistedCommandHistory(commandHistory: SessionCommandHistoryEntry[]) {
+  return commandHistory.slice(0, SESSION_HISTORY_LIMIT);
 }
 
 function touchTab(tab: SessionTab, update?: Partial<SessionTab>): SessionTab {
@@ -380,7 +388,36 @@ export function setTabSplitDirection(
   };
 }
 
+export function recordPaneCommandHistory(
+  state: SessionWorkspaceState & { commandHistory: SessionCommandHistoryEntry[] },
+  paneId: string,
+  command: string,
+  source: SessionCommandHistorySource
+) {
+  const pane = state.panes[paneId];
+  const trimmedCommand = command.trim();
+  if (!pane || !trimmedCommand) {
+    return state;
+  }
+
+  const entry: SessionCommandHistoryEntry = {
+    id: crypto.randomUUID(),
+    paneId,
+    hostId: pane.hostId,
+    transport: pane.transport,
+    command: trimmedCommand,
+    source,
+    createdAt: new Date().toISOString(),
+  };
+
+  return {
+    ...state,
+    commandHistory: sanitizePersistedCommandHistory([entry, ...state.commandHistory]),
+  };
+}
+
 export interface SessionsState extends SessionWorkspaceState {
+  commandHistory: SessionCommandHistoryEntry[];
   openSession: (host: HostRecord) => string;
   duplicateSession: (host: HostRecord, baseTitle?: string) => string;
   selectTab: (tabId: string) => void;
@@ -394,6 +431,8 @@ export interface SessionsState extends SessionWorkspaceState {
   setPaneBackendSession: (paneId: string, backendSessionId?: string) => void;
   queuePaneCommand: (paneId: string, command: string, label?: string) => void;
   consumePaneCommand: (paneId: string, commandId: string) => void;
+  recordPaneCommand: (paneId: string, command: string, source?: SessionCommandHistorySource) => void;
+  clearCommandHistory: () => void;
   queueCommandForHosts: (hosts: HostRecord[], command: string, label?: string) => string[];
   togglePaneConnection: (paneId: string) => void;
   setSplitDirection: (tabId: string, splitDirection: SplitDirection) => void;
@@ -404,6 +443,7 @@ export const useSessionsStore = create<SessionsState>()(
     (set, get) => ({
       tabs: [],
       panes: {},
+      commandHistory: [],
       activeTabId: undefined,
       lastRestoredAt: undefined,
       openSession: (host) => {
@@ -433,6 +473,9 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => queuePaneCommand(state, paneId, command, label)),
       consumePaneCommand: (paneId, commandId) =>
         set((state) => consumePaneCommand(state, paneId, commandId)),
+      recordPaneCommand: (paneId, command, source = "queued") =>
+        set((state) => recordPaneCommandHistory(state, paneId, command, source)),
+      clearCommandHistory: () => set(() => ({ commandHistory: [] })),
       queueCommandForHosts: (hosts, command, label) => {
         const paneIds: string[] = [];
 
@@ -481,6 +524,7 @@ export const useSessionsStore = create<SessionsState>()(
           activeTabId: state.activeTabId,
           lastRestoredAt: new Date().toISOString(),
         }),
+        commandHistory: sanitizePersistedCommandHistory(state.commandHistory),
       }),
       merge: (persistedState, currentState) => ({
         ...currentState,
@@ -489,6 +533,10 @@ export const useSessionsStore = create<SessionsState>()(
             SessionWorkspaceState,
             "tabs" | "panes" | "activeTabId" | "lastRestoredAt"
           >
+        ),
+        commandHistory: sanitizePersistedCommandHistory(
+          ((persistedState as { commandHistory?: SessionCommandHistoryEntry[] }).commandHistory ??
+            currentState.commandHistory) as SessionCommandHistoryEntry[]
         ),
       }),
     }

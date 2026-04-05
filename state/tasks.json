@@ -202,7 +202,26 @@
       "status": "completed",
       "phase": "macos-network-protocol-execution",
       "completed_at": "2026-04-05T06:35:41.515Z"
+    },
+    {
+      "id": "task-session-command-history",
+      "title": "Persist searchable session command history for app-dispatched commands",
+      "status": "completed",
+      "phase": "macos-session-history-and-runbooks",
+      "completed_at": "2026-04-05T06:48:47Z"
+    },
+    {
+      "id": "task-session-output-history",
+      "title": "Capture searchable session output excerpts alongside command history",
+      "status": "pending",
+      "phase": "macos-session-history-and-runbooks"
+    },
+    {
+      "id": "task-structured-runbook-foundation",
+      "title": "Upgrade snippets into parameterized structured runbooks with execution records",
+      "status": "pending",
+      "phase": "macos-session-history-and-runbooks"
     }
   ],
-  "updated_at": "2026-04-05T06:35:41.515Z"
+  "updated_at": "2026-04-05T06:48:47Z"
 }

@@ -5,6 +5,9 @@
 Build durable session history, searchable command logs, and structured runbooks on top of the
 native multi-protocol macOS client.
 
+The first slice is now live: app-dispatched commands persist across relaunch, Sessions exposes a
+searchable history rail, and saved commands can be replayed back into their host sessions.
+
 ## Active Phases
 
 - macOS session history and structured runbooks
@@ -31,6 +34,9 @@ native multi-protocol macOS client.
 - Opportunity: native local shell plus executable telnet, serial, and mosh inventory now has live
   PTY-backed validation coverage, which gives session history, runbooks, and broader multi-protocol
   parity work a stable native execution base instead of an inventory-only model.
+- Opportunity: the first session-history slice is now user-facing, so output capture, replay,
+  runbook evidence, and safer history semantics can iterate on a real persisted Sessions surface
+  instead of a speculative data model.
 - Opportunity: the hosted release workflow now has a branch-safe preview path, explicit secret
   preflight, branch-SHA release targeting, and shared Node-based secret validation, so once secret
   material is supplied it can be rerun without additional workflow design work.
