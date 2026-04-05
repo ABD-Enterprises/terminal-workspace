@@ -1037,12 +1037,15 @@ fn native_external_protocol_runtime_fixture_flow() {
     let telnet_output =
         run_external_protocol_fixture(&telnet_host, "TELNET_INPUT:status", Some("status"));
     assert!(telnet_output.contains("TELNET:legacy.internal:2323"));
+    assert!(telnet_output.contains("TELNET_INPUT:status"));
 
     let serial_output =
         run_external_protocol_fixture(&serial_host, "SERIAL_INPUT:ping", Some("ping"));
     assert!(serial_output.contains("SERIAL:/dev/cu.fixture:115200"));
+    assert!(serial_output.contains("SERIAL_INPUT:ping"));
 
     let mosh_output = run_external_protocol_fixture(&mosh_host, "MOSH_AUTH:fixture-secret", None);
     assert!(mosh_output.contains("MOSH:ops@ops.internal:"));
     assert!(mosh_output.contains("--ssh="));
+    assert!(mosh_output.contains("MOSH_AUTH:fixture-secret"));
 }
