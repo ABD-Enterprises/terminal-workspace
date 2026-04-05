@@ -1,13 +1,11 @@
 {
-  "summary": "The active branch is phase/macos-network-protocol-execution. Telnet, serial, and mosh sessions now preflight native client availability before launch and surface install guidance inline in the editor and terminal pane.",
+  "summary": "The macOS network protocol execution phase is complete. Telnet, serial, and mosh now have live PTY-backed fixture coverage, and the native transport script runs that validation before the broader localhost SSH fixture.",
   "next_steps": [
-    "Add live validation coverage for telnet, serial, and mosh runtime paths.",
-    "After live protocol validation is in place, move to session history, searchable logs, and structured runbooks for the next solo-macOS differentiation slice.",
+    "Start macOS session history and structured runbooks on top of the validated multi-protocol native client.",
     "Preserve the blocked release-secret provisioning work until exportable signing and notarization material exists."
   ],
   "blockers": [
-    "GitHub release secret provisioning is still blocked because the repository has no configured signing/notarization secrets and the current workstation state does not expose exportable certificate or notary credential material.",
-    "The new telnet, serial, and mosh runtime paths still need live end-to-end validation fixtures."
+    "GitHub release secret provisioning is still blocked because the repository has no configured signing/notarization secrets and the current workstation state does not expose exportable certificate or notary credential material."
   ],
-  "updated_at": "2026-04-05T02:24:44-04:00"
+  "updated_at": "2026-04-05T06:35:41.515Z"
 }

@@ -1,6 +1,8 @@
 use super::*;
 use std::{
-    env, fs,
+    env,
+    ffi::OsString,
+    fs,
     io::{Read, Write},
     net::{Shutdown, TcpListener, TcpStream},
     path::{Path, PathBuf},
@@ -9,6 +11,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::mpsc::unbounded_channel;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 const FIXTURE_TIMEOUT: Duration = Duration::from_secs(15);
 const FIXTURE_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -46,6 +50,29 @@ struct NativeTransportFixture {
     direct_host: BackendHostConnection,
     jump_target_host: BackendHostConnection,
     http_server: TestHttpServer,
+}
+
+struct ScopedEnvVar {
+    key: &'static str,
+    original: Option<OsString>,
+}
+
+impl ScopedEnvVar {
+    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let original = env::var_os(key);
+        env::set_var(key, value);
+        Self { key, original }
+    }
+}
+
+impl Drop for ScopedEnvVar {
+    fn drop(&mut self) {
+        if let Some(value) = self.original.take() {
+            env::set_var(self.key, value);
+        } else {
+            env::remove_var(self.key);
+        }
+    }
 }
 
 impl NativeTransportFixture {
@@ -392,6 +419,121 @@ fn insert_fixture_session(
             })),
         },
     );
+}
+
+fn write_fixture_executable(path: &Path, contents: &str) {
+    fs::write(path, contents).expect("fixture executable should be written");
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(path)
+            .expect("fixture executable metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions)
+            .expect("fixture executable permissions should be set");
+    }
+}
+
+fn collect_external_command_output(
+    child: &mut Box<dyn Child + Send + Sync>,
+    receiver: &std::sync::mpsc::Receiver<JumpSessionEvent>,
+    expected_marker: &str,
+) -> String {
+    let started_at = Instant::now();
+    let mut output = String::new();
+
+    while started_at.elapsed() < FIXTURE_TIMEOUT {
+        loop {
+            match receiver.try_recv() {
+                Ok(JumpSessionEvent::Output(chunk)) => {
+                    output.push_str(&chunk);
+                    if output.contains(expected_marker) {
+                        return output;
+                    }
+                }
+                Ok(JumpSessionEvent::Error(error)) => {
+                    panic!("fixture external command errored: {error}");
+                }
+                Ok(JumpSessionEvent::Eof) => break,
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+
+        match child.try_wait() {
+            Ok(Some(_)) if output.contains(expected_marker) => return output,
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(error) => panic!("fixture external command status should be readable: {error}"),
+        }
+
+        thread::sleep(FIXTURE_POLL_INTERVAL);
+    }
+
+    panic!("Timed out waiting for fixture output marker `{expected_marker}` in `{output}`");
+}
+
+fn run_external_protocol_fixture(
+    host: &BackendHostConnection,
+    expected_marker: &str,
+    manual_input: Option<&str>,
+) -> String {
+    let session_id = next_native_session_id();
+    let ExternalCommandSessionSpec {
+        command,
+        prompt_responses,
+        cleanup_dir,
+        ..
+    } = build_external_command_session_spec(host, &session_id)
+        .expect("fixture external session spec should build");
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: DEFAULT_TERMINAL_ROWS,
+            cols: DEFAULT_TERMINAL_COLS,
+            pixel_width: DEFAULT_TERMINAL_PIXEL_WIDTH,
+            pixel_height: DEFAULT_TERMINAL_PIXEL_HEIGHT,
+        })
+        .expect("fixture pty should open");
+
+    let mut child = pair
+        .slave
+        .spawn_command(command)
+        .expect("fixture external command should spawn");
+    drop(pair.slave);
+
+    let writer = Arc::new(Mutex::new(
+        pair.master
+            .take_writer()
+            .expect("fixture pty writer should be available"),
+    ));
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .expect("fixture pty reader should clone");
+    drop(pair.master);
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    if prompt_responses.is_empty() {
+        spawn_local_session_reader(reader, sender);
+    } else {
+        spawn_jump_session_reader(reader, writer.clone(), prompt_responses, sender);
+    }
+
+    if let Some(input) = manual_input {
+        write_jump_session_input(&writer, &format!("{input}\n"))
+            .expect("fixture external input should write");
+    }
+
+    let output = collect_external_command_output(&mut child, &receiver, expected_marker);
+
+    let _ = child.kill();
+    let _ = child.wait();
+    if let Some(cleanup_dir) = cleanup_dir {
+        let _ = fs::remove_dir_all(cleanup_dir);
+    }
+
+    output
 }
 
 fn read_shell_until(channel: &mut Channel, marker: &str) -> String {
@@ -809,4 +951,87 @@ fn native_key_tooling_fixture_flow() {
         rescanned_generated_key.fingerprint,
         generated_key.fingerprint
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn native_external_protocol_runtime_fixture_flow() {
+    let root = make_fixture_root("external-protocols");
+    let bin_dir = root.join("bin");
+    fs::create_dir_all(&bin_dir).expect("fixture bin dir should be created");
+
+    let telnet_path = bin_dir.join("telnet-fixture");
+    write_fixture_executable(
+        &telnet_path,
+        "#!/bin/sh\nprintf 'TELNET:%s:%s\\n' \"$1\" \"$2\"\nIFS= read -r line || exit 1\nprintf 'TELNET_INPUT:%s\\n' \"$line\"\n",
+    );
+    let screen_path = bin_dir.join("screen-fixture");
+    write_fixture_executable(
+        &screen_path,
+        "#!/bin/sh\nprintf 'SERIAL:%s:%s\\n' \"$1\" \"$2\"\nIFS= read -r line || exit 1\nprintf 'SERIAL_INPUT:%s\\n' \"$line\"\n",
+    );
+    let mosh_path = bin_dir.join("mosh-fixture");
+    write_fixture_executable(
+        &mosh_path,
+        "#!/bin/sh\nprintf 'MOSH:%s:%s\\n' \"$1\" \"$2\"\nprintf 'password:'\nIFS= read -r secret || exit 1\nprintf 'MOSH_AUTH:%s\\n' \"$secret\"\n",
+    );
+
+    let _telnet_override = ScopedEnvVar::set("TERMSNIP_TELNET_PATH", &telnet_path);
+    let _screen_override = ScopedEnvVar::set("TERMSNIP_SCREEN_PATH", &screen_path);
+    let _mosh_override = ScopedEnvVar::set("TERMSNIP_MOSH_PATH", &mosh_path);
+
+    let telnet_host = BackendHostConnection {
+        agent_forwarding: false,
+        auth_method: "none".to_string(),
+        environment: None,
+        hostname: "legacy.internal".to_string(),
+        jump_host: None,
+        known_host_algorithm: None,
+        known_host_public_key: None,
+        password: String::new(),
+        passphrase: String::new(),
+        port: 2323,
+        private_key_path: String::new(),
+        protocol: "telnet".to_string(),
+        sftp_root: None,
+        username: String::new(),
+    };
+    let serial_host = BackendHostConnection {
+        hostname: "/dev/cu.fixture".to_string(),
+        port: 115200,
+        protocol: "serial".to_string(),
+        ..telnet_host.clone()
+    };
+    let mosh_host = BackendHostConnection {
+        auth_method: "password".to_string(),
+        hostname: "ops.internal".to_string(),
+        password: "fixture-secret".to_string(),
+        port: 60022,
+        protocol: "mosh".to_string(),
+        username: "ops".to_string(),
+        ..telnet_host.clone()
+    };
+
+    let telnet_status = build_protocol_runtime_status("telnet");
+    let serial_status = build_protocol_runtime_status("serial");
+    let mosh_status = build_protocol_runtime_status("mosh");
+    assert!(telnet_status.available);
+    assert_eq!(telnet_status.resolved_path.as_deref(), Some(telnet_path.to_string_lossy().as_ref()));
+    assert!(serial_status.available);
+    assert_eq!(serial_status.client.as_deref(), Some("screen"));
+    assert_eq!(serial_status.resolved_path.as_deref(), Some(screen_path.to_string_lossy().as_ref()));
+    assert!(mosh_status.available);
+    assert_eq!(mosh_status.resolved_path.as_deref(), Some(mosh_path.to_string_lossy().as_ref()));
+
+    let telnet_output =
+        run_external_protocol_fixture(&telnet_host, "TELNET_INPUT:status", Some("status"));
+    assert!(telnet_output.contains("TELNET:legacy.internal:2323"));
+
+    let serial_output =
+        run_external_protocol_fixture(&serial_host, "SERIAL_INPUT:ping", Some("ping"));
+    assert!(serial_output.contains("SERIAL:/dev/cu.fixture:115200"));
+
+    let mosh_output = run_external_protocol_fixture(&mosh_host, "MOSH_AUTH:fixture-secret", None);
+    assert!(mosh_output.contains("MOSH:ops@ops.internal:"));
+    assert!(mosh_output.contains("--ssh="));
 }

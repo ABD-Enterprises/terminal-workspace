@@ -2,17 +2,16 @@
 
 ## Current Focus
 
-Turn the protocol-aware host model into real native transports by launching telnet, serial, and
-mosh sessions through the Tauri PTY bridge, then harden the slice with the new client preflight
-layer and live runtime validation.
+Build durable session history, searchable command logs, and structured runbooks on top of the
+native multi-protocol macOS client.
 
 ## Active Phases
 
-- macOS network protocol execution
+- macOS session history and structured runbooks
 - Success criteria:
-  - telnet, serial, and mosh sessions launch through the native bridge instead of stopping at inventory
-  - protocol defaults and validation no longer assume SSH semantics for non-SSH hosts
-  - missing telnet, mosh, screen, or cu binaries are detected before launch with inline install guidance
+  - session history persists across relaunch and is searchable by host, protocol, and command text
+  - structured runbooks can collect parameters, preview targets, execute safely, and retain results
+  - native multi-protocol sessions emit reusable history and execution evidence
   - the repo test suite, desktop build, Rust tests, and runtime validator all pass
 
 ## Risks And Opportunities
@@ -22,8 +21,6 @@ layer and live runtime validation.
 - Risk: the local workstation exposes the Developer ID identity, but it does not currently expose
   exportable certificate/password or notarization credential material, so automated GitHub secret
   provisioning cannot complete from the repo alone.
-- Risk: telnet, serial, and mosh now launch through native external clients and preflight missing
-  binaries before connect, but the repo still needs live runtime fixtures for those paths.
 - Opportunity: the repo now has a single canonical execution contract across roadmap, shared state,
   validator enforcement, CI, agents, and prompts.
 - Opportunity: the exported local vault snapshot now carries stable vault and device identifiers,
@@ -31,9 +28,9 @@ layer and live runtime validation.
   envelopes now carry encrypted lineage metadata plus persisted trusted-key governance with an
   operator management/import/export surface, which gives the future sync architecture a concrete
   contract instead of a flat config dump.
-- Opportunity: native local shell plus executable telnet, serial, and mosh inventory now provides
-  the foundation for session history, structured runbooks, and broader multi-protocol parity work
-  that pushes the desktop app toward a real Termius replacement instead of a browser demo.
+- Opportunity: native local shell plus executable telnet, serial, and mosh inventory now has live
+  PTY-backed validation coverage, which gives session history, runbooks, and broader multi-protocol
+  parity work a stable native execution base instead of an inventory-only model.
 - Opportunity: the hosted release workflow now has a branch-safe preview path, explicit secret
   preflight, branch-SHA release targeting, and shared Node-based secret validation, so once secret
   material is supplied it can be rerun without additional workflow design work.

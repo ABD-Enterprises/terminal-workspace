@@ -84,6 +84,22 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
   );
 
   useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setValues(
+      host
+        ? {
+            ...hostToFormValues(host),
+            password: runtimeSecrets?.password ?? "",
+            passphrase: runtimeSecrets?.passphrase ?? "",
+          }
+        : emptyHostFormValues
+    );
+  }, [host, open, runtimeSecrets?.passphrase, runtimeSecrets?.password]);
+
+  useEffect(() => {
     if (!open || !host) {
       return;
     }

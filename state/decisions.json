@@ -252,7 +252,17 @@
         "Missing client binaries now fail early with actionable install guidance instead of a later session-spawn error.",
         "The remaining network-protocol gap is live end-to-end validation rather than hidden workstation prerequisites."
       ]
+    },
+    {
+      "id": "dec-network-protocol-live-fixtures",
+      "date": "2026-04-05",
+      "title": "Validate non-SSH protocol launches with deterministic native fixture clients",
+      "decision": "Use explicit telnet, screen, cu, and mosh command-path overrides in the native runtime so tests can point the PTY launcher at deterministic fixture executables and verify real launch behavior.",
+      "consequences": [
+        "The repo can validate telnet, serial, and mosh launch paths without relying on external servers or workstation-specific client installations.",
+        "Real workstation clients still work by default when overrides are unset."
+      ]
     }
   ],
-  "updated_at": "2026-04-05T02:24:44-04:00"
+  "updated_at": "2026-04-05T06:35:41.515Z"
 }

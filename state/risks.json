@@ -164,10 +164,11 @@
       "id": "risk-network-protocol-live-validation-missing",
       "title": "Telnet, serial, and mosh runtime paths do not yet have live end-to-end validation fixtures",
       "severity": "medium",
-      "status": "open",
-      "summary": "The protocol runtime slice is covered by unit tests, desktop build validation, and Rust tests, but there are no live telnet, serial, or mosh fixture runs yet.",
-      "assigned_phase": "macos-network-protocol-execution"
+      "status": "resolved",
+      "summary": "Live protocol fixtures now drive telnet, serial, and mosh through the native PTY launch path with deterministic client overrides, and the native transport script runs that coverage before the broader localhost SSH fixture.",
+      "assigned_phase": "macos-network-protocol-execution",
+      "resolved_at": "2026-04-05T06:35:41.515Z"
     }
   ],
-  "updated_at": "2026-04-05T02:24:44-04:00"
+  "updated_at": "2026-04-05T06:35:41.515Z"
 }

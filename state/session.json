@@ -1,12 +1,12 @@
 {
   "branch": "phase/macos-network-protocol-execution",
-  "current_run_id": "2026-04-05-macos-network-protocol-execution-preflight",
-  "current_task": "Native telnet, serial, and mosh clients now preflight before launch; the remaining work in this phase is live runtime validation.",
+  "current_run_id": "2026-04-05-macos-network-protocol-execution-live-validation",
+  "current_task": "macOS network protocol execution is complete; live telnet, serial, and mosh fixtures now run through the native PTY bridge.",
   "current_phase": "macos-network-protocol-execution",
   "started_at": "2026-04-05T02:19:42-04:00",
-  "summary": "This run added a shared native protocol-runtime status command, surfaced inline install guidance in the host editor and terminal pane, and made non-SSH session launch fail early when telnet, mosh, screen, or cu are missing.",
-  "updated_at": "2026-04-05T02:24:44-04:00",
-  "status": "in_progress",
+  "summary": "This run added deterministic live telnet, serial, and mosh fixtures on top of the native command-launch path, wired them into the native transport script, and closed the remaining live-validation gap for protocol execution.",
+  "updated_at": "2026-04-05T06:35:41.515Z",
+  "status": "completed",
   "validation": [
     {
       "id": "validation-vault-sync-targeted-tests-deletions",
@@ -211,6 +211,36 @@
     {
       "id": "validation-network-protocol-preflight-desktop-build",
       "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-fixture-cargo",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml native_external_protocol_runtime_fixture_flow -- --test-threads=1",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-fixture-script",
+      "command": "bash ./scripts/native-transport-test.sh",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-full-cargo",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-full-vitest",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-live-validator",
+      "command": "node ./tools/validators/enforce-runtime-guardrails.js --base 34310cc",
       "result": "passed"
     }
   ]

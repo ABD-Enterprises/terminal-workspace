@@ -592,6 +592,22 @@ fn resolve_command_path(candidates: &[&str]) -> Option<PathBuf> {
     None
 }
 
+fn resolve_command_path_with_override(
+    override_env: Option<&str>,
+    candidates: &[&str],
+) -> Option<PathBuf> {
+    if let Some(override_env) = override_env {
+        if let Some(path) = env::var_os(override_env) {
+            let candidate = PathBuf::from(path);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    resolve_command_path(candidates)
+}
+
 fn shell_quote(value: &str) -> String {
     if value
         .chars()
@@ -650,7 +666,10 @@ fn build_protocol_runtime_status(protocol: &str) -> ProtocolRuntimeStatusRespons
                 None,
             )
         }
-        "telnet" => match resolve_command_path(&["/usr/bin/telnet", "telnet"]) {
+        "telnet" => match resolve_command_path_with_override(
+            Some("TERMSNIP_TELNET_PATH"),
+            &["/usr/bin/telnet", "telnet"],
+        ) {
             Some(path) => protocol_runtime_response(
                 protocol,
                 true,
@@ -672,7 +691,10 @@ fn build_protocol_runtime_status(protocol: &str) -> ProtocolRuntimeStatusRespons
             ),
         },
         "serial" => {
-            if let Some(path) = resolve_command_path(&["/usr/bin/screen", "screen"]) {
+            if let Some(path) = resolve_command_path_with_override(
+                Some("TERMSNIP_SCREEN_PATH"),
+                &["/usr/bin/screen", "screen"],
+            ) {
                 protocol_runtime_response(
                     protocol,
                     true,
@@ -681,7 +703,9 @@ fn build_protocol_runtime_status(protocol: &str) -> ProtocolRuntimeStatusRespons
                     "Serial sessions will launch with screen.".to_string(),
                     None,
                 )
-            } else if let Some(path) = resolve_command_path(&["/usr/bin/cu", "cu"]) {
+            } else if let Some(path) =
+                resolve_command_path_with_override(Some("TERMSNIP_CU_PATH"), &["/usr/bin/cu", "cu"])
+            {
                 protocol_runtime_response(
                     protocol,
                     true,
@@ -704,12 +728,15 @@ fn build_protocol_runtime_status(protocol: &str) -> ProtocolRuntimeStatusRespons
                 )
             }
         }
-        "mosh" => match resolve_command_path(&[
-            "/opt/homebrew/bin/mosh",
-            "/usr/local/bin/mosh",
-            "/usr/bin/mosh",
-            "mosh",
-        ]) {
+        "mosh" => match resolve_command_path_with_override(
+            Some("TERMSNIP_MOSH_PATH"),
+            &[
+                "/opt/homebrew/bin/mosh",
+                "/usr/local/bin/mosh",
+                "/usr/bin/mosh",
+                "mosh",
+            ],
+        ) {
             Some(path) => protocol_runtime_response(
                 protocol,
                 true,
@@ -837,8 +864,9 @@ fn build_external_command_session_spec(
             })
         }
         "telnet" => {
-            let executable = resolve_command_path(&["/usr/bin/telnet", "telnet"])
-                .ok_or_else(|| "Telnet client is not installed on this workstation".to_string())?;
+            let executable =
+                resolve_command_path_with_override(Some("TERMSNIP_TELNET_PATH"), &["/usr/bin/telnet", "telnet"])
+                    .ok_or_else(|| "Telnet client is not installed on this workstation".to_string())?;
             let mut command = CommandBuilder::new(executable);
             command.arg(host.hostname.clone());
             command.arg(host.port.to_string());
@@ -852,14 +880,18 @@ fn build_external_command_session_spec(
             })
         }
         "serial" => {
-            let mut command = if let Some(executable) =
-                resolve_command_path(&["/usr/bin/screen", "screen"])
+            let mut command = if let Some(executable) = resolve_command_path_with_override(
+                Some("TERMSNIP_SCREEN_PATH"),
+                &["/usr/bin/screen", "screen"],
+            )
             {
                 let mut command = CommandBuilder::new(executable);
                 command.arg(host.hostname.clone());
                 command.arg(host.port.to_string());
                 command
-            } else if let Some(executable) = resolve_command_path(&["/usr/bin/cu", "cu"]) {
+            } else if let Some(executable) =
+                resolve_command_path_with_override(Some("TERMSNIP_CU_PATH"), &["/usr/bin/cu", "cu"])
+            {
                 let mut command = CommandBuilder::new(executable);
                 command.arg("-l");
                 command.arg(host.hostname.clone());
@@ -881,12 +913,15 @@ fn build_external_command_session_spec(
             })
         }
         "mosh" => {
-            let executable = resolve_command_path(&[
-                "/opt/homebrew/bin/mosh",
-                "/usr/local/bin/mosh",
-                "/usr/bin/mosh",
-                "mosh",
-            ])
+            let executable = resolve_command_path_with_override(
+                Some("TERMSNIP_MOSH_PATH"),
+                &[
+                    "/opt/homebrew/bin/mosh",
+                    "/usr/local/bin/mosh",
+                    "/usr/bin/mosh",
+                    "mosh",
+                ],
+            )
             .ok_or_else(|| "Mosh client is not installed on this workstation".to_string())?;
             let cleanup_dir = if host.known_host_public_key.is_some() {
                 Some(create_native_ssh_session_dir(session_id)?)
