@@ -140,6 +140,11 @@ export function SessionsPage() {
                   <button
                     type="button"
                     disabled={!historyHost}
+                    aria-label={
+                      historyHost
+                        ? `Run saved command again on ${historyHost.label}`
+                        : "Run saved command again"
+                    }
                     onClick={() => {
                       if (historyHost) {
                         queueCommandForHosts([historyHost], entry.command, "Replay history command");
