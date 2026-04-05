@@ -19,8 +19,9 @@ Review changes for evidence quality, state integrity, risk handling, and standar
 
 ## Required Checks
 
-- [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json) and `/state/*` stay synchronized.
+- [/Users/deffenda/Code/term-snip/state/controller.md](/Users/deffenda/Code/term-snip/state/controller.md) and [/Users/deffenda/Code/term-snip/state/current_task.md](/Users/deffenda/Code/term-snip/state/current_task.md) stay synchronized with the GitHub PR outcome.
+- [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json) and `/state/*` stay synchronized where product state is mirrored.
 - Evidence in [state/artifacts.json](/Users/deffenda/Code/term-snip/state/artifacts.json) matches the work that changed.
 - [state/handoff.json](/Users/deffenda/Code/term-snip/state/handoff.json) records the next action and any discovered issues linked to open risks.
-- Return review outcomes through GitHub CI, PR comments, and [/Users/deffenda/Code/term-snip/state/validation_report.md](/Users/deffenda/Code/term-snip/state/validation_report.md) when mirrored locally.
+- Return review outcomes through GitHub CI and PR comments; [/Users/deffenda/Code/term-snip/state/validation_report.md](/Users/deffenda/Code/term-snip/state/validation_report.md) is only an optional local mirror when present.
 - Open risks remain present or are explicitly resolved with timestamps.

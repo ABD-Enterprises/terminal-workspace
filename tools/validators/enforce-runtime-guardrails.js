@@ -12,6 +12,18 @@ const REQUIRED_STATE_FILES = [
   "state/artifacts.json",
   "state/handoff.json"
 ];
+const REQUIRED_WORKFLOW_FILES = [
+  "ai/bootstrap.md",
+  "ai/plan.md",
+  "ai/tasks.md",
+  "ai/acceptance.md",
+  "state/controller.md",
+  "state/current_task.md"
+];
+const REQUIRED_IGNORED_LOCAL_STATE_FILES = [
+  "state/implementation_notes.md",
+  "state/validation_report.md"
+];
 
 const STATE_UPDATE_FILES = new Set([
   "state/tasks.json",
@@ -114,6 +126,20 @@ const ALLOWED_PHASE_STATUSES = new Set([
 ]);
 const ALLOWED_RUN_PROFILES = new Set(["standard", "night"]);
 const RESOLVED_RISK_STATUSES = new Set(["resolved", "closed"]);
+const ALLOWED_CONTROLLER_STATES = new Set([
+  "ready_for_claude",
+  "ready_for_codex",
+  "ready_for_review",
+  "review_failed_fix_required",
+  "blocked",
+  "done"
+]);
+const ALLOWED_FAILURE_TYPES = new Set([
+  "none",
+  "ci_failure",
+  "review_failure",
+  "planning_failure"
+]);
 
 function parseArgs(argv) {
   const options = {
@@ -153,6 +179,10 @@ function printUsage() {
 
 function readJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function readTextFile(filePath) {
+  return fs.readFileSync(filePath, "utf8");
 }
 
 function exists(filePath) {
@@ -652,6 +682,222 @@ function validateRequiredFiles(repoRoot, failures) {
       addFailure(
         failures,
         `Missing required state file: ${relativePath}; validator does not infer missing state from BrewSync, machine state, or control layers`
+      );
+    }
+  }
+
+  for (const relativePath of REQUIRED_WORKFLOW_FILES) {
+    const absolutePath = path.join(repoRoot, relativePath);
+    if (!exists(absolutePath)) {
+      addFailure(
+        failures,
+        `Missing required workflow file: ${relativePath}`
+      );
+    }
+  }
+}
+
+function validateIgnoredLocalStateFiles(repoRoot, failures) {
+  const gitignorePath = path.join(repoRoot, ".gitignore");
+  if (!exists(gitignorePath)) {
+    addFailure(failures, "Missing required ignore file: .gitignore");
+    return;
+  }
+
+  const gitignore = readTextFile(gitignorePath);
+  for (const relativePath of REQUIRED_IGNORED_LOCAL_STATE_FILES) {
+    if (!gitignore.split(/\r?\n/).includes(relativePath)) {
+      addFailure(
+        failures,
+        `.gitignore must ignore local workflow file: ${relativePath}`
+      );
+    }
+  }
+}
+
+function parseMarkdownScalars(content) {
+  const values = {};
+  for (const line of content.split(/\r?\n/)) {
+    const match = line.match(/^([a-z_]+):\s*(.*)$/);
+    if (!match) {
+      continue;
+    }
+    values[match[1]] = match[2].trim();
+  }
+  return values;
+}
+
+function validateWorkflowContract(repoRoot, failures) {
+  const controllerPath = path.join(repoRoot, "state/controller.md");
+  const taskPath = path.join(repoRoot, "state/current_task.md");
+  const bootstrapPath = path.join(repoRoot, "ai/bootstrap.md");
+
+  if (!exists(controllerPath) || !exists(taskPath) || !exists(bootstrapPath)) {
+    return;
+  }
+
+  const controllerText = readTextFile(controllerPath);
+  const currentTaskText = readTextFile(taskPath);
+  const bootstrapText = readTextFile(bootstrapPath);
+  const controller = parseMarkdownScalars(controllerText);
+  const currentTask = parseMarkdownScalars(currentTaskText);
+
+  for (const section of [
+    "current_state:",
+    "allowed_transitions:",
+    "transition_rules:",
+    "state_owner:",
+    "done_criteria:",
+    "blocked_criteria:"
+  ]) {
+    if (!controllerText.includes(section)) {
+      addFailure(
+        failures,
+        `state/controller.md missing required section: ${section.replace(":", "")}`
+      );
+    }
+  }
+
+  for (const state of ALLOWED_CONTROLLER_STATES) {
+    if (!controllerText.includes(state)) {
+      addFailure(
+        failures,
+        `state/controller.md must reference workflow state: ${state}`
+      );
+    }
+  }
+
+  if (controllerText.includes("ready_for_gemini")) {
+    addFailure(failures, "state/controller.md contains stale workflow state: ready_for_gemini");
+  }
+
+  if (!ALLOWED_CONTROLLER_STATES.has(String(controller.current_state || ""))) {
+    addFailure(
+      failures,
+      `state/controller.md current_state must be one of ${[...ALLOWED_CONTROLLER_STATES].join(", ")}`
+    );
+  }
+
+  if (!String(controller.current_task || "").trim()) {
+    addFailure(failures, "state/controller.md current_task is required");
+  }
+
+  for (const field of [
+    "task_id",
+    "description",
+    "branch",
+    "pr_link",
+    "owner",
+    "current_state",
+    "failure_type",
+    "acceptance_criteria_reference",
+    "last_action",
+    "next_action"
+  ]) {
+    if (!String(currentTask[field] || "").trim()) {
+      addFailure(
+        failures,
+        `state/current_task.md missing required field: ${field}`
+      );
+    }
+  }
+
+  if (!ALLOWED_CONTROLLER_STATES.has(String(currentTask.current_state || ""))) {
+    addFailure(
+      failures,
+      `state/current_task.md current_state must be one of ${[...ALLOWED_CONTROLLER_STATES].join(", ")}`
+    );
+  }
+
+  if (!ALLOWED_FAILURE_TYPES.has(String(currentTask.failure_type || ""))) {
+    addFailure(
+      failures,
+      `state/current_task.md failure_type must be one of ${[...ALLOWED_FAILURE_TYPES].join(", ")}`
+    );
+  }
+
+  if (
+    String(controller.current_state || "") &&
+    String(currentTask.current_state || "") &&
+    controller.current_state !== currentTask.current_state
+  ) {
+    addFailure(
+      failures,
+      "state/controller.md current_state must match state/current_task.md current_state"
+    );
+  }
+
+  if (
+    String(controller.current_task || "") &&
+    String(currentTask.task_id || "") &&
+    controller.current_task !== currentTask.task_id
+  ) {
+    addFailure(
+      failures,
+      "state/controller.md current_task must match state/current_task.md task_id"
+    );
+  }
+
+  if (
+    currentTask.failure_type === "planning_failure" &&
+    currentTask.current_state !== "ready_for_claude"
+  ) {
+    addFailure(
+      failures,
+      "planning_failure may only be recorded while current_state is ready_for_claude"
+    );
+  }
+
+  if (
+    currentTask.current_state === "review_failed_fix_required" &&
+    !["ci_failure", "review_failure"].includes(currentTask.failure_type)
+  ) {
+    addFailure(
+      failures,
+      "review_failed_fix_required must use failure_type ci_failure or review_failure"
+    );
+  }
+
+  if (!bootstrapText.includes("review_failed_fix_required")) {
+    addFailure(
+      failures,
+      "ai/bootstrap.md must define the review_failed_fix_required loop"
+    );
+  }
+
+  if (!bootstrapText.includes("GitHub pull request") && !bootstrapText.includes("GitHub PR")) {
+    addFailure(
+      failures,
+      "ai/bootstrap.md must describe GitHub PR review as the acceptance path"
+    );
+  }
+
+  if (bootstrapText.includes("ready_for_gemini")) {
+    addFailure(failures, "ai/bootstrap.md contains stale workflow state: ready_for_gemini");
+  }
+}
+
+function validateReviewWorkflows(repoRoot, failures) {
+  const ciWorkflowPath = path.join(repoRoot, ".github/workflows/ci.yml");
+  const validateWorkflowPath = path.join(repoRoot, ".github/workflows/validate.yml");
+
+  if (exists(ciWorkflowPath)) {
+    const content = readTextFile(ciWorkflowPath);
+    if (!content.includes("pull_request:")) {
+      addFailure(failures, ".github/workflows/ci.yml must run on pull_request");
+    }
+  }
+
+  if (exists(validateWorkflowPath)) {
+    const content = readTextFile(validateWorkflowPath);
+    if (!content.includes("pull_request:")) {
+      addFailure(failures, ".github/workflows/validate.yml must run on pull_request");
+    }
+
+    if (/\n\s*push:\s*\n/.test(content)) {
+      addFailure(
+        failures,
+        ".github/workflows/validate.yml must not run validation on push; PR review is the acceptance trigger"
       );
     }
   }
@@ -1310,6 +1556,10 @@ function main() {
 
     const config = resolveConfig(repoRoot, options.config);
     const baseRef = resolveBaseRef(repoRoot, options.base);
+
+    validateIgnoredLocalStateFiles(repoRoot, failures);
+    validateWorkflowContract(repoRoot, failures);
+    validateReviewWorkflows(repoRoot, failures);
 
     const roadmap = readJsonFile(path.join(repoRoot, "docs/roadmap/state.json"));
     const tasks = readJsonFile(path.join(repoRoot, "state/tasks.json"));

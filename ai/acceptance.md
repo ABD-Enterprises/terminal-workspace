@@ -6,7 +6,10 @@
 - No unrelated file churn
 - No docs-only or state-only commit
 - Changes stay within current task scope unless required for the fix
-- Review readiness means the branch is pushed, the PR is opened or updated, relevant local validation passed, and GitHub CI plus review feedback are available
+- GitHub PR review and CI are the only acceptance gate
+- Review readiness means the branch is pushed, the PR is opened or updated, any local preflight completed, and GitHub CI plus GitHub review feedback are available
+- CI failures and actionable PR comments keep the same task active under `review_failed_fix_required`
+- Only planning or design failures return the repo to `ready_for_claude`
 
 ## Per-task acceptance
 
@@ -17,6 +20,8 @@
 Validation commands:
 - `npm run test -- apps/desktop/src/store/sessions-store.test.ts`
 - `npm --prefix ./apps/desktop run build`
+- GitHub PR checks for the task branch are green
+- no blocking PR review comments remain
 
 ### T2
 - structured runbook starter data can exist without regressing existing snippet behavior
@@ -24,3 +29,5 @@ Validation commands:
 Validation commands:
 - `npm run test`
 - `npm --prefix ./apps/desktop run build`
+- GitHub PR checks for the task branch are green
+- no blocking PR review comments remain

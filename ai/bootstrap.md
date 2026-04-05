@@ -1,72 +1,97 @@
 # AI Bootstrap
 
-This repo uses a three-role workflow:
+This repo uses one canonical autonomous PR-driven workflow:
 
 - Claude = planning only
-- Codex = implementation only
-- Review = GitHub CI + PR review + Gemini Code Assist on GitHub
+- Codex = implementation and fixes only
+- Review = GitHub pull request, GitHub CI, and Gemini Code Assist on GitHub
 
-## Mandatory startup steps for every run
+GitHub is the source of truth for review and acceptance.
+Repo files are the source of truth for execution state.
+
+## Mandatory startup steps
 
 1. Read this file first.
-2. Read `/ai/plan.md`
-3. Read `/ai/tasks.md`
-4. Read `/ai/acceptance.md`
-5. Read `/state/current_task.md`
-6. Read `/state/implementation_notes.md` if it exists
-7. Read `/state/validation_report.md` if it exists
-8. Read `/state/controller.md`
+2. Read `/ai/plan.md`.
+3. Read `/ai/tasks.md`.
+4. Read `/ai/acceptance.md`.
+5. Read `/state/controller.md`.
+6. Read `/state/current_task.md`.
+7. Read `/state/implementation_notes.md` if it exists locally.
+8. Read `/state/validation_report.md` if it exists locally.
+
+## Canonical state model
+
+`ready_for_claude -> ready_for_codex -> ready_for_review -> review_failed_fix_required -> done | blocked`
+
+- `ready_for_claude`: planning or replanning is needed
+- `ready_for_codex`: Codex must implement the current task
+- `ready_for_review`: the active branch must be pushed or updated and reviewed through GitHub
+- `review_failed_fix_required`: CI failed or PR review found actionable implementation issues; Codex must fix the same task
+- `blocked`: work cannot continue from repo state alone
+- `done`: the current task or batch satisfied GitHub review and CI
 
 ## Role boundaries
 
 ### Claude
 - May read the repo and plan work
-- Must NOT write production code
-- Must NOT redesign the whole system unless explicitly asked
-- Must produce small, executable task slices
+- Must not write production code
+- Owns planning and replanning only
 
 ### Codex
-- May implement code and tests
-- Must work only on the current task
-- Must NOT re-plan the project
-- Must NOT invent new workstreams
-- Must run validation relevant to the task
-- Must commit only after validation passes
+- May implement code, tests, and CI or review fixes
+- Owns all implementation, CI-failure fixes, and PR-review fixes
+- Must not re-plan except by returning the repo to Claude on a planning failure
 
 ### Review
-- Review happens through GitHub CI and PR review
-- Gemini Code Assist, if configured on GitHub, participates there instead of as a local handoff step
-- Review feedback may send work back to Codex for fixes or Claude for replanning
+- Happens only through GitHub PRs, CI, and Gemini Code Assist on GitHub
+- Is not a local/manual handoff step
+- Determines pass or fail for the current task
 
-## Review readiness checklist
+## Review failure rule
 
-- branch is pushed or updated
-- pull request is opened or updated
-- relevant local validation already passed
-- GitHub CI is running or has run
-- review feedback is collected from GitHub
+If GitHub CI fails or PR review, including Gemini Code Assist on GitHub, identifies actionable implementation issues:
+
+- set `/state/controller.md` and `/state/current_task.md` to `review_failed_fix_required`
+- keep the same task active
+- Codex owns the next step
+
+If review reveals a planning or design problem:
+
+- set `/state/controller.md` and `/state/current_task.md` to `ready_for_claude`
+- set `failure_type: planning_failure` in `/state/current_task.md`
+
+## Review signal rules
+
+Review is FAILED when:
+
+- any GitHub check fails
+- required CI is not green
+- actionable PR review comments remain
+
+Review is PASSED when:
+
+- all required GitHub checks are green
+- no blocking PR review comments remain
+
+## Workflow loop
+
+1. Claude creates or refines `/ai/plan.md`, `/ai/tasks.md`, `/ai/acceptance.md`, and `/state/current_task.md`.
+2. Claude sets `/state/controller.md` to `ready_for_codex`.
+3. Codex implements the current task and may run local preflight checks before opening or updating the PR.
+4. Codex sets `/state/controller.md` to `ready_for_review`, updates `/state/current_task.md`, and pushes the branch.
+5. GitHub PR review, GitHub CI, and Gemini Code Assist on GitHub determine the review result.
+6. If CI or review fails for implementation reasons, the repo moves to `review_failed_fix_required` and Codex fixes the same task.
+7. If review exposes a planning failure, the repo moves to `ready_for_claude`.
+8. If review passes, the repo moves to `done`.
 
 ## Global rules
 
 - One repo at a time
 - One current task at a time
-- Small commits
+- No agent-to-agent communication
+- All coordination happens through repo files and GitHub PR state
 - No docs-only commits
 - No state-only commits
-- Docs/state updates allowed only when paired with real code or test changes
-- Acceptance criteria control completion
-- Validation report controls rework
-- Controller file controls handoff status
-
-## Loop
-
-1. Claude creates or refines plan/tasks/acceptance
-2. Set one task in `/state/current_task.md`
-3. Codex implements the task and performs local validation
-4. Codex sets `/state/controller.md` to `ready_for_review`
-5. The branch is pushed and the pull request is opened or updated
-6. Review happens through GitHub CI and Gemini Code Assist on GitHub
-7. If review finds implementation issues, set `review_failed_fix_required`
-8. Codex fixes review issues and returns to `ready_for_review`
-9. If review reveals a planning problem, set `ready_for_claude`
-10. If review passes, set `done`
+- Keep changes small and validated
+- No competing workflow definitions

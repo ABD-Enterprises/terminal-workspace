@@ -13,6 +13,7 @@ Files likely in scope:
 Done when:
 - persisted history can avoid storing sensitive output previews
 - the change is covered by targeted tests
+- the branch update is ready for GitHub PR review and CI
 
 Status: pending
 
@@ -27,5 +28,6 @@ Files likely in scope:
 
 Done when:
 - the repo has a concrete starter surface for structured runbook metadata
+- the change can be reviewed through the same PR-driven workflow without broadening scope
 
 Status: pending

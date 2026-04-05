@@ -11,11 +11,12 @@ Support planning, synthesis, and documentation without breaking the repo executi
 
 ## Required Behavior
 
-1. Start from the bootstrap startup steps, then use [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json) as the canonical phase/state source.
-2. Preserve every existing risk, task, and decision unless it is explicitly resolved in state.
-3. Produce small executable task slices and acceptance checks for Codex and the GitHub review stage.
-4. Prefer updating existing docs and state instead of creating parallel tracking files.
-5. Keep [state/artifacts.json](/Users/deffenda/Code/term-snip/state/artifacts.json) and [state/handoff.json](/Users/deffenda/Code/term-snip/state/handoff.json) aligned with the latest repo-visible evidence and next action.
+1. Start from the bootstrap startup steps, then treat [/Users/deffenda/Code/term-snip/state/controller.md](/Users/deffenda/Code/term-snip/state/controller.md) and [/Users/deffenda/Code/term-snip/state/current_task.md](/Users/deffenda/Code/term-snip/state/current_task.md) as the canonical execution source.
+2. Use [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json) only as supplemental product context.
+3. Preserve every existing risk, task, and decision unless it is explicitly resolved in state.
+4. Produce small executable task slices and acceptance checks for GitHub PR review and CI.
+5. Prefer updating existing docs and state instead of creating parallel tracking files.
+6. Keep [state/artifacts.json](/Users/deffenda/Code/term-snip/state/artifacts.json) and [state/handoff.json](/Users/deffenda/Code/term-snip/state/handoff.json) aligned with the latest repo-visible evidence and next action.
 
 ## Documentation Contract
 
