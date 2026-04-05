@@ -80,6 +80,7 @@ export function SessionsPage() {
             </span>
             <input
               type="search"
+              aria-label="Search command history"
               value={historyQuery}
               onChange={(event) => setHistoryQuery(event.target.value)}
               placeholder="Search host, protocol, or command"
