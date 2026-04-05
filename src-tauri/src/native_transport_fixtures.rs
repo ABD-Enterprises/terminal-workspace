@@ -1018,16 +1018,19 @@ fn native_external_protocol_runtime_fixture_flow() {
     assert!(telnet_status.available);
     assert_eq!(telnet_status.protocol, "telnet");
     assert_eq!(telnet_status.client.as_deref(), Some("telnet"));
+    assert_eq!(telnet_status.install_hint, None);
     assert!(telnet_status.message.contains("resolved"));
     assert_eq!(telnet_status.resolved_path.as_deref(), Some(telnet_path.to_string_lossy().as_ref()));
     assert!(serial_status.available);
     assert_eq!(serial_status.protocol, "serial");
     assert_eq!(serial_status.client.as_deref(), Some("screen"));
+    assert_eq!(serial_status.install_hint, None);
     assert!(serial_status.message.contains("screen"));
     assert_eq!(serial_status.resolved_path.as_deref(), Some(screen_path.to_string_lossy().as_ref()));
     assert!(mosh_status.available);
     assert_eq!(mosh_status.protocol, "mosh");
     assert_eq!(mosh_status.client.as_deref(), Some("mosh"));
+    assert_eq!(mosh_status.install_hint, None);
     assert!(mosh_status.message.contains("resolved"));
     assert_eq!(mosh_status.resolved_path.as_deref(), Some(mosh_path.to_string_lossy().as_ref()));
 
