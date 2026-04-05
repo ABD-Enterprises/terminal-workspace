@@ -1,11 +1,11 @@
 {
-  "branch": "phase/macos-protocol-hosts-and-local-shell",
-  "current_run_id": "2026-04-04-macos-solo-protocols-and-local-shell",
-  "current_task": "Hosts are now protocol-aware and the native shell can open a real local login shell; the remaining gap in this slice is executable telnet, serial, and mosh runtime support.",
-  "current_phase": "macos-solo-protocols-and-local-shell",
-  "started_at": "2026-04-04T19:32:30-04:00",
-  "summary": "This run moved execution onto the first unblocked Termius-parity slice: hosts now carry explicit protocol metadata, the native Tauri bridge can launch a real macOS login shell, and SSH-only features are hidden or disabled for non-SSH protocols while the release-secret blocker remains tracked separately.",
-  "updated_at": "2026-04-04T19:32:30-04:00",
+  "branch": "phase/macos-network-protocol-execution",
+  "current_run_id": "2026-04-05-macos-network-protocol-execution-preflight",
+  "current_task": "Native telnet, serial, and mosh clients now preflight before launch; the remaining work in this phase is live runtime validation.",
+  "current_phase": "macos-network-protocol-execution",
+  "started_at": "2026-04-05T02:19:42-04:00",
+  "summary": "This run added a shared native protocol-runtime status command, surfaced inline install guidance in the host editor and terminal pane, and made non-SSH session launch fail early when telnet, mosh, screen, or cu are missing.",
+  "updated_at": "2026-04-05T02:24:44-04:00",
   "status": "in_progress",
   "validation": [
     {
@@ -171,6 +171,46 @@
     {
       "id": "validation-protocol-hosts-validator",
       "command": "node ./tools/validators/enforce-runtime-guardrails.js --base c80b1f6bda72fe063af07c4d0f0b5730ed104921",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-targeted-tests",
+      "command": "npm run test -- apps/desktop/src/store/hosts-store.test.ts apps/desktop/src/store/sessions-store.test.ts apps/desktop/src/lib/connections.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-full-vitest",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-cargo-test",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-preflight-targeted-tests",
+      "command": "npm run test -- apps/desktop/src/lib/api.test.ts apps/desktop/src/store/hosts-store.test.ts apps/desktop/src/store/sessions-store.test.ts apps/desktop/src/lib/connections.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-preflight-cargo-test",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-preflight-full-vitest",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-network-protocol-preflight-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
       "result": "passed"
     }
   ]

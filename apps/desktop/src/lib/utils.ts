@@ -76,11 +76,15 @@ export function formatHostAddress(
   }
 
   if (host.protocol === "telnet") {
-    return `${host.hostname}:${host.port}`;
+    return `telnet://${host.hostname}:${host.port}`;
   }
 
   if (host.protocol === "serial") {
-    return host.hostname;
+    return `${host.hostname} · ${host.port} baud`;
+  }
+
+  if (host.protocol === "mosh") {
+    return `${host.username}@${host.hostname}:${host.port} via mosh`;
   }
 
   return `${host.username}@${host.hostname}:${host.port}`;
@@ -103,8 +107,16 @@ export function describeHostRuntime(
     return "Native macOS shell bridge";
   }
 
-  if (host.protocol !== "ssh") {
-    return `${formatHostProtocol(host.protocol)} inventory entry`;
+  if (host.protocol === "telnet") {
+    return "Native telnet bridge";
+  }
+
+  if (host.protocol === "serial") {
+    return `Native serial bridge · ${host.port} baud`;
+  }
+
+  if (host.protocol === "mosh") {
+    return "Native mosh bridge";
   }
 
   return [

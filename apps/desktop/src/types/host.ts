@@ -227,12 +227,41 @@ export function formatHostProtocol(protocol: HostProtocol) {
   }
 }
 
+export function protocolDefaultPort(protocol: HostProtocol) {
+  switch (protocol) {
+    case "localShell":
+      return 0;
+    case "telnet":
+      return 23;
+    case "serial":
+      return 115200;
+    case "mosh":
+    case "ssh":
+    default:
+      return 22;
+  }
+}
+
+export function protocolRequiresUsername(protocol: HostProtocol) {
+  return protocol === "ssh" || protocol === "mosh";
+}
+
+export function hostSupportsLiveTransport(protocol: HostProtocol) {
+  return (
+    protocol === "ssh" ||
+    protocol === "localShell" ||
+    protocol === "telnet" ||
+    protocol === "serial" ||
+    protocol === "mosh"
+  );
+}
+
 export function hostSupportsSftp(protocol: HostProtocol) {
   return protocol === "ssh";
 }
 
 export function hostSupportsTrustedKeys(protocol: HostProtocol) {
-  return protocol === "ssh";
+  return protocol === "ssh" || protocol === "mosh";
 }
 
 export function hostSupportsJumpHosts(protocol: HostProtocol) {
@@ -248,5 +277,5 @@ export function hostSupportsRemoteSnippets(protocol: HostProtocol) {
 }
 
 export function hostSupportsCredentialPrompt(protocol: HostProtocol) {
-  return protocol === "ssh";
+  return protocol === "ssh" || protocol === "mosh";
 }

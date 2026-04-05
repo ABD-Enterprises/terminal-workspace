@@ -274,7 +274,11 @@ export function HostsPage() {
                       <p className="mt-1 text-[11px] text-slate-500">
                         {host.protocol === "localShell"
                           ? "Local shell sessions stay on this workstation."
-                          : `${formatHostProtocol(host.protocol)} transport is inventoried but not executable yet.`}
+                          : host.protocol === "telnet"
+                            ? "Telnet sessions use the native PTY bridge and do not rely on SSH trust metadata."
+                            : host.protocol === "serial"
+                              ? "Serial sessions connect to a local device path and do not use network trust."
+                              : `${formatHostProtocol(host.protocol)} sessions use the native bridge without separate SSH trust metadata.`}
                       </p>
                     </div>
                     )}

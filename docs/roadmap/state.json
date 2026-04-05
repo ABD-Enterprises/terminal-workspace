@@ -1,10 +1,10 @@
 {
-  "updated_at": "2026-04-04T19:32:30-04:00",
-  "last_updated": "2026-04-04T19:32:30-04:00",
+  "updated_at": "2026-04-05T02:24:44-04:00",
+  "last_updated": "2026-04-05T02:24:44-04:00",
   "version": "0.1.0",
-  "current_phase": "macos-solo-protocols-and-local-shell",
+  "current_phase": "macos-network-protocol-execution",
   "current_phase_status": "in_progress",
-  "current_phase_branch": "phase/macos-protocol-hosts-and-local-shell",
+  "current_phase_branch": "phase/macos-network-protocol-execution",
   "completed_phases": [
     {
       "id": "web-demo-quality",
@@ -59,17 +59,23 @@
       "title": "GitHub Actions runtime modernization",
       "status": "completed",
       "completed_at": "2026-04-04T18:40:56-04:00"
+    },
+    {
+      "id": "macos-solo-protocols-and-local-shell",
+      "title": "macOS solo protocols and local shell",
+      "status": "completed",
+      "completed_at": "2026-04-05T02:19:42-04:00"
     }
   ],
   "upcoming_phases": [
     {
-      "id": "macos-network-protocol-execution",
-      "title": "Executable telnet, serial, and mosh transports",
+      "id": "macos-session-history-and-runbooks",
+      "title": "Session history and structured runbooks",
       "priority": 1,
       "depends_on": [
-        "macos-solo-protocols-and-local-shell"
+        "macos-network-protocol-execution"
       ],
-      "rationale": "Hosts are now protocol-aware and the native shell supports a real local session, but telnet, serial, and mosh remain inventory-only until their runtime surfaces and UX guardrails are implemented."
+      "rationale": "The native client can now open SSH, local shell, telnet, serial, and mosh sessions, so the next solo-macOS differentiator is durable session history, searchable command logs, and runbooks that go beyond raw snippets."
     },
     {
       "id": "release-workflow-live-verification",
@@ -331,6 +337,20 @@
     {
       "id": "task-network-protocol-runtime-support",
       "title": "Implement executable telnet, serial, and mosh transports on top of the protocol-aware host model",
+      "status": "completed",
+      "phase": "macos-network-protocol-execution",
+      "completed_at": "2026-04-05T02:19:42-04:00"
+    },
+    {
+      "id": "task-network-protocol-client-preflight",
+      "title": "Detect missing native telnet, serial, and mosh client prerequisites before runtime launch",
+      "status": "completed",
+      "phase": "macos-network-protocol-execution",
+      "completed_at": "2026-04-05T02:24:44-04:00"
+    },
+    {
+      "id": "task-network-protocol-live-validation",
+      "title": "Add live validation coverage for telnet, serial, and mosh runtime paths",
       "status": "pending",
       "phase": "macos-network-protocol-execution"
     }
@@ -482,8 +502,26 @@
       "id": "risk-non-ssh-protocols-inventory-only",
       "title": "Telnet, serial, and mosh are modeled but not executable yet",
       "severity": "medium",
+      "status": "resolved",
+      "summary": "Telnet, serial, and mosh now launch through the native PTY bridge with protocol-aware UI and host defaults instead of stopping at inventory only.",
+      "assigned_phase": "macos-network-protocol-execution",
+      "resolved_at": "2026-04-05T02:19:42-04:00"
+    },
+    {
+      "id": "risk-network-protocol-clients-may-be-missing",
+      "title": "Native telnet, serial, and mosh sessions depend on local client binaries",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "The desktop app now checks native client availability before session launch and surfaces inline install guidance in the host editor and terminal pane instead of failing later in the spawn path.",
+      "assigned_phase": "macos-network-protocol-execution",
+      "resolved_at": "2026-04-05T02:24:44-04:00"
+    },
+    {
+      "id": "risk-network-protocol-live-validation-missing",
+      "title": "Telnet, serial, and mosh runtime paths do not yet have live end-to-end validation fixtures",
+      "severity": "medium",
       "status": "open",
-      "summary": "The host model and UI now understand multiple protocols and a real native local shell session exists, but telnet, serial, and mosh entries still stop at inventory and cannot open a live transport yet.",
+      "summary": "The protocol runtime slice is covered by unit tests, desktop build validation, and Rust tests, but there are no live telnet, serial, or mosh fixture runs yet.",
       "assigned_phase": "macos-network-protocol-execution"
     }
   ],
@@ -644,10 +682,22 @@
       "date": "2026-04-04",
       "title": "Make hosts protocol-aware and ship a native local shell first",
       "summary": "Hosts now carry explicit protocol metadata across inventory and session state, the native shell can launch a real macOS login shell through the Tauri PTY bridge, and SSH-only features remain gated behind protocol-aware UI guardrails."
+    },
+    {
+      "id": "dec-native-external-protocol-pty",
+      "date": "2026-04-05",
+      "title": "Run telnet, serial, and mosh through the native PTY bridge",
+      "summary": "Telnet, serial, and mosh sessions now launch as native external commands under the Tauri PTY bridge, while SSH-only features remain gated and serial baud rates are preserved without collapsing into SSH port assumptions."
+    },
+    {
+      "id": "dec-network-protocol-client-preflight",
+      "date": "2026-04-05",
+      "title": "Preflight native protocol clients before session launch",
+      "summary": "The desktop app now resolves telnet, mosh, screen, and cu availability through a shared Tauri runtime-status command and surfaces any missing-client guidance inline before connect attempts."
     }
   ],
   "environment_status": {
-    "branch": "phase/macos-protocol-hosts-and-local-shell",
+    "branch": "phase/macos-network-protocol-execution",
     "dirty": true,
     "os": "macos",
     "node": "v25.9.0",
@@ -669,7 +719,9 @@
     "native_publish_dry_run": "passed",
     "github_release_workflow_live_run": "failed (missing signing/notary secrets)",
     "github_release_workflow_node24_opt_in": "enabled",
-    "github_release_workflow_current_action_majors": "passed"
+    "github_release_workflow_current_action_majors": "passed",
+    "native_protocol_runtime": "passed (vitest + desktop build + cargo test)",
+    "native_protocol_preflight": "passed"
   },
   "deployment_history": [],
   "promotion_history": [

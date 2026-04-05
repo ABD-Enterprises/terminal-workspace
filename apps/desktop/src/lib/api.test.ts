@@ -37,7 +37,7 @@ vi.mock("./demo-backend", () => ({
   uploadDemoRemoteFile: vi.fn(),
 }));
 
-import { generatePrivateKey, inspectPrivateKey, scanKnownHost } from "./api";
+import { generatePrivateKey, getProtocolRuntimeStatus, inspectPrivateKey, scanKnownHost } from "./api";
 import {
   createLocalForward,
   executeSnippetOnHosts,
@@ -122,6 +122,22 @@ describe("native trust and key tooling API", () => {
     });
   });
 
+  it("routes native protocol runtime status checks through the Tauri command bridge", async () => {
+    invokeTauriCommand.mockResolvedValue({
+      available: true,
+      client: "mosh",
+      message: "Mosh client resolved.",
+      protocol: "mosh",
+      resolvedPath: "/opt/homebrew/bin/mosh",
+    });
+
+    await getProtocolRuntimeStatus("mosh");
+
+    expect(invokeTauriCommand).toHaveBeenCalledWith("termsnip_protocol_runtime_status", {
+      request: { protocol: "mosh" },
+    });
+  });
+
   it("routes browser key inspection through the backend HTTP seam", async () => {
     isTauriRuntime.mockReturnValue(false);
     fetchMock.mockResolvedValue(
@@ -155,6 +171,17 @@ describe("native trust and key tooling API", () => {
       body: JSON.stringify({ host: hostFixture, path: "/" }),
       headers: { "Content-Type": "application/json" },
       method: "POST",
+    });
+  });
+
+  it("reports browser-only protocol runtime availability without invoking Tauri", async () => {
+    isTauriRuntime.mockReturnValue(false);
+
+    await expect(getProtocolRuntimeStatus("telnet")).resolves.toEqual({
+      available: false,
+      installHint: "Open this host in the native macOS app to use its protocol runtime.",
+      message: "This protocol requires the native macOS runtime.",
+      protocol: "telnet",
     });
   });
 

@@ -25,12 +25,24 @@ export function buildTerminalIntro(
       ? nativeBridgeEnabled
         ? host.protocol === "localShell"
           ? "Local shell connected through the native shell bridge."
+          : host.protocol === "serial"
+            ? "Serial session connected through the native shell bridge."
+            : host.protocol === "telnet"
+              ? "Telnet session connected through the native shell bridge."
+              : host.protocol === "mosh"
+                ? "Mosh session connected through the native shell bridge."
           : `${protocolLabel} session connected through the native shell bridge.`
         : `${protocolLabel} session connected.`
       : nativeBridgeEnabled
         ? host.protocol === "localShell"
           ? "Native local shell bridge standing by."
-          : "Native session bridge standing by."
+          : host.protocol === "serial"
+            ? "Native serial bridge standing by."
+            : host.protocol === "telnet"
+              ? "Native telnet bridge standing by."
+              : host.protocol === "mosh"
+                ? "Native mosh bridge standing by."
+        : "Native session bridge standing by."
         : host.protocol === "localShell"
           ? "Local shell requires the native desktop runtime."
           : "Connecting to the local SSH backend...";
@@ -42,6 +54,12 @@ export function buildTerminalIntro(
     : nativeBridgeEnabled
       ? host.protocol === "localShell"
         ? "The native bridge launches your macOS login shell locally and keeps the session off the network path."
+        : host.protocol === "telnet"
+          ? "Telnet I/O stays inside the native PTY bridge and avoids the browser transport path."
+          : host.protocol === "serial"
+            ? "Serial device I/O stays inside the native PTY bridge and uses the saved baud rate."
+            : host.protocol === "mosh"
+              ? "The native bridge launches the local mosh client and keeps its UDP session outside the browser transport path."
         : "SSH sessions, jump-host chains, terminal stream I/O, SFTP, forwards, and remote snippets route through the native shell bridge."
       : "Session lifecycle routes through the local backend while the browser UI stays decoupled from the transport.";
 

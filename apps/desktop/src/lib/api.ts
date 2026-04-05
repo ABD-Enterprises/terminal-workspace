@@ -1,5 +1,6 @@
 import { isDemoModeEnabled } from "../store/app-store";
 import type { PortForwardRecord } from "../types/forward";
+import type { HostProtocol } from "../types/host";
 import type { KeyMetadata } from "../types/key";
 import type {
   BackendBooleanResponse,
@@ -9,6 +10,7 @@ import type {
   GenerateKeyPayload,
   KnownHostScanResult,
   ListForwardsResponse,
+  ProtocolRuntimeStatusResponse,
   ResizeSessionPayload,
   SftpDirectoryResponse,
   SnippetExecutionResult,
@@ -107,6 +109,35 @@ export async function getBackendStatus() {
   }
 
   return getSessionBackendStatus();
+}
+
+export async function getProtocolRuntimeStatus(protocol: HostProtocol) {
+  if (isDemoModeEnabled()) {
+    return {
+      available: true,
+      message: "Demo mode bypasses native protocol runtime checks.",
+      protocol,
+    } satisfies ProtocolRuntimeStatusResponse;
+  }
+
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<ProtocolRuntimeStatusResponse>("termsnip_protocol_runtime_status", {
+      request: { protocol },
+    });
+  }
+
+  return {
+    available: protocol === "ssh",
+    installHint:
+      protocol === "ssh"
+        ? undefined
+        : "Open this host in the native macOS app to use its protocol runtime.",
+    message:
+      protocol === "ssh"
+        ? "SSH is available through the browser/backend transport."
+        : "This protocol requires the native macOS runtime.",
+    protocol,
+  } satisfies ProtocolRuntimeStatusResponse;
 }
 
 export async function createBackendSession(host: BackendHostConnection) {

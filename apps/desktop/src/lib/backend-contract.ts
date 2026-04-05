@@ -14,6 +14,15 @@ export interface BackendTransportInfo {
   sessionBridge: "browser" | "tauri-proxy";
 }
 
+export interface ProtocolRuntimeStatusResponse {
+  available: boolean;
+  client?: string;
+  installHint?: string;
+  message: string;
+  protocol: HostProtocol;
+  resolvedPath?: string;
+}
+
 export interface CreateSessionResponse {
   sessionId: string;
 }

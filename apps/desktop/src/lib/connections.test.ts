@@ -139,4 +139,35 @@ describe("connection helpers", () => {
     expect(connection.password).toBe("");
     expect(connection.port).toBe(0);
   });
+
+  it("applies trusted host requirements to mosh sessions", () => {
+    expect(() =>
+      buildBackendConnectionFromKnownHost(
+        {
+          ...baseHost,
+          id: "mosh-host",
+          label: "Ops Mosh",
+          protocol: "mosh",
+          hostKeyPolicy: "requireTrusted",
+          sftpRoot: "",
+        },
+        undefined
+      )
+    ).toThrow(/Trusted host key required/);
+
+    const connection = buildBackendConnectionFromKnownHost(
+      {
+        ...baseHost,
+        id: "mosh-host",
+        label: "Ops Mosh",
+        protocol: "mosh",
+        hostKeyPolicy: "requireTrusted",
+        sftpRoot: "",
+      },
+      trustedKnownHost
+    );
+
+    expect(connection.protocol).toBe("mosh");
+    expect(connection.knownHostPublicKey).toBe(trustedKnownHost.publicKey);
+  });
 });

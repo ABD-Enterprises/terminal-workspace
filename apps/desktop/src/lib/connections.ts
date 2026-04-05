@@ -1,5 +1,5 @@
 import type { BackendHostConnection } from "./api";
-import type { HostRecord } from "../types/host";
+import { hostSupportsJumpHosts, hostSupportsTrustedKeys, type HostRecord } from "../types/host";
 import { getHostConnectionSecrets } from "../store/connection-secrets-store";
 import { useHostsStore } from "../store/hosts-store";
 import type { KnownHostRecord } from "../types/known-host";
@@ -40,14 +40,14 @@ function buildBackendConnectionRecursive(
   const knownHost = findKnownHostMatch(knownHosts, host);
   const secrets = getHostConnectionSecrets(host.id);
 
-  if (host.protocol === "ssh" && host.hostKeyPolicy === "requireTrusted" && !knownHost) {
+  if (hostSupportsTrustedKeys(host.protocol) && host.hostKeyPolicy === "requireTrusted" && !knownHost) {
     throw new Error(
       `Trusted host key required for ${host.label}. Scan and trust ${host.hostname}:${host.port} in Keys before connecting.`
     );
   }
 
   let jumpHost: BackendHostConnection | undefined;
-  if (host.protocol === "ssh" && host.jumpHostId) {
+  if (hostSupportsJumpHosts(host.protocol) && host.jumpHostId) {
     const resolvedJumpHost = useHostsStore
       .getState()
       .hosts.find((candidate) => candidate.id === host.jumpHostId);

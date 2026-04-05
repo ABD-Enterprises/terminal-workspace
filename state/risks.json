@@ -146,10 +146,28 @@
       "id": "risk-non-ssh-protocols-inventory-only",
       "title": "Telnet, serial, and mosh are modeled but not executable yet",
       "severity": "medium",
+      "status": "resolved",
+      "summary": "Telnet, serial, and mosh now launch through the native PTY bridge with protocol-aware UI and host defaults instead of stopping at inventory only.",
+      "assigned_phase": "macos-network-protocol-execution",
+      "resolved_at": "2026-04-05T02:19:42-04:00"
+    },
+    {
+      "id": "risk-network-protocol-clients-may-be-missing",
+      "title": "Native telnet, serial, and mosh sessions depend on local client binaries",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "The desktop app now checks native client availability before session launch and surfaces inline install guidance in the host editor and terminal pane instead of failing later in the spawn path.",
+      "assigned_phase": "macos-network-protocol-execution",
+      "resolved_at": "2026-04-05T02:24:44-04:00"
+    },
+    {
+      "id": "risk-network-protocol-live-validation-missing",
+      "title": "Telnet, serial, and mosh runtime paths do not yet have live end-to-end validation fixtures",
+      "severity": "medium",
       "status": "open",
-      "summary": "The host model and UI now understand multiple protocols and a real native local shell session exists, but telnet, serial, and mosh entries still stop at inventory and cannot open a live transport yet.",
+      "summary": "The protocol runtime slice is covered by unit tests, desktop build validation, and Rust tests, but there are no live telnet, serial, or mosh fixture runs yet.",
       "assigned_phase": "macos-network-protocol-execution"
     }
   ],
-  "updated_at": "2026-04-04T19:32:30-04:00"
+  "updated_at": "2026-04-05T02:24:44-04:00"
 }

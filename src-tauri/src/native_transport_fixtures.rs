@@ -107,7 +107,7 @@ impl NativeTransportFixture {
             known_host_public_key: Some(jump_public_key),
             password: String::new(),
             passphrase: passphrase.to_string(),
-            port: jump_port,
+            port: u32::from(jump_port),
             private_key_path: client_key_path.to_string_lossy().into_owned(),
             protocol: "ssh".to_string(),
             sftp_root: None,
@@ -126,7 +126,7 @@ impl NativeTransportFixture {
             known_host_public_key: Some(target_public_key.clone()),
             password: String::new(),
             passphrase: passphrase.to_string(),
-            port: target_port,
+            port: u32::from(target_port),
             private_key_path: client_key_path.to_string_lossy().into_owned(),
             protocol: "ssh".to_string(),
             sftp_root: Some(remote_root.to_string_lossy().into_owned()),
@@ -145,7 +145,7 @@ impl NativeTransportFixture {
             known_host_public_key: Some(target_public_key),
             password: String::new(),
             passphrase: passphrase.to_string(),
-            port: target_port,
+            port: u32::from(target_port),
             private_key_path: client_key_path.to_string_lossy().into_owned(),
             protocol: "ssh".to_string(),
             sftp_root: Some(remote_root.to_string_lossy().into_owned()),
@@ -462,7 +462,7 @@ fn assert_native_trust_tooling(fixture: &NativeTransportFixture) {
 
     match scan_known_host(&KnownHostScanRequest {
         hostname: fixture.direct_host.hostname.clone(),
-        port: fixture.direct_host.port,
+        port: u16::try_from(fixture.direct_host.port).expect("fixture direct host port should fit"),
     }) {
         Ok(scanned_known_hosts) => {
             assert!(
@@ -569,7 +569,7 @@ fn localhost_ssh_transport_fixture_flow() {
         .expect("fixture direct host fingerprint should compute");
     match scan_known_host(&KnownHostScanRequest {
         hostname: fixture.direct_host.hostname.clone(),
-        port: fixture.direct_host.port,
+        port: u16::try_from(fixture.direct_host.port).expect("fixture direct host port should fit"),
     }) {
         Ok(scanned_known_hosts) => {
             assert!(

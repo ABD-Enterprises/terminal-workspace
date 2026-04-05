@@ -127,4 +127,50 @@ describe("sessions store helpers", () => {
     const consumed = consumePaneCommand(queued, paneId, queued.panes[paneId]!.queuedCommands[0]!.id);
     expect(consumed.panes[paneId]?.queuedCommands).toHaveLength(0);
   });
+
+  it("maps protocol-aware panes to their executable transports", () => {
+    const telnetHost = {
+      ...sampleHosts[0],
+      id: "telnet-host",
+      label: "Legacy Telnet",
+      protocol: "telnet" as const,
+      username: "",
+      port: 23,
+      authMethod: "none" as const,
+    };
+    const serialHost = {
+      ...sampleHosts[0],
+      id: "serial-host",
+      label: "Serial Console",
+      protocol: "serial" as const,
+      hostname: "/dev/cu.usbserial-1410",
+      username: "",
+      port: 115200,
+      authMethod: "none" as const,
+    };
+    const moshHost = {
+      ...sampleHosts[0],
+      id: "mosh-host",
+      label: "Ops Mosh",
+      protocol: "mosh" as const,
+      authMethod: "none" as const,
+    };
+
+    const telnetWorkspace = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      telnetHost
+    );
+    const serialWorkspace = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      serialHost
+    );
+    const moshWorkspace = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      moshHost
+    );
+
+    expect(telnetWorkspace.panes[telnetWorkspace.tabs[0]!.paneIds[0]!]!.transport).toBe("telnet");
+    expect(serialWorkspace.panes[serialWorkspace.tabs[0]!.paneIds[0]!]!.transport).toBe("serial");
+    expect(moshWorkspace.panes[moshWorkspace.tabs[0]!.paneIds[0]!]!.transport).toBe("mosh");
+  });
 });

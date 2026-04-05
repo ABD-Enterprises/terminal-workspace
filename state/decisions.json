@@ -232,7 +232,27 @@
         "The desktop app now has a real local terminal path instead of relying solely on remote SSH sessions.",
         "Telnet, serial, and mosh can reuse the same host model later, but they remain inventory-only until their transports are implemented."
       ]
+    },
+    {
+      "id": "dec-native-external-protocol-pty",
+      "date": "2026-04-05",
+      "title": "Run telnet, serial, and mosh through the native PTY bridge",
+      "decision": "Launch telnet, serial, and mosh as native external commands under the Tauri PTY bridge, reuse SSH-style prompt handling for mosh where credentials exist, and preserve serial baud rates without forcing them through an SSH-only `u16` port assumption.",
+      "consequences": [
+        "The macOS client now has a real local runtime path for the non-SSH protocols already modeled in inventory.",
+        "Client binary availability and live end-to-end fixtures remain explicit follow-up work instead of silent runtime failures."
+      ]
+    },
+    {
+      "id": "dec-network-protocol-client-preflight",
+      "date": "2026-04-05",
+      "title": "Preflight native protocol clients before session launch",
+      "decision": "Use one Tauri runtime-status command to resolve client availability for telnet, mosh, screen, and cu, and surface that status inline in the host editor and terminal pane before connect attempts.",
+      "consequences": [
+        "Missing client binaries now fail early with actionable install guidance instead of a later session-spawn error.",
+        "The remaining network-protocol gap is live end-to-end validation rather than hidden workstation prerequisites."
+      ]
     }
   ],
-  "updated_at": "2026-04-04T19:32:30-04:00"
+  "updated_at": "2026-04-05T02:24:44-04:00"
 }

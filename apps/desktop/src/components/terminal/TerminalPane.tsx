@@ -1,10 +1,11 @@
 import { FitAddon } from "@xterm/addon-fit";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "xterm";
 import "xterm/css/xterm.css";
 import {
   closeBackendSession,
   createBackendSession,
+  getProtocolRuntimeStatus,
   openBackendSessionSocket,
   resizeBackendSession,
   type SessionSocketLike,
@@ -17,7 +18,7 @@ import { cn, formatHostAddress } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
 import { useKnownHostsStore } from "../../store/known-hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
-import type { HostRecord } from "../../types/host";
+import { formatHostProtocol, hostSupportsTrustedKeys, type HostRecord } from "../../types/host";
 import {
   formatSessionConnectionState,
   type SessionPane,
@@ -123,19 +124,59 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const connectedOnceRef = useRef(pane.connectionState === "connected");
   const reconnectOnRestoreRef = useRef(pane.reconnectOnRestore);
   const pendingSecretsNoticeShownRef = useRef(false);
+  const runtimeStatusRef = useRef<{
+    available: boolean;
+    installHint?: string;
+    message: string;
+  } | null>(null);
   const toggleConnectionRef = useRef<() => void>(() => undefined);
   const ensureConnectedRef = useRef<() => void>(() => undefined);
   const dispatchCommandRef = useRef<(command: string) => void>(() => undefined);
   const processedCommandIdRef = useRef<string | undefined>(undefined);
+  const [runtimeStatusMessage, setRuntimeStatusMessage] = useState<{
+    available: boolean;
+    installHint?: string;
+    message: string;
+  } | null>(null);
   const trustedKnownHost = useMemo(
-    () => (protocol === "ssh" ? findKnownHostMatch(knownHosts, { hostname, port }) : undefined),
+    () =>
+      hostSupportsTrustedKeys(protocol)
+        ? findKnownHostMatch(knownHosts, { hostname, port })
+        : undefined,
     [hostname, knownHosts, port, protocol]
   );
   const useMockTransport = demoModeEnabled || (protocol === "ssh" && authMethod === "none");
   const unsupportedTransport =
-    (protocol !== "ssh" && protocol !== "localShell") ||
-    (protocol === "localShell" && !demoModeEnabled && !isTauriRuntime());
+    !demoModeEnabled &&
+    (protocol === "localShell" ||
+      protocol === "telnet" ||
+      protocol === "serial" ||
+      protocol === "mosh") &&
+    !isTauriRuntime();
   const nativeBridgeEnabled = !useMockTransport && !unsupportedTransport && isTauriRuntime();
+  const protocolLabel = formatHostProtocol(protocol);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void getProtocolRuntimeStatus(protocol).then((status) => {
+      if (cancelled) {
+        return;
+      }
+
+      const nextStatus = {
+        available: status.available,
+        installHint: status.installHint,
+        message: status.message,
+      };
+      runtimeStatusRef.current = nextStatus;
+      setRuntimeStatusMessage(nextStatus);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [protocol]);
 
   useEffect(() => {
     transportRef.current = pane.transport;
@@ -246,7 +287,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           fitAddon.fit();
 
           if (
-            (transportRef.current === "ssh" || transportRef.current === "localShell") &&
+            transportRef.current !== "mock" &&
+            transportRef.current !== "unsupported" &&
             backendSessionIdRef.current
           ) {
             void resizeBackendSession(backendSessionIdRef.current, {
@@ -279,7 +321,28 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         return;
       }
 
-      const requiresSecrets = protocol === "ssh" && authMethod !== "none";
+      const runtimeStatus =
+        runtimeStatusRef.current ?? (await getProtocolRuntimeStatus(protocol));
+      const nextRuntimeStatus = {
+        available: runtimeStatus.available,
+        installHint: runtimeStatus.installHint,
+        message: runtimeStatus.message,
+      };
+      runtimeStatusRef.current = nextRuntimeStatus;
+      setRuntimeStatusMessage(nextRuntimeStatus);
+      if (!runtimeStatus.available) {
+        connectionStateRef.current = "error";
+        setPaneState(pane.id, "error");
+        if (announce) {
+          terminal.writeln(`\r\n${runtimeStatus.message}`);
+          if (runtimeStatus.installHint) {
+            terminal.writeln(runtimeStatus.installHint);
+          }
+        }
+        return;
+      }
+
+      const requiresSecrets = (protocol === "ssh" || protocol === "mosh") && authMethod !== "none";
       const hasReusableBackendSession = Boolean(backendSessionIdRef.current);
       const canConnectWithoutPrompt =
         hasReusableBackendSession || !requiresSecrets || (await canRestoreSessionWithoutPrompt(host));
@@ -322,15 +385,26 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
       pendingSecretsNoticeShownRef.current = false;
       connectingRef.current = true;
-      transportRef.current = protocol === "localShell" ? "localShell" : "ssh";
-      setPaneTransport(pane.id, protocol === "localShell" ? "localShell" : "ssh");
+      transportRef.current =
+        protocol === "localShell"
+          ? "localShell"
+          : protocol === "telnet"
+            ? "telnet"
+            : protocol === "serial"
+              ? "serial"
+              : protocol === "mosh"
+                ? "mosh"
+                : "ssh";
+      setPaneTransport(pane.id, transportRef.current);
       setPaneState(pane.id, "connecting");
 
       if (announce) {
         terminal.writeln(
           protocol === "localShell"
             ? "\r\nOpening local shell..."
-            : `\r\nConnecting to ${hostname}...`
+            : protocol === "serial"
+              ? `\r\nOpening serial session for ${hostname}...`
+              : `\r\nOpening ${protocolLabel} session to ${hostname}...`
         );
       }
 
@@ -411,7 +485,12 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             clearBackendSession();
           }
 
-          if (!connectedOnceRef.current && reusedExistingSession && protocol === "ssh" && authMethod !== "none") {
+          if (
+            !connectedOnceRef.current &&
+            reusedExistingSession &&
+            (protocol === "ssh" || protocol === "mosh") &&
+            authMethod !== "none"
+          ) {
             void connectNativeSession({
               allowPendingSecrets: true,
               promptForSecrets: false,
@@ -430,16 +509,14 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             return;
           }
 
-          terminal.writeln("\r\nSSH session transport failed.");
+          terminal.writeln(`\r\n${protocolLabel} session transport failed.`);
           clearBackendSession();
           connectionStateRef.current = "error";
           setPaneState(pane.id, "error");
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        terminal.writeln(
-          `\r\n${protocol === "localShell" ? "Local shell" : "SSH"} connect failed: ${message}`
-        );
+        terminal.writeln(`\r\n${protocolLabel} connect failed: ${message}`);
         connectionStateRef.current = "error";
         setPaneState(pane.id, "error");
         clearBackendSession();
@@ -464,9 +541,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
       connectionStateRef.current = "disconnected";
       setPaneState(pane.id, "disconnected");
-      terminal.writeln(
-        `\r\n${protocol === "localShell" ? "Local shell" : "SSH"} session closed.`
-      );
+      terminal.writeln(`\r\n${protocolLabel} session closed.`);
     };
 
     const toggleConnection = () => {
@@ -544,7 +619,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         return;
       }
 
-      if (transportRef.current === "ssh" || transportRef.current === "localShell") {
+      if (transportRef.current !== "mock" && transportRef.current !== "unsupported") {
         if (socketRef.current?.readyState === WebSocket.OPEN && connectionStateRef.current === "connected") {
           socketRef.current.send(JSON.stringify({ type: "input", data: `${command}\r` }));
         }
@@ -580,7 +655,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
     const disposable = terminal.onData((data) => {
       if (
-        (transportRef.current === "ssh" || transportRef.current === "localShell") &&
+        transportRef.current !== "mock" &&
+        transportRef.current !== "unsupported" &&
         socketRef.current?.readyState === WebSocket.OPEN
       ) {
         socketRef.current.send(JSON.stringify({ type: "input", data }));
@@ -646,7 +722,13 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         reconnectOnRestoreRef.current ||
         connectionStateRef.current === "pendingSecrets"
       ) {
-        if (protocol === "localShell" || (await canRestoreSessionWithoutPrompt(host))) {
+        if (
+          protocol === "localShell" ||
+          protocol === "telnet" ||
+          protocol === "serial" ||
+          authMethod === "none" ||
+          (await canRestoreSessionWithoutPrompt(host))
+        ) {
           await connectNativeSession({
             allowPendingSecrets: true,
             promptForSecrets: false,
@@ -721,7 +803,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     }
 
     const sshTransportPending =
-      (pane.transport === "ssh" || pane.transport === "localShell") &&
+      pane.transport !== "mock" &&
+      pane.transport !== "unsupported" &&
       socketRef.current?.readyState !== WebSocket.OPEN;
 
     if (pane.connectionState !== "connected" || sshTransportPending) {
@@ -796,6 +879,14 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           </button>
         </div>
       </header>
+      {runtimeStatusMessage && !runtimeStatusMessage.available ? (
+        <div className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+          <p>{runtimeStatusMessage.message}</p>
+          {runtimeStatusMessage.installHint ? (
+            <p className="mt-1 text-rose-100/80">{runtimeStatusMessage.installHint}</p>
+          ) : null}
+        </div>
+      ) : null}
       <div ref={containerRef} className="min-h-0 flex-1 px-3 py-3" />
     </section>
   );

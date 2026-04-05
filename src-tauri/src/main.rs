@@ -158,6 +158,13 @@ enum JumpSessionEvent {
     Output(String),
 }
 
+struct ExternalCommandSessionSpec {
+    command: CommandBuilder,
+    exit_label: String,
+    prompt_responses: Vec<PromptResponse>,
+    cleanup_dir: Option<PathBuf>,
+}
+
 struct NativeSshControlContext {
     config_path: PathBuf,
     session_dir: PathBuf,
@@ -191,7 +198,7 @@ struct BackendHostConnection {
     known_host_public_key: Option<String>,
     password: String,
     passphrase: String,
-    port: u16,
+    port: u32,
     private_key_path: String,
     #[serde(default = "default_backend_protocol")]
     protocol: String,
@@ -257,6 +264,23 @@ struct SftpDirectoryResponse {
 #[serde(rename_all = "camelCase")]
 struct KeyPathRequest {
     path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtocolRuntimeStatusRequest {
+    protocol: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtocolRuntimeStatusResponse {
+    available: bool,
+    client: Option<String>,
+    install_hint: Option<String>,
+    message: String,
+    protocol: String,
+    resolved_path: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -545,6 +569,353 @@ fn expand_home(pathname: &str) -> PathBuf {
     PathBuf::from(pathname)
 }
 
+fn resolve_command_path(candidates: &[&str]) -> Option<PathBuf> {
+    for candidate in candidates {
+        let candidate_path = PathBuf::from(candidate);
+        if candidate_path.is_absolute() {
+            if candidate_path.is_file() {
+                return Some(candidate_path);
+            }
+            continue;
+        }
+
+        if let Some(paths) = env::var_os("PATH") {
+            for directory in env::split_paths(&paths) {
+                let resolved = directory.join(candidate);
+                if resolved.is_file() {
+                    return Some(resolved);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn shell_quote(value: &str) -> String {
+    if value
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || "/._:-=@".contains(character))
+    {
+        return value.to_string();
+    }
+
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn configure_command_environment(command: &mut CommandBuilder, host: &BackendHostConnection) {
+    if let Some(environment) = get_channel_environment(&host.environment) {
+        for (key, value) in environment {
+            command.env(key, value);
+        }
+    }
+}
+
+fn protocol_runtime_response(
+    protocol: &str,
+    available: bool,
+    client: Option<&str>,
+    resolved_path: Option<String>,
+    message: String,
+    install_hint: Option<String>,
+) -> ProtocolRuntimeStatusResponse {
+    ProtocolRuntimeStatusResponse {
+        available,
+        client: client.map(str::to_string),
+        install_hint,
+        message,
+        protocol: protocol.to_string(),
+        resolved_path,
+    }
+}
+
+fn build_protocol_runtime_status(protocol: &str) -> ProtocolRuntimeStatusResponse {
+    match protocol {
+        "ssh" => protocol_runtime_response(
+            protocol,
+            true,
+            None,
+            None,
+            "SSH sessions are available through the native transport stack.".to_string(),
+            None,
+        ),
+        "localShell" => {
+            let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+            protocol_runtime_response(
+                protocol,
+                true,
+                Some("shell"),
+                Some(shell.clone()),
+                format!("Local shell sessions will launch with {shell}."),
+                None,
+            )
+        }
+        "telnet" => match resolve_command_path(&["/usr/bin/telnet", "telnet"]) {
+            Some(path) => protocol_runtime_response(
+                protocol,
+                true,
+                Some("telnet"),
+                Some(path.to_string_lossy().into_owned()),
+                "Telnet client resolved for native session launch.".to_string(),
+                None,
+            ),
+            None => protocol_runtime_response(
+                protocol,
+                false,
+                Some("telnet"),
+                None,
+                "Telnet client is not installed on this workstation.".to_string(),
+                Some(
+                    "Install a telnet client or save this host as SSH/local shell until one is available."
+                        .to_string(),
+                ),
+            ),
+        },
+        "serial" => {
+            if let Some(path) = resolve_command_path(&["/usr/bin/screen", "screen"]) {
+                protocol_runtime_response(
+                    protocol,
+                    true,
+                    Some("screen"),
+                    Some(path.to_string_lossy().into_owned()),
+                    "Serial sessions will launch with screen.".to_string(),
+                    None,
+                )
+            } else if let Some(path) = resolve_command_path(&["/usr/bin/cu", "cu"]) {
+                protocol_runtime_response(
+                    protocol,
+                    true,
+                    Some("cu"),
+                    Some(path.to_string_lossy().into_owned()),
+                    "Serial sessions will launch with cu.".to_string(),
+                    None,
+                )
+            } else {
+                protocol_runtime_response(
+                    protocol,
+                    false,
+                    Some("screen|cu"),
+                    None,
+                    "Serial runtime requires either screen or cu.".to_string(),
+                    Some(
+                        "Install `screen` or `cu` so this workstation can open serial sessions."
+                            .to_string(),
+                    ),
+                )
+            }
+        }
+        "mosh" => match resolve_command_path(&[
+            "/opt/homebrew/bin/mosh",
+            "/usr/local/bin/mosh",
+            "/usr/bin/mosh",
+            "mosh",
+        ]) {
+            Some(path) => protocol_runtime_response(
+                protocol,
+                true,
+                Some("mosh"),
+                Some(path.to_string_lossy().into_owned()),
+                "Mosh client resolved for native session launch.".to_string(),
+                None,
+            ),
+            None => protocol_runtime_response(
+                protocol,
+                false,
+                Some("mosh"),
+                None,
+                "Mosh client is not installed on this workstation.".to_string(),
+                Some(
+                    "Install `mosh` so the native client can launch this session, or use SSH until it is available."
+                        .to_string(),
+                ),
+            ),
+        },
+        other => protocol_runtime_response(
+            other,
+            false,
+            None,
+            None,
+            format!("Unsupported protocol runtime: {other}."),
+            None,
+        ),
+    }
+}
+
+fn validate_network_host(host: &BackendHostConnection, require_username: bool) -> Result<(), String> {
+    if host.hostname.trim().is_empty() || host.port == 0 {
+        return Err("Missing host connection fields".to_string());
+    }
+
+    if require_username && host.username.trim().is_empty() {
+        return Err("Missing host connection fields".to_string());
+    }
+
+    Ok(())
+}
+
+fn validate_mosh_host(host: &BackendHostConnection) -> Result<(), String> {
+    validate_network_host(host, true)?;
+
+    if host.auth_method == "password" && host.password.is_empty() {
+        return Err("Password auth selected but no password provided".to_string());
+    }
+
+    if host.auth_method == "privateKey" && host.private_key_path.trim().is_empty() {
+        return Err("Private key auth selected but no key path provided".to_string());
+    }
+
+    Ok(())
+}
+
+fn build_mosh_ssh_command(
+    host: &BackendHostConnection,
+    known_hosts_path: Option<&PathBuf>,
+) -> String {
+    let mut arguments = vec![
+        "/usr/bin/ssh".to_string(),
+        "-p".to_string(),
+        host.port.to_string(),
+        "-o".to_string(),
+        "BatchMode=no".to_string(),
+        "-o".to_string(),
+        "GlobalKnownHostsFile=/dev/null".to_string(),
+    ];
+
+    if let Some(known_hosts_path) = known_hosts_path {
+        arguments.push("-o".to_string());
+        arguments.push(format!(
+            "UserKnownHostsFile={}",
+            known_hosts_path.to_string_lossy()
+        ));
+    }
+
+    if host.known_host_public_key.is_some() && host.known_host_algorithm.is_some() {
+        arguments.push("-o".to_string());
+        arguments.push("StrictHostKeyChecking=yes".to_string());
+    } else {
+        arguments.push("-o".to_string());
+        arguments.push("StrictHostKeyChecking=accept-new".to_string());
+    }
+
+    if host.agent_forwarding && env::var_os("SSH_AUTH_SOCK").is_some() {
+        arguments.push("-A".to_string());
+    }
+
+    if host.auth_method == "privateKey" && !host.private_key_path.trim().is_empty() {
+        arguments.push("-i".to_string());
+        arguments.push(expand_home(&host.private_key_path).to_string_lossy().into_owned());
+        arguments.push("-o".to_string());
+        arguments.push("IdentitiesOnly=yes".to_string());
+    }
+
+    arguments
+        .iter()
+        .map(|argument| shell_quote(argument))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn build_external_command_session_spec(
+    host: &BackendHostConnection,
+    session_id: &str,
+) -> Result<ExternalCommandSessionSpec, String> {
+    match host.protocol.as_str() {
+        "localShell" => {
+            let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+            let mut command = CommandBuilder::new(shell);
+            command.arg("-l");
+            if let Some(home_dir) = env::var_os("HOME") {
+                command.cwd(PathBuf::from(home_dir));
+            }
+            configure_command_environment(&mut command, host);
+
+            Ok(ExternalCommandSessionSpec {
+                command,
+                exit_label: "Local shell".to_string(),
+                prompt_responses: Vec::new(),
+                cleanup_dir: None,
+            })
+        }
+        "telnet" => {
+            let executable = resolve_command_path(&["/usr/bin/telnet", "telnet"])
+                .ok_or_else(|| "Telnet client is not installed on this workstation".to_string())?;
+            let mut command = CommandBuilder::new(executable);
+            command.arg(host.hostname.clone());
+            command.arg(host.port.to_string());
+            configure_command_environment(&mut command, host);
+
+            Ok(ExternalCommandSessionSpec {
+                command,
+                exit_label: "Telnet session".to_string(),
+                prompt_responses: Vec::new(),
+                cleanup_dir: None,
+            })
+        }
+        "serial" => {
+            let mut command = if let Some(executable) =
+                resolve_command_path(&["/usr/bin/screen", "screen"])
+            {
+                let mut command = CommandBuilder::new(executable);
+                command.arg(host.hostname.clone());
+                command.arg(host.port.to_string());
+                command
+            } else if let Some(executable) = resolve_command_path(&["/usr/bin/cu", "cu"]) {
+                let mut command = CommandBuilder::new(executable);
+                command.arg("-l");
+                command.arg(host.hostname.clone());
+                command.arg("-s");
+                command.arg(host.port.to_string());
+                command
+            } else {
+                return Err(
+                    "Serial runtime requires either `screen` or `cu` to be installed".to_string(),
+                );
+            };
+            configure_command_environment(&mut command, host);
+
+            Ok(ExternalCommandSessionSpec {
+                command,
+                exit_label: "Serial session".to_string(),
+                prompt_responses: Vec::new(),
+                cleanup_dir: None,
+            })
+        }
+        "mosh" => {
+            let executable = resolve_command_path(&[
+                "/opt/homebrew/bin/mosh",
+                "/usr/local/bin/mosh",
+                "/usr/bin/mosh",
+                "mosh",
+            ])
+            .ok_or_else(|| "Mosh client is not installed on this workstation".to_string())?;
+            let cleanup_dir = if host.known_host_public_key.is_some() {
+                Some(create_native_ssh_session_dir(session_id)?)
+            } else {
+                None
+            };
+            let known_hosts_path = match cleanup_dir.as_ref() {
+                Some(session_dir) => Some(write_native_known_hosts(host, session_dir)?),
+                None => None,
+            };
+            let mut command = CommandBuilder::new(executable);
+            command.arg(format!("{}@{}", host.username, host.hostname));
+            command.arg(format!(
+                "--ssh={}",
+                build_mosh_ssh_command(host, known_hosts_path.as_ref())
+            ));
+            configure_command_environment(&mut command, host);
+
+            Ok(ExternalCommandSessionSpec {
+                command,
+                exit_label: "Mosh session".to_string(),
+                prompt_responses: build_prompt_responses(host),
+                cleanup_dir,
+            })
+        }
+        other => Err(format!("Unsupported external session protocol: {other}")),
+    }
+}
+
 fn emit_session_stream_event(app: &AppHandle, event: SessionStreamEvent) {
     let _ = app.emit(SESSION_STREAM_EVENT_NAME, event);
 }
@@ -771,6 +1142,9 @@ fn emit_native_session_error(
 fn should_use_native_session(host: &BackendHostConnection) -> bool {
     match host.protocol.as_str() {
         "localShell" => true,
+        "telnet" => true,
+        "serial" => true,
+        "mosh" => true,
         "ssh" => host.auth_method != "none",
         _ => false,
     }
@@ -783,6 +1157,10 @@ fn validate_ssh_host(host: &BackendHostConnection) -> Result<(), String> {
 
     if host.hostname.trim().is_empty() || host.username.trim().is_empty() || host.port == 0 {
         return Err("Missing host connection fields".to_string());
+    }
+
+    if host.port > u32::from(u16::MAX) {
+        return Err("SSH port must be between 1 and 65535".to_string());
     }
 
     if host.auth_method == "password" && host.password.is_empty() {
@@ -808,6 +1186,9 @@ fn validate_session_target(host: &BackendHostConnection) -> Result<(), String> {
     match host.protocol.as_str() {
         "localShell" => Ok(()),
         "ssh" => validate_ssh_host(host),
+        "telnet" => validate_network_host(host, false),
+        "serial" => validate_network_host(host, false),
+        "mosh" => validate_mosh_host(host),
         other => Err(format!("Unsupported session protocol: {other}")),
     }
 }
@@ -877,7 +1258,10 @@ fn open_native_channel(session: &Session, host: &BackendHostConnection) -> Resul
 }
 
 fn connect_native_session(host: &BackendHostConnection) -> Result<(Session, Channel), String> {
-    let tcp_stream = TcpStream::connect((host.hostname.as_str(), host.port))
+    let tcp_stream = TcpStream::connect((
+        host.hostname.as_str(),
+        u16::try_from(host.port).map_err(|_| "SSH port must be between 1 and 65535".to_string())?,
+    ))
         .map_err(|error| error.to_string())?;
     let _ = tcp_stream.set_nodelay(true);
 
@@ -1005,7 +1389,7 @@ fn spawn_local_session_reader(
     });
 }
 
-fn run_local_shell_session_loop(
+fn run_external_command_session_loop(
     app: AppHandle,
     registry: NativeSessionRegistry,
     forward_registry: NativeForwardRegistry,
@@ -1014,7 +1398,15 @@ fn run_local_shell_session_loop(
     host: BackendHostConnection,
     mut receiver: UnboundedReceiver<NativeSessionCommand>,
 ) {
+    let mut cleanup_dir = None;
     let result = (|| -> Result<(), String> {
+        let ExternalCommandSessionSpec {
+            command,
+            exit_label,
+            prompt_responses,
+            cleanup_dir: spec_cleanup_dir,
+        } = build_external_command_session_spec(&host, &session_id)?;
+        cleanup_dir = spec_cleanup_dir.clone();
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -1024,18 +1416,6 @@ fn run_local_shell_session_loop(
                 pixel_height: DEFAULT_TERMINAL_PIXEL_HEIGHT,
             })
             .map_err(|error| error.to_string())?;
-
-        let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-        let mut command = CommandBuilder::new(shell);
-        command.arg("-l");
-        if let Some(home_dir) = env::var_os("HOME") {
-            command.cwd(PathBuf::from(home_dir));
-        }
-        if let Some(environment) = get_channel_environment(&host.environment) {
-            for (key, value) in environment {
-                command.env(key, value);
-            }
-        }
 
         let mut child = pair
             .slave
@@ -1055,7 +1435,11 @@ fn run_local_shell_session_loop(
         let mut master = pair.master;
         let (output_sender, output_receiver) = std::sync::mpsc::channel();
 
-        spawn_local_session_reader(reader, output_sender);
+        if prompt_responses.is_empty() {
+            spawn_local_session_reader(reader, output_sender);
+        } else {
+            spawn_jump_session_reader(reader, writer.clone(), prompt_responses, output_sender);
+        }
         set_native_session_connection_state(&app, &session_id, &state, "connected");
 
         let mut should_close = false;
@@ -1118,7 +1502,7 @@ fn run_local_shell_session_loop(
                             &app,
                             &session_id,
                             &state,
-                            format!("Local shell exited with status {status}."),
+                            format!("{exit_label} exited with status {status}."),
                         );
                         set_native_session_connection_state(&app, &session_id, &state, "error");
                     }
@@ -1152,6 +1536,10 @@ fn run_local_shell_session_loop(
     close_native_forwards_for_session(&forward_registry, &session_id);
     remove_native_session(&registry, &session_id);
     set_native_session_connection_state(&app, &session_id, &state, "disconnected");
+
+    if let Some(cleanup_dir) = cleanup_dir {
+        let _ = fs::remove_dir_all(cleanup_dir);
+    }
 
     let stream_id = {
         let mut state = state.lock().expect("native session state lock poisoned");
@@ -1673,6 +2061,13 @@ fn termsnip_transport_info(bridge: State<'_, BackendBridge>) -> BackendTransport
 }
 
 #[tauri::command]
+fn termsnip_protocol_runtime_status(
+    request: ProtocolRuntimeStatusRequest,
+) -> ProtocolRuntimeStatusResponse {
+    build_protocol_runtime_status(&request.protocol)
+}
+
+#[tauri::command]
 async fn termsnip_backend_status(
     bridge: State<'_, BackendBridge>,
 ) -> Result<BackendStatusResponse, String> {
@@ -2019,7 +2414,11 @@ async fn termsnip_create_backend_session(
     let app_handle = app.clone();
     let session_id_for_thread = session_id.clone();
     let state_for_thread = state.clone();
-    let command_sender = if host.protocol == "localShell" {
+    let command_sender = if host.protocol == "localShell"
+        || host.protocol == "telnet"
+        || host.protocol == "serial"
+        || host.protocol == "mosh"
+    {
         let (command_sender, command_receiver) = unbounded_channel();
         let registry_for_thread = native_registry.clone();
         let forward_registry_for_thread = forward_registry.clone();
@@ -2028,7 +2427,7 @@ async fn termsnip_create_backend_session(
         let thread_state = state_for_thread.clone();
 
         thread::spawn(move || {
-            run_local_shell_session_loop(
+            run_external_command_session_loop(
                 thread_app,
                 registry_for_thread,
                 forward_registry_for_thread,
@@ -2377,6 +2776,7 @@ fn main() {
         .manage(NativeForwardRegistry::default())
         .invoke_handler(tauri::generate_handler![
             termsnip_transport_info,
+            termsnip_protocol_runtime_status,
             termsnip_backend_status,
             termsnip_proxy_backend_json,
             termsnip_proxy_backend_binary,
@@ -2488,6 +2888,87 @@ mod tests {
         assert_eq!(resolve_remote_path("/srv", "releases/../logs"), "/srv/logs");
         assert_eq!(resolve_remote_path("/srv", "/var/tmp"), "/var/tmp");
         assert_eq!(resolve_remote_path("/", "../../etc"), "/etc");
+    }
+
+    #[test]
+    fn validates_telnet_serial_and_mosh_session_targets() {
+        let telnet_host = BackendHostConnection {
+            agent_forwarding: false,
+            auth_method: "none".to_string(),
+            environment: None,
+            hostname: "legacy.internal".to_string(),
+            jump_host: None,
+            known_host_algorithm: None,
+            known_host_public_key: None,
+            password: "".to_string(),
+            passphrase: "".to_string(),
+            port: 23,
+            private_key_path: "".to_string(),
+            protocol: "telnet".to_string(),
+            sftp_root: None,
+            username: "".to_string(),
+        };
+        let serial_host = BackendHostConnection {
+            hostname: "/dev/cu.usbserial-1410".to_string(),
+            port: 115200,
+            protocol: "serial".to_string(),
+            ..telnet_host.clone()
+        };
+        let mosh_host = BackendHostConnection {
+            auth_method: "privateKey".to_string(),
+            hostname: "ops.internal".to_string(),
+            port: 22,
+            private_key_path: "~/.ssh/id_ops".to_string(),
+            protocol: "mosh".to_string(),
+            username: "ops".to_string(),
+            ..telnet_host.clone()
+        };
+
+        assert!(should_use_native_session(&telnet_host));
+        assert!(should_use_native_session(&serial_host));
+        assert!(should_use_native_session(&mosh_host));
+        assert!(validate_session_target(&telnet_host).is_ok());
+        assert!(validate_session_target(&serial_host).is_ok());
+        assert!(validate_session_target(&mosh_host).is_ok());
+    }
+
+    #[test]
+    fn reports_builtin_and_unknown_protocol_runtime_status() {
+        let ssh_status = build_protocol_runtime_status("ssh");
+        let unknown_status = build_protocol_runtime_status("gopher");
+
+        assert!(ssh_status.available);
+        assert_eq!(ssh_status.protocol, "ssh");
+        assert!(!unknown_status.available);
+        assert!(unknown_status.message.contains("Unsupported protocol runtime"));
+    }
+
+    #[test]
+    fn builds_mosh_ssh_command_with_known_hosts_and_key_path() {
+        let host = BackendHostConnection {
+            agent_forwarding: true,
+            auth_method: "privateKey".to_string(),
+            environment: None,
+            hostname: "ops.internal".to_string(),
+            jump_host: None,
+            known_host_algorithm: Some("ssh-ed25519".to_string()),
+            known_host_public_key: Some("AAAATESTMOSH".to_string()),
+            password: "".to_string(),
+            passphrase: "passphrase".to_string(),
+            port: 60022,
+            private_key_path: "~/.ssh/id_ops".to_string(),
+            protocol: "mosh".to_string(),
+            sftp_root: None,
+            username: "ops".to_string(),
+        };
+        let known_hosts_path = PathBuf::from("/tmp/termsnip-known-hosts");
+        let ssh_command = build_mosh_ssh_command(&host, Some(&known_hosts_path));
+
+        assert!(ssh_command.contains("/usr/bin/ssh"));
+        assert!(ssh_command.contains("-p 60022"));
+        assert!(ssh_command.contains("UserKnownHostsFile=/tmp/termsnip-known-hosts"));
+        assert!(ssh_command.contains("StrictHostKeyChecking=yes"));
+        assert!(ssh_command.contains("IdentitiesOnly=yes"));
     }
 
     #[test]

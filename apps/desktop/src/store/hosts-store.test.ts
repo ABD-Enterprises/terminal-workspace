@@ -113,4 +113,53 @@ describe("hosts store helpers", () => {
     expect(created.jumpHostId).toBeUndefined();
     expect(created.sftpRoot).toBe("");
   });
+
+  it("uses protocol defaults for telnet and serial inventory", () => {
+    const telnetHost = createHostRecord({
+      ...emptyHostFormValues,
+      label: "Legacy BBS",
+      protocol: "telnet",
+      hostname: "bbs.internal",
+      username: "ignored",
+      port: "",
+      authMethod: "password",
+    });
+    const serialHost = createHostRecord({
+      ...emptyHostFormValues,
+      label: "Console Cable",
+      protocol: "serial",
+      hostname: "/dev/cu.usbserial-1410",
+      username: "ignored",
+      port: "",
+      authMethod: "privateKey",
+    });
+
+    expect(telnetHost.port).toBe(23);
+    expect(telnetHost.username).toBe("");
+    expect(telnetHost.authMethod).toBe("none");
+    expect(serialHost.port).toBe(115200);
+    expect(serialHost.username).toBe("");
+    expect(serialHost.authMethod).toBe("none");
+  });
+
+  it("keeps mosh credential metadata when the host uses ssh-style auth", () => {
+    const created = createHostRecord({
+      ...emptyHostFormValues,
+      label: "Ops Mosh",
+      protocol: "mosh",
+      hostname: "ops.internal",
+      username: "ops",
+      port: "",
+      authMethod: "privateKey",
+      privateKeyPath: "~/.ssh/id_ops",
+      keyLabel: "Ops Key",
+      hostKeyPolicy: "requireTrusted",
+    });
+
+    expect(created.port).toBe(22);
+    expect(created.authMethod).toBe("privateKey");
+    expect(created.privateKeyPath).toBe("~/.ssh/id_ops");
+    expect(created.keyLabel).toBe("Ops Key");
+    expect(created.hostKeyPolicy).toBe("requireTrusted");
+  });
 });

@@ -7,7 +7,7 @@ export type SessionConnectionState =
   | "pendingSecrets"
   | "error";
 export type SplitDirection = "vertical" | "horizontal";
-export type SessionTransport = "localShell" | "mock" | "ssh" | "unsupported";
+export type SessionTransport = "localShell" | "mock" | "mosh" | "serial" | "ssh" | "telnet" | "unsupported";
 
 export interface QueuedPaneCommand {
   id: string;
@@ -56,7 +56,13 @@ export function createSessionPane(host: HostRecord, title = host.label): Session
         ? host.authMethod === "none"
           ? "mock"
           : "ssh"
-        : "unsupported";
+        : host.protocol === "telnet"
+          ? "telnet"
+          : host.protocol === "serial"
+            ? "serial"
+            : host.protocol === "mosh"
+              ? "mosh"
+              : "unsupported";
 
   return {
     id: crypto.randomUUID(),

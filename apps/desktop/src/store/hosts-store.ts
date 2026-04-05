@@ -6,6 +6,8 @@ import {
   defaultHostProtocol,
   hostSupportsCredentialPrompt,
   hostSupportsJumpHosts,
+  protocolDefaultPort,
+  protocolRequiresUsername,
   hostSupportsSftp,
   hostSupportsTrustedKeys,
   sampleHosts,
@@ -78,11 +80,14 @@ export function createHostRecord(values: HostFormValues, currentHost?: HostRecor
     id: currentHost?.id ?? crypto.randomUUID(),
     label: values.label.trim(),
     protocol,
-    hostname:
-      protocol === "localShell" ? "localhost" : values.hostname.trim(),
+    hostname: protocol === "localShell" ? "localhost" : values.hostname.trim(),
     username:
-      protocol === "localShell" ? values.username.trim() || "local" : values.username.trim(),
-    port: protocol === "localShell" ? 0 : Number.parseInt(values.port, 10) || 22,
+      protocol === "localShell"
+        ? values.username.trim() || "local"
+        : protocolRequiresUsername(protocol)
+          ? values.username.trim()
+          : "",
+    port: Number.parseInt(values.port, 10) || protocolDefaultPort(protocol),
     authMethod: supportsCredentials ? values.authMethod : "none",
     privateKeyPath: supportsCredentials ? values.privateKeyPath.trim() : "",
     group: values.group.trim(),

@@ -185,9 +185,23 @@
     {
       "id": "task-network-protocol-runtime-support",
       "title": "Implement executable telnet, serial, and mosh transports on top of the protocol-aware host model",
+      "status": "completed",
+      "phase": "macos-network-protocol-execution",
+      "completed_at": "2026-04-05T02:19:42-04:00"
+    },
+    {
+      "id": "task-network-protocol-client-preflight",
+      "title": "Detect missing native telnet, serial, and mosh client prerequisites before runtime launch",
+      "status": "completed",
+      "phase": "macos-network-protocol-execution",
+      "completed_at": "2026-04-05T02:24:44-04:00"
+    },
+    {
+      "id": "task-network-protocol-live-validation",
+      "title": "Add live validation coverage for telnet, serial, and mosh runtime paths",
       "status": "pending",
       "phase": "macos-network-protocol-execution"
     }
   ],
-  "updated_at": "2026-04-04T19:32:30-04:00"
+  "updated_at": "2026-04-05T02:24:44-04:00"
 }
