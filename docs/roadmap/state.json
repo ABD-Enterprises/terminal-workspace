@@ -1,8 +1,11 @@
 {
-  "updated_at": "2026-04-05T06:48:47Z",
-  "last_updated": "2026-04-05T06:48:47Z",
+  "updated_at": "2026-04-05T11:48:23Z",
+  "last_updated": "2026-04-05T11:48:23Z",
   "version": "0.1.0",
   "current_phase": "macos-session-history-and-runbooks",
+  "phase_type": "build",
+  "phase_status": "in_progress",
+  "active_task_id": "task-session-history-redaction-controls",
   "current_phase_status": "in_progress",
   "current_phase_branch": "phase/macos-session-history-and-runbooks",
   "completed_phases": [
@@ -362,6 +365,20 @@
     {
       "id": "task-session-output-history",
       "title": "Capture searchable session output excerpts alongside command history",
+      "status": "completed",
+      "completed_at": "2026-04-05T07:10:24Z",
+      "phase": "macos-session-history-and-runbooks"
+    },
+    {
+      "id": "task-enterprise-standards-alignment",
+      "title": "Align validator usage, prompts, bootstrap, and evidence state to the latest enterprise contract",
+      "status": "completed",
+      "completed_at": "2026-04-05T11:46:11Z",
+      "phase": "macos-session-history-and-runbooks"
+    },
+    {
+      "id": "task-session-history-redaction-controls",
+      "title": "Add redaction and sensitivity controls for persisted session output previews",
       "status": "pending",
       "phase": "macos-session-history-and-runbooks"
     },
@@ -547,7 +564,15 @@
       "title": "Session history currently covers app-dispatched commands only",
       "severity": "medium",
       "status": "open",
-      "summary": "The first session-history slice intentionally records only commands launched through app-managed dispatch paths so interactive prompts and password entry are not captured, but manual terminal input and output excerpts are not yet persisted.",
+      "summary": "Session history now stores bounded output excerpts for app-dispatched commands, but manual terminal input is still intentionally excluded until safe capture and redaction rules exist.",
+      "assigned_phase": "macos-session-history-and-runbooks"
+    },
+    {
+      "id": "risk-session-output-preview-may-capture-sensitive-results",
+      "title": "Persisted session output previews may include sensitive command results",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The new output-history slice stores bounded response excerpts for app-dispatched commands, which improves replay and auditing but can still persist sensitive command results until redaction or sensitivity controls are added.",
       "assigned_phase": "macos-session-history-and-runbooks"
     }
   ],
@@ -603,7 +628,7 @@
       "impact": "medium",
       "effort": "medium",
       "assigned_phase": "macos-session-history-and-runbooks",
-      "summary": "Sessions now exposes a searchable persisted command history rail with replay actions, which gives output capture, runbook evidence, and safer history semantics a real user-facing surface to build on.",
+      "summary": "Sessions now exposes a searchable persisted command history rail with replay actions and bounded output previews, which gives output capture, runbook evidence, and safer history semantics a real user-facing surface to build on.",
       "status": "foundation-established"
     }
   ],
@@ -740,7 +765,7 @@
       "id": "dec-session-history-explicit-dispatch-only",
       "date": "2026-04-05",
       "title": "Start session history with app-dispatched commands only",
-      "summary": "The first session-history slice persists queued and replayed commands only, which gives Sessions a real searchable history surface without capturing arbitrary interactive input before redaction and output rules exist."
+      "summary": "The session-history slice persists queued and replayed commands plus bounded output previews only, which gives Sessions useful searchable history context without capturing arbitrary interactive input before stronger redaction rules exist."
     }
   ],
   "environment_status": {
@@ -770,7 +795,8 @@
     "native_protocol_runtime": "passed (vitest + desktop build + cargo test + live protocol fixtures)",
     "native_protocol_preflight": "passed",
     "native_protocol_live_validation": "passed (cargo external protocol fixture + native transport script)",
-    "session_command_history": "passed (vitest + desktop build + cargo test + validator)"
+    "session_command_history": "passed (vitest + desktop build + cargo test + validator)",
+    "session_output_history": "passed (vitest + desktop build + cargo test + validator)"
   },
   "deployment_history": [],
   "promotion_history": [

@@ -267,12 +267,23 @@
       "id": "dec-session-history-explicit-dispatch-only",
       "date": "2026-04-05",
       "title": "Start session history with app-dispatched commands only",
-      "decision": "Persist session history only for app-managed dispatch paths such as queued commands and history replay, and do not capture arbitrary interactive terminal input until output capture and redaction rules exist.",
+      "decision": "Persist session history only for app-managed dispatch paths such as queued commands and history replay, capture bounded output excerpts for those dispatched commands, and do not capture arbitrary interactive terminal input until stronger redaction rules exist.",
       "consequences": [
-        "The first searchable history slice avoids recording passwords or other sensitive interactive input from live shells.",
-        "Manual terminal commands and output transcripts remain explicit follow-up work in the session-history phase."
+        "The searchable history surface now includes useful command-result context without storing full transcripts by default.",
+        "Manual terminal commands remain excluded, and redaction controls for sensitive output previews remain explicit follow-up work in the session-history phase."
+      ]
+    },
+    {
+      "id": "dec-enterprise-validator-config-alignment",
+      "date": "2026-04-05",
+      "title": "Use the config-driven enterprise validator contract locally",
+      "decision": "Vendor the latest enterprise validator, keep a repo-local `ai.config.json`, record evidence in `state/artifacts.json`, and run the validator through `--repo . --config ai.config.json` from package scripts, CI, bootstrap, prompts, and agent guidance.",
+      "consequences": [
+        "Local and CI enforcement now evaluate the same phase, evidence, and handoff contract without relying on implied defaults.",
+        "Future work must write file-backed build, test, and run evidence into `artifacts/` whenever non-doc code or config changes land."
       ]
     }
   ],
-  "updated_at": "2026-04-05T06:48:47Z"
+  "updated_at": "2026-04-05T11:48:23Z",
+  "last_updated": "2026-04-05T11:48:23Z"
 }

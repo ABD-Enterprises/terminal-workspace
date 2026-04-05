@@ -174,9 +174,28 @@
       "title": "Session history currently covers app-dispatched commands only",
       "severity": "medium",
       "status": "open",
-      "summary": "The first session-history slice intentionally records only commands launched through app-managed dispatch paths so interactive prompts and password entry are not captured, but manual terminal input and output excerpts are not yet persisted.",
+      "summary": "Session history now stores bounded output excerpts for app-dispatched commands, but manual terminal input is still intentionally excluded until safe capture and redaction rules exist.",
       "assigned_phase": "macos-session-history-and-runbooks"
+    },
+    {
+      "id": "risk-session-output-preview-may-capture-sensitive-results",
+      "title": "Persisted session output previews may include sensitive command results",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The new output-history slice stores bounded response excerpts for app-dispatched commands, which improves replay and auditing but can still persist sensitive command results until redaction or sensitivity controls are added.",
+      "assigned_phase": "macos-session-history-and-runbooks"
+    },
+    {
+      "id": "risk-enterprise-standards-contract-drift",
+      "title": "Local validator usage and state contract drifted from the latest enterprise standard",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "The repo was still using the older runtime-guardrails invocation shape, an outdated `state/artifacts.json` schema, and handoff/roadmap state that no longer matched the config-driven enterprise validator contract.",
+      "assigned_phase": "macos-session-history-and-runbooks",
+      "resolution": "The repo now vendors the latest enterprise validator, ships a local `ai.config.json`, records evidence in the current artifact schema, and calls the validator through the config-driven path from package scripts, CI, bootstrap, prompts, and agent docs.",
+      "resolved_at": "2026-04-05T11:46:11Z"
     }
   ],
-  "updated_at": "2026-04-05T06:48:47Z"
+  "updated_at": "2026-04-05T11:48:23Z",
+  "last_updated": "2026-04-05T11:48:23Z"
 }

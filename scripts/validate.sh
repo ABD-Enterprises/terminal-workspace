@@ -27,3 +27,6 @@ if [[ "${TERMSNIP_RUN_E2E:-0}" == "1" ]]; then
 else
   echo "[validate] browser e2e skipped (set TERMSNIP_RUN_E2E=1 to include)"
 fi
+
+echo "[validate] guardrails"
+node ./tools/validators/enforce-runtime-guardrails.js --repo . --config ai.config.json

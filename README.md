@@ -6,8 +6,10 @@ A local-first macOS SSH client starter repo inspired by the usability patterns o
 
 This repository is self-contained and stateful:
 
+- first-read AI workflow entrypoint lives in [ai/bootstrap.md](/Users/deffenda/Code/term-snip/ai/bootstrap.md)
 - canonical roadmap state lives in [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json)
 - shared execution state lives in `/state/*`
+- build, test, run, and deploy evidence live in [state/artifacts.json](/Users/deffenda/Code/term-snip/state/artifacts.json)
 - agent and prompt contracts live in `/agents` and `/prompts`
 - runtime enforcement lives in [tools/validators/enforce-runtime-guardrails.js](/Users/deffenda/Code/term-snip/tools/validators/enforce-runtime-guardrails.js)
 - PR enforcement lives in [.github/workflows/ci.yml](/Users/deffenda/Code/term-snip/.github/workflows/ci.yml)
@@ -49,7 +51,7 @@ release contract, and `.env` remains the local override file.
   `artifacts/release/promoted/stable/`.
 - `npm run native:publish:dry-run` validates the promoted GitHub release asset set without
   creating or uploading a release.
-- `npm run validate:guardrails` runs the repository runtime guardrails validator.
+- `npm run validate:guardrails` runs the config-driven repository runtime guardrails validator with `ai.config.json`.
 - `TERMSNIP_RUN_E2E=1 npm run validate` runs lint, unit/integration tests, build, macOS native
   trust tooling when available, and browser e2e.
 

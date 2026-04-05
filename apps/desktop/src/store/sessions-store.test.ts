@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { sampleHosts } from "../types/host";
 import { formatSessionConnectionState } from "../types/session";
 import {
+  appendPaneCommandHistoryOutput,
   closeSessionTab,
   consumePaneCommand,
   duplicateSessionWorkspace,
@@ -154,6 +155,33 @@ describe("sessions store helpers", () => {
       command: "uptime",
       source: "queued",
     });
+  });
+
+  it("appends sanitized output previews to recorded history entries", () => {
+    const opened = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      sampleHosts[0]
+    );
+    const paneId = opened.tabs[0]!.paneIds[0]!;
+    const recorded = recordPaneCommandHistory(
+      {
+        ...opened,
+        commandHistory: [],
+      },
+      paneId,
+      "uptime",
+      "queued"
+    );
+    const entryId = recorded.commandHistory[0]!.id;
+
+    const updated = appendPaneCommandHistoryOutput(
+      recorded,
+      entryId,
+      "\u001b[32mload average: 1.00\r\nusers: 2\u001b[0m"
+    );
+
+    expect(updated.commandHistory[0]?.outputPreview).toBe("load average: 1.00\nusers: 2");
+    expect(updated.commandHistory[0]?.outputUpdatedAt).toBeDefined();
   });
 
   it("maps protocol-aware panes to their executable transports", () => {

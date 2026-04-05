@@ -7,6 +7,8 @@ native multi-protocol macOS client.
 
 The first slice is now live: app-dispatched commands persist across relaunch, Sessions exposes a
 searchable history rail, and saved commands can be replayed back into their host sessions.
+The second slice is now live: app-dispatched command entries also retain bounded output previews,
+and Sessions search can match against that saved output context.
 
 ## Active Phases
 
@@ -37,6 +39,8 @@ searchable history rail, and saved commands can be replayed back into their host
 - Opportunity: the first session-history slice is now user-facing, so output capture, replay,
   runbook evidence, and safer history semantics can iterate on a real persisted Sessions surface
   instead of a speculative data model.
+- Risk: persisted output previews improve search and replay evidence, but they can still retain
+  sensitive command results until explicit redaction and sensitivity controls exist.
 - Opportunity: the hosted release workflow now has a branch-safe preview path, explicit secret
   preflight, branch-SHA release targeting, and shared Node-based secret validation, so once secret
   material is supplied it can be rerun without additional workflow design work.

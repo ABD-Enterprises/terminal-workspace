@@ -111,6 +111,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const setPaneBackendSession = useSessionsStore((state) => state.setPaneBackendSession);
   const consumePaneCommand = useSessionsStore((state) => state.consumePaneCommand);
   const recordPaneCommand = useSessionsStore((state) => state.recordPaneCommand);
+  const appendCommandOutput = useSessionsStore((state) => state.appendCommandOutput);
   const knownHosts = useKnownHostsStore((state) => state.knownHosts);
   const demoModeEnabled = useAppStore((state) => state.demoModeEnabled);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -133,6 +134,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const toggleConnectionRef = useRef<() => void>(() => undefined);
   const ensureConnectedRef = useRef<() => void>(() => undefined);
   const dispatchCommandRef = useRef<(command: string) => void>(() => undefined);
+  const activeHistoryEntryIdRef = useRef<string | undefined>(undefined);
   const processedCommandIdRef = useRef<string | undefined>(undefined);
   const [runtimeStatusMessage, setRuntimeStatusMessage] = useState<{
     available: boolean;
@@ -243,10 +245,11 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     };
 
     const runMockCommand = (command: string) => {
+      let outputPreview = "";
       if (command.trim() === "clear") {
         terminal.clear();
       } else {
-        buildMockCommandResponse(command, {
+        const responseLines = buildMockCommandResponse(command, {
           group,
           hostname,
           label,
@@ -255,9 +258,15 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           sftpRoot,
           tags,
           username,
-        }).forEach((line) => terminal.writeln(line));
+        });
+        responseLines.forEach((line) => terminal.writeln(line));
+        outputPreview = responseLines.join("\n");
       }
 
+      if (activeHistoryEntryIdRef.current && outputPreview) {
+        appendCommandOutput(activeHistoryEntryIdRef.current, outputPreview);
+      }
+      activeHistoryEntryIdRef.current = undefined;
       writePrompt();
     };
 
@@ -458,6 +467,9 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
           if (message.type === "data") {
             terminal.write(message.data);
+            if (activeHistoryEntryIdRef.current) {
+              appendCommandOutput(activeHistoryEntryIdRef.current, message.data);
+            }
             return;
           }
 
@@ -622,7 +634,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
         return;
       }
 
-      recordPaneCommand(pane.id, trimmedCommand, "queued");
+      activeHistoryEntryIdRef.current = recordPaneCommand(pane.id, trimmedCommand, "queued");
 
       if (transportRef.current !== "mock" && transportRef.current !== "unsupported") {
         if (socketRef.current?.readyState === WebSocket.OPEN && connectionStateRef.current === "connected") {
@@ -784,6 +796,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     pane.id,
     privateKeyPath,
     nativeBridgeEnabled,
+    appendCommandOutput,
     recordPaneCommand,
     setPaneBackendSession,
     setPaneReconnectOnRestore,

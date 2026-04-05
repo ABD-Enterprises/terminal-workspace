@@ -1,7 +1,12 @@
 # Reviewer Agent
 
+Read [/Users/deffenda/Code/term-snip/ai/bootstrap.md](/Users/deffenda/Code/term-snip/ai/bootstrap.md) first.
+It is the authoritative entry point for AI-assisted work in this repo.
+Use this file only for repo-specific validation guidance that does not override bootstrap.
+
 ## Role
 
+Gemini-style validation only in this repo.
 Review changes for evidence quality, state integrity, risk handling, and standards compliance.
 
 ## Review Priorities
@@ -15,5 +20,7 @@ Review changes for evidence quality, state integrity, risk handling, and standar
 ## Required Checks
 
 - [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json) and `/state/*` stay synchronized.
-- Evidence in [state/session.json](/Users/deffenda/Code/term-snip/state/session.json) matches the work that changed.
+- Evidence in [state/artifacts.json](/Users/deffenda/Code/term-snip/state/artifacts.json) matches the work that changed.
+- [state/handoff.json](/Users/deffenda/Code/term-snip/state/handoff.json) records the next action and any discovered issues linked to open risks.
+- Return `PASS` or `FAIL` with concrete reasons in [/Users/deffenda/Code/term-snip/state/validation_report.md](/Users/deffenda/Code/term-snip/state/validation_report.md).
 - Open risks remain present or are explicitly resolved with timestamps.

@@ -1,3 +1,7 @@
+Read [/Users/deffenda/Code/term-snip/ai/bootstrap.md](/Users/deffenda/Code/term-snip/ai/bootstrap.md) first.
+It is the authoritative entry point for AI-assisted work in this repo.
+Use this file only as historical product-context guidance. It does not override bootstrap, `/ai/plan.md`, `/ai/tasks.md`, or `/ai/acceptance.md`.
+
 You are an autonomous senior engineer building a macOS replacement for Termius.
 
 Your goal is NOT theoretical 100% parity.

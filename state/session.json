@@ -1,11 +1,11 @@
 {
   "branch": "phase/macos-session-history-and-runbooks",
-  "current_run_id": "2026-04-05-macos-session-history-and-runbooks-command-history",
-  "current_task": "Persisted app-dispatched session command history is wired into the session store and surfaced in Sessions with search and replay.",
+  "current_run_id": "2026-04-05-macos-session-history-and-runbooks-output-history",
+  "current_task": "App-dispatched session history now stores bounded output excerpts and surfaces them in Sessions.",
   "current_phase": "macos-session-history-and-runbooks",
-  "started_at": "2026-04-05T06:48:47Z",
-  "summary": "This run started the session-history and runbooks phase by persisting app-dispatched commands in the session store, rendering a searchable history panel in Sessions, and adding replay actions for saved commands.",
-  "updated_at": "2026-04-05T06:48:47Z",
+  "started_at": "2026-04-05T07:10:24Z",
+  "summary": "This run completed the output-history slice for the session-history phase by storing bounded output previews for app-dispatched commands, rendering those excerpts in Sessions, and expanding history search to cover output text.",
+  "updated_at": "2026-04-05T07:10:24Z",
   "status": "in_progress",
   "validation": [
     {
@@ -270,6 +270,36 @@
     },
     {
       "id": "validation-session-history-json-state",
+      "command": "python3 -m json.tool docs/roadmap/state.json state/tasks.json state/risks.json state/decisions.json state/session.json state/repo.json state/handoff.json",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-targeted-tests",
+      "command": "npm run test -- apps/desktop/src/store/sessions-store.test.ts apps/desktop/src/lib/api.test.ts",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-full-vitest",
+      "command": "npm run test",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-desktop-build",
+      "command": "npm --prefix ./apps/desktop run build",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-cargo-test",
+      "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-validator",
+      "command": "node ./tools/validators/enforce-runtime-guardrails.js --base aa3a3fb",
+      "result": "passed"
+    },
+    {
+      "id": "validation-session-output-history-json-state",
       "command": "python3 -m json.tool docs/roadmap/state.json state/tasks.json state/risks.json state/decisions.json state/session.json state/repo.json state/handoff.json",
       "result": "passed"
     }

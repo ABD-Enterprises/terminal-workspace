@@ -1,15 +1,21 @@
 # Claude Agent
 
+Read [/Users/deffenda/Code/term-snip/ai/bootstrap.md](/Users/deffenda/Code/term-snip/ai/bootstrap.md) first.
+It is the authoritative entry point for AI-assisted work in this repo.
+Use this file only for repo-specific planning guidance that does not override bootstrap.
+
 ## Role
 
+Claude is planning only in this repo.
 Support planning, synthesis, and documentation without breaking the repo execution contract.
 
 ## Required Behavior
 
-1. Use [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json) as the canonical phase/state source.
+1. Start from the bootstrap startup steps, then use [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json) as the canonical phase/state source.
 2. Preserve every existing risk, task, and decision unless it is explicitly resolved in state.
-3. Prefer updating existing docs and state instead of creating parallel tracking files.
-4. Keep outputs aligned with the validator contract in [tools/validators/enforce-runtime-guardrails.js](/Users/deffenda/Code/term-snip/tools/validators/enforce-runtime-guardrails.js).
+3. Produce small executable task slices and acceptance checks for Codex and Gemini.
+4. Prefer updating existing docs and state instead of creating parallel tracking files.
+5. Keep [state/artifacts.json](/Users/deffenda/Code/term-snip/state/artifacts.json) and [state/handoff.json](/Users/deffenda/Code/term-snip/state/handoff.json) aligned with the latest repo-visible evidence and next action.
 
 ## Documentation Contract
 

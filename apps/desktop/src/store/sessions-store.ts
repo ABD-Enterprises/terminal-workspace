@@ -22,6 +22,7 @@ const fallbackStorage: StateStorage = {
 };
 
 const SESSION_HISTORY_LIMIT = 200;
+const SESSION_HISTORY_OUTPUT_LIMIT = 600;
 
 function sanitizePersistedWorkspace(
   workspace: Pick<SessionWorkspaceState, "tabs" | "panes" | "activeTabId" | "lastRestoredAt">
@@ -45,6 +46,14 @@ function sanitizePersistedWorkspace(
 
 function sanitizePersistedCommandHistory(commandHistory: SessionCommandHistoryEntry[]) {
   return commandHistory.slice(0, SESSION_HISTORY_LIMIT);
+}
+
+function normalizeCommandHistoryOutput(output: string) {
+  return output
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\r/g, "")
+    .replace(/\u0007/g, "")
+    .trim();
 }
 
 function touchTab(tab: SessionTab, update?: Partial<SessionTab>): SessionTab {
@@ -416,6 +425,37 @@ export function recordPaneCommandHistory(
   };
 }
 
+export function appendPaneCommandHistoryOutput(
+  state: SessionWorkspaceState & { commandHistory: SessionCommandHistoryEntry[] },
+  entryId: string,
+  output: string
+) {
+  const normalizedOutput = normalizeCommandHistoryOutput(output);
+  if (!normalizedOutput) {
+    return state;
+  }
+
+  const nextCommandHistory = state.commandHistory.map((entry) => {
+    if (entry.id !== entryId) {
+      return entry;
+    }
+
+    const outputPreview = `${entry.outputPreview ? `${entry.outputPreview}\n` : ""}${normalizedOutput}`
+      .slice(-SESSION_HISTORY_OUTPUT_LIMIT)
+      .trim();
+    return {
+      ...entry,
+      outputPreview,
+      outputUpdatedAt: new Date().toISOString(),
+    };
+  });
+
+  return {
+    ...state,
+    commandHistory: nextCommandHistory,
+  };
+}
+
 export interface SessionsState extends SessionWorkspaceState {
   commandHistory: SessionCommandHistoryEntry[];
   openSession: (host: HostRecord) => string;
@@ -431,7 +471,12 @@ export interface SessionsState extends SessionWorkspaceState {
   setPaneBackendSession: (paneId: string, backendSessionId?: string) => void;
   queuePaneCommand: (paneId: string, command: string, label?: string) => void;
   consumePaneCommand: (paneId: string, commandId: string) => void;
-  recordPaneCommand: (paneId: string, command: string, source?: SessionCommandHistorySource) => void;
+  recordPaneCommand: (
+    paneId: string,
+    command: string,
+    source?: SessionCommandHistorySource
+  ) => string | undefined;
+  appendCommandOutput: (entryId: string, output: string) => void;
   clearCommandHistory: () => void;
   queueCommandForHosts: (hosts: HostRecord[], command: string, label?: string) => string[];
   togglePaneConnection: (paneId: string) => void;
@@ -473,8 +518,13 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => queuePaneCommand(state, paneId, command, label)),
       consumePaneCommand: (paneId, commandId) =>
         set((state) => consumePaneCommand(state, paneId, commandId)),
-      recordPaneCommand: (paneId, command, source = "queued") =>
-        set((state) => recordPaneCommandHistory(state, paneId, command, source)),
+      recordPaneCommand: (paneId, command, source = "queued") => {
+        const nextState = recordPaneCommandHistory(get(), paneId, command, source);
+        set(nextState);
+        return nextState.commandHistory[0]?.id;
+      },
+      appendCommandOutput: (entryId, output) =>
+        set((state) => appendPaneCommandHistoryOutput(state, entryId, output)),
       clearCommandHistory: () => set(() => ({ commandHistory: [] })),
       queueCommandForHosts: (hosts, command, label) => {
         const paneIds: string[] = [];

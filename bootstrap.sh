@@ -25,11 +25,44 @@ validate_json() {
   python3 -m json.tool "$path" >/dev/null
 }
 
+write_ai_config() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+{
+  "run_profile": "standard",
+  "requires_test_evidence": true,
+  "requires_deploy_evidence": true,
+  "allowed_phases_without_tests": [
+    "planning",
+    "docs"
+  ],
+  "strict_mode": true,
+  "evidence_directories": [
+    "artifacts/"
+  ],
+  "meta_directories": [],
+  "allowed_metadata_only_evidence_types": [
+    "build",
+    "test",
+    "run",
+    "deploy"
+  ],
+  "protected_environment_paths": [
+    "brew/"
+  ]
+}
+EOF
+}
+
 mkdir -p state docs/roadmap runs logs agents prompts scripts
 
 require_command git
 require_command node
 require_command python3
+
+if [[ ! -f ai.config.json ]]; then
+  write_ai_config ai.config.json
+fi
 
 ROOT="$ROOT" node <<'NODE'
 const fs = require("fs");
@@ -39,7 +72,11 @@ const root = process.env.ROOT;
 const defaults = {
   "docs/roadmap/state.json": {
     updated_at: null,
+    last_updated: null,
     current_phase: null,
+    phase_type: "build",
+    phase_status: "planned",
+    active_task_id: null,
     current_phase_branch: null,
     completed_phases: [],
     upcoming_phases: [],
@@ -86,13 +123,52 @@ const defaults = {
     validation: [],
   },
   "state/artifacts.json": {
-    items: [],
-    updated_at: null,
+    last_updated: null,
+    code_changes_present: false,
+    claims: {
+      implementation: "not_started",
+      validation: "not_started",
+      deployment: "not_started"
+    },
+    external_inputs: [],
+    evidence: {
+      build: {
+        metadata_only: true,
+        status: "not_required",
+        reason: "Bootstrap created placeholder artifacts state",
+        updated_at: null,
+        paths: []
+      },
+      test: {
+        metadata_only: true,
+        status: "not_required",
+        reason: "Bootstrap created placeholder artifacts state",
+        updated_at: null,
+        paths: []
+      },
+      run: {
+        metadata_only: true,
+        status: "not_required",
+        reason: "Bootstrap created placeholder artifacts state",
+        updated_at: null,
+        paths: []
+      },
+      deploy: {
+        metadata_only: true,
+        status: "not_required",
+        reason: "Bootstrap created placeholder artifacts state",
+        updated_at: null,
+        paths: []
+      }
+    }
   },
   "state/handoff.json": {
     summary: "",
+    next_action: "",
+    discovered_issues: [],
     next_steps: [],
     blockers: [],
+    last_updated: null,
     updated_at: null,
   },
   "state/tasks.json": {
@@ -129,6 +205,7 @@ require_file state/handoff.json
 require_file state/tasks.json
 require_file state/risks.json
 require_file state/decisions.json
+require_file ai.config.json
 
 validate_json docs/roadmap/state.json
 validate_json state/env.json
@@ -139,6 +216,7 @@ validate_json state/handoff.json
 validate_json state/tasks.json
 validate_json state/risks.json
 validate_json state/decisions.json
+validate_json ai.config.json
 
 if [[ ! -d node_modules/.pnpm ]] || [[ ! -x apps/desktop/node_modules/.bin/vite ]] || [[ ! -x node_modules/.bin/vitest ]]; then
   echo "Installing workspace dependencies with the pinned pnpm toolchain..."
