@@ -1,0 +1,9 @@
+
+> terminal-workspace@0.1.0 validate:guardrails
+> node ./tools/validators/enforce-runtime-guardrails.js --repo . --config ai.config.json
+
+PASS:
+- Phase macos-session-history-and-runbooks (build) satisfies the runtime contract
+- 8 non-doc code/config file(s) require evidence in this diff
+- Run profile standard
+- Config loaded from ai.config.json

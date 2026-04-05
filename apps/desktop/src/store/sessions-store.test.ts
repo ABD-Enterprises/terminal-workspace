@@ -219,6 +219,70 @@ describe("sessions store helpers", () => {
     expect(persisted[0]?.outputUpdatedAt).toBeUndefined();
   });
 
+  it("keeps opted-out command history redacted after the pane is removed", () => {
+    const opened = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      sampleHosts[0]
+    );
+    const tabId = opened.tabs[0]!.id;
+    const paneId = opened.tabs[0]!.paneIds[0]!;
+    const recorded = recordPaneCommandHistory(
+      {
+        ...opened,
+        commandHistory: [],
+      },
+      paneId,
+      "uptime",
+      "queued"
+    );
+    const entryId = recorded.commandHistory[0]!.id;
+    const updated = appendPaneCommandHistoryOutput(recorded, entryId, "load average: 1.00");
+    const optedOut = updatePanePreviewPersistence(updated, paneId, false);
+    const closed = closeSessionTab(optedOut, tabId);
+    const persisted = sanitizePersistedCommandHistory(
+      optedOut.commandHistory,
+      closed.panes
+    );
+
+    expect(closed.panes[paneId]).toBeUndefined();
+    expect(persisted[0]).toMatchObject({
+      paneId,
+      persistOutputPreview: false,
+    });
+    expect(persisted[0]?.outputPreview).toBeUndefined();
+    expect(persisted[0]?.outputUpdatedAt).toBeUndefined();
+  });
+
+  it("keeps opted-in command history previews after the pane is removed", () => {
+    const opened = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      sampleHosts[0]
+    );
+    const tabId = opened.tabs[0]!.id;
+    const paneId = opened.tabs[0]!.paneIds[0]!;
+    const recorded = recordPaneCommandHistory(
+      {
+        ...opened,
+        commandHistory: [],
+      },
+      paneId,
+      "uptime",
+      "queued"
+    );
+    const entryId = recorded.commandHistory[0]!.id;
+    const updated = appendPaneCommandHistoryOutput(recorded, entryId, "load average: 1.00");
+    const closed = closeSessionTab(updated, tabId);
+    const persisted = sanitizePersistedCommandHistory(updated.commandHistory, closed.panes);
+
+    expect(closed.panes[paneId]).toBeUndefined();
+    expect(persisted[0]).toMatchObject({
+      paneId,
+      persistOutputPreview: true,
+      outputPreview: "load average: 1.00",
+    });
+    expect(persisted[0]?.outputUpdatedAt).toBeDefined();
+  });
+
   it("maps protocol-aware panes to their executable transports", () => {
     const telnetHost = {
       ...sampleHosts[0],

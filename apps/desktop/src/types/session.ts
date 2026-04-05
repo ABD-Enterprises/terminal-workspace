@@ -25,6 +25,7 @@ export interface SessionCommandHistoryEntry {
   transport: SessionTransport;
   command: string;
   source: SessionCommandHistorySource;
+  persistOutputPreview?: boolean;
   outputPreview?: string;
   outputUpdatedAt?: string;
   createdAt: string;

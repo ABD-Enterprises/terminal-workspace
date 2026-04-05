@@ -801,6 +801,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     nativeBridgeEnabled,
     appendCommandOutput,
     recordPaneCommand,
+    protocolLabel,
     setPaneBackendSession,
     setPaneReconnectOnRestore,
     setPaneState,

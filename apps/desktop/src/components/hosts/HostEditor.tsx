@@ -16,7 +16,10 @@ import {
   type HostRecord,
   type HostFormValues,
 } from "../../types/host";
-import { useConnectionSecretsStore } from "../../store/connection-secrets-store";
+import {
+  type ConnectionSecretRecord,
+  useConnectionSecretsStore,
+} from "../../store/connection-secrets-store";
 import { useHostsStore } from "../../store/hosts-store";
 import { Modal } from "../common/Modal";
 
@@ -30,27 +33,51 @@ interface HostEditorProps {
 const fieldClassName =
   "mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20";
 
-export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
-  const hosts = useHostsStore((state) => state.hosts);
-  const runtimeSecrets = useConnectionSecretsStore((state) =>
-    host ? state.secretsByHostId[host.id] : undefined
-  );
-  const hydrateHostSecrets = useConnectionSecretsStore((state) => state.hydrateHostSecrets);
-  const formId = host ? `host-editor-${host.id}` : "host-editor-new";
+interface RuntimeStatusMessage {
+  available: boolean;
+  installHint?: string;
+  message: string;
+}
+
+interface HostEditorContentProps extends HostEditorProps {
+  formId: string;
+  hosts: HostRecord[];
+  runtimeSecrets?: ConnectionSecretRecord;
+  hydrateHostSecrets: (hostId: string) => Promise<ConnectionSecretRecord | undefined>;
+}
+
+function buildHostEditorValues(
+  host?: HostRecord,
+  runtimeSecrets?: Pick<ConnectionSecretRecord, "password" | "passphrase">
+) {
+  if (!host) {
+    return emptyHostFormValues;
+  }
+
+  return {
+    ...hostToFormValues(host),
+    password: runtimeSecrets?.password ?? "",
+    passphrase: runtimeSecrets?.passphrase ?? "",
+  };
+}
+
+function HostEditorContent({
+  formId,
+  hosts,
+  open,
+  host,
+  runtimeSecrets,
+  hydrateHostSecrets,
+  onClose,
+  onSave,
+}: HostEditorContentProps) {
   const [values, setValues] = useState<HostFormValues>(() =>
-    host
-      ? {
-          ...hostToFormValues(host),
-          password: runtimeSecrets?.password ?? "",
-          passphrase: runtimeSecrets?.passphrase ?? "",
-        }
-      : emptyHostFormValues
+    buildHostEditorValues(host, runtimeSecrets)
   );
   const nativeSecretStorage = isTauriRuntime();
   const [runtimeStatusMessage, setRuntimeStatusMessage] = useState<{
-    available: boolean;
-    installHint?: string;
-    message: string;
+    protocol: HostFormValues["protocol"];
+    status: RuntimeStatusMessage;
   } | null>(null);
   const supportsCredentials = hostSupportsCredentialPrompt(values.protocol);
   const supportsJumpHosts = hostSupportsJumpHosts(values.protocol);
@@ -84,22 +111,6 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
   );
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    setValues(
-      host
-        ? {
-            ...hostToFormValues(host),
-            password: runtimeSecrets?.password ?? "",
-            passphrase: runtimeSecrets?.passphrase ?? "",
-          }
-        : emptyHostFormValues
-    );
-  }, [host, open, runtimeSecrets?.passphrase, runtimeSecrets?.password]);
-
-  useEffect(() => {
     if (!open || !host) {
       return;
     }
@@ -125,23 +136,25 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
 
   useEffect(() => {
     if (!open) {
-      setRuntimeStatusMessage(null);
       return;
     }
 
     let cancelled = false;
-    setRuntimeStatusMessage(null);
+    const protocol = values.protocol;
 
-    void getProtocolRuntimeStatus(values.protocol)
+    void getProtocolRuntimeStatus(protocol)
       .then((status) => {
         if (cancelled) {
           return;
         }
 
         setRuntimeStatusMessage({
-          available: status.available,
-          installHint: status.installHint,
-          message: status.message,
+          protocol,
+          status: {
+            available: status.available,
+            installHint: status.installHint,
+            message: status.message,
+          },
         });
       })
       .catch((error) => {
@@ -150,9 +163,14 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
         }
 
         setRuntimeStatusMessage({
-          available: false,
-          message:
-            error instanceof Error ? error.message : "Unable to determine protocol runtime availability.",
+          protocol,
+          status: {
+            available: false,
+            message:
+              error instanceof Error
+                ? error.message
+                : "Unable to determine protocol runtime availability.",
+          },
         });
       });
 
@@ -160,6 +178,9 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
       cancelled = true;
     };
   }, [open, values.protocol]);
+
+  const visibleRuntimeStatusMessage =
+    runtimeStatusMessage?.protocol === values.protocol ? runtimeStatusMessage.status : null;
 
   return (
     <Modal
@@ -494,19 +515,19 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
           ? "Passwords and passphrases stay outside the host inventory and persist through macOS Keychain in the native shell."
           : "Passwords and passphrases stay in memory only in the browser demo and are not exported with host metadata."}
       </div>
-      {runtimeStatusMessage ? (
-      <div
-        className={`mt-4 rounded-2xl border px-4 py-3 text-sm leading-6 ${
-          runtimeStatusMessage.available
-            ? "border-emerald-400/20 bg-emerald-400/5 text-emerald-100"
-            : "border-rose-400/30 bg-rose-400/10 text-rose-100"
-        }`}
-      >
-        {runtimeStatusMessage.message}
-        {runtimeStatusMessage.installHint ? (
-          <p className="mt-2 text-xs text-rose-100/80">{runtimeStatusMessage.installHint}</p>
-        ) : null}
-      </div>
+      {visibleRuntimeStatusMessage ? (
+        <div
+          className={`mt-4 rounded-2xl border px-4 py-3 text-sm leading-6 ${
+            visibleRuntimeStatusMessage.available
+              ? "border-emerald-400/20 bg-emerald-400/5 text-emerald-100"
+              : "border-rose-400/30 bg-rose-400/10 text-rose-100"
+          }`}
+        >
+          {visibleRuntimeStatusMessage.message}
+          {visibleRuntimeStatusMessage.installHint ? (
+            <p className="mt-2 text-xs text-rose-100/80">{visibleRuntimeStatusMessage.installHint}</p>
+          ) : null}
+        </div>
       ) : null}
       {supportsTrustedKeys ? (
       <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-slate-300">
@@ -538,5 +559,28 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
       </label>
       </form>
     </Modal>
+  );
+}
+
+export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
+  const hosts = useHostsStore((state) => state.hosts);
+  const runtimeSecrets = useConnectionSecretsStore((state) =>
+    host ? state.secretsByHostId[host.id] : undefined
+  );
+  const hydrateHostSecrets = useConnectionSecretsStore((state) => state.hydrateHostSecrets);
+  const formId = host ? `host-editor-${host.id}` : "host-editor-new";
+
+  return (
+    <HostEditorContent
+      key={`${formId}-${open ? "open" : "closed"}`}
+      formId={formId}
+      hosts={hosts}
+      open={open}
+      host={host}
+      runtimeSecrets={runtimeSecrets}
+      hydrateHostSecrets={hydrateHostSecrets}
+      onClose={onClose}
+      onSave={onSave}
+    />
   );
 }

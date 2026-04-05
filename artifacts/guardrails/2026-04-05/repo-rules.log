@@ -1,0 +1,5 @@
+Scoped eslint checks passed for HostEditor, TerminalPane, sessions-store, session types, and guardrails validator.
+2026-04-05 review-fix pass
+- Confirmed required AI workflow files remain present.
+- Confirmed `.gitignore` still ignores `state/implementation_notes.md` and `state/validation_report.md`.
+- Returned `state/controller.md` and `state/current_task.md` to `ready_for_review` before rerunning guardrails.

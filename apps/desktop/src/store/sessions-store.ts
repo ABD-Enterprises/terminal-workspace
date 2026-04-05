@@ -23,12 +23,33 @@ const fallbackStorage: StateStorage = {
 
 const SESSION_HISTORY_LIMIT = 200;
 const SESSION_HISTORY_OUTPUT_LIMIT = 600;
+const ANSI_ESCAPE_CHARACTER = String.fromCharCode(27);
+const TERMINAL_BELL_CHARACTER = String.fromCharCode(7);
+const ANSI_ESCAPE_SEQUENCE_REGEX = new RegExp(
+  `${ANSI_ESCAPE_CHARACTER}\\[[0-9;?]*[ -/]*[@-~]`,
+  "g"
+);
+const TERMINAL_BELL_REGEX = new RegExp(TERMINAL_BELL_CHARACTER, "g");
+
+function limitCommandHistory(commandHistory: SessionCommandHistoryEntry[]) {
+  return commandHistory.slice(0, SESSION_HISTORY_LIMIT);
+}
 
 function normalizePersistedPane(pane: SessionPane): SessionPane {
   return {
     ...pane,
     persistOutputPreview: pane.persistOutputPreview ?? true,
   };
+}
+
+function resolvePersistOutputPreview(
+  entry: SessionCommandHistoryEntry,
+  panes: Record<string, SessionPane>
+) {
+  const pane = panes[entry.paneId];
+  return pane
+    ? normalizePersistedPane(pane).persistOutputPreview
+    : entry.persistOutputPreview ?? false;
 }
 
 function sanitizePersistedWorkspace(
@@ -60,24 +81,29 @@ export function sanitizePersistedCommandHistory(
   commandHistory: SessionCommandHistoryEntry[],
   panes: Record<string, SessionPane>
 ) {
-  return commandHistory.slice(0, SESSION_HISTORY_LIMIT).map<SessionCommandHistoryEntry>((entry) => {
-    const pane = panes[entry.paneId];
-    const persistOutputPreview = pane ? normalizePersistedPane(pane).persistOutputPreview : true;
+  return limitCommandHistory(commandHistory).map<SessionCommandHistoryEntry>((entry) => {
+    const persistOutputPreview = resolvePersistOutputPreview(entry, panes);
     if (persistOutputPreview) {
-      return entry;
+      return {
+        ...entry,
+        persistOutputPreview: true,
+      };
     }
 
-    const { outputPreview: _outputPreview, outputUpdatedAt: _outputUpdatedAt, ...redactedEntry } =
-      entry;
-    return redactedEntry;
+    return {
+      ...entry,
+      persistOutputPreview: false,
+      outputPreview: undefined,
+      outputUpdatedAt: undefined,
+    };
   });
 }
 
 function normalizeCommandHistoryOutput(output: string) {
   return output
-    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(ANSI_ESCAPE_SEQUENCE_REGEX, "")
     .replace(/\r/g, "")
-    .replace(/\u0007/g, "")
+    .replace(TERMINAL_BELL_REGEX, "")
     .trim();
 }
 
@@ -304,12 +330,16 @@ export function updatePaneReconnectPreference(
   };
 }
 
-export function updatePanePreviewPersistence<T extends SessionWorkspaceState>(
+export function updatePanePreviewPersistence<
+  T extends SessionWorkspaceState & { commandHistory?: SessionCommandHistoryEntry[] },
+>(
   state: T,
   paneId: string,
   persistOutputPreview: boolean
 ): T;
-export function updatePanePreviewPersistence<T extends SessionWorkspaceState>(
+export function updatePanePreviewPersistence<
+  T extends SessionWorkspaceState & { commandHistory?: SessionCommandHistoryEntry[] },
+>(
   state: T,
   paneId: string,
   persistOutputPreview: boolean
@@ -319,12 +349,19 @@ export function updatePanePreviewPersistence<T extends SessionWorkspaceState>(
     return state;
   }
 
+  const nextCommandHistory = Array.isArray(state.commandHistory)
+    ? state.commandHistory.map((entry) =>
+        entry.paneId === paneId ? { ...entry, persistOutputPreview } : entry
+      )
+    : undefined;
+
   return {
     ...state,
     panes: {
       ...state.panes,
       [paneId]: touchPane(pane, { persistOutputPreview }),
     },
+    ...(nextCommandHistory ? { commandHistory: nextCommandHistory } : {}),
   } as T;
 }
 
@@ -465,12 +502,13 @@ export function recordPaneCommandHistory(
     transport: pane.transport,
     command: trimmedCommand,
     source,
+    persistOutputPreview: normalizePersistedPane(pane).persistOutputPreview,
     createdAt: new Date().toISOString(),
   };
 
   return {
     ...state,
-    commandHistory: sanitizePersistedCommandHistory([entry, ...state.commandHistory], state.panes),
+    commandHistory: limitCommandHistory([entry, ...state.commandHistory]),
   };
 }
 
