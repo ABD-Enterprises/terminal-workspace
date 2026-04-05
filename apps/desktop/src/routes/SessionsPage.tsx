@@ -89,6 +89,7 @@ export function SessionsPage() {
             />
             <button
               type="button"
+              aria-label="Clear saved command history"
               onClick={() => clearCommandHistory()}
               disabled={commandHistory.length === 0}
               className="rounded-2xl border border-slate-700 px-3 py-2 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600"
