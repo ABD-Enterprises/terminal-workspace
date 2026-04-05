@@ -129,7 +129,10 @@ export function SessionsPage() {
                       {entry.command}
                     </p>
                     {entry.outputPreview ? (
-                      <p className="mt-2 line-clamp-3 whitespace-pre-wrap rounded-2xl border border-slate-800/80 bg-slate-900/70 px-3 py-2 font-mono text-xs text-slate-300">
+                      <p
+                        title={entry.outputPreview}
+                        className="mt-2 line-clamp-3 whitespace-pre-wrap rounded-2xl border border-slate-800/80 bg-slate-900/70 px-3 py-2 font-mono text-xs text-slate-300"
+                      >
                         {entry.outputPreview}
                       </p>
                     ) : null}
