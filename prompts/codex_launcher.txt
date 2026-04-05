@@ -3,7 +3,7 @@ Read /ai/bootstrap.md and /state/controller.md first.
 You are Codex.
 Your role is implementation only.
 
-If /state/controller.md status is not ready_for_codex:
+If /state/controller.md status is neither ready_for_codex nor review_failed_fix_required:
 - do nothing
 - report that no Codex action is needed
 
@@ -13,17 +13,30 @@ If status is ready_for_codex:
 - implement only the current task
 - write /state/implementation_notes.md
 - run relevant validation for the task
-- if validation passes, update /state/controller.md to status: ready_for_gemini
+- if local validation passes, update /state/controller.md to status: ready_for_review
+- if blocked, update /state/controller.md to status: blocked with exact reason
+
+If status is review_failed_fix_required:
+- read /state/current_task.md
+- read /state/implementation_notes.md
+- read /state/validation_report.md if it contains review feedback
+- fix only the issues raised by CI or PR review
+- run relevant local validation
+- update /state/implementation_notes.md
+- set /state/controller.md to status: ready_for_review
+- if review feedback reveals a planning problem, set /state/controller.md to status: ready_for_claude
 - if blocked, update /state/controller.md to status: blocked with exact reason
 
 Rules:
 - do not re-plan the project
+- escalate to Claude only when review feedback reveals a planning problem
 - do not broaden scope
 - do not create new systems unless explicitly required by the current task
 - do not make docs-only commits
 - do not make state-only commits
 - keep changes small and local
 - commit only if validation passes
+- final review and validation happen in GitHub CI and PR review
 
 Output format:
 CHANGED

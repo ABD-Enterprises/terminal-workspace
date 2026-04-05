@@ -6,6 +6,7 @@
 - No unrelated file churn
 - No docs-only or state-only commit
 - Changes stay within current task scope unless required for the fix
+- Review readiness means the branch is pushed, the PR is opened or updated, relevant local validation passed, and GitHub CI plus review feedback are available
 
 ## Per-task acceptance
 

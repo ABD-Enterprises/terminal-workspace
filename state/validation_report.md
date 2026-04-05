@@ -1,5 +1,7 @@
 # Validation Report
 
+This file may summarize local validation, GitHub CI results, and GitHub review findings for the current task.
+
 ## Task
 T1
 

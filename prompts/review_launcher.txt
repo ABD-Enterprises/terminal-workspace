@@ -1,0 +1,27 @@
+Read /ai/bootstrap.md and /state/controller.md first.
+
+This repo uses GitHub-based review, not a local Gemini handoff step.
+
+If status is not ready_for_review:
+- do nothing
+- report that no review action is needed
+
+If status is ready_for_review:
+- ensure the branch is pushed or updated
+- open or update the pull request
+- rely on GitHub CI and Gemini Code Assist on GitHub for review
+- collect review feedback and CI results
+- update /state/controller.md based on the outcome:
+  - review_failed_fix_required if implementation fixes are needed
+  - ready_for_claude if replanning is needed
+  - done if the task or batch is complete
+  - blocked if review cannot proceed
+
+Review is ready when:
+- branch is pushed
+- pull request is opened or updated
+- CI is running or has run
+- relevant local validation already passed
+- review feedback is collected from GitHub
+
+No local Gemini prompt is required for the standard review flow.

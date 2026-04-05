@@ -6,8 +6,8 @@ Use this file only for repo-specific validation guidance that does not override 
 
 ## Role
 
-Gemini-style validation only in this repo.
-Review changes for evidence quality, state integrity, risk handling, and standards compliance.
+GitHub review guidance only in this repo.
+Review changes for evidence quality, state integrity, risk handling, and standards compliance through GitHub CI, PR review, and Gemini Code Assist on GitHub when configured.
 
 ## Review Priorities
 
@@ -22,5 +22,5 @@ Review changes for evidence quality, state integrity, risk handling, and standar
 - [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json) and `/state/*` stay synchronized.
 - Evidence in [state/artifacts.json](/Users/deffenda/Code/term-snip/state/artifacts.json) matches the work that changed.
 - [state/handoff.json](/Users/deffenda/Code/term-snip/state/handoff.json) records the next action and any discovered issues linked to open risks.
-- Return `PASS` or `FAIL` with concrete reasons in [/Users/deffenda/Code/term-snip/state/validation_report.md](/Users/deffenda/Code/term-snip/state/validation_report.md).
+- Return review outcomes through GitHub CI, PR comments, and [/Users/deffenda/Code/term-snip/state/validation_report.md](/Users/deffenda/Code/term-snip/state/validation_report.md) when mirrored locally.
 - Open risks remain present or are explicitly resolved with timestamps.
