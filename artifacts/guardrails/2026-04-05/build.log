@@ -10,14 +10,14 @@ computing gzip size...
 dist/index.html                          0.46 kB │ gzip:   0.29 kB
 dist/assets/SessionsPage-LcAfv9l9.css    4.35 kB │ gzip:   1.67 kB
 dist/assets/index-DfEnj4XS.css          26.92 kB │ gzip:   5.84 kB
-dist/assets/EmptyState-ml4CSxUI.js       0.61 kB │ gzip:   0.34 kB
-dist/assets/ConfirmDialog-BG-eCDBn.js    0.73 kB │ gzip:   0.38 kB
+dist/assets/EmptyState-lbWvADU5.js       0.61 kB │ gzip:   0.34 kB
+dist/assets/ConfirmDialog-B1H0tS5p.js    0.73 kB │ gzip:   0.38 kB
 dist/assets/event-OkWMoV8X.js            1.16 kB │ gzip:   0.58 kB
-dist/assets/SnippetsPage-MiMpq01G.js    15.38 kB │ gzip:   3.78 kB
-dist/assets/KeysPage-Dl3H5ROg.js        15.63 kB │ gzip:   3.69 kB
-dist/assets/TransfersPage-BeCZKup5.js   16.71 kB │ gzip:   4.42 kB
-dist/assets/HostsPage-B0Cb0vd7.js       27.58 kB │ gzip:   6.90 kB
-dist/assets/SettingsPage-BETQjFkR.js    33.31 kB │ gzip:   8.10 kB
-dist/assets/SessionsPage-4mlDsoYg.js   316.81 kB │ gzip:  79.64 kB
-dist/assets/index-C2gsL47D.js          334.53 kB │ gzip: 103.48 kB
-✓ built in 1.72s
+dist/assets/SnippetsPage-B3Jd1yzB.js    15.38 kB │ gzip:   3.78 kB
+dist/assets/KeysPage-4bh52-Eo.js        15.63 kB │ gzip:   3.69 kB
+dist/assets/TransfersPage-DUN7GLuX.js   16.71 kB │ gzip:   4.42 kB
+dist/assets/HostsPage-B7W7Xglf.js       27.58 kB │ gzip:   6.90 kB
+dist/assets/SettingsPage-c8FGtuZn.js    33.31 kB │ gzip:   8.10 kB
+dist/assets/SessionsPage-BWr2_9az.js   316.81 kB │ gzip:  79.64 kB
+dist/assets/index-DJmed1gQ.js          334.53 kB │ gzip: 103.48 kB
+✓ built in 1.83s

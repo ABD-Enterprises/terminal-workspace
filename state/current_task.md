@@ -8,5 +8,5 @@ owner: Codex
 current_state: ready_for_review
 failure_type: none
 acceptance_criteria_reference: /ai/acceptance.md#t1
-last_action: Materialized per-session decrypted identity copies for passphrase-protected native SSH keys, reran `npm run native:fixtures`, and restored the ignored localhost transport fixture to green.
-next_action: Let GitHub PR #1 rerun validation on `codex/t1-output-preview-persistence-control`, then address any new CI or review feedback on the same task.
+last_action: Refreshed the guardrails evidence and state files for the current rerun commit, corrected the diff flag in `state/artifacts.json`, and reran the guardrails validator against `origin/main`.
+next_action: Push `codex/t1-output-preview-persistence-control` and wait for PR #1 validation plus review to rerun.

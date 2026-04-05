@@ -5,10 +5,10 @@
 
  RUN  v3.2.4 /Users/deffenda/Code/term-snip
 
- ✓ apps/desktop/src/store/sessions-store.test.ts (13 tests) 6ms
+ ✓ apps/desktop/src/store/sessions-store.test.ts (13 tests) 7ms
 
  Test Files  1 passed (1)
       Tests  13 passed (13)
-   Start at  12:11:44
-   Duration  430ms (transform 48ms, setup 0ms, collect 58ms, tests 6ms, environment 0ms, prepare 50ms)
+   Start at  15:14:06
+   Duration  372ms (transform 54ms, setup 0ms, collect 63ms, tests 7ms, environment 0ms, prepare 75ms)
 
