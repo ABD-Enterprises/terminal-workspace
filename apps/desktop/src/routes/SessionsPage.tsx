@@ -35,6 +35,7 @@ export function SessionsPage() {
         const host = hostMap.get(entry.hostId);
         return [
           entry.command,
+          entry.outputPreview ?? "",
           host?.label ?? "",
           host?.hostname ?? "",
           host ? formatHostProtocol(host.protocol) : "",
@@ -121,7 +122,17 @@ export function SessionsPage() {
                         })}
                       </span>
                     </div>
-                    <p className="mt-1 truncate font-mono text-sm text-emerald-100">{entry.command}</p>
+                    <p
+                      title={entry.command}
+                      className="mt-1 truncate font-mono text-sm text-emerald-100"
+                    >
+                      {entry.command}
+                    </p>
+                    {entry.outputPreview ? (
+                      <p className="mt-2 line-clamp-3 whitespace-pre-wrap rounded-2xl border border-slate-800/80 bg-slate-900/70 px-3 py-2 font-mono text-xs text-slate-300">
+                        {entry.outputPreview}
+                      </p>
+                    ) : null}
                   </div>
                   <button
                     type="button"
