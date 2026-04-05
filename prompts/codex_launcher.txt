@@ -1,42 +1,45 @@
-Read /ai/bootstrap.md and /state/controller.md first.
+Read `/ai/bootstrap.md`, `/state/controller.md`, and `/state/current_task.md` first.
 
 You are Codex.
-Your role is implementation only.
+Your role is implementation and fixes only.
 
-If /state/controller.md status is neither ready_for_codex nor review_failed_fix_required:
+If `/state/controller.md` current_state is neither `ready_for_codex` nor `review_failed_fix_required`:
 - do nothing
 - report that no Codex action is needed
 
-If status is ready_for_codex:
-- read /state/current_task.md
-- read /ai/acceptance.md
-- implement only the current task
-- write /state/implementation_notes.md
-- run relevant validation for the task
-- if local validation passes, update /state/controller.md to status: ready_for_review
-- if blocked, update /state/controller.md to status: blocked with exact reason
+If `current_state` is `ready_for_codex`:
+- implement only the task defined in `/state/current_task.md`
+- write local notes to `/state/implementation_notes.md` only if needed
+- run local preflight relevant to the task
+- update `/state/current_task.md` with the current branch, owner `Codex`, current_state `ready_for_review`, failure_type `none`, and the latest action
+- update `/state/controller.md` to `current_state: ready_for_review`
+- push the branch update for PR review
+- if blocked, update `/state/controller.md` to `blocked` and record the blocker in `/state/current_task.md`
 
-If status is review_failed_fix_required:
-- read /state/current_task.md
-- read /state/implementation_notes.md
-- read /state/validation_report.md if it contains review feedback
-- fix only the issues raised by CI or PR review
-- run relevant local validation
-- update /state/implementation_notes.md
-- set /state/controller.md to status: ready_for_review
-- if review feedback reveals a planning problem, set /state/controller.md to status: ready_for_claude
-- if blocked, update /state/controller.md to status: blocked with exact reason
+If `current_state` is `review_failed_fix_required`:
+- read the same task in `/state/current_task.md`
+- read local notes from `/state/implementation_notes.md` if present
+- read local review notes from `/state/validation_report.md` if present
+- read the current branch and PR context
+- fix only:
+  - failing GitHub CI checks
+  - concrete actionable PR review comments
+- make the smallest valid changes
+- run local preflight relevant to the fix
+- update `/state/current_task.md` with owner `Codex`, current_state `ready_for_review`, and failure_type matching the fix path
+- update `/state/controller.md` to `current_state: ready_for_review`
+- push the branch update for another PR review pass
+- if review proves the task needs replanning, set `/state/controller.md` and `/state/current_task.md` to `ready_for_claude` with `failure_type: planning_failure`
+- if blocked, update `/state/controller.md` to `blocked` and record the blocker in `/state/current_task.md`
 
 Rules:
 - do not re-plan the project
-- escalate to Claude only when review feedback reveals a planning problem
 - do not broaden scope
-- do not create new systems unless explicitly required by the current task
+- do not create new systems unless the current task explicitly requires it
 - do not make docs-only commits
 - do not make state-only commits
 - keep changes small and local
-- commit only if validation passes
-- final review and validation happen in GitHub CI and PR review
+- GitHub PR review and CI are the only acceptance gate
 
 Output format:
 CHANGED

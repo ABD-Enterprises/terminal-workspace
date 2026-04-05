@@ -7,12 +7,13 @@ A local-first macOS SSH client starter repo inspired by the usability patterns o
 This repository is self-contained and stateful:
 
 - first-read AI workflow entrypoint lives in [ai/bootstrap.md](/Users/deffenda/Code/term-snip/ai/bootstrap.md)
+- execution handoff state lives in [state/controller.md](/Users/deffenda/Code/term-snip/state/controller.md) and [state/current_task.md](/Users/deffenda/Code/term-snip/state/current_task.md)
 - canonical roadmap state lives in [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json)
 - shared execution state lives in `/state/*`
 - build, test, run, and deploy evidence live in [state/artifacts.json](/Users/deffenda/Code/term-snip/state/artifacts.json)
 - agent and prompt contracts live in `/agents` and `/prompts`
 - runtime enforcement lives in [tools/validators/enforce-runtime-guardrails.js](/Users/deffenda/Code/term-snip/tools/validators/enforce-runtime-guardrails.js)
-- PR enforcement lives in [.github/workflows/ci.yml](/Users/deffenda/Code/term-snip/.github/workflows/ci.yml)
+- PR review and CI are the only validation gate, enforced by [.github/workflows/ci.yml](/Users/deffenda/Code/term-snip/.github/workflows/ci.yml) and [.github/workflows/validate.yml](/Users/deffenda/Code/term-snip/.github/workflows/validate.yml)
 
 ## Current Focus
 

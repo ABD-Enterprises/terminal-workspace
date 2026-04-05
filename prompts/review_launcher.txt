@@ -1,27 +1,30 @@
-Read /ai/bootstrap.md and /state/controller.md first.
+Read `/ai/bootstrap.md`, `/state/controller.md`, and `/state/current_task.md` first.
 
-This repo uses GitHub-based review, not a local Gemini handoff step.
+This repo uses PR-driven review, not a local Gemini handoff step.
 
-If status is not ready_for_review:
+If `/state/controller.md` current_state is not `ready_for_review`:
 - do nothing
 - report that no review action is needed
 
-If status is ready_for_review:
-- ensure the branch is pushed or updated
-- open or update the pull request
+If `current_state` is `ready_for_review`:
+- ensure the active branch is pushed or updated
+- ensure the pull request is opened or updated
 - rely on GitHub CI and Gemini Code Assist on GitHub for review
-- collect review feedback and CI results
-- update /state/controller.md based on the outcome:
-  - review_failed_fix_required if implementation fixes are needed
-  - ready_for_claude if replanning is needed
-  - done if the task or batch is complete
-  - blocked if review cannot proceed
+- collect required check results and actionable PR comments
+- update `/state/controller.md` and `/state/current_task.md` based on the outcome:
+  - `review_failed_fix_required` with `failure_type: ci_failure` when any GitHub check fails or required CI is not green
+  - `review_failed_fix_required` with `failure_type: review_failure` when actionable PR review comments remain
+  - `ready_for_claude` with `failure_type: planning_failure` when review proves the task needs replanning
+  - `done` with `failure_type: none` when all required checks are green and no blocking review comments remain
+  - `blocked` when the branch, PR, or review system cannot proceed
 
-Review is ready when:
-- branch is pushed
-- pull request is opened or updated
-- CI is running or has run
-- relevant local validation already passed
-- review feedback is collected from GitHub
+Review is FAILED when:
+- any GitHub check fails
+- required CI is not green
+- actionable PR review comments remain
+
+Review is PASSED when:
+- all required GitHub checks are green
+- no blocking PR review comments remain
 
 No local Gemini prompt is required for the standard review flow.

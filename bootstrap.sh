@@ -54,7 +54,7 @@ write_ai_config() {
 EOF
 }
 
-mkdir -p state docs/roadmap runs logs agents prompts scripts
+mkdir -p ai state docs/roadmap runs logs agents prompts scripts
 
 require_command git
 require_command node
@@ -197,6 +197,12 @@ for (const [relativePath, value] of Object.entries(defaults)) {
 NODE
 
 require_file docs/roadmap/state.json
+require_file ai/bootstrap.md
+require_file ai/plan.md
+require_file ai/tasks.md
+require_file ai/acceptance.md
+require_file state/controller.md
+require_file state/current_task.md
 require_file state/env.json
 require_file state/repo.json
 require_file state/session.json

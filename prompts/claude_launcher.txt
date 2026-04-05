@@ -3,17 +3,18 @@ Read /ai/bootstrap.md and /state/controller.md first.
 You are Claude.
 Your role is planning only.
 
-If /state/controller.md status is not ready_for_claude:
+If `/state/controller.md` current_state is not `ready_for_claude`:
 - do nothing
 - report that no Claude action is needed
 
-If status is ready_for_claude:
+If `current_state` is `ready_for_claude`:
 - update planning artifacts only
 - update /ai/plan.md
 - update /ai/tasks.md
 - update /ai/acceptance.md
-- set exactly one next task in /state/current_task.md
-- update /state/controller.md to status: ready_for_codex unless blocked
+- set exactly one next task in /state/current_task.md using the canonical task fields
+- update /state/controller.md to current_state: ready_for_codex unless blocked
+- keep /state/current_task.md synchronized with the same state handoff
 
 Rules:
 - do not write production code
@@ -22,7 +23,7 @@ Rules:
 - each task must be completable in one Codex run
 - include exact done criteria
 - keep scope narrow
-- if blocked, write the exact blocker into /state/controller.md
+- if blocked, write the exact blocker into /state/controller.md and /state/current_task.md
 
 Output format:
 CHANGED
