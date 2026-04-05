@@ -1024,18 +1024,21 @@ fn native_external_protocol_runtime_fixture_flow() {
         "Telnet client resolved for native session launch."
     );
     assert_eq!(telnet_status.resolved_path.as_deref(), Some(telnet_path.to_string_lossy().as_ref()));
+    assert!(Path::new(telnet_status.resolved_path.as_deref().unwrap_or_default()).is_file());
     assert!(serial_status.available);
     assert_eq!(serial_status.protocol, "serial");
     assert_eq!(serial_status.client.as_deref(), Some("screen"));
     assert_eq!(serial_status.install_hint, None);
     assert_eq!(serial_status.message, "Serial sessions will launch with screen.");
     assert_eq!(serial_status.resolved_path.as_deref(), Some(screen_path.to_string_lossy().as_ref()));
+    assert!(Path::new(serial_status.resolved_path.as_deref().unwrap_or_default()).is_file());
     assert!(mosh_status.available);
     assert_eq!(mosh_status.protocol, "mosh");
     assert_eq!(mosh_status.client.as_deref(), Some("mosh"));
     assert_eq!(mosh_status.install_hint, None);
     assert_eq!(mosh_status.message, "Mosh client resolved for native session launch.");
     assert_eq!(mosh_status.resolved_path.as_deref(), Some(mosh_path.to_string_lossy().as_ref()));
+    assert!(Path::new(mosh_status.resolved_path.as_deref().unwrap_or_default()).is_file());
 
     let telnet_output =
         run_external_protocol_fixture(&telnet_host, "TELNET_INPUT:status", Some("status"));
