@@ -73,6 +73,11 @@ export function SessionsPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-500">
+              {filteredHistory.length} shown{filteredHistory.length !== commandHistory.length
+                ? ` of ${commandHistory.length}`
+                : ""}
+            </span>
             <input
               type="search"
               value={historyQuery}
