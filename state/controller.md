@@ -1,6 +1,6 @@
 # Controller State
 
-current_state: ready_for_claude
+current_state: ready_for_codex
 current_task: T1
 
 allowed_transitions:
