@@ -1,0 +1,5 @@
+# Disable automatic Gemini reviews to conserve credits.
+# Request manually with @gemini-code-assist in a PR comment when needed.
+pullRequests:
+  review:
+    enabled: false
