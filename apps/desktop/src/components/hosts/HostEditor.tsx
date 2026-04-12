@@ -88,6 +88,9 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
       return;
     }
 
+    // The editor intentionally resets its local draft when the modal opens or
+    // when hydrated secrets change for the active host.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setValues(
       host
         ? {
@@ -125,6 +128,7 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
 
   useEffect(() => {
     if (!open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRuntimeStatusMessage(null);
       return;
     }

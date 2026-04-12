@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-04-05T11:48:23Z",
+  "last_updated": "2026-04-12T00:00:00Z",
   "code_changes_present": true,
   "claims": {
     "implementation": "in_progress",
@@ -11,34 +11,32 @@
     "build": {
       "status": "passed",
       "reason": "",
-      "updated_at": "2026-04-05T11:48:23Z",
+      "updated_at": "2026-04-12T00:00:00Z",
       "paths": [
-        "artifacts/guardrails/2026-04-05/build.log"
+        "state/validation_report.md"
       ]
     },
     "test": {
       "status": "passed",
       "reason": "",
-      "updated_at": "2026-04-05T11:48:23Z",
+      "updated_at": "2026-04-12T00:00:00Z",
       "paths": [
-        "artifacts/guardrails/2026-04-05/test.log"
+        "state/validation_report.md"
       ]
     },
     "run": {
       "status": "passed",
       "reason": "",
-      "updated_at": "2026-04-05T11:48:23Z",
+      "updated_at": "2026-04-12T00:00:00Z",
       "paths": [
-        "artifacts/guardrails/2026-04-05/setup.log",
-        "artifacts/guardrails/2026-04-05/guardrails.log",
-        "artifacts/guardrails/2026-04-05/repo-rules.log"
+        "state/validation_report.md"
       ]
     },
     "deploy": {
       "metadata_only": true,
       "status": "not_required",
       "reason": "Current phase is build-oriented and no deployment was executed in this diff.",
-      "updated_at": "2026-04-05T11:48:23Z",
+      "updated_at": "2026-04-12T00:00:00Z",
       "paths": []
     }
   }

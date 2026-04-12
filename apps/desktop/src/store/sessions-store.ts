@@ -23,6 +23,11 @@ const fallbackStorage: StateStorage = {
 
 const SESSION_HISTORY_LIMIT = 200;
 const SESSION_HISTORY_OUTPUT_LIMIT = 600;
+const ANSI_ESCAPE_SEQUENCE = new RegExp(
+  String.raw`\u001b\[[0-9;?]*[ -/]*[@-~]`,
+  "g"
+);
+const BELL_CHARACTER = new RegExp(String.raw`\u0007`, "g");
 
 function sanitizePersistedWorkspace(
   workspace: Pick<SessionWorkspaceState, "tabs" | "panes" | "activeTabId" | "lastRestoredAt">
@@ -50,9 +55,9 @@ function sanitizePersistedCommandHistory(commandHistory: SessionCommandHistoryEn
 
 function normalizeCommandHistoryOutput(output: string) {
   return output
-    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(ANSI_ESCAPE_SEQUENCE, "")
     .replace(/\r/g, "")
-    .replace(/\u0007/g, "")
+    .replace(BELL_CHARACTER, "")
     .trim();
 }
 

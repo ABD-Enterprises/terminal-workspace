@@ -10,3 +10,12 @@ state/implementation_notes.md
 state/validation_report.md
 
 *.tsbuildinfo
+
+!ai.config.json
+!state/tasks.json
+!state/risks.json
+!state/decisions.json
+!state/artifacts.json
+!state/handoff.json
+!state/implementation_notes.md
+!state/validation_report.md

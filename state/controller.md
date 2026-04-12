@@ -1,5 +1,6 @@
 # Controller State
 
+state: ready_for_codex
 current_state: ready_for_codex
 current_task: T1
 

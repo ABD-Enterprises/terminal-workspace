@@ -20,6 +20,10 @@ Repo files are the source of truth for execution state.
 7. Read `/state/implementation_notes.md` if it exists locally.
 8. Read `/state/validation_report.md` if it exists locally.
 
+## Standards reference
+
+This repo follows enterprise-ai-standards. The local validator runs via `scripts/validate.sh`. The authoritative standard is vendored at `project-manager/enterprise-ai-standards.md`.
+
 ## Canonical state model
 
 `ready_for_claude -> ready_for_codex -> ready_for_review -> review_failed_fix_required -> done | blocked`

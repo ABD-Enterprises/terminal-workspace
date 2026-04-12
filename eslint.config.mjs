@@ -24,6 +24,12 @@ export default tseslint.config(
     },
   },
   {
+    files: ["tools/validators/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+  {
     files: ["apps/desktop/src/**/*.{ts,tsx}", "apps/desktop/vite.config.ts"],
     languageOptions: {
       ecmaVersion: "latest",

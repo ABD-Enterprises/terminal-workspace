@@ -1,0 +1,41 @@
+name: AI Guardrails
+
+# Do NOT add macos-latest jobs here. Native app builds should use
+# a separate workflow with workflow_dispatch or release-only triggers.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  enforce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve base ref
+        id: base
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "sha=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Enforce runtime guardrails
+        run: |
+          node tools/validators/enforce-runtime-guardrails.js \
+            --repo . \
+            --config ai.config.json \
+            --base "${{ steps.base.outputs.sha }}"

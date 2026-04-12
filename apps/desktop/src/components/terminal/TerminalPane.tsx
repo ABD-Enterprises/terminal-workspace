@@ -795,6 +795,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     port,
     pane.id,
     privateKeyPath,
+    protocolLabel,
     nativeBridgeEnabled,
     appendCommandOutput,
     recordPaneCommand,
