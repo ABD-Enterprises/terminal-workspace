@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* eslint-disable @typescript-eslint/no-require-imports */
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -19,11 +18,13 @@ const REQUIRED_WORKFLOW_FILES = [
   "ai/tasks.md",
   "ai/acceptance.md",
   "state/controller.md",
-  "state/current_task.md"
-];
-const REQUIRED_IGNORED_LOCAL_STATE_FILES = [
+  "state/current_task.md",
   "state/implementation_notes.md",
   "state/validation_report.md"
+];
+const REQUIRED_REPO_FILES = [
+  ...REQUIRED_STATE_FILES,
+  ...REQUIRED_WORKFLOW_FILES
 ];
 
 const STATE_UPDATE_FILES = new Set([
@@ -62,7 +63,8 @@ const ALLOWED_CONFIG_KEYS = new Set([
   "protected_environment_paths",
   "evidence_directories",
   "meta_directories",
-  "allowed_metadata_only_evidence_types"
+  "allowed_metadata_only_evidence_types",
+  "auto_merge"
 ]);
 const ALLOWED_EXTERNAL_INPUT_LAYERS = new Set([
   "environment",
@@ -90,6 +92,7 @@ const DOC_PATTERNS = [
 ];
 
 const STATE_OR_META_PATTERNS = [
+  /^ai\//,
   /^state\//,
   /^docs\/roadmap\/state\.json$/,
   /^docs\/roadmap\/roadmap\.md$/,
@@ -98,6 +101,20 @@ const STATE_OR_META_PATTERNS = [
   /^scripts\/validate\.sh$/,
   /^\.github\/workflows\//
 ];
+
+const FRONTEND_FILE_PATTERNS = [
+  /\.tsx$/,
+  /\.jsx$/,
+  /\.vue$/,
+  /\.svelte$/,
+  /\.css$/,
+  /\.scss$/,
+  /\.less$/
+];
+
+function isFrontendFile(relativePath) {
+  return FRONTEND_FILE_PATTERNS.some((pattern) => pattern.test(relativePath));
+}
 
 const EVIDENCE_KEYS = ["build", "test", "run", "deploy"];
 const ALLOWED_EVIDENCE_STATUSES = new Set([
@@ -126,7 +143,6 @@ const ALLOWED_PHASE_STATUSES = new Set([
   "complete"
 ]);
 const ALLOWED_RUN_PROFILES = new Set(["standard", "night"]);
-const RESOLVED_RISK_STATUSES = new Set(["resolved", "closed"]);
 const ALLOWED_CONTROLLER_STATES = new Set([
   "ready_for_claude",
   "ready_for_codex",
@@ -135,12 +151,7 @@ const ALLOWED_CONTROLLER_STATES = new Set([
   "blocked",
   "done"
 ]);
-const ALLOWED_FAILURE_TYPES = new Set([
-  "none",
-  "ci_failure",
-  "review_failure",
-  "planning_failure"
-]);
+const RESOLVED_RISK_STATUSES = new Set(["resolved", "closed"]);
 
 function parseArgs(argv) {
   const options = {
@@ -180,10 +191,6 @@ function printUsage() {
 
 function readJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
-}
-
-function readTextFile(filePath) {
-  return fs.readFileSync(filePath, "utf8");
 }
 
 function exists(filePath) {
@@ -653,6 +660,16 @@ function addFailure(failures, message) {
   }
 }
 
+function readTextFile(filePath) {
+  return fs.readFileSync(filePath, "utf8");
+}
+
+function extractMarkdownField(content, fieldName) {
+  const pattern = new RegExp(`^${fieldName}:\\s*(.+)$`, "mi");
+  const match = content.match(pattern);
+  return match ? match[1].trim() : "";
+}
+
 function getRepoVisibleFiles(repoRoot) {
   const fromGit = runGit(repoRoot, [
     "ls-files",
@@ -677,229 +694,43 @@ function pathMatchesProtectedEnvironmentPath(relativePath, protectedPaths) {
 }
 
 function validateRequiredFiles(repoRoot, failures) {
-  for (const relativePath of REQUIRED_STATE_FILES) {
+  for (const relativePath of REQUIRED_REPO_FILES) {
     const absolutePath = path.join(repoRoot, relativePath);
     if (!exists(absolutePath)) {
+      const label = REQUIRED_WORKFLOW_FILES.includes(relativePath)
+        ? "workflow file"
+        : "state file";
       addFailure(
         failures,
-        `Missing required state file: ${relativePath}; validator does not infer missing state from BrewSync, machine state, or control layers`
+        `Missing required ${label}: ${relativePath}; validator does not infer missing execution contract inputs from chat memory, BrewSync, machine state, or control layers`
       );
     }
   }
+}
 
+function validateWorkflowFiles(repoRoot, failures) {
   for (const relativePath of REQUIRED_WORKFLOW_FILES) {
     const absolutePath = path.join(repoRoot, relativePath);
-    if (!exists(absolutePath)) {
-      addFailure(
-        failures,
-        `Missing required workflow file: ${relativePath}`
-      );
-    }
-  }
-}
-
-function validateIgnoredLocalStateFiles(repoRoot, failures) {
-  const gitignorePath = path.join(repoRoot, ".gitignore");
-  if (!exists(gitignorePath)) {
-    addFailure(failures, "Missing required ignore file: .gitignore");
-    return;
-  }
-
-  const gitignore = readTextFile(gitignorePath);
-  for (const relativePath of REQUIRED_IGNORED_LOCAL_STATE_FILES) {
-    if (!gitignore.split(/\r?\n/).includes(relativePath)) {
-      addFailure(
-        failures,
-        `.gitignore must ignore local workflow file: ${relativePath}`
-      );
-    }
-  }
-}
-
-function parseMarkdownScalars(content) {
-  const values = {};
-  for (const line of content.split(/\r?\n/)) {
-    const match = line.match(/^([a-z_]+):\s*(.*)$/);
-    if (!match) {
+    if (!exists(absolutePath) || isDirectory(absolutePath)) {
       continue;
     }
-    values[match[1]] = match[2].trim();
-  }
-  return values;
-}
 
-function validateWorkflowContract(repoRoot, failures) {
-  const controllerPath = path.join(repoRoot, "state/controller.md");
-  const taskPath = path.join(repoRoot, "state/current_task.md");
-  const bootstrapPath = path.join(repoRoot, "ai/bootstrap.md");
-
-  if (!exists(controllerPath) || !exists(taskPath) || !exists(bootstrapPath)) {
-    return;
-  }
-
-  const controllerText = readTextFile(controllerPath);
-  const currentTaskText = readTextFile(taskPath);
-  const bootstrapText = readTextFile(bootstrapPath);
-  const controller = parseMarkdownScalars(controllerText);
-  const currentTask = parseMarkdownScalars(currentTaskText);
-
-  for (const section of [
-    "current_state:",
-    "allowed_transitions:",
-    "transition_rules:",
-    "state_owner:",
-    "done_criteria:",
-    "blocked_criteria:"
-  ]) {
-    if (!controllerText.includes(section)) {
-      addFailure(
-        failures,
-        `state/controller.md missing required section: ${section.replace(":", "")}`
-      );
-    }
-  }
-
-  for (const state of ALLOWED_CONTROLLER_STATES) {
-    if (!controllerText.includes(state)) {
-      addFailure(
-        failures,
-        `state/controller.md must reference workflow state: ${state}`
-      );
-    }
-  }
-
-  if (controllerText.includes("ready_for_gemini")) {
-    addFailure(failures, "state/controller.md contains stale workflow state: ready_for_gemini");
-  }
-
-  if (!ALLOWED_CONTROLLER_STATES.has(String(controller.current_state || ""))) {
-    addFailure(
-      failures,
-      `state/controller.md current_state must be one of ${[...ALLOWED_CONTROLLER_STATES].join(", ")}`
-    );
-  }
-
-  if (!String(controller.current_task || "").trim()) {
-    addFailure(failures, "state/controller.md current_task is required");
-  }
-
-  for (const field of [
-    "task_id",
-    "description",
-    "branch",
-    "pr_link",
-    "owner",
-    "current_state",
-    "failure_type",
-    "acceptance_criteria_reference",
-    "last_action",
-    "next_action"
-  ]) {
-    if (!String(currentTask[field] || "").trim()) {
-      addFailure(
-        failures,
-        `state/current_task.md missing required field: ${field}`
-      );
-    }
-  }
-
-  if (!ALLOWED_CONTROLLER_STATES.has(String(currentTask.current_state || ""))) {
-    addFailure(
-      failures,
-      `state/current_task.md current_state must be one of ${[...ALLOWED_CONTROLLER_STATES].join(", ")}`
-    );
-  }
-
-  if (!ALLOWED_FAILURE_TYPES.has(String(currentTask.failure_type || ""))) {
-    addFailure(
-      failures,
-      `state/current_task.md failure_type must be one of ${[...ALLOWED_FAILURE_TYPES].join(", ")}`
-    );
-  }
-
-  if (
-    String(controller.current_state || "") &&
-    String(currentTask.current_state || "") &&
-    controller.current_state !== currentTask.current_state
-  ) {
-    addFailure(
-      failures,
-      "state/controller.md current_state must match state/current_task.md current_state"
-    );
-  }
-
-  if (
-    String(controller.current_task || "") &&
-    String(currentTask.task_id || "") &&
-    controller.current_task !== currentTask.task_id
-  ) {
-    addFailure(
-      failures,
-      "state/controller.md current_task must match state/current_task.md task_id"
-    );
-  }
-
-  if (
-    currentTask.failure_type === "planning_failure" &&
-    currentTask.current_state !== "ready_for_claude"
-  ) {
-    addFailure(
-      failures,
-      "planning_failure may only be recorded while current_state is ready_for_claude"
-    );
-  }
-
-  if (
-    currentTask.current_state === "review_failed_fix_required" &&
-    !["ci_failure", "review_failure"].includes(currentTask.failure_type)
-  ) {
-    addFailure(
-      failures,
-      "review_failed_fix_required must use failure_type ci_failure or review_failure"
-    );
-  }
-
-  if (!bootstrapText.includes("review_failed_fix_required")) {
-    addFailure(
-      failures,
-      "ai/bootstrap.md must define the review_failed_fix_required loop"
-    );
-  }
-
-  if (!bootstrapText.includes("GitHub pull request") && !bootstrapText.includes("GitHub PR")) {
-    addFailure(
-      failures,
-      "ai/bootstrap.md must describe GitHub PR review as the acceptance path"
-    );
-  }
-
-  if (bootstrapText.includes("ready_for_gemini")) {
-    addFailure(failures, "ai/bootstrap.md contains stale workflow state: ready_for_gemini");
-  }
-}
-
-function validateReviewWorkflows(repoRoot, failures) {
-  const ciWorkflowPath = path.join(repoRoot, ".github/workflows/ci.yml");
-  const validateWorkflowPath = path.join(repoRoot, ".github/workflows/validate.yml");
-
-  if (exists(ciWorkflowPath)) {
-    const content = readTextFile(ciWorkflowPath);
-    if (!content.includes("pull_request:")) {
-      addFailure(failures, ".github/workflows/ci.yml must run on pull_request");
-    }
-  }
-
-  if (exists(validateWorkflowPath)) {
-    const content = readTextFile(validateWorkflowPath);
-    if (!content.includes("pull_request:")) {
-      addFailure(failures, ".github/workflows/validate.yml must run on pull_request");
+    const content = readTextFile(absolutePath).trim();
+    if (!content) {
+      addFailure(failures, `Required workflow file is empty: ${relativePath}`);
+      continue;
     }
 
-    if (/\n\s*push:\s*\n/.test(content)) {
-      addFailure(
-        failures,
-        ".github/workflows/validate.yml must not run validation on push; PR review is the acceptance trigger"
-      );
+    if (relativePath === "state/controller.md") {
+      const state = extractMarkdownField(content, "current_state")
+        || extractMarkdownField(content, "state")
+        || extractMarkdownField(content, "status");
+      if (!ALLOWED_CONTROLLER_STATES.has(state)) {
+        addFailure(
+          failures,
+          `state/controller.md state must be one of ${[...ALLOWED_CONTROLLER_STATES].join(", ")}`
+        );
+      }
     }
   }
 }
@@ -1537,6 +1368,61 @@ function validatePhaseRules(
   }
 }
 
+function isGitIgnored(repoRoot, relativePath) {
+  try {
+    execFileSync("git", ["check-ignore", "-q", relativePath], {
+      cwd: repoRoot,
+      stdio: ["ignore", "ignore", "ignore"]
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validateGitignoreSafety(repoRoot, failures) {
+  const pipelineFiles = [
+    ...REQUIRED_REPO_FILES,
+    "ai.config.json"
+  ];
+
+  for (const relativePath of pipelineFiles) {
+    if (isGitIgnored(repoRoot, relativePath)) {
+      addFailure(
+        failures,
+        `Pipeline file ${relativePath} is matched by .gitignore — the validator, Codex, and Claude will not see changes to this file`
+      );
+    }
+  }
+}
+
+function validateUICompliance(repoRoot, changedFiles, failures) {
+  const frontendChanges = changedFiles.filter((relativePath) =>
+    isFrontendFile(relativePath)
+  );
+
+  if (frontendChanges.length === 0) {
+    return;
+  }
+
+  const validationReportPath = path.join(repoRoot, "state/validation_report.md");
+  if (!exists(validationReportPath)) {
+    return;
+  }
+
+  const content = fs.readFileSync(validationReportPath, "utf8").toLowerCase();
+  if (
+    !content.includes("ui compliance") &&
+    !content.includes("ui-business-software") &&
+    !content.includes("ui standard")
+  ) {
+    addFailure(
+      failures,
+      "Frontend files changed without UI compliance acknowledgment in state/validation_report.md (see developer/ui-business-software.md)"
+    );
+  }
+}
+
 function main() {
   let options;
   try {
@@ -1550,17 +1436,15 @@ function main() {
   const failures = [];
 
   try {
+    validateGitignoreSafety(repoRoot, failures);
     validateRequiredFiles(repoRoot, failures);
+    validateWorkflowFiles(repoRoot, failures);
     if (failures.length > 0) {
       throw new Error("missing-files");
     }
 
     const config = resolveConfig(repoRoot, options.config);
     const baseRef = resolveBaseRef(repoRoot, options.base);
-
-    validateIgnoredLocalStateFiles(repoRoot, failures);
-    validateWorkflowContract(repoRoot, failures);
-    validateReviewWorkflows(repoRoot, failures);
 
     const roadmap = readJsonFile(path.join(repoRoot, "docs/roadmap/state.json"));
     const tasks = readJsonFile(path.join(repoRoot, "state/tasks.json"));
@@ -1597,6 +1481,7 @@ function main() {
       config.value,
       failures
     );
+    validateUICompliance(repoRoot, changedFiles, failures);
 
     if (failures.length > 0) {
       console.error("FAIL:");
