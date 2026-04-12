@@ -1,6 +1,6 @@
 # Controller State
 
-current_state: ready_for_codex
+current_state: review_failed_fix_required
 current_task: T1
 
 allowed_transitions:
