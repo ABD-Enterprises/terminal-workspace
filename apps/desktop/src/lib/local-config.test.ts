@@ -155,6 +155,7 @@ describe("local config", () => {
           transport: "ssh",
           queuedCommands: [],
           reconnectOnRestore: true,
+          persistOutputPreview: true,
           createdAt: "2026-03-29T10:00:00.000Z",
           updatedAt: "2026-03-29T10:00:00.000Z",
         },

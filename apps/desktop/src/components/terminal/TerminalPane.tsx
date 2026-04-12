@@ -107,6 +107,9 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     host;
   const setPaneState = useSessionsStore((state) => state.setPaneState);
   const setPaneReconnectOnRestore = useSessionsStore((state) => state.setPaneReconnectOnRestore);
+  const setPanePersistOutputPreview = useSessionsStore(
+    (state) => state.setPanePersistOutputPreview
+  );
   const setPaneTransport = useSessionsStore((state) => state.setPaneTransport);
   const setPaneBackendSession = useSessionsStore((state) => state.setPaneBackendSession);
   const consumePaneCommand = useSessionsStore((state) => state.consumePaneCommand);
@@ -798,6 +801,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     nativeBridgeEnabled,
     appendCommandOutput,
     recordPaneCommand,
+    protocolLabel,
     setPaneBackendSession,
     setPaneReconnectOnRestore,
     setPaneState,
@@ -862,6 +866,28 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             {" · "}
             {formatSessionConnectionState(pane.connectionState)}
           </span>
+          <label
+            className={cn(
+              "flex items-center gap-2 rounded-2xl border px-3 py-1.5 text-xs transition",
+              pane.persistOutputPreview
+                ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-100"
+                : "border-slate-700 text-slate-300"
+            )}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={pane.persistOutputPreview}
+              onChange={(event) => {
+                event.stopPropagation();
+                setPanePersistOutputPreview(pane.id, event.target.checked);
+              }}
+              className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-950 accent-emerald-400"
+            />
+            Save previews
+          </label>
           <button
             type="button"
             onClick={(event) => {

@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-04-05T11:46:05.907Z",
+  "generated_at": "2026-04-05T19:13:54.435Z",
   "repo_root": "/Users/deffenda/Code/term-snip",
-  "branch": "phase/macos-session-history-and-runbooks",
-  "commit": "4c198a07f7e9c6ca0baf7e38351307074c1d4945",
+  "branch": "codex/t1-output-preview-persistence-control",
+  "commit": "9f240cb534e816b5140d732a65de4643e87f9889",
   "dirty": true,
   "name": "terminal-workspace",
   "version": "0.1.0"

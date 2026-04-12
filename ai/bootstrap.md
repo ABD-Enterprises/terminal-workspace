@@ -83,7 +83,10 @@ Review is PASSED when:
 5. GitHub PR review, GitHub CI, and Gemini Code Assist on GitHub determine the review result.
 6. If CI or review fails for implementation reasons, the repo moves to `review_failed_fix_required` and Codex fixes the same task.
 7. If review exposes a planning failure, the repo moves to `ready_for_claude`.
-8. If review passes, the repo moves to `done`.
+8. If review passes and PR is merged:
+   - If tasks remain in `/ai/tasks.md` with status `pending`, set `ready_for_claude`.
+   - If no tasks remain, set `done`.
+   - Claude reads `ready_for_claude`, marks the finished task `done`, advances `/state/current_task.md` to the next task, and sets `ready_for_codex`.
 
 ## Global rules
 

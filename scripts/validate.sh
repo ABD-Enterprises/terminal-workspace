@@ -29,4 +29,12 @@ else
 fi
 
 echo "[validate] guardrails"
-node ./tools/validators/enforce-runtime-guardrails.js --repo . --config ai.config.json
+VALIDATOR_ARGS=(--repo . --config ai.config.json)
+
+if [[ -n "${AI_VALIDATOR_BASE_REF:-}" ]]; then
+  VALIDATOR_ARGS+=(--base "${AI_VALIDATOR_BASE_REF}")
+elif [[ -n "${GITHUB_BASE_REF:-}" ]]; then
+  VALIDATOR_ARGS+=(--base "origin/${GITHUB_BASE_REF}")
+fi
+
+node ./tools/validators/enforce-runtime-guardrails.js "${VALIDATOR_ARGS[@]}"

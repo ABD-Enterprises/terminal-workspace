@@ -9,13 +9,14 @@ import { useTransfersStore } from "../store/transfers-store";
 
 export function TransfersPage() {
   const navigate = useNavigate();
-  const hosts = useHostsStore((state) => state.hosts.filter((host) => host.protocol === "ssh"));
+  const allHosts = useHostsStore((state) => state.hosts);
   const markConnected = useHostsStore((state) => state.markConnected);
   const openSession = useSessionsStore((state) => state.openSession);
   const activeHostId = useTransfersStore((state) => state.activeHostId);
   const setActiveHost = useTransfersStore((state) => state.setActiveHost);
   const queue = useTransfersStore((state) => state.queue);
   const clearCompleted = useTransfersStore((state) => state.clearCompleted);
+  const hosts = allHosts.filter((host) => host.protocol === "ssh");
   const activeHost = hosts.find((host) => host.id === activeHostId) ?? hosts[0];
 
   useEffect(() => {

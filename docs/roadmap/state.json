@@ -1,6 +1,6 @@
 {
-  "updated_at": "2026-04-05T11:48:23Z",
-  "last_updated": "2026-04-05T11:48:23Z",
+  "updated_at": "2026-04-05T15:30:40Z",
+  "last_updated": "2026-04-05T15:30:40Z",
   "version": "0.1.0",
   "current_phase": "macos-session-history-and-runbooks",
   "phase_type": "build",
@@ -378,7 +378,7 @@
     },
     {
       "id": "task-session-history-redaction-controls",
-      "title": "Add redaction and sensitivity controls for persisted session output previews",
+      "title": "Add a pane-level output-preview persistence control for persisted session history",
       "status": "pending",
       "phase": "macos-session-history-and-runbooks"
     },

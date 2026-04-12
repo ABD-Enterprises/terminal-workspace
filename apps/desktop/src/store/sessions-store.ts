@@ -23,6 +23,34 @@ const fallbackStorage: StateStorage = {
 
 const SESSION_HISTORY_LIMIT = 200;
 const SESSION_HISTORY_OUTPUT_LIMIT = 600;
+const ANSI_ESCAPE_CHARACTER = String.fromCharCode(27);
+const TERMINAL_BELL_CHARACTER = String.fromCharCode(7);
+const ANSI_ESCAPE_SEQUENCE_REGEX = new RegExp(
+  `${ANSI_ESCAPE_CHARACTER}\\[[0-9;?]*[ -/]*[@-~]`,
+  "g"
+);
+const TERMINAL_BELL_REGEX = new RegExp(TERMINAL_BELL_CHARACTER, "g");
+
+function limitCommandHistory(commandHistory: SessionCommandHistoryEntry[]) {
+  return commandHistory.slice(0, SESSION_HISTORY_LIMIT);
+}
+
+function normalizePersistedPane(pane: SessionPane): SessionPane {
+  return {
+    ...pane,
+    persistOutputPreview: pane.persistOutputPreview ?? true,
+  };
+}
+
+function resolvePersistOutputPreview(
+  entry: SessionCommandHistoryEntry,
+  panes: Record<string, SessionPane>
+) {
+  const pane = panes[entry.paneId];
+  return pane
+    ? normalizePersistedPane(pane).persistOutputPreview
+    : entry.persistOutputPreview ?? false;
+}
 
 function sanitizePersistedWorkspace(
   workspace: Pick<SessionWorkspaceState, "tabs" | "panes" | "activeTabId" | "lastRestoredAt">
@@ -30,29 +58,52 @@ function sanitizePersistedWorkspace(
   return {
     ...workspace,
     panes: Object.fromEntries(
-      Object.entries(workspace.panes).map(([paneId, pane]) => [
-        paneId,
-        {
-          ...pane,
-          backendSessionId: undefined,
-          connectionState: "disconnected" as const,
-          queuedCommands: [],
-          reconnectOnRestore: pane.connectionState === "connected" || pane.reconnectOnRestore,
-        },
-      ])
+      Object.entries(workspace.panes).map(([paneId, pane]) => {
+        const normalizedPane = normalizePersistedPane(pane);
+
+        return [
+          paneId,
+          {
+            ...normalizedPane,
+            backendSessionId: undefined,
+            connectionState: "disconnected" as const,
+            queuedCommands: [],
+            reconnectOnRestore:
+              normalizedPane.connectionState === "connected" || normalizedPane.reconnectOnRestore,
+          },
+        ];
+      })
     ),
   };
 }
 
-function sanitizePersistedCommandHistory(commandHistory: SessionCommandHistoryEntry[]) {
-  return commandHistory.slice(0, SESSION_HISTORY_LIMIT);
+export function sanitizePersistedCommandHistory(
+  commandHistory: SessionCommandHistoryEntry[],
+  panes: Record<string, SessionPane>
+) {
+  return limitCommandHistory(commandHistory).map<SessionCommandHistoryEntry>((entry) => {
+    const persistOutputPreview = resolvePersistOutputPreview(entry, panes);
+    if (persistOutputPreview) {
+      return {
+        ...entry,
+        persistOutputPreview: true,
+      };
+    }
+
+    return {
+      ...entry,
+      persistOutputPreview: false,
+      outputPreview: undefined,
+      outputUpdatedAt: undefined,
+    };
+  });
 }
 
 function normalizeCommandHistoryOutput(output: string) {
   return output
-    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(ANSI_ESCAPE_SEQUENCE_REGEX, "")
     .replace(/\r/g, "")
-    .replace(/\u0007/g, "")
+    .replace(TERMINAL_BELL_REGEX, "")
     .trim();
 }
 
@@ -279,6 +330,41 @@ export function updatePaneReconnectPreference(
   };
 }
 
+export function updatePanePreviewPersistence<
+  T extends SessionWorkspaceState & { commandHistory?: SessionCommandHistoryEntry[] },
+>(
+  state: T,
+  paneId: string,
+  persistOutputPreview: boolean
+): T;
+export function updatePanePreviewPersistence<
+  T extends SessionWorkspaceState & { commandHistory?: SessionCommandHistoryEntry[] },
+>(
+  state: T,
+  paneId: string,
+  persistOutputPreview: boolean
+): T {
+  const pane = state.panes[paneId];
+  if (!pane) {
+    return state;
+  }
+
+  const nextCommandHistory = Array.isArray(state.commandHistory)
+    ? state.commandHistory.map((entry) =>
+        entry.paneId === paneId ? { ...entry, persistOutputPreview } : entry
+      )
+    : undefined;
+
+  return {
+    ...state,
+    panes: {
+      ...state.panes,
+      [paneId]: touchPane(pane, { persistOutputPreview }),
+    },
+    ...(nextCommandHistory ? { commandHistory: nextCommandHistory } : {}),
+  } as T;
+}
+
 export function updatePaneTransport(
   state: SessionWorkspaceState,
   paneId: string,
@@ -416,12 +502,13 @@ export function recordPaneCommandHistory(
     transport: pane.transport,
     command: trimmedCommand,
     source,
+    persistOutputPreview: normalizePersistedPane(pane).persistOutputPreview,
     createdAt: new Date().toISOString(),
   };
 
   return {
     ...state,
-    commandHistory: sanitizePersistedCommandHistory([entry, ...state.commandHistory]),
+    commandHistory: limitCommandHistory([entry, ...state.commandHistory]),
   };
 }
 
@@ -467,6 +554,7 @@ export interface SessionsState extends SessionWorkspaceState {
   selectPane: (tabId: string, paneId: string) => void;
   setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
+  setPanePersistOutputPreview: (paneId: string, persistOutputPreview: boolean) => void;
   setPaneTransport: (paneId: string, transport: SessionTransport) => void;
   setPaneBackendSession: (paneId: string, backendSessionId?: string) => void;
   queuePaneCommand: (paneId: string, command: string, label?: string) => void;
@@ -510,6 +598,8 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => updatePaneConnectionState(state, paneId, connectionState)),
       setPaneReconnectOnRestore: (paneId, reconnectOnRestore) =>
         set((state) => updatePaneReconnectPreference(state, paneId, reconnectOnRestore)),
+      setPanePersistOutputPreview: (paneId, persistOutputPreview) =>
+        set((state) => updatePanePreviewPersistence(state, paneId, persistOutputPreview)),
       setPaneTransport: (paneId, transport) =>
         set((state) => updatePaneTransport(state, paneId, transport)),
       setPaneBackendSession: (paneId, backendSessionId) =>
@@ -567,28 +657,40 @@ export const useSessionsStore = create<SessionsState>()(
       storage: createJSONStorage(() =>
         typeof window === "undefined" ? fallbackStorage : window.localStorage
       ),
-      partialize: (state) => ({
-        ...sanitizePersistedWorkspace({
+      partialize: (state) => {
+        const persistedWorkspace = sanitizePersistedWorkspace({
           tabs: state.tabs,
           panes: state.panes,
           activeTabId: state.activeTabId,
           lastRestoredAt: new Date().toISOString(),
-        }),
-        commandHistory: sanitizePersistedCommandHistory(state.commandHistory),
-      }),
-      merge: (persistedState, currentState) => ({
-        ...currentState,
-        ...sanitizePersistedWorkspace(
+        });
+
+        return {
+          ...persistedWorkspace,
+          commandHistory: sanitizePersistedCommandHistory(
+            state.commandHistory,
+            persistedWorkspace.panes
+          ),
+        };
+      },
+      merge: (persistedState, currentState) => {
+        const persistedWorkspace = sanitizePersistedWorkspace(
           persistedState as Pick<
             SessionWorkspaceState,
             "tabs" | "panes" | "activeTabId" | "lastRestoredAt"
           >
-        ),
-        commandHistory: sanitizePersistedCommandHistory(
-          ((persistedState as { commandHistory?: SessionCommandHistoryEntry[] }).commandHistory ??
-            currentState.commandHistory) as SessionCommandHistoryEntry[]
-        ),
-      }),
+        );
+
+        return {
+          ...currentState,
+          ...persistedWorkspace,
+          commandHistory: sanitizePersistedCommandHistory(
+            ((persistedState as { commandHistory?: SessionCommandHistoryEntry[] }).commandHistory ??
+              currentState.commandHistory) as SessionCommandHistoryEntry[],
+            persistedWorkspace.panes
+          ),
+        };
+      },
     }
   )
 );

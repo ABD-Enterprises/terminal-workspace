@@ -1,0 +1,29 @@
+
+> terminal-workspace@0.1.0 setup
+> bash ./bootstrap.sh
+
+{
+  "status": "READY",
+  "repo": {
+    "generated_at": "2026-04-05T19:13:54.435Z",
+    "repo_root": "/Users/deffenda/Code/term-snip",
+    "branch": "codex/t1-output-preview-persistence-control",
+    "commit": "9f240cb534e816b5140d732a65de4643e87f9889",
+    "dirty": true,
+    "name": "terminal-workspace",
+    "version": "0.1.0"
+  },
+  "roadmap": {
+    "current_phase": "macos-session-history-and-runbooks",
+    "updated_at": "2026-04-05T15:30:40Z"
+  },
+  "paths": {
+    "state_dir": "/Users/deffenda/Code/term-snip/state",
+    "scripts_dir": "/Users/deffenda/Code/term-snip/scripts",
+    "artifacts_file": "/Users/deffenda/Code/term-snip/state/artifacts.json",
+    "handoff_file": "/Users/deffenda/Code/term-snip/state/handoff.json",
+    "roadmap_dir": "/Users/deffenda/Code/term-snip/docs/roadmap",
+    "runs_dir": "/Users/deffenda/Code/term-snip/runs",
+    "logs_dir": "/Users/deffenda/Code/term-snip/logs"
+  }
+}
