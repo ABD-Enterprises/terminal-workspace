@@ -98,3 +98,22 @@ Review is PASSED when:
 - No state-only commits
 - Keep changes small and validated
 - No competing workflow definitions
+
+## Standards reference
+
+This repo follows enterprise-ai-standards. The local validator runs via `scripts/validate.sh`. The authoritative standard is vendored at `project-manager/enterprise-ai-standards.md`.
+
+Single-tool rule:
+
+- if one tool (Claude, Codex, Cursor, or any single agent) handles planning, implementation, and validation in one session, all workflow rules still apply
+- write planning artifacts before writing code
+- transition state/controller.md through the standard states
+- push a branch and open a PR for human review
+- run scripts/validate.sh before marking ready_for_review
+- do not commit directly to main, self-merge, or skip state file updates
+
+Budget rules:
+
+- Codex: implement at most 1 task per repo per run; after opening a PR, stop
+- review gate: CI checks (free) + Copilot review (primary) are the merge gate; Gemini is optional
+- auto-merge: PRs that pass all required CI checks with no blocking review comments are merged automatically
