@@ -20,5 +20,5 @@
     "GitHub release secret provisioning is still blocked because the repository has no configured signing/notarization secrets and the current workstation state does not expose exportable certificate or notary credential material."
   ],
   "updated_at": "2026-04-05T19:14:17Z",
-  "last_updated": "2026-04-05T19:14:17Z"
+  "last_updated": "2026-04-12T23:59:09Z"
 }
