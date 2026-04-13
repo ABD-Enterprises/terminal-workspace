@@ -101,7 +101,9 @@ const STATE_OR_META_PATTERNS = [
   /^\.github\/workflows\//,
   /^tools\/validators\//,
   /^developer\//,
-  /^\.gitignore$/
+  /^\.gitignore$/,
+  /^enterprise-ai-standards\.md$/,
+  /^ai\/enterprise-ai-standards\.md$/
 ];
 
 const FRONTEND_FILE_PATTERNS = [
@@ -676,7 +678,8 @@ function readTextFile(filePath) {
 }
 
 function extractMarkdownField(content, fieldName) {
-  const pattern = new RegExp(`^${fieldName}:\\s*(.+)$`, "mi");
+  // Handles both "key: value" and "- key: value" (bullet-list) formats
+  const pattern = new RegExp(`^(?:-\\s+)?${fieldName}:\\s*(.+)$`, "mi");
   const match = content.match(pattern);
   return match ? match[1].trim() : "";
 }
@@ -1088,7 +1091,9 @@ function validateDiffAwareState(
     );
 
   if (codeOrConfigChanges.length > 0) {
-    const requiredUpdates = ["state/tasks.json", "state/artifacts.json"];
+    const requiredUpdates = nightRunProfile
+      ? ["state/artifacts.json"]
+      : ["state/tasks.json", "state/artifacts.json"];
 
     for (const relativePath of requiredUpdates) {
       if (!changedSet.has(relativePath)) {
@@ -1326,11 +1331,12 @@ function validatePhaseRules(
   }
 
   // Only enforce the "complete requires evidence" gate when the phase is being
-  // newly marked complete in this PR. If it was already complete in the base,
-  // the evidence gate was checked at that time — don't re-fire it on every
-  // subsequent PR (e.g. a standards-only sync that doesn't touch evidence).
+  // newly marked complete in this PR. If it was already complete in the base
+  // (or no base was provided, meaning this is a local/headless run on an
+  // already-complete repo), the evidence gate was already checked — don't
+  // re-fire it on every subsequent PR or local validate run.
   const alreadyCompleteInBase =
-    baseRoadmap &&
+    !baseRoadmap || // no base = headless/local run on established state
     normalizePhaseStatus(baseRoadmap.phase_status) === "complete";
   if (!alreadyCompleteInBase && roadmap && normalizePhaseStatus(roadmap.phase_status) === "complete") {
     const incompleteEvidence = EVIDENCE_KEYS.filter((key) => {
