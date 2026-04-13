@@ -4,7 +4,7 @@
 
 ### S1
 Title: SSH terminal core — fast connect, multi-session, session persistence
-Status: pending
+Status: done
 Phase: 1
 Description: Build the terminal core that replaces Termius basics. SSH connection with host/port/key/password auth. Multiple simultaneous sessions in tabs (not windows). Session persistence — reconnect automatically on network interruption. Fast startup (<1 second to usable terminal). Session list as a compact table in a left sidebar: hostname, status (connected/disconnected as plain text), duration. Click to switch session. Keyboard shortcut to cycle sessions (Cmd+Tab between sessions). Keychain integration for credential storage (1Password or macOS Keychain, no plaintext).
 Done when: SSH connect works with key and password auth. Multiple sessions in tabs. Auto-reconnect on network drop. Session list in sidebar table. Credential storage via keychain. <1s startup.

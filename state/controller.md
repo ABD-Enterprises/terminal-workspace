@@ -1,4 +1,4 @@
 # Controller State
 
-current_state: ready_for_claude
-current_task: S1
+current_state: ready_for_codex
+current_task: S2
