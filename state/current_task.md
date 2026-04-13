@@ -3,12 +3,13 @@
 task_id: S1
 description: SSH terminal core — fast connect, multi-session, session persistence, keychain credential storage
 scope: src/, apps/
-status: pending
-execution_status: in_progress
-execution_branch: codex/s1-ssh-terminal-core-fast-connect-2
-execution_started_at: 2026-04-13T07:03:55Z
-execution_heartbeat_at: 2026-04-13T07:03:55Z
-execution_lease_expires_at: 2026-04-13T08:33:55Z
+status: done
+current_state: ready_for_review
+execution_status: idle
+execution_branch:
+execution_started_at:
+execution_heartbeat_at:
+execution_lease_expires_at:
 execution_host_id:
 execution_worker_id:
 review_failure_count: 2

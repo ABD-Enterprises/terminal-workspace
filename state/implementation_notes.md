@@ -1,20 +1,21 @@
 # Implementation Notes
 
-- 2026-04-12 reclaim: reused existing task branch `codex/t1-output-preview-persistence-control` and PR #1 after confirming there was no active execution lease in `state/current_task.md`.
+Completed task IDs: `S1`
 
-- 2026-04-05: Validated the existing T1 working-tree changes that add a pane-level `persistOutputPreview` preference, redact persisted preview fields for opted-out panes, and cover the default-enabled plus opt-out store paths.
+CHANGED
+- Added tab-cycling support in the sessions store and wired `Cmd+Tab` / `Shift+Cmd+Tab` session switching in the desktop shell.
+- Added a compact left-rail session table with hostname, plain-text status, and duration for direct tab switching.
+- Added automatic reconnect scheduling in `TerminalPane` for unexpected SSH transport drops.
 
-Local preflight:
+DID
+- Completed the remaining operator-facing `S1` workflow gaps without touching planning files.
+- Kept credential storage on the existing native secrets/keychain path.
+
+VALIDATED
+- `npx eslint apps/desktop/src/components/layout/AppShell.tsx apps/desktop/src/components/layout/Sidebar.tsx apps/desktop/src/components/terminal/TerminalPane.tsx apps/desktop/src/lib/utils.ts apps/desktop/src/store/sessions-store.ts apps/desktop/src/store/sessions-store.test.ts`
 - `npm run test -- apps/desktop/src/store/sessions-store.test.ts`
 - `npm --prefix ./apps/desktop run build`
 
-- 2026-04-05 review-fix pass: preserved each command-history entry's preview-persistence intent after pane removal, added pane-removal regression coverage, and cleared the active lint and guardrails failures in the working tree.
-
-Additional local preflight:
-- `npm run lint`
-- `npm run validate:guardrails`
-
-- 2026-04-05 review-fix pass: refreshed the guardrails evidence bundle for PR #1, corrected `state/artifacts.json` so the diff metadata matches the branch's code changes, and reran the validator against `origin/main`.
-
-Additional local preflight:
-- `AI_VALIDATOR_BASE_REF=origin/main npm run validate:guardrails`
+NEXT
+- Review PR for sidebar session-table UX and reconnect behavior.
+- Repo-wide `npm run lint` still reports pre-existing errors in `tools/validators/enforce-runtime-guardrails.js`, outside this task diff.
