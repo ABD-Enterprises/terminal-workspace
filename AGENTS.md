@@ -6,9 +6,9 @@ Read `ai/bootstrap.md` first — it is the authoritative workflow entry point.
 
 ```
 Claude plans → writes ai/ → sets ready_for_codex
-Codex implements → opens PR → sets ready_for_review  
-CI passes → PR auto-merges (watch-open-prs)
-watch-open-prs → advances state to ready_for_codex (next task)
+Codex implements → opens PR + queues auto-merge → sets ready_for_review
+CI passes → GitHub auto-merges PR instantly (branch protection enforces required checks)
+watch-open-prs → detects merge, advances state to ready_for_codex (next task)
 ```
 
 State flow: `ready_for_codex` → `ready_for_review` → (merge) → `ready_for_codex` | `done`  

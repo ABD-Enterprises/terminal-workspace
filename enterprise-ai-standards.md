@@ -5,7 +5,7 @@ This is the single authoritative standards document for downstream AI-driven del
 Authoritative paths:
 
 - standards: `project-manager/enterprise-ai-standards.md`
-- validator: `tools/validators/enforce-runtime-guardrails.js`
+- validator: `tools/validators/enforce-runtime-guardrails.mjs`
 - config template: `templates/ai.config.json`
 - adoption template: `templates/product-repo-minimal/`
 
@@ -776,7 +776,7 @@ Not allowed:
 
 ## 9. Validator Mapping
 
-| Rule Group | Enforced By `enforce-runtime-guardrails.js` |
+| Rule Group | Enforced By `enforce-runtime-guardrails.mjs` |
 | --- | --- |
 | Layer boundaries | rejects execution-layer environment manifests, repo-external evidence paths, and external state fallbacks |
 | Three-role workflow contract | requires repo workflow files under `ai/` and `state/`, requires a valid `state/controller.md` workflow state, rejects invalid run profiles, and treats workflow files as repo-visible handoff inputs rather than code |
@@ -817,3 +817,57 @@ Config may relax evidence requirements for specific phases. It must not be used 
 - `night`
 
 Repo-specific Gemini GitHub review behavior may be customized with `.gemini/config.yaml` if desired, but that is optional and does not replace the repo execution contract.
+
+## 11. CI Runner Rules
+
+### CI-1 No macOS runners on pull_request triggers
+
+**macOS GitHub-hosted runners cost approximately 10x ubuntu-latest. They must never be used in pull_request-triggered workflows.**
+
+Any job that requires macOS (native Swift/Tauri/Xcode builds, keychain tests, notarization, native fixture tests) must use one of:
+
+- `workflow_dispatch` (manual trigger)
+- A release-only workflow (e.g. triggered by tag push)
+- A local/self-hosted runner cron
+
+**This is a hard rule enforced by `ai-pipeline.sh repair`.** The `check_macos_pr_jobs` repair check scans all PR-triggered workflow files and removes any job whose `runs-on` references a macOS runner variant (`macos-latest`, `macos-14`, etc.).
+
+Agents (Claude, Codex) must not add `runs-on: macos-*` jobs to any workflow that has a `pull_request:` trigger. If a macOS test is needed for PR validation, flag it for human review — do not add it to CI.
+
+## 12. Security Scanning
+
+### SC-1 Semgrep as the standard static analysis tool
+
+All managed repos use Semgrep for static analysis and security scanning. Semgrep runs via Docker — no per-machine install is required and no macOS runner is needed.
+
+Required image: `semgrep/semgrep:latest`
+
+One-time setup: `semgrep login` on the developer's machine. Credentials are cached in `~/.semgrep/`. CI uses the `SEMGREP_APP_TOKEN` environment variable (never stored in the repo).
+
+### SC-2 Per-repo requirements
+
+Every managed repo must have:
+
+- `.semgrepignore` — excludes `node_modules/`, `.next/`, `dist/`, `build/`, `runs/`, `state/`, `.git/`
+- A `semgrep` step in `scripts/validate.sh` that runs after the existing security step:
+
+```bash
+docker run --rm \
+  -v "$(pwd)":/src \
+  -w /src \
+  -e SEMGREP_APP_TOKEN \
+  semgrep/semgrep \
+  semgrep --config=auto --error .
+```
+
+If Docker is not available in the execution environment, the step must record `NOT RUN` rather than fail the entire validation.
+
+**This is enforced by `ai-pipeline.sh repair`.** The `check_semgrep_config` repair check ensures `.semgrepignore` exists and that `validate.sh` contains the semgrep Docker invocation.
+
+### SC-3 Fleet sweep
+
+`brew-sync/tools/semgrep/scan-all.sh` runs Semgrep across all repos listed in `repos.json`. Use this for full-fleet scans on demand. Results are printed per-repo as PASS/FAIL.
+
+### SC-4 Custom rules
+
+Repo-specific or pipeline-specific Semgrep rules live in `brew-sync/tools/semgrep/rules/`. Rules must be YAML files conforming to the Semgrep rule schema. Agents must not modify rule files without explicit instruction.
