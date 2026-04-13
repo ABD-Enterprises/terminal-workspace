@@ -1,6 +1,8 @@
 # Implementation Notes
 
-Completed task IDs: `S1`
+- 2026-04-13 planning-failure triage: PR #3 review exposed a task-contract contradiction that Codex cannot resolve without changing planning artifacts. `ai/tasks.md` requires `Cmd+Tab` session cycling for S1, but review correctly flagged that shortcut as conflicting with the macOS app switcher. `ai/acceptance.md` also does not define a `### S1` section, so the active task has no canonical acceptance contract. Returned the repo to `ready_for_claude` for replanning instead of forcing a code change that would violate the current spec.
+
+Active task IDs: `S1`
 
 CHANGED
 - Added tab-cycling support in the sessions store and wired `Cmd+Tab` / `Shift+Cmd+Tab` session switching in the desktop shell.
@@ -8,7 +10,7 @@ CHANGED
 - Added automatic reconnect scheduling in `TerminalPane` for unexpected SSH transport drops.
 
 DID
-- Completed the remaining operator-facing `S1` workflow gaps without touching planning files.
+- Implemented the current `S1` branch changes without touching planning files.
 - Kept credential storage on the existing native secrets/keychain path.
 
 VALIDATED
@@ -17,5 +19,5 @@ VALIDATED
 - `npm --prefix ./apps/desktop run build`
 
 NEXT
-- Review PR for sidebar session-table UX and reconnect behavior.
+- Claude must replace the `Cmd+Tab` shortcut requirement with a review-safe in-app shortcut contract and add a canonical `### S1` acceptance section before handing the task back to Codex.
 - Repo-wide `npm run lint` still reports pre-existing errors in `tools/validators/enforce-runtime-guardrails.js`, outside this task diff.
