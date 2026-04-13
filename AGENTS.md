@@ -48,7 +48,7 @@ Codex acquires a 90-minute lease before starting work:
 
 0. Rebase branch onto current main: `git fetch origin main && git rebase origin/main` — prevents DIRTY PR state.
 1. All repo-local validation must pass (see `ai/bootstrap.md` for the exact commands)
-2. `node tools/validators/enforce-runtime-guardrails.js --repo . --config ai.config.json` must pass
+2. `node tools/validators/enforce-runtime-guardrails.mjs --repo . --config ai.config.json` must pass
 3. `state/artifacts.json` must reflect actual evidence (real file paths, correct statuses)
 4. Lease must be cleared (`execution_status: idle`)
 
@@ -96,6 +96,6 @@ Valid `status` + `paths` combinations for each evidence type (`build`, `test`, `
 
 ## Validator integrity (enterprise standard — do not modify)
 
-`tools/validators/enforce-runtime-guardrails.js` is synced from enterprise-ai-standards and must not be modified in this repo. The file is hash-verified by CI before execution. Modifications will cause CI to fail immediately with an integrity error.
+`tools/validators/enforce-runtime-guardrails.mjs` is synced from enterprise-ai-standards and must not be modified in this repo. The file is hash-verified by CI before execution. Modifications will cause CI to fail immediately with an integrity error.
 
 To update the validator: submit a change to enterprise-ai-standards and run the sync script.
