@@ -817,3 +817,19 @@ Config may relax evidence requirements for specific phases. It must not be used 
 - `night`
 
 Repo-specific Gemini GitHub review behavior may be customized with `.gemini/config.yaml` if desired, but that is optional and does not replace the repo execution contract.
+
+## 11. CI Runner Rules
+
+### CI-1 No macOS runners on pull_request triggers
+
+**macOS GitHub-hosted runners cost approximately 10x ubuntu-latest. They must never be used in pull_request-triggered workflows.**
+
+Any job that requires macOS (native Swift/Tauri/Xcode builds, keychain tests, notarization, native fixture tests) must use one of:
+
+- `workflow_dispatch` (manual trigger)
+- A release-only workflow (e.g. triggered by tag push)
+- A local/self-hosted runner cron
+
+**This is a hard rule enforced by `ai-pipeline.sh repair`.** The `check_macos_pr_jobs` repair check scans all PR-triggered workflow files and removes any job whose `runs-on` references a macOS runner variant (`macos-latest`, `macos-14`, etc.).
+
+Agents (Claude, Codex) must not add `runs-on: macos-*` jobs to any workflow that has a `pull_request:` trigger. If a macOS test is needed for PR validation, flag it for human review — do not add it to CI.
