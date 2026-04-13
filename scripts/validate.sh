@@ -37,4 +37,4 @@ elif [[ -n "${GITHUB_BASE_REF:-}" ]]; then
   VALIDATOR_ARGS+=(--base "origin/${GITHUB_BASE_REF}")
 fi
 
-node ./tools/validators/enforce-runtime-guardrails.js "${VALIDATOR_ARGS[@]}"
+node ./tools/validators/enforce-runtime-guardrails.mjs "${VALIDATOR_ARGS[@]}"

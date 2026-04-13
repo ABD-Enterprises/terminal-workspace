@@ -31,9 +31,20 @@ jobs:
           node-version: "20"
           cache: pnpm
 
+      - name: Verify validator integrity
+        shell: bash
+        run: |
+          if ! sha256sum -c tools/validators/enforce-runtime-guardrails.mjs.sha256; then
+            echo ""
+            echo "FATAL: enforce-runtime-guardrails.mjs has been modified in this repo."
+            echo "The validator is an enterprise standard and must not be changed locally."
+            echo "Restore it from enterprise-ai-standards and run the sync script."
+            exit 1
+          fi
+
       - name: Enforce runtime guardrails
         run: |
-          node tools/validators/enforce-runtime-guardrails.js \
+          node tools/validators/enforce-runtime-guardrails.mjs \
             --repo . \
             --config ai.config.json \
             --base "${{ github.event.pull_request.base.sha }}"

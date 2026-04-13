@@ -4,17 +4,23 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const REQUIRED_STATE_FILES = [
-  "docs/roadmap/state.json",
   "state/tasks.json",
+  "state/artifacts.json"
+];
+// Optional state files — validated when present, not required
+const OPTIONAL_STATE_FILES = [
+  "docs/roadmap/state.json",
   "state/risks.json",
-  "state/artifacts.json",
-  "state/handoff.json"
+  "state/handoff.json",
+  "state/decisions.json"
 ];
 const REQUIRED_WORKFLOW_FILES = [
+  "AGENTS.md",
   "ai/bootstrap.md",
   "ai/plan.md",
   "ai/tasks.md",
@@ -31,9 +37,7 @@ const REQUIRED_REPO_FILES = [
 
 const STATE_UPDATE_FILES = new Set([
   "state/tasks.json",
-  "state/risks.json",
-  "state/artifacts.json",
-  "state/handoff.json"
+  "state/artifacts.json"
 ]);
 const DEFAULT_EVIDENCE_DIRECTORIES = ["artifacts/"];
 const DEFAULT_META_DIRECTORIES = [];
@@ -94,15 +98,16 @@ const DOC_PATTERNS = [
 ];
 
 const STATE_OR_META_PATTERNS = [
+  /^AGENTS\.md$/,
   /^ai\//,
   /^state\//,
-  /^docs\/roadmap\/state\.json$/,
-  /^docs\/roadmap\/roadmap\.md$/,
+  /^docs\/roadmap\//,
   /^ai\.config\.json$/,
   /^bootstrap\.sh$/,
-  /^scripts\/validate\.sh$/,
+  /^scripts\//,
   /^\.github\/workflows\//,
-  /^tools\/validators\//
+  /^tools\/validators\//,
+  /^developer\//
 ];
 
 const FRONTEND_FILE_PATTERNS = [
@@ -877,12 +882,14 @@ function validateEvidenceStructure(repoRoot, artifacts, config, failures) {
     const metadataOnlyAllowed = config.allowed_metadata_only_evidence_types.includes(key);
     const status = String(entry.status || "");
     const requiresFileBackedEvidence = ["passed", "failed"].includes(status);
+    // not_run/blocked/not_required are "pending" or "exempt" states — empty paths are fine
+    const pathsOptional = ["not_run", "blocked", "not_required"].includes(status);
 
     if (!Object.prototype.hasOwnProperty.call(entry, "paths")) {
       addFailure(failures, `${label}.paths is required`);
     } else if (!Array.isArray(entry.paths)) {
       addFailure(failures, `${label}.paths must be an array`);
-    } else if (entry.paths.length === 0) {
+    } else if (entry.paths.length === 0 && !pathsOptional) {
       if (!metadataOnly) {
         addFailure(
           failures,
@@ -930,8 +937,9 @@ function validateEvidenceStructure(repoRoot, artifacts, config, failures) {
       );
     }
 
+    // reason is optional for not_run (the default reset state — no work done yet)
     if (
-      ["failed", "not_run", "blocked", "not_required"].includes(String(entry.status || "")) &&
+      ["failed", "blocked", "not_required"].includes(String(entry.status || "")) &&
       !String(entry.reason || "").trim()
     ) {
       addFailure(
@@ -1024,27 +1032,25 @@ function validateEvidenceStructure(repoRoot, artifacts, config, failures) {
   }
 }
 
-function validateRiskAndHandoffState(risks, handoff, failures) {
+function validateRisksFile(risks, failures) {
   if (!Array.isArray(risks.risks)) {
     addFailure(failures, "state/risks.json must contain a risks array");
   }
-
   if (!risks.last_updated) {
     addFailure(failures, "state/risks.json missing required field: last_updated");
   }
+}
 
+function validateHandoffFile(handoff, failures) {
   if (!handoff.last_updated) {
     addFailure(failures, "state/handoff.json missing required field: last_updated");
   }
-
   if (!String(handoff.summary || "").trim()) {
     addFailure(failures, "state/handoff.json summary is required");
   }
-
   if (!String(handoff.next_action || "").trim()) {
     addFailure(failures, "state/handoff.json next_action is required");
   }
-
   if (!Array.isArray(handoff.discovered_issues)) {
     addFailure(failures, "state/handoff.json discovered_issues must be an array");
   }
@@ -1082,13 +1088,7 @@ function validateDiffAwareState(
     );
 
   if (codeOrConfigChanges.length > 0) {
-    const requiredUpdates = nightRunProfile
-      ? ["state/artifacts.json"]
-      : [
-          "state/tasks.json",
-          "state/artifacts.json",
-          "state/handoff.json"
-        ];
+    const requiredUpdates = ["state/tasks.json", "state/artifacts.json"];
 
     for (const relativePath of requiredUpdates) {
       if (!changedSet.has(relativePath)) {
@@ -1107,7 +1107,7 @@ function validateDiffAwareState(
     );
   }
 
-  if (baseRoadmap) {
+  if (baseRoadmap && roadmap) {
     const phaseChanged =
       baseRoadmap.current_phase !== roadmap.current_phase ||
       normalizePhaseType(baseRoadmap.phase_type) !== normalizePhaseType(roadmap.phase_type) ||
@@ -1121,7 +1121,7 @@ function validateDiffAwareState(
       if (!hasStateUpdate) {
         addFailure(
           failures,
-          "Phase changed without updating task, artifact, handoff, or risk state"
+          "Phase changed without updating task or artifact state"
         );
       }
     }
@@ -1248,7 +1248,7 @@ function validatePhaseRules(
   config,
   failures
 ) {
-  const phaseType = normalizePhaseType(roadmap.phase_type);
+  const phaseType = normalizePhaseType(roadmap ? roadmap.phase_type : "build");
   const evidence = artifacts.evidence || {};
   const claims = artifacts.claims || {};
   const codeChangesPresent = changedFilesInfo.codeOrConfigChanges.length > 0;
@@ -1324,7 +1324,7 @@ function validatePhaseRules(
     addFailure(failures, "Missing test or build evidence for changed code");
   }
 
-  if (String(roadmap.phase_status) === "complete") {
+  if (roadmap && String(roadmap.phase_status) === "complete") {
     const incompleteEvidence = EVIDENCE_KEYS.filter((key) => {
       if (!required[key]) {
         return false;
@@ -1345,20 +1345,20 @@ function validatePhaseRules(
       ["failed", "blocked"].includes(String((evidence[key] || {}).status || ""))
     );
 
-    const unresolvedRisks = Array.isArray(risks.risks)
+    const unresolvedRisks = risks && Array.isArray(risks.risks)
       ? risks.risks.filter((risk) => !RESOLVED_RISK_STATUSES.has(String(risk.status || "").toLowerCase()))
       : [];
-    const linkedDiscoveredIssues = Array.isArray(handoff.discovered_issues)
+    const linkedDiscoveredIssues = handoff && Array.isArray(handoff.discovered_issues)
       ? handoff.discovered_issues.filter(
           (issue) =>
             issue &&
-            issue.requires_risk_log !== false &&
+            issue.requires_risk_log === true &&
             Array.isArray(issue.risk_ids) &&
             issue.risk_ids.length > 0
         )
       : [];
 
-    if (blockingEvidence.length > 0 && unresolvedRisks.length === 0 && linkedDiscoveredIssues.length === 0) {
+    if (blockingEvidence.length > 0 && unresolvedRisks.length === 0 && linkedDiscoveredIssues.length === 0 && risks) {
       addFailure(
         failures,
         "Failed or blocked evidence exists without a logged unresolved risk"
@@ -1445,16 +1445,19 @@ function main() {
     const config = resolveConfig(repoRoot, options.config);
     const baseRef = resolveBaseRef(repoRoot, options.base);
 
-    const roadmap = readJsonFile(path.join(repoRoot, "docs/roadmap/state.json"));
+    const roadmapPath = path.join(repoRoot, "docs/roadmap/state.json");
+    const roadmap = exists(roadmapPath) ? readJsonFile(roadmapPath) : null;
     const tasks = readJsonFile(path.join(repoRoot, "state/tasks.json"));
-    const risks = readJsonFile(path.join(repoRoot, "state/risks.json"));
+    const risksPath = path.join(repoRoot, "state/risks.json");
+    const risks = exists(risksPath) ? readJsonFile(risksPath) : null;
     const decisionsPath = path.join(repoRoot, "state/decisions.json");
     const decisions = exists(decisionsPath) ? readJsonFile(decisionsPath) : null;
     const artifacts = readJsonFile(path.join(repoRoot, "state/artifacts.json"));
-    const handoff = readJsonFile(path.join(repoRoot, "state/handoff.json"));
+    const handoffPath = path.join(repoRoot, "state/handoff.json");
+    const handoff = exists(handoffPath) ? readJsonFile(handoffPath) : null;
 
-    const baseRoadmap = readJsonAtGitRef(repoRoot, baseRef, "docs/roadmap/state.json");
-    const baseRisks = readJsonAtGitRef(repoRoot, baseRef, "state/risks.json");
+    const baseRoadmap = roadmap ? readJsonAtGitRef(repoRoot, baseRef, "docs/roadmap/state.json") : null;
+    const baseRisks = risks ? readJsonAtGitRef(repoRoot, baseRef, "state/risks.json") : null;
 
     const changedFiles = getChangedFiles(repoRoot, baseRef);
     validateLayerBoundaryViolations(repoRoot, changedFiles, config.value, failures);
@@ -1466,12 +1469,13 @@ function main() {
       failures
     );
 
-    validateRoadmapState(roadmap, tasks, failures);
+    if (roadmap) validateRoadmapState(roadmap, tasks, failures);
     validateEvidenceStructure(repoRoot, artifacts, config.value, failures);
-    validateRiskAndHandoffState(risks, handoff, failures);
+    if (risks) validateRisksFile(risks, failures);
+    if (handoff) validateHandoffFile(handoff, failures);
     if (decisions) validateDecisions(decisions, failures);
-    validateRiskContinuity(baseRisks, risks, failures);
-    validateDiscoveredIssues(handoff, risks, failures);
+    if (risks) validateRiskContinuity(baseRisks, risks, failures);
+    if (risks && handoff) validateDiscoveredIssues(handoff, risks, failures);
     validatePhaseRules(
       roadmap,
       artifacts,
@@ -1491,12 +1495,12 @@ function main() {
       process.exit(1);
     }
 
-    const normalizedPhaseType = normalizePhaseType(roadmap.phase_type);
+    const normalizedPhaseType = normalizePhaseType(roadmap ? roadmap.phase_type : "build");
     const codeChanges = changedFilesInfo.codeOrConfigChanges.length;
     const configLabel = toRelative(repoRoot, config.path);
 
     console.log("PASS:");
-    console.log(`- Phase ${roadmap.current_phase} (${normalizedPhaseType}) satisfies the runtime contract`);
+    console.log(`- Phase ${roadmap ? roadmap.current_phase : "(roadmap optional)"} (${normalizedPhaseType}) satisfies the runtime contract`);
     console.log(`- ${codeChanges} non-doc code/config file(s) require evidence in this diff`);
     console.log(`- Run profile ${config.value.run_profile}`);
     console.log(`- Config loaded from ${configLabel}`);

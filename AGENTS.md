@@ -48,10 +48,11 @@ Codex acquires a 90-minute lease before starting work:
 
 0. Rebase branch onto current main: `git fetch origin main && git rebase origin/main` — prevents DIRTY PR state.
 1. All repo-local validation must pass (see `ai/bootstrap.md` for the exact commands)
-2. `node tools/validators/enforce-runtime-guardrails.js --repo . --config ai.config.json` must pass
+2. `node tools/validators/enforce-runtime-guardrails.mjs --repo . --config ai.config.json` must pass
 3. `state/artifacts.json` must reflect actual evidence (real file paths, correct statuses)
 4. Lease must be cleared (`execution_status: idle`)
 
+**If validate.sh passes locally, CI must also pass.** Local and CI validation use the same validator. A CI failure after a local pass means validate.sh is broken — fix it before opening more PRs.
 
 ## Batch mode (Codex)
 
@@ -72,3 +73,29 @@ Codex implements **up to 3 sequential tasks per run** on one branch and one PR:
 - Never modify `ai/plan.md`, `ai/tasks.md`, `ai/acceptance.md`
 - Document any necessary out-of-scope changes in `state/implementation_notes.md`
 - If the task is ambiguous or blocked: set `ready_for_claude`, document reason, clear lease, stop
+
+## artifacts.json contract (validator-enforced — violations fail CI)
+
+Valid `status` + `paths` combinations for each evidence type (`build`, `test`, `run`, `deploy`):
+
+| status | paths | metadata_only | When to use |
+|--------|-------|---------------|-------------|
+| `"passed"` | non-empty array | false (omit) | Evidence captured; artifact files exist at listed paths |
+| `"not_run"` | `[]` (empty) | `true` | Evidence cannot be captured in CI (macOS-only build, local-only lint, etc.) |
+| `"not_required"` | `[]` (empty) | omit | This evidence type does not apply (e.g., deploy for a library) |
+| `"blocked"` | `[]` (empty) | omit | Blocked by a known upstream dependency |
+
+**Invalid combinations that WILL fail CI:**
+- `"status": "passed"` + empty `paths[]` → FAIL (passed requires artifacts)
+- `"status": "passed"` + `"metadata_only": true` → FAIL (double violation)
+- `"status": "not_run"` + `"metadata_only": true` + type NOT in `allowed_metadata_only_evidence_types` → FAIL
+
+**`code_changes_present`**: Set to `true` if any production code changed. Set to `false` only for state-only or docs-only commits.
+
+**Always run the validator BEFORE writing artifacts.json.** Never pre-populate artifacts.json with CI tracking fields — the validator writes those. If `scripts/validate.sh` writes artifacts.json before calling the validator, that is a bug.
+
+## Validator integrity (enterprise standard — do not modify)
+
+`tools/validators/enforce-runtime-guardrails.mjs` is synced from enterprise-ai-standards and must not be modified in this repo. The file is hash-verified by CI before execution. Modifications will cause CI to fail immediately with an integrity error.
+
+To update the validator: submit a change to enterprise-ai-standards and run the sync script.
