@@ -97,6 +97,7 @@ const STATE_OR_META_PATTERNS = [
   /^docs\/roadmap\//,
   /^ai\.config\.json$/,
   /^bootstrap\.sh$/,
+  /^\.semgrepignore$/,
   /^scripts\//,
   /^\.github\/workflows\//,
   /^tools\/validators\//,
