@@ -98,7 +98,8 @@ const STATE_OR_META_PATTERNS = [
   /^ai\.config\.json$/,
   /^bootstrap\.sh$/,
   /^scripts\/validate\.sh$/,
-  /^\.github\/workflows\//
+  /^\.github\/workflows\//,
+  /^tools\/validators\//
 ];
 
 const FRONTEND_FILE_PATTERNS = [
