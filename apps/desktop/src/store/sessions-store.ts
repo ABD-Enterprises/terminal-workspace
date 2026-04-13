@@ -455,6 +455,24 @@ export function setActiveSessionTab(state: SessionWorkspaceState, tabId: string)
   };
 }
 
+export function cycleSessionTab(
+  state: SessionWorkspaceState,
+  direction: 1 | -1 = 1
+): SessionWorkspaceState {
+  if (state.tabs.length <= 1) {
+    return state;
+  }
+
+  const currentIndex = state.tabs.findIndex((tab) => tab.id === state.activeTabId);
+  const startIndex = currentIndex >= 0 ? currentIndex : 0;
+  const nextIndex = (startIndex + direction + state.tabs.length) % state.tabs.length;
+
+  return {
+    ...state,
+    activeTabId: state.tabs[nextIndex]?.id ?? state.activeTabId,
+  };
+}
+
 export function setActiveSessionPane(
   state: SessionWorkspaceState,
   tabId: string,
@@ -548,6 +566,7 @@ export interface SessionsState extends SessionWorkspaceState {
   openSession: (host: HostRecord) => string;
   duplicateSession: (host: HostRecord, baseTitle?: string) => string;
   selectTab: (tabId: string) => void;
+  cycleTab: (direction?: 1 | -1) => void;
   closeTab: (tabId: string) => void;
   splitTab: (tabId: string, host: HostRecord) => void;
   closePane: (tabId: string, paneId: string) => void;
@@ -590,6 +609,7 @@ export const useSessionsStore = create<SessionsState>()(
         return nextState.activeTabId ?? "";
       },
       selectTab: (tabId) => set((state) => setActiveSessionTab(state, tabId)),
+      cycleTab: (direction = 1) => set((state) => cycleSessionTab(state, direction)),
       closeTab: (tabId) => set((state) => closeSessionTab(state, tabId)),
       splitTab: (tabId, host) => set((state) => splitSessionPane(state, tabId, host)),
       closePane: (tabId, paneId) => set((state) => removeSessionPane(state, tabId, paneId)),

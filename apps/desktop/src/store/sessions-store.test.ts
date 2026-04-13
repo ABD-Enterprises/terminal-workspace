@@ -3,6 +3,7 @@ import { sampleHosts } from "../types/host";
 import { formatSessionConnectionState } from "../types/session";
 import {
   appendPaneCommandHistoryOutput,
+  cycleSessionTab,
   closeSessionTab,
   consumePaneCommand,
   duplicateSessionWorkspace,
@@ -84,6 +85,27 @@ describe("sessions store helpers", () => {
     const closed = closeSessionTab(horizontal, horizontal.tabs[0]!.id);
     expect(closed.tabs).toHaveLength(0);
     expect(Object.keys(closed.panes)).toHaveLength(0);
+  });
+
+  it("cycles through open tabs in both directions", () => {
+    const initial = {
+      tabs: [],
+      panes: {},
+      activeTabId: undefined,
+      lastRestoredAt: undefined,
+    };
+
+    const first = openSessionWorkspace(initial, sampleHosts[0]);
+    const second = duplicateSessionWorkspace(first, sampleHosts[1]);
+    const third = duplicateSessionWorkspace(second, sampleHosts[2]);
+
+    expect(third.activeTabId).toBe(third.tabs[2]?.id);
+
+    const wrappedForward = cycleSessionTab(third, 1);
+    expect(wrappedForward.activeTabId).toBe(third.tabs[0]?.id);
+
+    const backward = cycleSessionTab(wrappedForward, -1);
+    expect(backward.activeTabId).toBe(third.tabs[2]?.id);
   });
 
   it("preserves reconnect intent until the user explicitly clears it", () => {
