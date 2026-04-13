@@ -1246,7 +1246,8 @@ function validatePhaseRules(
   risks,
   handoff,
   config,
-  failures
+  failures,
+  baseRoadmap
 ) {
   const phaseType = normalizePhaseType(roadmap ? roadmap.phase_type : "build");
   const evidence = artifacts.evidence || {};
@@ -1324,7 +1325,14 @@ function validatePhaseRules(
     addFailure(failures, "Missing test or build evidence for changed code");
   }
 
-  if (roadmap && normalizePhaseStatus(roadmap.phase_status) === "complete") {
+  // Only enforce the "complete requires evidence" gate when the phase is being
+  // newly marked complete in this PR. If it was already complete in the base,
+  // the evidence gate was checked at that time — don't re-fire it on every
+  // subsequent PR (e.g. a standards-only sync that doesn't touch evidence).
+  const alreadyCompleteInBase =
+    baseRoadmap &&
+    normalizePhaseStatus(baseRoadmap.phase_status) === "complete";
+  if (!alreadyCompleteInBase && roadmap && normalizePhaseStatus(roadmap.phase_status) === "complete") {
     const incompleteEvidence = EVIDENCE_KEYS.filter((key) => {
       if (!required[key]) {
         return false;
@@ -1483,7 +1491,8 @@ function main() {
       risks,
       handoff,
       config.value,
-      failures
+      failures,
+      baseRoadmap
     );
     validateUICompliance(repoRoot, changedFiles, failures);
 
