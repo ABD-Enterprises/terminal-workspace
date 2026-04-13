@@ -1,5 +1,11 @@
 # Validation Report
 
+## 2026-04-13 CI fix pass
+
+- ui compliance review: AppShell.tsx, Sidebar.tsx, and TerminalPane.tsx changes reviewed against ui-business-software.md guidelines. Changes are layout/structural (tab bar, sidebar, terminal pane framing) — no new patterns introduced that conflict with the business-software UI standards. Acknowledged per developer/ui-business-software.md.
+- artifacts.json corrected: build/test/run statuses changed from `passed` (no backing files) to `not_run` with explanatory reasons.
+- enforce-runtime-guardrails.js converted to ESM to fix eslint `no-require-imports` lint error.
+
 ## 2026-04-13 planning-failure triage
 
 - No local validation rerun was performed because no code fix was attempted.
