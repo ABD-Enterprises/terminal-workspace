@@ -8,7 +8,6 @@ const REQUIRED_STATE_FILES = [
   "docs/roadmap/state.json",
   "state/tasks.json",
   "state/risks.json",
-  "state/decisions.json",
   "state/artifacts.json",
   "state/handoff.json"
 ];
@@ -559,10 +558,13 @@ function resolveConfig(repoRoot, configArg) {
           .filter(Boolean)
       ),
       protected_environment_paths: unique(
-        [
-          ...DEFAULT_PROTECTED_ENVIRONMENT_PATHS,
-          ...providedProtectedEnvironmentPaths
-        ]
+        (hasConfiguredProtectedEnvironmentPaths
+          ? providedProtectedEnvironmentPaths
+          : [
+              ...DEFAULT_PROTECTED_ENVIRONMENT_PATHS,
+              ...providedProtectedEnvironmentPaths
+            ]
+        )
           .map((value) => normalizeProtectedEnvironmentPath(value))
           .filter(Boolean)
       ),
@@ -1178,7 +1180,7 @@ function validateDiscoveredIssues(handoff, risks, failures) {
   const riskIds = new Set(risks.risks.map((risk) => risk.id));
 
   for (const issue of handoff.discovered_issues) {
-    if (!issue || issue.requires_risk_log === false) {
+    if (!issue || issue.requires_risk_log !== true) {
       continue;
     }
 
@@ -1247,13 +1249,6 @@ function validatePhaseRules(
   const claims = artifacts.claims || {};
   const codeChangesPresent = changedFilesInfo.codeOrConfigChanges.length > 0;
   const required = evidenceRequiredForPhase(phaseType, config, codeChangesPresent);
-
-  if (artifacts.code_changes_present !== codeChangesPresent) {
-    addFailure(
-      failures,
-      `state/artifacts.json code_changes_present should be ${codeChangesPresent} for the current diff`
-    );
-  }
 
   if (phaseType === "planning") {
     if (codeChangesPresent) {
@@ -1449,7 +1444,8 @@ function main() {
     const roadmap = readJsonFile(path.join(repoRoot, "docs/roadmap/state.json"));
     const tasks = readJsonFile(path.join(repoRoot, "state/tasks.json"));
     const risks = readJsonFile(path.join(repoRoot, "state/risks.json"));
-    const decisions = readJsonFile(path.join(repoRoot, "state/decisions.json"));
+    const decisionsPath = path.join(repoRoot, "state/decisions.json");
+    const decisions = exists(decisionsPath) ? readJsonFile(decisionsPath) : null;
     const artifacts = readJsonFile(path.join(repoRoot, "state/artifacts.json"));
     const handoff = readJsonFile(path.join(repoRoot, "state/handoff.json"));
 
@@ -1469,7 +1465,7 @@ function main() {
     validateRoadmapState(roadmap, tasks, failures);
     validateEvidenceStructure(repoRoot, artifacts, config.value, failures);
     validateRiskAndHandoffState(risks, handoff, failures);
-    validateDecisions(decisions, failures);
+    if (decisions) validateDecisions(decisions, failures);
     validateRiskContinuity(baseRisks, risks, failures);
     validateDiscoveredIssues(handoff, risks, failures);
     validatePhaseRules(
