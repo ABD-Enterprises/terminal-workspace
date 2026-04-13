@@ -12,13 +12,6 @@ const REQUIRED_STATE_FILES = [
   "state/tasks.json",
   "state/artifacts.json"
 ];
-// Optional state files — validated when present, not required
-const OPTIONAL_STATE_FILES = [
-  "docs/roadmap/state.json",
-  "state/risks.json",
-  "state/handoff.json",
-  "state/decisions.json"
-];
 const REQUIRED_WORKFLOW_FILES = [
   "AGENTS.md",
   "ai/bootstrap.md",
@@ -107,7 +100,8 @@ const STATE_OR_META_PATTERNS = [
   /^scripts\//,
   /^\.github\/workflows\//,
   /^tools\/validators\//,
-  /^developer\//
+  /^developer\//,
+  /^\.gitignore$/
 ];
 
 const FRONTEND_FILE_PATTERNS = [
