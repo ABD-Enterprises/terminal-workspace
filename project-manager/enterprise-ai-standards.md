@@ -5,7 +5,7 @@ This is the single authoritative standards document for downstream AI-driven del
 Authoritative paths:
 
 - standards: `project-manager/enterprise-ai-standards.md`
-- validator: `tools/validators/enforce-runtime-guardrails.js`
+- validator: `tools/validators/enforce-runtime-guardrails.mjs`
 - config template: `templates/ai.config.json`
 - adoption template: `templates/product-repo-minimal/`
 
@@ -776,7 +776,7 @@ Not allowed:
 
 ## 9. Validator Mapping
 
-| Rule Group | Enforced By `enforce-runtime-guardrails.js` |
+| Rule Group | Enforced By `enforce-runtime-guardrails.mjs` |
 | --- | --- |
 | Layer boundaries | rejects execution-layer environment manifests, repo-external evidence paths, and external state fallbacks |
 | Three-role workflow contract | requires repo workflow files under `ai/` and `state/`, requires a valid `state/controller.md` workflow state, rejects invalid run profiles, and treats workflow files as repo-visible handoff inputs rather than code |
