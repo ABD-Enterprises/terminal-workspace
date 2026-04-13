@@ -6,7 +6,5 @@ src-tauri/target/
 artifacts/
 playwright-report/
 test-results/
-state/implementation_notes.md
-state/validation_report.md
 
 *.tsbuildinfo
