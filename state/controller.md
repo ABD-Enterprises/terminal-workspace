@@ -1,4 +1,4 @@
 # Controller State
 
-current_state: review_failed_fix_required
+current_state: ready_for_claude
 current_task: S1

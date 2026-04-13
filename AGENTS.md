@@ -46,6 +46,7 @@ Codex acquires a 90-minute lease before starting work:
 
 ## Before setting ready_for_review
 
+0. Rebase branch onto current main: `git fetch origin main && git rebase origin/main` — prevents DIRTY PR state.
 1. All repo-local validation must pass (see `ai/bootstrap.md` for the exact commands)
 2. `node tools/validators/enforce-runtime-guardrails.js --repo . --config ai.config.json` must pass
 3. `state/artifacts.json` must reflect actual evidence (real file paths, correct statuses)

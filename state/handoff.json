@@ -1,32 +1,30 @@
 {
-  "summary": "The macOS session-history phase remains active, and PR #1 is back in review after the guardrails rerun commit refreshed the output-preview persistence evidence state.",
-  "next_action": "Wait for PR #1 validation and review to rerun on `codex/t1-output-preview-persistence-control`, then address only any new CI or review defects on the same task.",
+  "summary": "PR #3 for S1 was returned to Claude because review exposed a planning mismatch rather than a pure implementation defect.",
+  "next_action": "Replan S1 by replacing the Cmd+Tab requirement with a review-safe in-app shortcut contract and add a canonical `### S1` section to ai/acceptance.md before sending the repo back to Codex.",
   "discovered_issues": [
     {
-      "id": "issue-release-secret-provisioning-blocker",
-      "summary": "The hosted macOS release workflow still cannot pass preflight because GitHub lacks signing and notarization secrets and this workstation still does not expose exportable release credential material.",
-      "risk_ids": [
-        "risk-github-release-workflow-missing-secrets",
-        "risk-local-release-secret-source-material-missing"
-      ]
+      "id": "issue-s1-shortcut-contract-conflicts-with-macos",
+      "summary": "The current S1 task contract requires Cmd+Tab session cycling, but PR review correctly flagged that shortcut as conflicting with the macOS application switcher.",
+      "owner": "claude",
+      "source": "pr-3-review",
+      "detected_at": "2026-04-13T10:59:15Z"
     },
     {
-      "issue": "Handoff references PR on branch codex/t1-output-preview-persistence-control which no longer exists as an open remote branch. Current active task is S1 on branch origin/codex/S1-ssh-terminal-core-fast-connect.",
-      "severity": "low",
-      "action": "Update handoff summary and next_action to reflect current S1 task state.",
-      "owner": "scheduled-audit",
-      "source": "repo-health-audit",
-      "detected_at": "2026-04-13T05:11:00Z"
+      "id": "issue-s1-acceptance-contract-missing",
+      "summary": "ai/acceptance.md does not include a canonical `### S1` section, so PR remediation no longer has a task-specific acceptance contract.",
+      "owner": "claude",
+      "source": "pr-3-review",
+      "detected_at": "2026-04-13T10:59:15Z"
     }
   ],
   "next_steps": [
-    "Wait for PR #1 validation and review to rerun on the refreshed guardrails state commit.",
-    "Upgrade snippets into structured runbooks with parameter input, preview, execution records, and retained results.",
-    "Preserve the blocked release-secret provisioning work until exportable signing and notarization material exists."
+    "Update ai/tasks.md and ai/acceptance.md so the S1 shortcut and acceptance contract match review-safe behavior.",
+    "Decide whether the existing branch should keep the current shortcut implementation, switch to a new in-app shortcut, or split shortcut work into a follow-up task.",
+    "Set the repo back to ready_for_codex only after the S1 plan and acceptance contract are consistent."
   ],
   "blockers": [
-    "GitHub release secret provisioning is still blocked because the repository has no configured signing/notarization secrets and the current workstation state does not expose exportable certificate or notary credential material."
+    "Codex cannot resolve the shortcut conflict or the missing S1 acceptance section because ai/tasks.md and ai/acceptance.md are planner-owned files."
   ],
-  "updated_at": "2026-04-05T19:14:17Z",
-  "last_updated": "2026-04-13T05:11:00Z"
+  "updated_at": "2026-04-13T10:59:15Z",
+  "last_updated": "2026-04-13T10:59:15Z"
 }

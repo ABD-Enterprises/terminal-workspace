@@ -128,6 +128,9 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const connectingRef = useRef(false);
   const connectedOnceRef = useRef(pane.connectionState === "connected");
   const reconnectOnRestoreRef = useRef(pane.reconnectOnRestore);
+  const reconnectTimeoutRef = useRef<number | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const intentionalDisconnectRef = useRef(false);
   const pendingSecretsNoticeShownRef = useRef(false);
   const runtimeStatusRef = useRef<{
     available: boolean;
@@ -282,6 +285,49 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       setPaneBackendSession(pane.id, undefined);
     };
 
+    const clearReconnectTimer = () => {
+      if (reconnectTimeoutRef.current == null) {
+        return;
+      }
+
+      window.clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    };
+
+    const scheduleReconnect = (message?: string) => {
+      if (
+        disposed ||
+        intentionalDisconnectRef.current ||
+        useMockTransport ||
+        unsupportedTransport ||
+        (!connectedOnceRef.current && !reconnectOnRestoreRef.current)
+      ) {
+        return;
+      }
+
+      clearReconnectTimer();
+      reconnectAttemptRef.current += 1;
+      const reconnectDelayMs = Math.min(
+        8_000,
+        reconnectAttemptRef.current <= 1 ? 1_500 : reconnectAttemptRef.current * 2_000
+      );
+
+      connectionStateRef.current = "disconnected";
+      setPaneState(pane.id, "disconnected");
+      terminal.writeln(
+        `\r\n${message ?? `${protocolLabel} connection interrupted.`} Reconnecting in ${Math.ceil(reconnectDelayMs / 1000)}s...`
+      );
+
+      reconnectTimeoutRef.current = window.setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        void connectNativeSession({
+          announce: true,
+          allowPendingSecrets: true,
+          promptForSecrets: false,
+        });
+      }, reconnectDelayMs);
+    };
+
     const scheduleFit = () => {
       if (disposed) {
         return;
@@ -333,6 +379,9 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       if (disposed) {
         return;
       }
+
+      intentionalDisconnectRef.current = false;
+      clearReconnectTimer();
 
       const runtimeStatus =
         runtimeStatusRef.current ?? (await getProtocolRuntimeStatus(protocol));
@@ -479,14 +528,21 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           if (message.type === "status") {
             if (message.state === "connected") {
               connectedOnceRef.current = true;
+              reconnectOnRestoreRef.current = true;
+              reconnectAttemptRef.current = 0;
             }
             connectionStateRef.current = message.state;
             setPaneState(pane.id, message.state);
             return;
           }
 
-          terminal.writeln(`\r\n${message.message}`);
           clearBackendSession();
+          if (connectedOnceRef.current || reconnectOnRestoreRef.current) {
+            scheduleReconnect(message.message);
+            return;
+          }
+
+          terminal.writeln(`\r\n${message.message}`);
           connectionStateRef.current = "error";
           setPaneState(pane.id, "error");
         });
@@ -514,10 +570,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             return;
           }
 
-          if (connectionStateRef.current !== "disconnected") {
-            connectionStateRef.current = "disconnected";
-            setPaneState(pane.id, "disconnected");
-          }
+          scheduleReconnect();
         });
 
         socket.addEventListener("error", () => {
@@ -525,17 +578,27 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             return;
           }
 
-          terminal.writeln(`\r\n${protocolLabel} session transport failed.`);
           clearBackendSession();
+          if (connectedOnceRef.current || reconnectOnRestoreRef.current) {
+            scheduleReconnect(`${protocolLabel} session transport failed.`);
+            return;
+          }
+
+          terminal.writeln(`\r\n${protocolLabel} session transport failed.`);
           connectionStateRef.current = "error";
           setPaneState(pane.id, "error");
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        clearBackendSession();
+        if (connectedOnceRef.current || reconnectOnRestoreRef.current) {
+          scheduleReconnect(`${protocolLabel} connect failed: ${message}`);
+          return;
+        }
+
         terminal.writeln(`\r\n${protocolLabel} connect failed: ${message}`);
         connectionStateRef.current = "error";
         setPaneState(pane.id, "error");
-        clearBackendSession();
       } finally {
         connectingRef.current = false;
       }
@@ -543,10 +606,13 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
     const disconnectNativeSession = async () => {
       const sessionId = backendSessionIdRef.current;
+      intentionalDisconnectRef.current = true;
+      clearReconnectTimer();
       socketRef.current?.close();
       socketRef.current = null;
       clearBackendSession();
       connectedOnceRef.current = false;
+      reconnectAttemptRef.current = 0;
       pendingSecretsNoticeShownRef.current = false;
       reconnectOnRestoreRef.current = false;
       setPaneReconnectOnRestore(pane.id, false);
@@ -586,6 +652,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       setPaneTransport(pane.id, "mock");
 
       if (connectionStateRef.current === "connected") {
+        intentionalDisconnectRef.current = true;
+        clearReconnectTimer();
         connectionStateRef.current = "disconnected";
         pendingSecretsNoticeShownRef.current = false;
         reconnectOnRestoreRef.current = false;
@@ -773,6 +841,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       if (fitFrameId !== null) {
         window.cancelAnimationFrame(fitFrameId);
       }
+      clearReconnectTimer();
       socketRef.current?.close();
       socketRef.current = null;
       clearViewportRefreshFrame(getPrivateViewport(terminal));

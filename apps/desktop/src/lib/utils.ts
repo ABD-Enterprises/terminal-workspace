@@ -167,6 +167,27 @@ export function formatTimestamp(isoString?: string) {
   }).format(new Date(isoString));
 }
 
+export function formatDurationSince(isoString?: string, now = Date.now()) {
+  if (!isoString) {
+    return "0m";
+  }
+
+  const elapsedMilliseconds = Math.max(0, now - new Date(isoString).getTime());
+  const elapsedMinutes = Math.floor(elapsedMilliseconds / 60_000);
+
+  if (elapsedMinutes < 1) {
+    return "<1m";
+  }
+
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes}m`;
+  }
+
+  const hours = Math.floor(elapsedMinutes / 60);
+  const minutes = elapsedMinutes % 60;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${String(minutes).padStart(2, "0")}m`;
+}
+
 export function buildHostSearchText(host: HostRecord) {
   return [
     host.label,

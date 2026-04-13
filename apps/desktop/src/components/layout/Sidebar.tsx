@@ -1,17 +1,43 @@
-import { NavLink } from "react-router-dom";
+import { useMemo } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { navigationItems } from "../../lib/navigation";
-import { cn } from "../../lib/utils";
+import { cn, formatDurationSince } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
 import { useHostsStore } from "../../store/hosts-store";
+import { useSessionsStore } from "../../store/sessions-store";
+import { formatSessionConnectionState } from "../../types/session";
 import { SearchInput } from "../common/SearchInput";
 
 export function Sidebar() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const hosts = useHostsStore((state) => state.hosts);
   const sidebarSearch = useAppStore((state) => state.sidebarSearch);
   const setSidebarSearch = useAppStore((state) => state.setSidebarSearch);
   const workspaceDensity = useAppStore((state) => state.workspaceDensity);
+  const sessionTabs = useSessionsStore((state) => state.tabs);
+  const sessionPanes = useSessionsStore((state) => state.panes);
+  const activeSessionTabId = useSessionsStore((state) => state.activeTabId);
+  const selectSessionTab = useSessionsStore((state) => state.selectTab);
   const favoriteCount = hosts.filter((host) => host.favorite).length;
   const groupCount = new Set(hosts.map((host) => host.group).filter(Boolean)).size;
+  const sessionRows = useMemo(
+    () =>
+      sessionTabs.map((tab) => {
+        const host = hosts.find((entry) => entry.id === tab.hostId);
+        const activePane = sessionPanes[tab.activePaneId];
+        const anchorPane = sessionPanes[tab.paneIds[0] ?? tab.activePaneId];
+
+        return {
+          tabId: tab.id,
+          hostname: host?.hostname ?? "Unknown host",
+          status: formatSessionConnectionState(activePane?.connectionState ?? "disconnected"),
+          duration: formatDurationSince(anchorPane?.createdAt),
+          active: tab.id === activeSessionTabId,
+        };
+      }),
+    [activeSessionTabId, hosts, sessionPanes, sessionTabs]
+  );
 
   return (
     <aside
@@ -71,6 +97,55 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+
+      <div className="mt-2 min-h-0 flex-1 overflow-hidden rounded-[18px] border border-slate-800/90 bg-slate-900/60">
+        <div className="border-b border-slate-800/80 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+            Sessions
+          </p>
+          <div className="mt-1 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 text-[10px] uppercase tracking-[0.18em] text-slate-600">
+            <span>Host</span>
+            <span>Status</span>
+            <span>Duration</span>
+          </div>
+        </div>
+        <div className="max-h-full overflow-auto px-2 py-2">
+          {sessionRows.length ? (
+            <div className="space-y-1">
+              {sessionRows.map((session) => (
+                <button
+                  key={session.tabId}
+                  type="button"
+                  onClick={() => {
+                    selectSessionTab(session.tabId);
+                    if (!location.pathname.startsWith("/sessions")) {
+                      navigate(`/sessions?tabId=${session.tabId}`);
+                    } else {
+                      navigate(`/sessions?tabId=${session.tabId}`, { replace: true });
+                    }
+                  }}
+                  className={cn(
+                    "grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-[14px] border px-2 py-2 text-left transition",
+                    session.active
+                      ? "border-emerald-400/50 bg-emerald-400/10"
+                      : "border-slate-800 bg-slate-950/60 hover:border-slate-700 hover:bg-slate-900"
+                  )}
+                >
+                  <span className="truncate text-[12px] font-medium text-slate-100">
+                    {session.hostname}
+                  </span>
+                  <span className="text-[11px] text-slate-400">{session.status}</span>
+                  <span className="text-[11px] text-slate-500">{session.duration}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-[14px] border border-dashed border-slate-800 px-2.5 py-2 text-[11px] text-slate-500">
+              Open a host to pin its session here for quick switching.
+            </p>
+          )}
+        </div>
+      </div>
     </aside>
   );
 }

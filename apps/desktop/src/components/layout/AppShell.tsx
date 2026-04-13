@@ -44,6 +44,13 @@ export function AppShell() {
     ? sessionPanes[activeSessionTab.activePaneId]
     : undefined;
 
+  const focusSessionTab = (tabId: string, replace = false) => {
+    selectSessionTab(tabId);
+    setPaletteQuery("");
+    navigate(`/sessions?tabId=${tabId}`, replace ? { replace: true } : undefined);
+    closeCommandPalette();
+  };
+
   useEffect(() => {
     if (commandPaletteOpen) {
       inputRef.current?.focus();
@@ -52,6 +59,35 @@ export function AppShell() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const eventTarget = event.target;
+      const targetIsEditable =
+        eventTarget instanceof HTMLElement &&
+        (eventTarget instanceof HTMLInputElement ||
+          eventTarget instanceof HTMLTextAreaElement ||
+          eventTarget.isContentEditable ||
+          eventTarget.getAttribute("role") === "textbox");
+
+      if (targetIsEditable) {
+        return;
+      }
+
+      if (isPrimaryShortcut(event, "tab") && sessionTabs.length > 1) {
+        event.preventDefault();
+        const currentIndex = sessionTabs.findIndex((tab) => tab.id === activeSessionTabId);
+        const startIndex = currentIndex >= 0 ? currentIndex : 0;
+        const direction = event.shiftKey ? -1 : 1;
+        const nextIndex = (startIndex + direction + sessionTabs.length) % sessionTabs.length;
+        const nextTabId = sessionTabs[nextIndex]?.id;
+
+        if (nextTabId) {
+          selectSessionTab(nextTabId);
+          setPaletteQuery("");
+          navigate(`/sessions?tabId=${nextTabId}`, { replace: true });
+          closeCommandPalette();
+        }
+        return;
+      }
+
       if (!sectionShortcutsEnabled) {
         return;
       }
@@ -74,7 +110,14 @@ export function AppShell() {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [closeCommandPalette, navigate, sectionShortcutsEnabled]);
+  }, [
+    activeSessionTabId,
+    closeCommandPalette,
+    navigate,
+    sectionShortcutsEnabled,
+    selectSessionTab,
+    sessionTabs,
+  ]);
 
   const matchingSections = navigationItems.filter((item) => {
     if (!paletteQuery.trim()) {
@@ -155,10 +198,7 @@ export function AppShell() {
   };
 
   const focusSession = (tabId: string) => {
-    selectSessionTab(tabId);
-    setPaletteQuery("");
-    navigate(`/sessions?tabId=${tabId}`);
-    closeCommandPalette();
+    focusSessionTab(tabId);
   };
 
   const runSnippetInActivePane = (snippetId: string) => {
