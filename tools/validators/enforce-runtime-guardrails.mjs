@@ -142,8 +142,14 @@ const ALLOWED_PHASE_STATUSES = new Set([
   "planned",
   "in_progress",
   "blocked",
-  "complete"
+  "complete",
+  "done" // legacy alias for "complete" — normalised before validation
 ]);
+// Normalise phase_status: "done" is a legacy alias for "complete"
+function normalizePhaseStatus(s) {
+  const str = String(s || "");
+  return str === "done" ? "complete" : str;
+}
 const ALLOWED_RUN_PROFILES = new Set(["standard", "night"]);
 const ALLOWED_CONTROLLER_STATES = new Set([
   "ready_for_claude",
@@ -1105,7 +1111,7 @@ function validateDiffAwareState(
     const phaseChanged =
       baseRoadmap.current_phase !== roadmap.current_phase ||
       normalizePhaseType(baseRoadmap.phase_type) !== normalizePhaseType(roadmap.phase_type) ||
-      baseRoadmap.phase_status !== roadmap.phase_status;
+      normalizePhaseStatus(baseRoadmap.phase_status) !== normalizePhaseStatus(roadmap.phase_status);
 
     if (phaseChanged) {
       const hasStateUpdate = [...STATE_UPDATE_FILES].some((relativePath) =>
@@ -1318,7 +1324,7 @@ function validatePhaseRules(
     addFailure(failures, "Missing test or build evidence for changed code");
   }
 
-  if (roadmap && String(roadmap.phase_status) === "complete") {
+  if (roadmap && normalizePhaseStatus(roadmap.phase_status) === "complete") {
     const incompleteEvidence = EVIDENCE_KEYS.filter((key) => {
       if (!required[key]) {
         return false;
