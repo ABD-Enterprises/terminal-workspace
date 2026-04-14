@@ -427,6 +427,19 @@ function validateArtifactPaths(repoRoot, paths, label, failures) {
   }
 }
 
+function normalizeCurrentPhaseMarker(currentPhase) {
+  if (currentPhase && typeof currentPhase === "object" && !Array.isArray(currentPhase)) {
+    return JSON.stringify({
+      id: currentPhase.id || "",
+      title: currentPhase.title || "",
+      status: normalizePhaseStatus(currentPhase.status),
+      rationale: currentPhase.rationale || ""
+    });
+  }
+
+  return String(currentPhase || "");
+}
+
 function listFilesRecursively(root, current = "") {
   const absolute = current ? path.join(root, current) : root;
   const files = [];
@@ -1136,7 +1149,7 @@ function validateDiffAwareState(
 
   if (baseRoadmap && roadmap) {
     const phaseChanged =
-      baseRoadmap.current_phase !== roadmap.current_phase ||
+      normalizeCurrentPhaseMarker(baseRoadmap.current_phase) !== normalizeCurrentPhaseMarker(roadmap.current_phase) ||
       normalizePhaseType(baseRoadmap.phase_type) !== normalizePhaseType(roadmap.phase_type) ||
       normalizePhaseStatus(baseRoadmap.phase_status) !== normalizePhaseStatus(roadmap.phase_status);
 
