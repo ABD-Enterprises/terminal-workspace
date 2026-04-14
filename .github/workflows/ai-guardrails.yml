@@ -1,15 +1,15 @@
 name: AI Guardrails
 
-# Runs on every PR targeting main only.
-# Do NOT add push:main trigger — the validator checks state files which are in
-# transition during a merge; running on push causes false-positive failures.
-# Do NOT add macos-latest jobs here — macOS runners cost significantly more credits.
-# Native Swift builds use a separate workflow_dispatch or release-only trigger.
+# This workflow runs on ubuntu-latest for every PR only.
+# Do NOT add a push-to-main trigger — the validator is called during the
+# state-advance commit and fails on merge commits (no diff base available).
+# Do NOT add macos-latest jobs here — macOS runners consume significantly
+# more runner credits. Native app builds (Swift, Xcode, etc.) should use
+# a separate workflow with workflow_dispatch or release-only triggers.
 # See developer/coding-standards.md "CI Design Rules" for the full policy.
 
 on:
   pull_request:
-    branches: [main]
 
 jobs:
   enforce:
@@ -20,16 +20,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.0
-
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: "20"
-          cache: pnpm
 
       - name: Enforce runtime guardrails
         run: |

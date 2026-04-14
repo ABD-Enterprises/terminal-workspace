@@ -44,6 +44,10 @@ Codex acquires a 90-minute lease before starting work:
 - Never commit secrets, node_modules, __pycache__, .env, or generated artifacts
 - Use `--force-with-lease` for own branch pushes only; never force-push `main`
 
+## Validation
+
+GitHub pull requests are the only validation trigger. Never run validation outside of a PR context or bypass CI.
+
 ## Before setting ready_for_review
 
 0. Rebase branch onto current main: `git fetch origin main && git rebase origin/main` — prevents DIRTY PR state.
@@ -89,6 +93,7 @@ Valid `status` + `paths` combinations for each evidence type (`build`, `test`, `
 - `"status": "passed"` + empty `paths[]` → FAIL (passed requires artifacts)
 - `"status": "passed"` + `"metadata_only": true` → FAIL (double violation)
 - `"status": "not_run"` + `"metadata_only": true` + type NOT in `allowed_metadata_only_evidence_types` → FAIL
+- evidence paths that point at generated output trees like `dist/`, `build/`, `.next/`, `coverage/`, or `node_modules/` → FAIL
 
 **`code_changes_present`**: Set to `true` if any production code changed. Set to `false` only for state-only or docs-only commits.
 

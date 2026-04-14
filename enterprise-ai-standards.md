@@ -573,8 +573,11 @@ Evidence paths must be repo-relative artifact references. They must not be:
 - network URLs
 - external system handles
 - traversal paths outside the repo
+- generated output trees such as `dist/`, `build/`, `.next/`, `coverage/`, or `node_modules/`
 
 If a path is declared as proof, it must resolve to a real non-empty repo-visible file.
+
+Use retained evidence paths such as `artifacts/validation/...` for build and test proof. Do not point at transient outputs created later in the pipeline, because standalone guardrail jobs validate evidence before those generated trees exist in CI.
 
 `passed` and `failed` evidence must be file-backed and must not rely on metadata-only declarations.
 
@@ -733,6 +736,24 @@ Each risk must keep a stable `id`. Unresolved risks may not disappear from later
 
 Every discovered issue that materially affects delivery must set `requires_risk_log: true` and reference one or more `risk_ids`.
 
+### ST-6 Learnings promotion
+
+Use the execution-state files as the first capture point for learnings:
+
+- raw repo-local friction or surprises belong in `state/handoff.json`
+- accepted local generalizations belong in `state/decisions.json`
+
+When a learning is durable, reusable across repos, or likely to change future standards work, promote it into `project-manager/lessons/*.md`.
+
+If the promoted lesson changes the contract, it should lead to one of:
+
+- a standards update in `enterprise-ai-standards.md`
+- a template change
+- a validator change
+- a repair-tooling change
+
+The lessons directory is a promotion layer, not a substitute for updating the authoritative contract.
+
 ## 7. Phase Rules
 
 These are the validator-enforced defaults. `templates/ai.config.json` can relax test requirements, but it does not remove the need to track state honestly.
@@ -848,21 +869,30 @@ One-time setup: `semgrep login` on the developer's machine. Credentials are cach
 
 Every managed repo must have:
 
-- `.semgrepignore` — excludes `node_modules/`, `.next/`, `dist/`, `build/`, `runs/`, `state/`, `.git/`
-- A `semgrep` step in `scripts/validate.sh` that runs after the existing security step:
+- `.semgrepignore` — excludes `node_modules/`, `.next/`, `dist/`, `build/`, `runs/`, `state/`, `.git/`, and `tools/validators/` when that directory only contains synced validator metadata
+- A `semgrep` step in `scripts/validate.sh` that uses the PR baseline when one is available and otherwise falls back safely:
 
 ```bash
+BASE_REF="${AI_VALIDATOR_BASE_REF:-${1:-}}"
+if [[ -z "$BASE_REF" && -n "${GITHUB_BASE_REF:-}" ]]; then
+  BASE_REF="origin/${GITHUB_BASE_REF}"
+fi
+
+if [[ -n "$BASE_REF" ]]; then
+  git diff --name-only "${BASE_REF}...HEAD" --
+fi
+
 docker run --rm \
   -v "$(pwd)":/src \
   -w /src \
   -e SEMGREP_APP_TOKEN \
   semgrep/semgrep \
-  semgrep --config=auto --error .
+  semgrep scan --config=auto --error "${SEMGREP_TARGETS[@]}"
 ```
 
-If Docker is not available in the execution environment, the step must record `NOT RUN` rather than fail the entire validation.
+In PR contexts, the baseline ref should come from `AI_VALIDATOR_BASE_REF` or `GITHUB_BASE_REF`, and Semgrep should scan only the changed repo-visible files in that diff. If no base ref is available, the step may fall back to a full-repo scan for local or headless runs. If Docker is not available in the execution environment, the step must record `NOT RUN` rather than fail the entire validation.
 
-**This is enforced by `ai-pipeline.sh repair`.** The `check_semgrep_config` repair check ensures `.semgrepignore` exists and that `validate.sh` contains the semgrep Docker invocation.
+**This is enforced by `ai-pipeline.sh repair`.** The `check_semgrep_config` repair check ensures `.semgrepignore` contains the shared ignore set and that `validate.sh` uses the baseline-aware Semgrep flow.
 
 ### SC-3 Fleet sweep
 

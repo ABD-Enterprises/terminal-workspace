@@ -366,6 +366,17 @@ function validateArtifactPaths(repoRoot, paths, label, failures) {
     return;
   }
 
+  const generatedEvidenceDirectories = new Set([
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules"
+  ]);
+
   for (const artifactPath of paths) {
     if (!isRepoRelativeArtifactPath(artifactPath)) {
       addFailure(
@@ -379,11 +390,21 @@ function validateArtifactPaths(repoRoot, paths, label, failures) {
       repoRoot,
       normalizeRepoRelativePath(artifactPath)
     );
+    const normalizedArtifactPath = normalizeRepoRelativePath(artifactPath);
+    const pathSegments = normalizedArtifactPath.split("/");
 
     if (!absoluteArtifactPath.startsWith(`${repoRoot}${path.sep}`) && absoluteArtifactPath !== repoRoot) {
       addFailure(
         failures,
         `${label} must not point outside the repository`
+      );
+      continue;
+    }
+
+    if (pathSegments.some((segment) => generatedEvidenceDirectories.has(segment))) {
+      addFailure(
+        failures,
+        `${label} must not reference generated output directories: ${artifactPath}`
       );
       continue;
     }
