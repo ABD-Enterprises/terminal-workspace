@@ -20,7 +20,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup pnpm
+      - name: Detect pnpm packageManager
+        id: pnpm-version-source
+        shell: bash
+        run: |
+          if [[ -f package.json ]] && node -e "const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); process.exit(typeof pkg.packageManager === 'string' && pkg.packageManager.startsWith('pnpm@') ? 0 : 1)"; then
+            echo "use_package_manager=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_package_manager=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm from packageManager
+        if: steps.pnpm-version-source.outputs.use_package_manager == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup pnpm fallback
+        if: steps.pnpm-version-source.outputs.use_package_manager != 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 10
