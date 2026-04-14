@@ -4,9 +4,9 @@ This is the single authoritative standards document for downstream AI-driven del
 
 Authoritative paths:
 
-- standards: `project-manager/enterprise-ai-standards.md`
+- standards: `enterprise-ai-standards.md`
 - validator: `tools/validators/enforce-runtime-guardrails.mjs`
-- config template: `templates/ai.config.json`
+- config template: `templates/product-repo-minimal/ai.config.json`
 - adoption template: `templates/product-repo-minimal/`
 
 Everything else in this repository is supporting guidance, examples, or templates.
@@ -106,25 +106,28 @@ It must not:
 - The validator must not require BrewSync, the control layer, network calls, or any other external system.
 - External logs or verification outputs only count when attached to the repo as referenced artifacts.
 
-## 3. Three-Role Repo Execution Model
+## 3. Repo Execution Model
 
 ### TM-1 Role model
 
-Three-role workflow:
+Every adopted repo still uses a review lane, but planning and implementation ownership are config-driven through `ai.config.json`.
 
-- Claude = planning only
-- Codex = implementation only
-- Review = GitHub pull request + CI + Gemini Code Assist on GitHub
+Execution modes:
 
-Claude updates planning artifacts only.
-Codex implements only the current task.
+- `strict` = planning and implementation remain intentionally separated
+- `paired` = either Codex or Claude may own planning, while implementation stays review-gated through PR + CI
+- `solo` = one tool may plan and implement in the same lease, but planning artifacts must still be written before code changes and external review still gates merge
+
+Review remains GitHub pull request + CI + Gemini Code Assist on GitHub.
+The execution owner implements the current task.
+The planning owner updates planning artifacts when the repo needs new scope, replanning, or a fresh queue.
 Review determines whether work is accepted, needs fixes, needs replanning, or is blocked.
 
 Role ownership:
 
-- Claude owns planning and replanning only.
-- Codex owns implementation and review remediation by default.
-- Claude re-enters only when review reveals a requirement, scope, or design problem.
+- the planning owner owns planning and replanning only
+- the execution owner owns implementation and review remediation by default
+- the planning owner re-enters only when review reveals a requirement, scope, or design problem
 
 ### TM-2 Handoff model
 
@@ -149,33 +152,33 @@ Official controller states:
 
 State meanings:
 
-- `ready_for_claude` = current task is finished and Claude should mark it done, select the next task, and advance to `ready_for_codex`; OR planning or replanning is needed
-- `ready_for_codex` = current task is queued and ready for Codex to implement
+- `ready_for_claude` = legacy replanning escape hatch for repos that still route planning back to Claude
+- `ready_for_codex` = current task is queued and ready for execution after the planning owner has updated the repo-visible plan
 - `ready_for_review` = branch should be pushed or updated and reviewed through GitHub PR + CI + Gemini Code Assist on GitHub
-- `review_failed_fix_required` = review found implementation issues that Codex should fix
+- `review_failed_fix_required` = review found implementation issues that the execution owner should fix
 - `blocked` = work cannot continue without intervention
-- `done` = no remaining tasks in the current backlog; triggers Claude to check for a roadmap or backlog source and plan the next batch
+- `done` = no remaining tasks in the current backlog; triggers the planning owner to check for a roadmap or backlog source and plan the next batch
 - `blocked` after 3 consecutive `review_failed_fix_required` cycles on the same task = automatic circuit breaker
 
 Post-merge state selection:
 
-- If tasks remain in `ai/tasks.md` with status `pending`, set controller to `ready_for_claude` so Claude can mark the finished task done and advance to the next task.
+- If tasks remain in `ai/tasks.md` with status `pending`, either advance directly to `ready_for_codex` after planning is updated or use legacy `ready_for_claude` when the repo still separates replanning that way.
 - If no tasks remain (all tasks are `done`), set controller to `done`.
 
 Done-state replanning:
 
-- When Claude reads `done`, it checks for a roadmap or backlog source (e.g., `docs/roadmap.md`, `docs/roadmap/state.json`, GitHub issues, or `CHANGELOG.md` gap analysis).
-- If planned work exists, Claude produces a new `ai/plan.md`, `ai/tasks.md`, and `ai/acceptance.md`, then sets controller to `ready_for_codex`.
+- When the planning owner reads `done`, it checks for a roadmap or backlog source (e.g., `docs/roadmap.md`, `docs/roadmap/state.json`, GitHub issues, or `CHANGELOG.md` gap analysis).
+- If planned work exists, the planning owner produces a new `ai/plan.md`, `ai/tasks.md`, and `ai/acceptance.md`, then sets controller to `ready_for_codex`.
 - If no further work is identified, the controller stays `done` and a summary notification is produced.
 
 Review failure circuit breaker:
 
 - If the same task has been in `review_failed_fix_required` for 3 consecutive cycles without advancing to a merged PR, the automation must set the controller to `blocked` with a note explaining the repeated failure.
-- Blocked tasks require human intervention or Claude replanning before resuming.
+- Blocked tasks require human intervention or planning-owner replanning before resuming.
 
 Execution lease:
 
-- Codex-owned execution must use a repo-visible lease recorded in `state/current_task.md`.
+- Execution-owned work must use a repo-visible lease recorded in `state/current_task.md`.
 - Required lease fields are `execution_status`, `execution_branch`, `execution_started_at`, `execution_heartbeat_at`, and `execution_lease_expires_at`.
 - `execution_status = in_progress` with a future `execution_lease_expires_at` means another Codex run must not start or remediate the same task.
 - If the lease is expired, the next Codex run may reclaim the same task on the same branch and must record that reclaim in `state/implementation_notes.md`.
@@ -207,27 +210,27 @@ Each participating product repo must enforce the live PR existence check in repo
 - small commits
 - acceptance criteria control completion
 - validation report controls pass/fail and rework
-- execution commits by Codex must include real code or test changes
+- execution commits by the execution owner must include real code or test changes
 - docs-only and state-only changes do not count as execution progress
-- docs/state changes are allowed only when paired with real code or test changes, except Claude planning artifact refreshes which remain planning-only and must not be presented as implementation progress or completion
-- review remediation is a normal Codex implementation cycle, not a separate workflow role
+- docs/state changes are allowed only when paired with real code or test changes, except planning-owner planning artifact refreshes which remain planning-only and must not be presented as implementation progress or completion
+- review remediation is a normal execution-owner implementation cycle, not a separate workflow role
 - automation ownership should be exclusive by controller state so the same state is not advanced by competing loops
 
 ### TM-4 Execution loop
 
-1. Claude creates or refines `ai/plan.md`, `ai/tasks.md`, and `ai/acceptance.md`.
+1. The planning owner creates or refines `ai/plan.md`, `ai/tasks.md`, and `ai/acceptance.md`.
 2. One task is set in `state/current_task.md`.
-3. Codex implements that task and performs local validation.
-4. Codex sets `state/controller.md` to `ready_for_review`.
+3. The execution owner implements that task and performs local validation.
+4. The execution owner sets `state/controller.md` to `ready_for_review`.
 5. The branch is pushed and the pull request is opened or updated.
 6. GitHub CI and Gemini Code Assist on GitHub review the pull request.
 7. If review finds implementation issues, set `state/controller.md` to `review_failed_fix_required`.
-8. Codex fixes review issues, reruns local validation, pushes updates to the same branch, and returns the controller to `ready_for_review`.
-9. If review reveals a planning problem, set `state/controller.md` to `ready_for_claude`.
+8. The execution owner fixes review issues, reruns local validation, pushes updates to the same branch, and returns the controller to `ready_for_review`.
+9. If review reveals a planning problem, either set `state/controller.md` to legacy `ready_for_claude` or have the planning owner update the queue directly before returning to `ready_for_codex`.
 10. If review passes and the pull request is merged:
-    - If tasks remain in `ai/tasks.md` with status `pending`, set `state/controller.md` to `ready_for_claude`.
+    - If tasks remain in `ai/tasks.md` with status `pending`, either queue the next task at `ready_for_codex` or use legacy `ready_for_claude` for repos that still split replanning that way.
     - If no tasks remain, mark the current task done and set `state/controller.md` to `done`.
-    - Claude reads `ready_for_claude`, marks the finished task `done`, performs the pass-2 hardening review, advances `state/current_task.md` to the next task, and sets `state/controller.md` to `ready_for_codex`.
+    - The planning owner marks the finished task `done`, performs the pass-2 hardening review, advances `state/current_task.md` to the next task, and sets `state/controller.md` to `ready_for_codex`.
 
 ### TM-5 Required repo structure contract
 
@@ -312,11 +315,11 @@ These files are required execution-contract inputs, not optional chat supplement
 
 ### TM-7 Output contract
 
-Claude required output:
+Planning-owner required output:
 
 - updated planning artifacts only
 
-Codex required output:
+Execution-owner required output:
 
 - `CHANGED`
 - `DID`
@@ -354,21 +357,20 @@ Reason:
 
 ### TM-10 Automation-driven execution guidance
 
-Automation-driven repos may use Codex automations to advance controller states.
+Automation-driven repos may use Codex or Claude automations to advance controller states, depending on `execution_mode`.
 
 Required automation behavior:
 
 - one automation may own `ready_for_codex` ("Get Next Planned Tasks")
 - one automation may own `ready_for_review` and `review_failed_fix_required` ("Address Open PRs")
 - the review watcher may merge the pull request when review acceptance criteria are satisfied
-- after merge, the automation should set `state/controller.md` to `ready_for_claude` if tasks remain, or `done` if no tasks remain
-- Claude (scheduled or triggered) reads `ready_for_claude`, marks the finished task done, advances `state/current_task.md` to the next pending task, and sets `state/controller.md` to `ready_for_codex`
-- Claude (scheduled or triggered) reads `done`, checks for a roadmap or backlog source, and either plans the next batch or stays done
-- the next task must not move to `ready_for_codex` until Claude has selected and queued it
-- before any Codex-owned run starts work, it must check for an active execution lease plus existing branch and pull request state
-- a fresh execution lease must block re-entry by any Codex automation on the same repo and task
-- Codex must refresh `execution_heartbeat_at` and `execution_lease_expires_at` during long-running work
-- Codex must clear the execution lease when the task moves to `ready_for_review`, `ready_for_claude`, `blocked`, or `done`
+- after merge, the automation should set `state/controller.md` to `ready_for_codex` for the next queued task, or use legacy `ready_for_claude` only when the repo still routes replanning through that state
+- the planning owner (scheduled or triggered) reads `done`, checks for a roadmap or backlog source, and either plans the next batch or stays done
+- the next task must not move to `ready_for_codex` until the planning owner has selected and queued it
+- before any execution-owned run starts work, it must check for an active execution lease plus existing branch and pull request state
+- a fresh execution lease must block re-entry by any automation on the same repo and task
+- the execution owner must refresh `execution_heartbeat_at` and `execution_lease_expires_at` during long-running work
+- the execution owner must clear the execution lease when the task moves to `ready_for_review`, `ready_for_claude`, `blocked`, or `done`
 - stale execution leases may be reclaimed only on the same task branch, with the reclaim recorded in `state/implementation_notes.md`
 - planner and summary automations must use the 2-hour, lease-aware stale rule before flagging a repo as stuck or stale
 - pass-2 hardening review must create one grouped hardening follow-up task when residual gaps are found
@@ -376,10 +378,10 @@ Required automation behavior:
 
 Scope guard:
 
-- Codex automations must NOT modify `ai/plan.md`, `ai/tasks.md`, or `ai/acceptance.md`
-- Only Claude may create or update planning artifacts
-- Codex may update `state/controller.md`, `state/current_task.md`, `state/implementation_notes.md`, and `state/validation_report.md`
-- Codex may update `state/tasks.json`, `state/artifacts.json`, `state/handoff.json`, and `state/decisions.json` when those files exist
+- execution-owner automations must NOT modify planning artifacts unless the repo is explicitly running in `solo`
+- only the planning owner may create or update planning artifacts in `strict` mode
+- the execution owner may update `state/controller.md`, `state/current_task.md`, `state/implementation_notes.md`, and `state/validation_report.md`
+- the execution owner may update `state/tasks.json`, `state/artifacts.json`, `state/handoff.json`, and `state/decisions.json` when those files exist
 
 Review failure circuit breaker:
 
@@ -756,7 +758,7 @@ The lessons directory is a promotion layer, not a substitute for updating the au
 
 ## 7. Phase Rules
 
-These are the validator-enforced defaults. `templates/ai.config.json` can relax test requirements, but it does not remove the need to track state honestly.
+These are the validator-enforced defaults. `templates/product-repo-minimal/ai.config.json` can relax test requirements, but it does not remove the need to track state honestly.
 
 | Phase Type | Allowed Change Shape | Required Evidence | Forbidden Claims |
 | --- | --- | --- | --- |
@@ -800,7 +802,7 @@ Not allowed:
 | Rule Group | Enforced By `enforce-runtime-guardrails.mjs` |
 | --- | --- |
 | Layer boundaries | rejects execution-layer environment manifests, repo-external evidence paths, and external state fallbacks |
-| Three-role workflow contract | requires repo workflow files under `ai/` and `state/`, requires a valid `state/controller.md` workflow state, rejects invalid run profiles, and treats workflow files as repo-visible handoff inputs rather than code |
+| Execution-mode workflow contract | requires repo workflow files under `ai/` and `state/`, requires a valid `state/controller.md` workflow state, rejects invalid run profiles or execution policies, and treats workflow files as repo-visible handoff inputs rather than code |
 | Execution contract | required file presence, JSON parsing, diff-aware state updates, phase/state change tracking |
 | Evidence contract | evidence bucket shape, allowed statuses, required reasons, repo-relative artifact references, phase-aware evidence requirements |
 | State contract | required fields, active task linkage, handoff continuity, risk continuity |
@@ -811,9 +813,11 @@ Not allowed:
 
 ## 10. Repo-Level Configuration
 
-Product repos should copy `templates/ai.config.json` to `ai.config.json` and only change:
+Product repos should copy `templates/product-repo-minimal/ai.config.json` to `ai.config.json` and only change:
 
 - `run_profile`
+- `execution_mode`
+- `codeql_policy`
 - `requires_test_evidence`
 - `requires_deploy_evidence`
 - `allowed_phases_without_tests`
@@ -837,7 +841,67 @@ Config may relax evidence requirements for specific phases. It must not be used 
 - `standard`
 - `night`
 
+`execution_mode` may be:
+
+- `strict`
+- `paired`
+- `solo`
+
+`codeql_policy` may be:
+
+- `disabled` — keep GitHub Code Scanning default setup off and disable any checked-in `codeql.yml`
+- `scheduled` — keep GitHub default setup off; if the repo uses a checked-in CodeQL workflow, prefer schedule or manual triggers instead of `pull_request`
+- `required` — the repo expects a checked-in CodeQL workflow or equivalent required security scan, with branch protection and required-check enforcement handled repo-locally
+
+Practical default:
+
+- non-public repos: start with `codeql_policy = disabled`
+- public repos: use `scheduled` or `required` depending on whether CodeQL should block merges
+
+In practice, most repos only need two settings changed from the template:
+
+- `execution_mode`
+- `codeql_policy`
+
+The rest of `ai.config.json` should usually stay at the template defaults unless the repo has a real evidence or deployment exception.
+
 Repo-specific Gemini GitHub review behavior may be customized with `.gemini/config.yaml` if desired, but that is optional and does not replace the repo execution contract.
+
+## 10A. GitHub Hygiene Outside AI Adoption
+
+Not every repo should adopt the full `ai/` + `state/` contract.
+
+Repos that only need healthy GitHub merge policy should use the separate GitHub hygiene path instead of partially copying the AI-managed standards surface. The hygiene path is documented in [`technical-writer/github-repo-hygiene.md`](technical-writer/github-repo-hygiene.md) and audited with [`tools/github-hygiene.sh`](tools/github-hygiene.sh) against a local config copied from [`github-hygiene.example.json`](github-hygiene.example.json).
+
+The hygiene path covers three policy areas:
+
+- merge-gate policy for private repos (`lightweight` vs `strict`)
+- public-repo free review/security features and the resulting required checks
+- on-demand workflow policy for deploy, release, rollback, expensive scans, and destructive maintenance
+
+Non-AI hygiene repos must not be treated as partially adopted AI repos. They do **not** need:
+
+- `ai/` planning files
+- `state/` execution files
+- runtime guardrails validation
+- `tools/ai-pipeline.sh repair`
+
+They should still have healthy GitHub settings:
+
+- pull requests required for the default branch
+- strict required-status-check gating
+- `allow_auto_merge = true`
+- `delete_branch_on_merge = true`
+- `required_approving_review_count = 0` by default unless the repo owner explicitly wants human approval
+
+For public repos, the hygiene path expects the free GitHub review/security features to be enabled when supported and to pass before merge:
+
+- Dependabot security updates
+- secret scanning
+- push protection
+- code scanning default setup
+
+Deploy, release, rollback, and similar workflows should be `workflow_dispatch`, tag/release-driven, or scheduled by default. They should not be required PR checks unless a repo explicitly chooses pre-merge deployment gating.
 
 ## 11. CI Runner Rules
 
@@ -854,6 +918,51 @@ Any job that requires macOS (native Swift/Tauri/Xcode builds, keychain tests, no
 **This is a hard rule enforced by `ai-pipeline.sh repair`.** The `check_macos_pr_jobs` repair check scans all PR-triggered workflow files and removes any job whose `runs-on` references a macOS runner variant (`macos-latest`, `macos-14`, etc.).
 
 Agents (Claude, Codex) must not add `runs-on: macos-*` jobs to any workflow that has a `pull_request:` trigger. If a macOS test is needed for PR validation, flag it for human review — do not add it to CI.
+
+### CI-2 Historical failed Actions triage
+
+Historical red in GitHub Actions is not automatically a current repo-health problem.
+
+Treat failed workflow runs in three buckets:
+
+- `current red`
+  - latest failed run on `main`
+  - latest failed run on an open PR
+  - latest failed required check on the default branch or release branch
+  - action: fix it or intentionally disable the workflow
+- `obsolete red`
+  - failures from closed PRs, superseded branches, or runs that already have newer green replacements
+  - action: do not spend engineering effort making old history green; optionally delete old runs only to reduce UI noise
+- `unwanted workflow`
+  - workflows that should no longer run because they are duplicative, obsolete, or cost-inefficient
+  - action: disable the workflow or remove the trigger rather than repeatedly rerunning it
+
+Repo health should be judged by the latest relevant run, not by every red item still visible in the Actions history.
+
+Deleting old workflow runs is optional cleanup. It is not a substitute for fixing a currently failing workflow.
+
+### CI-3 On-demand workflows should stay out of normal PR gating
+
+The following workflow classes should not run on every PR by default:
+
+- deploy or promote
+- release or publish
+- rollback
+- destructive maintenance
+- expensive full-repo scans
+- macOS-only or other high-cost validation
+- post-deploy repair or reapply jobs
+- notification-only workflows
+
+Preferred triggers:
+
+- `workflow_dispatch`
+- tag push
+- `release`
+- `schedule`
+- `repository_dispatch`
+
+Unless a repo deliberately opts into a different release model, these workflows should not be required branch-protection checks.
 
 ## 12. Security Scanning
 
