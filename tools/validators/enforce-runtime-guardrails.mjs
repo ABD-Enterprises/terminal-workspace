@@ -36,6 +36,8 @@ const DEFAULT_EVIDENCE_DIRECTORIES = ["artifacts/"];
 const DEFAULT_META_DIRECTORIES = [];
 const DEFAULT_PROTECTED_ENVIRONMENT_PATHS = ["brew/"];
 const DEFAULT_RUN_PROFILE = "standard";
+const DEFAULT_EXECUTION_MODE = "strict";
+const DEFAULT_CODEQL_POLICY = "scheduled";
 const DEFAULT_ALLOWED_METADATA_ONLY_EVIDENCE_TYPES = [
   "build",
   "test",
@@ -55,6 +57,8 @@ const SAFE_SUPPORTING_ARTIFACT_EXTENSIONS = new Set([
 ]);
 const ALLOWED_CONFIG_KEYS = new Set([
   "run_profile",
+  "execution_mode",
+  "codeql_policy",
   "requires_test_evidence",
   "requires_deploy_evidence",
   "allowed_phases_without_tests",
@@ -76,6 +80,16 @@ const BREWSYNC_EXTERNAL_KINDS = new Set([
   "apply",
   "verify",
   "log"
+]);
+const ALLOWED_EXECUTION_MODES = new Set([
+  "strict",
+  "paired",
+  "solo"
+]);
+const ALLOWED_CODEQL_POLICIES = new Set([
+  "required",
+  "scheduled",
+  "disabled"
 ]);
 
 const DOC_PATTERNS = [
@@ -115,6 +129,39 @@ const FRONTEND_FILE_PATTERNS = [
   /\.css$/,
   /\.scss$/,
   /\.less$/
+];
+const DEPENDENCY_BOT_ACTORS = new Set([
+  "app/dependabot",
+  "dependabot[bot]",
+  "renovate[bot]"
+]);
+const DEPENDENCY_FILE_PATTERNS = [
+  /(^|\/)package\.json$/,
+  /(^|\/)package-lock\.json$/,
+  /(^|\/)npm-shrinkwrap\.json$/,
+  /(^|\/)pnpm-lock\.yaml$/,
+  /(^|\/)yarn\.lock$/,
+  /(^|\/)bun\.lockb?$/,
+  /(^|\/)Cargo\.toml$/,
+  /(^|\/)Cargo\.lock$/,
+  /(^|\/)go\.mod$/,
+  /(^|\/)go\.sum$/,
+  /(^|\/)Pipfile$/,
+  /(^|\/)Pipfile\.lock$/,
+  /(^|\/)pyproject\.toml$/,
+  /(^|\/)poetry\.lock$/,
+  /(^|\/)requirements([-.].+)?\.txt$/,
+  /(^|\/)Gemfile$/,
+  /(^|\/)Gemfile\.lock$/,
+  /(^|\/)composer\.json$/,
+  /(^|\/)composer\.lock$/,
+  /(^|\/)mix\.exs$/,
+  /(^|\/)mix\.lock$/,
+  /(^|\/)Podfile$/,
+  /(^|\/)Podfile\.lock$/,
+  /(^|\/)Directory\.Packages\.props$/,
+  /(^|\/)packages\.lock\.json$/,
+  /(^|\/)global\.json$/
 ];
 
 function isFrontendFile(relativePath) {
@@ -331,6 +378,68 @@ function isCodeOrConfigChange(relativePath, config) {
   );
 }
 
+function isDependencyManifestOrLockFile(relativePath) {
+  const normalized = normalizeRepoRelativePath(relativePath);
+  return DEPENDENCY_FILE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function readGithubEventPayload() {
+  const eventPath = String(process.env.GITHUB_EVENT_PATH || "").trim();
+  if (!eventPath) {
+    return null;
+  }
+
+  try {
+    return readJsonFile(eventPath);
+  } catch {
+    return null;
+  }
+}
+
+function isDependencyBotLogin(login) {
+  return DEPENDENCY_BOT_ACTORS.has(String(login || "").trim().toLowerCase());
+}
+
+function isDependencyBotActor() {
+  const actor = String(
+    process.env.GITHUB_ACTOR || process.env.GITHUB_TRIGGERING_ACTOR || ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (isDependencyBotLogin(actor)) {
+    return true;
+  }
+
+  const eventPayload = readGithubEventPayload();
+  const prAuthorLogin =
+    eventPayload &&
+    eventPayload.pull_request &&
+    eventPayload.pull_request.user &&
+    eventPayload.pull_request.user.login;
+
+  return isDependencyBotLogin(prAuthorLogin);
+}
+
+function isDependencyOnlyBotPr(changedFiles, config) {
+  if (process.env.GITHUB_ACTIONS !== "true") {
+    return false;
+  }
+
+  if (!isDependencyBotActor()) {
+    return false;
+  }
+
+  const meaningfulChanges = changedFiles.filter((relativePath) =>
+    isCodeOrConfigChange(relativePath, config)
+  );
+
+  return (
+    meaningfulChanges.length > 0 &&
+    meaningfulChanges.every((relativePath) => isDependencyManifestOrLockFile(relativePath))
+  );
+}
+
 function isRepoRelativeArtifactPath(value) {
   const normalized = normalizeRepoRelativePath(value);
   if (!normalized) {
@@ -457,7 +566,10 @@ function listFilesRecursively(root, current = "") {
 }
 
 function resolveConfig(repoRoot, configArg) {
-  const shippedConfig = path.resolve(__dirname, "../../templates/ai.config.json");
+  const shippedConfig = path.resolve(
+    __dirname,
+    "../../templates/product-repo-minimal/ai.config.json"
+  );
   const candidates = [];
 
   if (configArg) {
@@ -465,16 +577,28 @@ function resolveConfig(repoRoot, configArg) {
   }
 
   candidates.push(path.join(repoRoot, "ai.config.json"));
-  candidates.push(path.join(repoRoot, "templates/ai.config.json"));
+  candidates.push(path.join(repoRoot, "templates/product-repo-minimal/ai.config.json"));
   candidates.push(shippedConfig);
 
   const configPath = candidates.find((candidate) => exists(candidate));
   if (!configPath) {
-    throw new Error("Missing ai.config.json. Copy templates/ai.config.json into the repo or pass --config.");
+    throw new Error(
+      "Missing ai.config.json. Copy templates/product-repo-minimal/ai.config.json into the repo or pass --config."
+    );
   }
 
   const config = readJsonFile(configPath);
   const normalizedRunProfile = normalizeRunProfile(config.run_profile);
+  const normalizedExecutionMode = String(
+    config.execution_mode || DEFAULT_EXECUTION_MODE
+  )
+    .trim()
+    .toLowerCase();
+  const normalizedCodeqlPolicy = String(
+    config.codeql_policy || DEFAULT_CODEQL_POLICY
+  )
+    .trim()
+    .toLowerCase();
   const hasConfiguredEvidenceDirectories = Object.prototype.hasOwnProperty.call(
     config,
     "evidence_directories"
@@ -531,6 +655,18 @@ function resolveConfig(repoRoot, configArg) {
     );
   }
 
+  if (!ALLOWED_EXECUTION_MODES.has(normalizedExecutionMode)) {
+    throw new Error(
+      `ai.config.json execution_mode must be one of ${[...ALLOWED_EXECUTION_MODES].join(", ")}`
+    );
+  }
+
+  if (!ALLOWED_CODEQL_POLICIES.has(normalizedCodeqlPolicy)) {
+    throw new Error(
+      `ai.config.json codeql_policy must be one of ${[...ALLOWED_CODEQL_POLICIES].join(", ")}`
+    );
+  }
+
   if (hasConfiguredEvidenceDirectories && !Array.isArray(config.evidence_directories)) {
     throw new Error("ai.config.json evidence_directories must be an array");
   }
@@ -581,6 +717,8 @@ function resolveConfig(repoRoot, configArg) {
     path: configPath,
     value: {
       run_profile: normalizedRunProfile,
+      execution_mode: normalizedExecutionMode,
+      codeql_policy: normalizedCodeqlPolicy,
       requires_test_evidence: config.requires_test_evidence !== false,
       requires_deploy_evidence: config.requires_deploy_evidence !== false,
       allowed_phases_without_tests: Array.isArray(config.allowed_phases_without_tests)
@@ -1115,6 +1253,7 @@ function validateDiffAwareState(
   const codeOrConfigChanges = changedFiles.filter((relativePath) =>
     isCodeOrConfigChange(relativePath, config)
   );
+  const dependencyOnlyBotPr = isDependencyOnlyBotPr(changedFiles, config);
   const nightRunProfile = config.run_profile === "night";
   const docsOnlyChanges =
     changedFiles.length > 0 &&
@@ -1125,7 +1264,7 @@ function validateDiffAwareState(
         isSupportingArtifactFile(file, config)
     );
 
-  if (codeOrConfigChanges.length > 0) {
+  if (codeOrConfigChanges.length > 0 && !dependencyOnlyBotPr) {
     const requiredUpdates = nightRunProfile
       ? ["state/artifacts.json"]
       : ["state/tasks.json", "state/artifacts.json"];
