@@ -48,12 +48,18 @@ mkdir -p "$VALIDATION_ARTIFACT_DIR"
 rm -f "$SEMGREP_STATUS_FILE" "$SEMGREP_OUTPUT_FILE"
 
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  SEMGREP_ENVS=(-e SEMGREP_APP_TOKEN)
+  SEMGREP_TARGETS=()
   if [[ -n "$BASE_REF" ]]; then
-    SEMGREP_ENVS+=(-e "SEMGREP_BASELINE_REF=$BASE_REF")
+    while IFS= read -r target; do
+      [[ -n "$target" ]] && SEMGREP_TARGETS+=("$target")
+    done < <(git diff --name-only "${BASE_REF}...HEAD" --)
   fi
 
-  if docker run --rm -v "${ROOT}":/src -w /src "${SEMGREP_ENVS[@]}" semgrep/semgrep semgrep ci --config=auto >"$SEMGREP_OUTPUT_FILE" 2>&1; then
+  if [[ ${#SEMGREP_TARGETS[@]} -eq 0 ]]; then
+    SEMGREP_TARGETS=(.)
+  fi
+
+  if docker run --rm -v "${ROOT}":/src -w /src -e SEMGREP_APP_TOKEN semgrep/semgrep semgrep scan --config=auto --error "${SEMGREP_TARGETS[@]}" >"$SEMGREP_OUTPUT_FILE" 2>&1; then
     printf 'PASS: semgrep completed successfully
 ' >"$SEMGREP_STATUS_FILE"
   else
