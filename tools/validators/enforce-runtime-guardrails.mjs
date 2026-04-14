@@ -366,6 +366,17 @@ function validateArtifactPaths(repoRoot, paths, label, failures) {
     return;
   }
 
+  const generatedEvidenceDirectories = new Set([
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules"
+  ]);
+
   for (const artifactPath of paths) {
     if (!isRepoRelativeArtifactPath(artifactPath)) {
       addFailure(
@@ -379,11 +390,21 @@ function validateArtifactPaths(repoRoot, paths, label, failures) {
       repoRoot,
       normalizeRepoRelativePath(artifactPath)
     );
+    const normalizedArtifactPath = normalizeRepoRelativePath(artifactPath);
+    const pathSegments = normalizedArtifactPath.split("/");
 
     if (!absoluteArtifactPath.startsWith(`${repoRoot}${path.sep}`) && absoluteArtifactPath !== repoRoot) {
       addFailure(
         failures,
         `${label} must not point outside the repository`
+      );
+      continue;
+    }
+
+    if (pathSegments.some((segment) => generatedEvidenceDirectories.has(segment))) {
+      addFailure(
+        failures,
+        `${label} must not reference generated output directories: ${artifactPath}`
       );
       continue;
     }
@@ -404,6 +425,19 @@ function validateArtifactPaths(repoRoot, paths, label, failures) {
       );
     }
   }
+}
+
+function normalizeCurrentPhaseMarker(currentPhase) {
+  if (currentPhase && typeof currentPhase === "object" && !Array.isArray(currentPhase)) {
+    return JSON.stringify({
+      id: currentPhase.id || "",
+      title: currentPhase.title || "",
+      status: normalizePhaseStatus(currentPhase.status),
+      rationale: currentPhase.rationale || ""
+    });
+  }
+
+  return String(currentPhase || "");
 }
 
 function listFilesRecursively(root, current = "") {
@@ -1115,7 +1149,7 @@ function validateDiffAwareState(
 
   if (baseRoadmap && roadmap) {
     const phaseChanged =
-      baseRoadmap.current_phase !== roadmap.current_phase ||
+      normalizeCurrentPhaseMarker(baseRoadmap.current_phase) !== normalizeCurrentPhaseMarker(roadmap.current_phase) ||
       normalizePhaseType(baseRoadmap.phase_type) !== normalizePhaseType(roadmap.phase_type) ||
       normalizePhaseStatus(baseRoadmap.phase_status) !== normalizePhaseStatus(roadmap.phase_status);
 

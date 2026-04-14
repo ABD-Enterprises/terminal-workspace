@@ -1,15 +1,15 @@
 name: AI Guardrails
 
-# Runs on every PR targeting main only.
-# Do NOT add push:main trigger — the validator checks state files which are in
-# transition during a merge; running on push causes false-positive failures.
-# Do NOT add macos-latest jobs here — macOS runners cost significantly more credits.
-# Native Swift builds use a separate workflow_dispatch or release-only trigger.
+# This workflow runs on ubuntu-latest for every PR only.
+# Do NOT add a push-to-main trigger — the validator is called during the
+# state-advance commit and fails on merge commits (no diff base available).
+# Do NOT add macos-latest jobs here — macOS runners consume significantly
+# more runner credits. Native app builds (Swift, Xcode, etc.) should use
+# a separate workflow with workflow_dispatch or release-only triggers.
 # See developer/coding-standards.md "CI Design Rules" for the full policy.
 
 on:
   pull_request:
-    branches: [main]
 
 jobs:
   enforce:
@@ -20,16 +20,33 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup pnpm
+      - name: Detect pnpm packageManager
+        id: pnpm-version-source
+        shell: bash
+        run: |
+          if [[ -f package.json ]] && node -e "const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); process.exit(typeof pkg.packageManager === 'string' && pkg.packageManager.startsWith('pnpm@') ? 0 : 1)"; then
+            echo "use_package_manager=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_package_manager=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm from packageManager
+        if: steps.pnpm-version-source.outputs.use_package_manager == 'true'
         uses: pnpm/action-setup@v4
         with:
-          version: 10.33.0
+          run_install: false
+
+      - name: Setup pnpm fallback
+        if: steps.pnpm-version-source.outputs.use_package_manager != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: "20"
-          cache: pnpm
 
       - name: Enforce runtime guardrails
         run: |
