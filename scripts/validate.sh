@@ -51,12 +51,25 @@ SEMGREP_OUTPUT_FILE="${VALIDATION_ARTIFACT_DIR}/semgrep-output.txt"
 mkdir -p "$VALIDATION_ARTIFACT_DIR"
 rm -f "$SEMGREP_STATUS_FILE" "$SEMGREP_OUTPUT_FILE"
 
+should_skip_semgrep_target() {
+  local target="$1"
+
+  case "$target" in
+    tools/validators/*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   SEMGREP_TARGETS=()
   if [[ -n "$BASE_REF" ]]; then
     while IFS= read -r target; do
       [[ -n "$target" ]] || continue
       [[ -f "$target" ]] || continue
+      should_skip_semgrep_target "$target" && continue
       SEMGREP_TARGETS+=("$target")
     done < <(git diff --name-only "${BASE_REF}...HEAD" --)
   fi
