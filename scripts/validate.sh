@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-ROOT="$(cd "$ROOT" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 echo "[validate] lint"
@@ -31,15 +30,20 @@ fi
 echo "[validate] guardrails"
 VALIDATOR_ARGS=(--repo . --config ai.config.json)
 
-if [[ -n "${AI_VALIDATOR_BASE_REF:-}" ]]; then
-  VALIDATOR_ARGS+=(--base "${AI_VALIDATOR_BASE_REF}")
-elif [[ -n "${GITHUB_BASE_REF:-}" ]]; then
-  VALIDATOR_ARGS+=(--base "origin/${GITHUB_BASE_REF}")
+BASE_REF="${AI_VALIDATOR_BASE_REF:-${1:-}}"
+if [[ -z "$BASE_REF" && -n "${GITHUB_BASE_REF:-}" ]]; then
+  BASE_REF="origin/${GITHUB_BASE_REF}"
+fi
+if [[ -z "$BASE_REF" ]] && git rev-parse --verify origin/main >/dev/null 2>&1; then
+  BASE_REF="origin/main"
+fi
+
+if [[ -n "$BASE_REF" ]]; then
+  VALIDATOR_ARGS+=(--base "$BASE_REF")
 fi
 
 node ./tools/validators/enforce-runtime-guardrails.mjs "${VALIDATOR_ARGS[@]}"
 
-BASE_REF="${AI_VALIDATOR_BASE_REF:-${1:-}}"
 VALIDATION_ARTIFACT_DIR="artifacts/validation"
 SEMGREP_STATUS_FILE="${VALIDATION_ARTIFACT_DIR}/semgrep-status.txt"
 SEMGREP_OUTPUT_FILE="${VALIDATION_ARTIFACT_DIR}/semgrep-output.txt"
@@ -51,11 +55,18 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   SEMGREP_TARGETS=()
   if [[ -n "$BASE_REF" ]]; then
     while IFS= read -r target; do
-      [[ -n "$target" ]] && SEMGREP_TARGETS+=("$target")
+      [[ -n "$target" ]] || continue
+      [[ -f "$target" ]] || continue
+      SEMGREP_TARGETS+=("$target")
     done < <(git diff --name-only "${BASE_REF}...HEAD" --)
   fi
 
   if [[ ${#SEMGREP_TARGETS[@]} -eq 0 ]]; then
+    if [[ -n "$BASE_REF" ]]; then
+      printf 'PASS: no scannable changed files for semgrep\n' >"$SEMGREP_STATUS_FILE"
+      exit 0
+    fi
+
     SEMGREP_TARGETS=(.)
   fi
 
