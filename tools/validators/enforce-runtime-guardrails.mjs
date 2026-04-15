@@ -82,16 +82,6 @@ const BREWSYNC_EXTERNAL_KINDS = new Set([
   "verify",
   "log"
 ]);
-const ALLOWED_EXECUTION_MODES = new Set([
-  "strict",
-  "paired",
-  "solo"
-]);
-const ALLOWED_CODEQL_POLICIES = new Set([
-  "required",
-  "scheduled",
-  "disabled"
-]);
 
 const DOC_PATTERNS = [
   /^docs\//,
@@ -112,7 +102,6 @@ const STATE_OR_META_PATTERNS = [
   /^docs\/roadmap\//,
   /^ai\.config\.json$/,
   /^bootstrap\.sh$/,
-  /^\.semgrepignore$/,
   /^scripts\//,
   /^\.github\/workflows\//,
   /^tools\/validators\//,
@@ -130,39 +119,6 @@ const FRONTEND_FILE_PATTERNS = [
   /\.css$/,
   /\.scss$/,
   /\.less$/
-];
-const DEPENDENCY_BOT_ACTORS = new Set([
-  "app/dependabot",
-  "dependabot[bot]",
-  "renovate[bot]"
-]);
-const DEPENDENCY_FILE_PATTERNS = [
-  /(^|\/)package\.json$/,
-  /(^|\/)package-lock\.json$/,
-  /(^|\/)npm-shrinkwrap\.json$/,
-  /(^|\/)pnpm-lock\.yaml$/,
-  /(^|\/)yarn\.lock$/,
-  /(^|\/)bun\.lockb?$/,
-  /(^|\/)Cargo\.toml$/,
-  /(^|\/)Cargo\.lock$/,
-  /(^|\/)go\.mod$/,
-  /(^|\/)go\.sum$/,
-  /(^|\/)Pipfile$/,
-  /(^|\/)Pipfile\.lock$/,
-  /(^|\/)pyproject\.toml$/,
-  /(^|\/)poetry\.lock$/,
-  /(^|\/)requirements([-.].+)?\.txt$/,
-  /(^|\/)Gemfile$/,
-  /(^|\/)Gemfile\.lock$/,
-  /(^|\/)composer\.json$/,
-  /(^|\/)composer\.lock$/,
-  /(^|\/)mix\.exs$/,
-  /(^|\/)mix\.lock$/,
-  /(^|\/)Podfile$/,
-  /(^|\/)Podfile\.lock$/,
-  /(^|\/)Directory\.Packages\.props$/,
-  /(^|\/)packages\.lock\.json$/,
-  /(^|\/)global\.json$/
 ];
 
 function isFrontendFile(relativePath) {
@@ -393,68 +349,6 @@ function isCodeOrConfigChange(relativePath, config) {
   );
 }
 
-function isDependencyManifestOrLockFile(relativePath) {
-  const normalized = normalizeRepoRelativePath(relativePath);
-  return DEPENDENCY_FILE_PATTERNS.some((pattern) => pattern.test(normalized));
-}
-
-function readGithubEventPayload() {
-  const eventPath = String(process.env.GITHUB_EVENT_PATH || "").trim();
-  if (!eventPath) {
-    return null;
-  }
-
-  try {
-    return readJsonFile(eventPath);
-  } catch {
-    return null;
-  }
-}
-
-function isDependencyBotLogin(login) {
-  return DEPENDENCY_BOT_ACTORS.has(String(login || "").trim().toLowerCase());
-}
-
-function isDependencyBotActor() {
-  const actor = String(
-    process.env.GITHUB_ACTOR || process.env.GITHUB_TRIGGERING_ACTOR || ""
-  )
-    .trim()
-    .toLowerCase();
-
-  if (isDependencyBotLogin(actor)) {
-    return true;
-  }
-
-  const eventPayload = readGithubEventPayload();
-  const prAuthorLogin =
-    eventPayload &&
-    eventPayload.pull_request &&
-    eventPayload.pull_request.user &&
-    eventPayload.pull_request.user.login;
-
-  return isDependencyBotLogin(prAuthorLogin);
-}
-
-function isDependencyOnlyBotPr(changedFiles, config) {
-  if (process.env.GITHUB_ACTIONS !== "true") {
-    return false;
-  }
-
-  if (!isDependencyBotActor()) {
-    return false;
-  }
-
-  const meaningfulChanges = changedFiles.filter((relativePath) =>
-    isCodeOrConfigChange(relativePath, config)
-  );
-
-  return (
-    meaningfulChanges.length > 0 &&
-    meaningfulChanges.every((relativePath) => isDependencyManifestOrLockFile(relativePath))
-  );
-}
-
 function isRepoRelativeArtifactPath(value) {
   const normalized = normalizeRepoRelativePath(value);
   if (!normalized) {
@@ -490,17 +384,6 @@ function validateArtifactPaths(repoRoot, paths, label, failures) {
     return;
   }
 
-  const generatedEvidenceDirectories = new Set([
-    ".next",
-    ".pytest_cache",
-    ".ruff_cache",
-    "__pycache__",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules"
-  ]);
-
   for (const artifactPath of paths) {
     if (!isRepoRelativeArtifactPath(artifactPath)) {
       addFailure(
@@ -514,21 +397,11 @@ function validateArtifactPaths(repoRoot, paths, label, failures) {
       repoRoot,
       normalizeRepoRelativePath(artifactPath)
     );
-    const normalizedArtifactPath = normalizeRepoRelativePath(artifactPath);
-    const pathSegments = normalizedArtifactPath.split("/");
 
     if (!absoluteArtifactPath.startsWith(`${repoRoot}${path.sep}`) && absoluteArtifactPath !== repoRoot) {
       addFailure(
         failures,
         `${label} must not point outside the repository`
-      );
-      continue;
-    }
-
-    if (pathSegments.some((segment) => generatedEvidenceDirectories.has(segment))) {
-      addFailure(
-        failures,
-        `${label} must not reference generated output directories: ${artifactPath}`
       );
       continue;
     }
@@ -551,19 +424,6 @@ function validateArtifactPaths(repoRoot, paths, label, failures) {
   }
 }
 
-function normalizeCurrentPhaseMarker(currentPhase) {
-  if (currentPhase && typeof currentPhase === "object" && !Array.isArray(currentPhase)) {
-    return JSON.stringify({
-      id: currentPhase.id || "",
-      title: currentPhase.title || "",
-      status: normalizePhaseStatus(currentPhase.status),
-      rationale: currentPhase.rationale || ""
-    });
-  }
-
-  return String(currentPhase || "");
-}
-
 function listFilesRecursively(root, current = "") {
   const absolute = current ? path.join(root, current) : root;
   const files = [];
@@ -581,10 +441,7 @@ function listFilesRecursively(root, current = "") {
 }
 
 function resolveConfig(repoRoot, configArg) {
-  const shippedConfig = path.resolve(
-    __dirname,
-    "../../templates/product-repo-minimal/ai.config.json"
-  );
+  const shippedConfig = path.resolve(__dirname, "../../templates/ai.config.json");
   const candidates = [];
 
   if (configArg) {
@@ -592,14 +449,12 @@ function resolveConfig(repoRoot, configArg) {
   }
 
   candidates.push(path.join(repoRoot, "ai.config.json"));
-  candidates.push(path.join(repoRoot, "templates/product-repo-minimal/ai.config.json"));
+  candidates.push(path.join(repoRoot, "templates/ai.config.json"));
   candidates.push(shippedConfig);
 
   const configPath = candidates.find((candidate) => exists(candidate));
   if (!configPath) {
-    throw new Error(
-      "Missing ai.config.json. Copy templates/product-repo-minimal/ai.config.json into the repo or pass --config."
-    );
+    throw new Error("Missing ai.config.json. Copy templates/ai.config.json into the repo or pass --config.");
   }
 
   const config = readJsonFile(configPath);
@@ -876,6 +731,18 @@ function normalizeComparableText(value) {
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+function normalizeComparableValue(value) {
+  if (value && typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  return String(value || "");
 }
 
 function extractTaskIdsFromHeadings(content) {
@@ -1512,10 +1379,8 @@ function validateDiffAwareState(
         isSupportingArtifactFile(file, config)
     );
 
-  if (codeOrConfigChanges.length > 0 && !dependencyOnlyBotPr) {
-    const requiredUpdates = nightRunProfile
-      ? ["state/artifacts.json"]
-      : ["state/tasks.json", "state/artifacts.json"];
+  if (codeOrConfigChanges.length > 0) {
+    const requiredUpdates = ["state/tasks.json", "state/artifacts.json"];
 
     for (const relativePath of requiredUpdates) {
       if (!changedSet.has(relativePath)) {
@@ -1529,7 +1394,8 @@ function validateDiffAwareState(
 
   if (baseRoadmap && roadmap) {
     const phaseChanged =
-      normalizeCurrentPhaseMarker(baseRoadmap.current_phase) !== normalizeCurrentPhaseMarker(roadmap.current_phase) ||
+      normalizeComparableValue(baseRoadmap.current_phase) !==
+        normalizeComparableValue(roadmap.current_phase) ||
       normalizePhaseType(baseRoadmap.phase_type) !== normalizePhaseType(roadmap.phase_type) ||
       normalizePhaseStatus(baseRoadmap.phase_status) !== normalizePhaseStatus(roadmap.phase_status);
 
