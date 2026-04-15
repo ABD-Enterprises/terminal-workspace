@@ -892,6 +892,20 @@ function validateWorkflowFiles(repoRoot, failures) {
       );
     }
 
+    if (relativePath === ".github/workflows/pipeline-events.yml") {
+      if (!/^\s*permissions:\s*$/m.test(content)) {
+        addFailure(
+          failures,
+          ".github/workflows/pipeline-events.yml must declare explicit permissions"
+        );
+      } else if (!/^\s*contents:\s*write\s*$/m.test(content)) {
+        addFailure(
+          failures,
+          ".github/workflows/pipeline-events.yml must grant contents: write for post-merge state advancement"
+        );
+      }
+    }
+
     if (relativePath === "state/controller.md") {
       const state = extractMarkdownField(content, "current_state")
         || extractMarkdownField(content, "state")
