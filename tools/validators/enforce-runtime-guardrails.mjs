@@ -741,7 +741,7 @@ function readTextFile(filePath) {
 
 function extractMarkdownField(content, fieldName) {
   // Handles both "key: value" and "- key: value" (bullet-list) formats
-  const pattern = new RegExp(`^(?:-\\s+)?${fieldName}:\\s*(.+)$`, "mi");
+  const pattern = new RegExp(`^(?:-\\s+)?${fieldName}:[ \\t]*(.*)$`, "mi");
   const match = content.match(pattern);
   return match ? match[1].trim() : "";
 }
@@ -892,6 +892,20 @@ function validateWorkflowFiles(repoRoot, failures) {
       );
     }
 
+    if (relativePath === ".github/workflows/pipeline-events.yml") {
+      if (!/^\s*permissions:\s*$/m.test(content)) {
+        addFailure(
+          failures,
+          ".github/workflows/pipeline-events.yml must declare explicit permissions"
+        );
+      } else if (!/^\s*contents:\s*write\s*$/m.test(content)) {
+        addFailure(
+          failures,
+          ".github/workflows/pipeline-events.yml must grant contents: write for post-merge state advancement"
+        );
+      }
+    }
+
     if (relativePath === "state/controller.md") {
       const state = extractMarkdownField(content, "current_state")
         || extractMarkdownField(content, "state")
@@ -981,7 +995,7 @@ function validateNoStaleStandardsReferences(repoRoot, failures) {
 
   for (const relativePath of repoFiles) {
     const absolutePath = path.join(repoRoot, relativePath);
-    let content = "";
+    let content;
 
     try {
       content = readTextFile(absolutePath);
@@ -1580,8 +1594,7 @@ function validatePhaseRules(
   risks,
   handoff,
   config,
-  failures,
-  baseRoadmap
+  failures
 ) {
   const phaseType = normalizePhaseType(roadmap ? roadmap.phase_type : "build");
   const evidence = artifacts.evidence || {};
@@ -1820,8 +1833,7 @@ function main() {
       risks,
       handoff,
       config.value,
-      failures,
-      baseRoadmap
+      failures
     );
     validateUICompliance(repoRoot, changedFiles, failures);
 

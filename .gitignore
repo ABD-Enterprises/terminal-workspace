@@ -3,8 +3,9 @@
 node_modules/
 apps/desktop/dist/
 src-tauri/target/
-artifacts/
 playwright-report/
 test-results/
 
 *.tsbuildinfo
+
+# Pipeline state and retained evidence files must not be gitignored — they are required by the AI validator
