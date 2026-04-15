@@ -10,5 +10,4 @@ test-results/
 
 # Pipeline state and retained evidence files must not be gitignored — they are required by the AI validator
 
-# Risks are private — do not publish to GitHub
 state/risks.json
