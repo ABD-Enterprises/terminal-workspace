@@ -32,3 +32,15 @@ Validation commands:
 - `npm --prefix ./apps/desktop run build`
 - GitHub PR checks for the task branch are green
 - no blocking PR review comments remain
+
+### S2
+- hosts can be grouped into named environments such as accounts, clusters, or regions
+- the sidebar renders environments as a filterable grouped list or table with nested hosts
+- CRUD operations exist for environments and hosts without regressing existing SSH session behavior
+- SSH config import can bootstrap environments from `~/.ssh/config`
+
+Validation commands:
+- `npm run test`
+- `npm --prefix ./apps/desktop run build`
+- GitHub PR checks for the task branch are green
+- no blocking PR review comments remain

@@ -5,8 +5,13 @@
       "status": "done",
       "completed_at": "2026-04-13T07:09:00Z",
       "title": "SSH terminal core \u2014 fast connect, multi-session, session persistence\nAI command assist \u2014 completion, explanation, impact simulation"
+    },
+    {
+      "id": "S2",
+      "status": "pending",
+      "title": "Environment grouping \u2014 organize hosts by account, cluster, region"
     }
   ],
-  "updated_at": "2026-04-13T07:09:00Z",
-  "last_updated": "2026-04-13T07:09:00Z"
+  "updated_at": "2026-04-15T01:15:00Z",
+  "last_updated": "2026-04-15T01:15:00Z"
 }
