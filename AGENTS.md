@@ -8,10 +8,10 @@ Read `ai/bootstrap.md` first — it is the authoritative workflow entry point.
 Claude plans → writes ai/ → sets ready_for_codex
 Codex implements → opens PR + queues auto-merge → sets ready_for_review
 CI passes → GitHub auto-merges PR instantly (branch protection enforces required checks)
-watch-open-prs → detects merge, advances state to ready_for_codex (next task)
+watch-open-prs → detects merge, advances state to ready_for_claude (if tasks remain) or done
 ```
 
-State flow: `ready_for_codex` → `ready_for_review` → (merge) → `ready_for_codex` | `done`  
+State flow: `ready_for_codex` → `ready_for_review` → (merge) → `ready_for_claude` | `done`
 Failure: `review_failed_fix_required` → fix → `ready_for_review`  
 Needs planning: `ready_for_claude` → Claude updates ai/ → `ready_for_codex`
 
@@ -21,6 +21,12 @@ Needs planning: `ready_for_claude` → Claude updates ai/ → `ready_for_codex`
 **Codex** — implements the current task only, runs local validation, opens/updates PR. Never re-plans.  
 **watch-open-prs** — merges green PRs, advances state automatically. Codex never merges its own PR.  
 **No agent-to-agent communication.** Coordination happens only through repo files and PR/CI state.
+
+## Execution modes
+
+`execution_mode: strict` = the normal role-separated pipeline.
+`execution_mode: solo` = one tool may perform planning and implementation sequentially, but it must still write `ai/` first, update state in order, open a PR, and wait for CI/review.
+Neither mode relaxes evidence, PR, or CI requirements.
 
 ## State file ownership (critical)
 
@@ -43,6 +49,10 @@ Codex acquires a 90-minute lease before starting work:
 - Run `git diff --cached --stat` before every commit to verify what is staged
 - Never commit secrets, node_modules, __pycache__, .env, or generated artifacts
 - Use `--force-with-lease` for own branch pushes only; never force-push `main`
+
+## Validation
+
+Run repo-local validation before opening or updating the PR, then use GitHub PR CI as the authoritative merge gate. Never bypass CI.
 
 ## Before setting ready_for_review
 
@@ -96,6 +106,8 @@ Valid `status` + `paths` combinations for each evidence type (`build`, `test`, `
 
 ## Validator integrity (enterprise standard — do not modify)
 
-`tools/validators/enforce-runtime-guardrails.mjs` is synced from enterprise-ai-standards and must not be modified in this repo. The file is hash-verified by CI before execution. Modifications will cause CI to fail immediately with an integrity error.
+In product repos, `tools/validators/enforce-runtime-guardrails.mjs` is synced from `enterprise-ai-standards` and should not be modified directly.
 
-To update the validator: submit a change to enterprise-ai-standards and run the sync script.
+In this repo, that file is the source of truth and may be updated intentionally along with its tests and documentation.
+
+To propagate validator updates to product repos, change it here first, then run the sync path.

@@ -18,6 +18,9 @@ const REQUIRED_WORKFLOW_FILES = [
   "ai/plan.md",
   "ai/tasks.md",
   "ai/acceptance.md",
+  "scripts/validate.sh",
+  ".github/workflows/ai-guardrails.yml",
+  ".github/workflows/pipeline-events.yml",
   "state/controller.md",
   "state/current_task.md",
   "state/implementation_notes.md",
@@ -36,6 +39,7 @@ const DEFAULT_EVIDENCE_DIRECTORIES = ["artifacts/"];
 const DEFAULT_META_DIRECTORIES = [];
 const DEFAULT_PROTECTED_ENVIRONMENT_PATHS = ["brew/"];
 const DEFAULT_RUN_PROFILE = "standard";
+const DEFAULT_EXECUTION_MODE = "strict";
 const DEFAULT_ALLOWED_METADATA_ONLY_EVIDENCE_TYPES = [
   "build",
   "test",
@@ -55,6 +59,7 @@ const SAFE_SUPPORTING_ARTIFACT_EXTENSIONS = new Set([
 ]);
 const ALLOWED_CONFIG_KEYS = new Set([
   "run_profile",
+  "execution_mode",
   "requires_test_evidence",
   "requires_deploy_evidence",
   "allowed_phases_without_tests",
@@ -101,7 +106,9 @@ const STATE_OR_META_PATTERNS = [
   /^\.github\/workflows\//,
   /^tools\/validators\//,
   /^developer\//,
-  /^\.gitignore$/
+  /^\.gitignore$/,
+  /^enterprise-ai-standards\.md$/,
+  /^ai\/enterprise-ai-standards\.md$/
 ];
 
 const FRONTEND_FILE_PATTERNS = [
@@ -150,7 +157,8 @@ function normalizePhaseStatus(s) {
   const str = String(s || "");
   return str === "done" ? "complete" : str;
 }
-const ALLOWED_RUN_PROFILES = new Set(["standard", "night"]);
+const ALLOWED_RUN_PROFILES = new Set(["standard"]);
+const ALLOWED_EXECUTION_MODES = new Set(["strict", "solo"]);
 const ALLOWED_CONTROLLER_STATES = new Set([
   "ready_for_claude",
   "ready_for_codex",
@@ -193,7 +201,7 @@ function parseArgs(argv) {
 
 function printUsage() {
   process.stdout.write(`Usage:
-  node tools/validators/enforce-runtime-guardrails.js [--repo PATH] [--config PATH] [--base GIT_REF]
+  node tools/validators/enforce-runtime-guardrails.mjs [--repo PATH] [--config PATH] [--base GIT_REF]
 `);
 }
 
@@ -246,6 +254,19 @@ function normalizePhaseType(value) {
 function normalizeRunProfile(value) {
   const normalized = String(value || "").trim().toLowerCase();
   return normalized || DEFAULT_RUN_PROFILE;
+}
+
+function normalizeExecutionMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized || DEFAULT_EXECUTION_MODE;
+}
+
+function formatPhaseLabel(value) {
+  if (value && typeof value === "object") {
+    return value.title || value.id || "(roadmap optional)";
+  }
+
+  return value || "(roadmap optional)";
 }
 
 function normalizeRepoRelativePath(value) {
@@ -437,7 +458,17 @@ function resolveConfig(repoRoot, configArg) {
   }
 
   const config = readJsonFile(configPath);
+  if (!Object.prototype.hasOwnProperty.call(config, "run_profile")) {
+    throw new Error("ai.config.json must declare run_profile");
+  }
+  if (!Object.prototype.hasOwnProperty.call(config, "execution_mode")) {
+    throw new Error("ai.config.json must declare execution_mode");
+  }
+  if (!Object.prototype.hasOwnProperty.call(config, "strict_mode")) {
+    throw new Error("ai.config.json must declare strict_mode");
+  }
   const normalizedRunProfile = normalizeRunProfile(config.run_profile);
+  const normalizedExecutionMode = normalizeExecutionMode(config.execution_mode);
   const hasConfiguredEvidenceDirectories = Object.prototype.hasOwnProperty.call(
     config,
     "evidence_directories"
@@ -490,8 +521,18 @@ function resolveConfig(repoRoot, configArg) {
 
   if (!ALLOWED_RUN_PROFILES.has(normalizedRunProfile)) {
     throw new Error(
-      `ai.config.json run_profile must be one of ${[...ALLOWED_RUN_PROFILES].join(", ")}`
+      `ai.config.json run_profile must be ${[...ALLOWED_RUN_PROFILES].join(", ")}`
     );
+  }
+
+  if (!ALLOWED_EXECUTION_MODES.has(normalizedExecutionMode)) {
+    throw new Error(
+      `ai.config.json execution_mode must be one of ${[...ALLOWED_EXECUTION_MODES].join(", ")}`
+    );
+  }
+
+  if (Object.prototype.hasOwnProperty.call(config, "strict_mode") && config.strict_mode !== true) {
+    throw new Error("ai.config.json strict_mode must be true");
   }
 
   if (hasConfiguredEvidenceDirectories && !Array.isArray(config.evidence_directories)) {
@@ -544,6 +585,7 @@ function resolveConfig(repoRoot, configArg) {
     path: configPath,
     value: {
       run_profile: normalizedRunProfile,
+      execution_mode: normalizedExecutionMode,
       requires_test_evidence: config.requires_test_evidence !== false,
       requires_deploy_evidence: config.requires_deploy_evidence !== false,
       allowed_phases_without_tests: Array.isArray(config.allowed_phases_without_tests)
@@ -676,9 +718,83 @@ function readTextFile(filePath) {
 }
 
 function extractMarkdownField(content, fieldName) {
-  const pattern = new RegExp(`^${fieldName}:\\s*(.+)$`, "mi");
+  // Handles both "key: value" and "- key: value" (bullet-list) formats
+  const pattern = new RegExp(`^(?:-\\s+)?${fieldName}:\\s*(.+)$`, "mi");
   const match = content.match(pattern);
   return match ? match[1].trim() : "";
+}
+
+function normalizeComparableText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[`*_]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function extractTaskIdsFromHeadings(content) {
+  const taskIds = new Set();
+  const headingPattern = /^#{2,6}\s+(.+)$/gm;
+  let match;
+
+  while ((match = headingPattern.exec(content)) !== null) {
+    const headingText = match[1].trim();
+    const idMatch = headingText.match(/\b([A-Za-z]+-\d+[A-Za-z0-9-]*|[A-Za-z]{1,6}\d+[A-Za-z0-9-]*)\b/);
+    if (idMatch) {
+      taskIds.add(idMatch[1]);
+    }
+  }
+
+  return taskIds;
+}
+
+function extractTaskSection(content, taskId) {
+  if (!taskId) {
+    return "";
+  }
+
+  const lines = String(content || "").split(/\r?\n/);
+  const headingPattern = /^#{2,6}\s+/;
+  let collecting = false;
+  const section = [];
+
+  for (const line of lines) {
+    if (headingPattern.test(line)) {
+      if (collecting) {
+        break;
+      }
+
+      if (line.includes(taskId)) {
+        collecting = true;
+      }
+
+      continue;
+    }
+
+    if (collecting) {
+      section.push(line);
+    }
+  }
+
+  return section.join("\n");
+}
+
+function acceptanceSectionExists(content, reference) {
+  const normalizedReference = String(reference || "").replace(/^\/+/, "");
+  const match = normalizedReference.match(/^ai\/acceptance\.md#(.+)$/);
+  if (!match) {
+    return false;
+  }
+
+  const anchor = match[1].trim();
+  if (!anchor) {
+    return false;
+  }
+
+  const escapedAnchor = anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`^#{1,6}\\s+${escapedAnchor}(?:\\b|\\s|\\-|—|:)`, "im");
+  return pattern.test(content);
 }
 
 function getRepoVisibleFiles(repoRoot) {
@@ -720,6 +836,9 @@ function validateRequiredFiles(repoRoot, failures) {
 }
 
 function validateWorkflowFiles(repoRoot, failures) {
+  let controllerState = "";
+  let controllerTaskId = "";
+
   for (const relativePath of REQUIRED_WORKFLOW_FILES) {
     const absolutePath = path.join(repoRoot, relativePath);
     if (!exists(absolutePath) || isDirectory(absolutePath)) {
@@ -732,10 +851,19 @@ function validateWorkflowFiles(repoRoot, failures) {
       continue;
     }
 
+    if (/^(<<<<<<<|=======|>>>>>>>)\s/m.test(content)) {
+      addFailure(
+        failures,
+        `Required workflow file contains unresolved merge markers: ${relativePath}`
+      );
+    }
+
     if (relativePath === "state/controller.md") {
       const state = extractMarkdownField(content, "current_state")
         || extractMarkdownField(content, "state")
         || extractMarkdownField(content, "status");
+      controllerState = state;
+      controllerTaskId = extractMarkdownField(content, "current_task");
       if (!ALLOWED_CONTROLLER_STATES.has(state)) {
         addFailure(
           failures,
@@ -743,6 +871,159 @@ function validateWorkflowFiles(repoRoot, failures) {
         );
       }
     }
+
+    if (relativePath === "state/current_task.md") {
+      const taskId = extractMarkdownField(content, "task_id")
+        || extractMarkdownField(content, "Task ID");
+      if (!taskId) {
+        addFailure(failures, "state/current_task.md missing required field: task_id");
+      }
+
+      const executionStatus = extractMarkdownField(content, "execution_status");
+      if (executionStatus && !["idle", "in_progress"].includes(executionStatus)) {
+        addFailure(
+          failures,
+          "state/current_task.md execution_status must be idle or in_progress"
+        );
+      }
+
+      const reviewFailureCount = extractMarkdownField(content, "review_failure_count");
+      if (reviewFailureCount && !/^\d+$/.test(reviewFailureCount)) {
+        addFailure(
+          failures,
+          "state/current_task.md review_failure_count must be a non-negative integer"
+        );
+      }
+
+      const taskState = extractMarkdownField(content, "current_state");
+      if (taskState && controllerState && taskState !== controllerState) {
+        addFailure(
+          failures,
+          `state/current_task.md current_state (${taskState}) does not match state/controller.md (${controllerState})`
+        );
+      }
+
+      if (executionStatus === "in_progress") {
+        const leaseExpiresAt = extractMarkdownField(content, "execution_lease_expires_at");
+        const executionBranch = extractMarkdownField(content, "execution_branch");
+        if (!leaseExpiresAt) {
+          addFailure(
+            failures,
+            "state/current_task.md execution_lease_expires_at is required when execution_status is in_progress"
+          );
+        }
+        if (!executionBranch) {
+          addFailure(
+            failures,
+            "state/current_task.md execution_branch is required when execution_status is in_progress"
+          );
+        }
+      }
+
+      if (
+        ["ready_for_review", "ready_for_claude", "blocked", "done"].includes(controllerState) &&
+        executionStatus === "in_progress"
+      ) {
+        addFailure(
+          failures,
+          `state/current_task.md execution lease must be cleared before controller state ${controllerState}`
+        );
+      }
+
+      if (controllerTaskId && taskId && controllerTaskId !== taskId) {
+        addFailure(
+          failures,
+          `state/controller.md current_task (${controllerTaskId}) does not match state/current_task.md (${taskId})`
+        );
+      }
+    }
+  }
+}
+
+function validatePlanningAlignment(repoRoot, roadmap, tasks, failures) {
+  const currentTaskPath = path.join(repoRoot, "state/current_task.md");
+  const tasksPath = path.join(repoRoot, "ai/tasks.md");
+  const acceptancePath = path.join(repoRoot, "ai/acceptance.md");
+  const controllerPath = path.join(repoRoot, "state/controller.md");
+
+  if (!exists(currentTaskPath) || !exists(tasksPath) || !exists(acceptancePath)) {
+    return;
+  }
+
+  const currentTaskContent = readTextFile(currentTaskPath);
+  const tasksContent = readTextFile(tasksPath);
+  const acceptanceContent = readTextFile(acceptancePath);
+  const controllerContent = exists(controllerPath) ? readTextFile(controllerPath) : "";
+
+  const currentTaskId = extractMarkdownField(currentTaskContent, "task_id")
+    || extractMarkdownField(currentTaskContent, "Task ID");
+
+  if (!currentTaskId) {
+    return;
+  }
+
+  const controllerTaskId = extractMarkdownField(controllerContent, "current_task");
+  if (controllerTaskId && controllerTaskId !== currentTaskId) {
+    addFailure(
+      failures,
+      `state/controller.md current_task (${controllerTaskId}) does not match state/current_task.md (${currentTaskId})`
+    );
+  }
+
+  if (roadmap && roadmap.active_task_id && roadmap.active_task_id !== currentTaskId) {
+    addFailure(
+      failures,
+      `state/current_task.md task_id (${currentTaskId}) does not match docs/roadmap/state.json active_task_id (${roadmap.active_task_id})`
+    );
+  }
+
+  if (Array.isArray(tasks.tasks) && !tasks.tasks.some((task) => task.id === currentTaskId)) {
+    addFailure(
+      failures,
+      `state/current_task.md task_id (${currentTaskId}) is not present in state/tasks.json`
+    );
+  }
+
+  const taskIdsInPlanning = extractTaskIdsFromHeadings(tasksContent);
+  if (!taskIdsInPlanning.has(currentTaskId)) {
+    addFailure(
+      failures,
+      `ai/tasks.md does not define the current task ${currentTaskId}`
+    );
+  }
+
+  const stateTask = Array.isArray(tasks.tasks)
+    ? tasks.tasks.find((task) => task.id === currentTaskId)
+    : null;
+  const planningTaskSection = extractTaskSection(tasksContent, currentTaskId);
+  const planningTaskTitle = extractMarkdownField(planningTaskSection, "Title")
+    || extractMarkdownField(planningTaskSection, "summary");
+
+  if (stateTask && stateTask.title && planningTaskTitle) {
+    const normalizedStateTitle = normalizeComparableText(stateTask.title);
+    const normalizedPlanningTitle = normalizeComparableText(planningTaskTitle);
+
+    const titlesClearlyDifferent =
+      normalizedStateTitle &&
+      normalizedPlanningTitle &&
+      normalizedStateTitle !== normalizedPlanningTitle &&
+      !normalizedStateTitle.includes(normalizedPlanningTitle) &&
+      !normalizedPlanningTitle.includes(normalizedStateTitle);
+
+    if (titlesClearlyDifferent) {
+      addFailure(
+        failures,
+        `Task ${currentTaskId} title drift: state/tasks.json ("${stateTask.title}") does not match ai/tasks.md ("${planningTaskTitle}")`
+      );
+    }
+  }
+
+  const acceptanceReference = extractMarkdownField(currentTaskContent, "acceptance_criteria_reference");
+  if (acceptanceReference && !acceptanceSectionExists(acceptanceContent, acceptanceReference)) {
+    addFailure(
+      failures,
+      `state/current_task.md acceptance_criteria_reference does not resolve: ${acceptanceReference}`
+    );
   }
 }
 
@@ -1077,7 +1358,6 @@ function validateDiffAwareState(
   const codeOrConfigChanges = changedFiles.filter((relativePath) =>
     isCodeOrConfigChange(relativePath, config)
   );
-  const nightRunProfile = config.run_profile === "night";
   const docsOnlyChanges =
     changedFiles.length > 0 &&
     changedFiles.every(
@@ -1098,13 +1378,6 @@ function validateDiffAwareState(
         );
       }
     }
-  }
-
-  if (nightRunProfile && changedFiles.length > 0 && docsOnlyChanges) {
-    addFailure(
-      failures,
-      "Night run profile does not allow docs-only, state-only, or governance-only diffs"
-    );
   }
 
   if (baseRoadmap && roadmap) {
@@ -1325,14 +1598,7 @@ function validatePhaseRules(
     addFailure(failures, "Missing test or build evidence for changed code");
   }
 
-  // Only enforce the "complete requires evidence" gate when the phase is being
-  // newly marked complete in this PR. If it was already complete in the base,
-  // the evidence gate was checked at that time — don't re-fire it on every
-  // subsequent PR (e.g. a standards-only sync that doesn't touch evidence).
-  const alreadyCompleteInBase =
-    baseRoadmap &&
-    normalizePhaseStatus(baseRoadmap.phase_status) === "complete";
-  if (!alreadyCompleteInBase && roadmap && normalizePhaseStatus(roadmap.phase_status) === "complete") {
+  if (roadmap && normalizePhaseStatus(roadmap.phase_status) === "complete") {
     const incompleteEvidence = EVIDENCE_KEYS.filter((key) => {
       if (!required[key]) {
         return false;
@@ -1478,6 +1744,7 @@ function main() {
     );
 
     if (roadmap) validateRoadmapState(roadmap, tasks, failures);
+    validatePlanningAlignment(repoRoot, roadmap, tasks, failures);
     validateEvidenceStructure(repoRoot, artifacts, config.value, failures);
     if (risks) validateRisksFile(risks, failures);
     if (handoff) validateHandoffFile(handoff, failures);
@@ -1509,9 +1776,10 @@ function main() {
     const configLabel = toRelative(repoRoot, config.path);
 
     console.log("PASS:");
-    console.log(`- Phase ${roadmap ? roadmap.current_phase : "(roadmap optional)"} (${normalizedPhaseType}) satisfies the runtime contract`);
+    console.log(`- Phase ${formatPhaseLabel(roadmap ? roadmap.current_phase : "")} (${normalizedPhaseType}) satisfies the runtime contract`);
     console.log(`- ${codeChanges} non-doc code/config file(s) require evidence in this diff`);
     console.log(`- Run profile ${config.value.run_profile}`);
+    console.log(`- Execution mode ${config.value.execution_mode}`);
     console.log(`- Config loaded from ${configLabel}`);
   } catch (error) {
     if (failures.length > 0) {

@@ -4,7 +4,7 @@ This is the single authoritative standards document for downstream AI-driven del
 
 Authoritative paths:
 
-- standards: `project-manager/enterprise-ai-standards.md`
+- standards: `enterprise-ai-standards.md`
 - validator: `tools/validators/enforce-runtime-guardrails.mjs`
 - config template: `templates/ai.config.json`
 - adoption template: `templates/product-repo-minimal/`
@@ -126,6 +126,12 @@ Role ownership:
 - Codex owns implementation and review remediation by default.
 - Claude re-enters only when review reveals a requirement, scope, or design problem.
 
+Execution modes:
+
+- `strict` = role-separated pipeline execution. Claude plans, Codex implements, GitHub review and CI validate.
+- `solo` = one tool may perform planning and implementation sequentially in one session, but it must still write planning artifacts first, update state in order, open a PR, and wait for CI and review.
+- `solo` does not relax evidence, state, PR, or CI requirements.
+
 ### TM-2 Handoff model
 
 Agents hand off through repo files, not chat memory.
@@ -136,7 +142,7 @@ Mandatory startup expectations for every run:
 2. Read `ai/plan.md`, `ai/tasks.md`, and `ai/acceptance.md`.
 3. Read `state/controller.md` and `state/current_task.md`.
 4. Read `state/implementation_notes.md` and `state/validation_report.md` if present.
-5. Apply the latest standards, including night mode if enabled.
+5. Apply the latest standards and strict execution rules.
 
 Official controller states:
 
@@ -237,6 +243,9 @@ Repos participating in this workflow must provide these repo-visible files:
 - `ai/plan.md`
 - `ai/tasks.md`
 - `ai/acceptance.md`
+- `scripts/validate.sh`
+- `.github/workflows/ai-guardrails.yml`
+- `.github/workflows/pipeline-events.yml`
 - `state/controller.md`
 - `state/current_task.md`
 - `state/implementation_notes.md`
@@ -276,6 +285,7 @@ These files are required execution-contract inputs, not optional chat supplement
 `state/controller.md`
 
 - current workflow state
+- current task identifier when tracked
 - next owner
 - review routing
 - blocker or replan signal when needed
@@ -286,6 +296,8 @@ These files are required execution-contract inputs, not optional chat supplement
 
 - exactly one active task
 - exact scope
+- task id must match `state/controller.md`, `docs/roadmap/state.json`, and `state/tasks.json`
+- acceptance reference must resolve to `ai/acceptance.md` when declared
 - role restrictions
 - mark the task done only after merged review acceptance
 - execution lease fields for Codex re-entry control
@@ -309,6 +321,22 @@ These files are required execution-contract inputs, not optional chat supplement
 - defects found
 - exact fix requests
 - merge acceptance or closure outcome when the review stage completes
+
+`scripts/validate.sh`
+
+- canonical local validation entrypoint
+- must run the runtime validator before PR review
+- must stay aligned with the repo's PR CI contract
+
+`.github/workflows/ai-guardrails.yml`
+
+- required PR guardrail workflow
+- enforces the runtime validator in GitHub CI
+
+`.github/workflows/pipeline-events.yml`
+
+- required event workflow for PR-closed and CI-failed signals
+- must resolve controller state from repo-visible files without external control-layer dependency
 
 ### TM-7 Output contract
 
@@ -387,30 +415,27 @@ Review failure circuit breaker:
 - The blocked note must include the failure count and the last CI or review error summary
 - Blocked tasks require human intervention or Claude replanning before resuming
 
-### TM-8 Night mode policy
+### TM-8 Strict unattended execution policy
 
-Bounded unattended execution is allowed through `run_profile = night`.
+Unattended execution is allowed only in the standard strict profile.
 
-Night mode rules:
+Strict automation rules:
 
 - one repo at a time
 - narrow task slices only
 - no broad architecture work
 - no docs-only or state-only progress loops
-- validation must still occur
+- local validation must still occur before PR handoff
 - concrete blockers must be recorded and the run must stop or follow repo policy
 - review still happens through GitHub pull request, CI, and Gemini Code Assist on GitHub
-
-One-line summary: Night run mode = code/test change + targeted validation + commit, with minimal governance churn.
 
 ## 4. Execution Contract
 
 These rules are mandatory and machine-enforced where possible.
 
-Execution profiles are config-driven:
+Execution is config-driven but single-profile:
 
 - `standard`
-- `night`
 
 Default: `standard`
 
@@ -444,46 +469,7 @@ If a diff contains non-state work, the same diff must also update:
 - `state/artifacts.json`
 - `state/handoff.json`
 
-### EX-4 Night profile progress updates
-
-`run_profile = night` is for unattended overnight repo progress.
-
-One-line summary: Night run mode = code/test change + targeted validation + commit, with minimal governance churn.
-
-It is intentionally narrow:
-
-- small code or test changes
-- targeted validation
-- evidence-backed commits
-- minimal governance churn
-
-In `night` profile, a non-doc code or test diff must still update:
-
-- `state/artifacts.json`
-
-In `night` profile, these files are not required on every code or test diff unless the actual work needs them:
-
-- `state/tasks.json`
-- `state/handoff.json`
-- `state/risks.json`
-
-Night profile does not relax:
-
-- evidence requirements
-- risk continuity
-- phase completion gates
-- phase-change state updates
-- layer boundaries
-
-Night profile must not be used for:
-
-- docs-only work
-- state-only work
-- governance-only work
-- architecture changes
-- broad refactors
-
-### EX-5 Phase changes require state updates
+### EX-4 Phase changes require state updates
 
 If `current_phase`, `phase_type`, or `phase_status` changes in `docs/roadmap/state.json`, at least one of these files must also change in the same diff:
 
@@ -793,6 +779,7 @@ Not allowed:
 Product repos should copy `templates/ai.config.json` to `ai.config.json` and only change:
 
 - `run_profile`
+- `execution_mode`
 - `requires_test_evidence`
 - `requires_deploy_evidence`
 - `allowed_phases_without_tests`
@@ -811,10 +798,16 @@ Config may relax evidence requirements for specific phases. It must not be used 
 
 `protected_environment_paths` is a minimal repo-relative prefix list for environment-layer boundaries. It defaults to `brew/`.
 
-`run_profile` may be:
+`run_profile` must be:
 
 - `standard`
-- `night`
+
+`execution_mode` may be:
+
+- `strict`
+- `solo`
+
+`strict_mode` must remain `true` for autonomous repo execution in both modes.
 
 Repo-specific Gemini GitHub review behavior may be customized with `.gemini/config.yaml` if desired, but that is optional and does not replace the repo execution contract.
 
