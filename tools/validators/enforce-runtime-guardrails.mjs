@@ -111,6 +111,23 @@ const STATE_OR_META_PATTERNS = [
   /^ai\/enterprise-ai-standards\.md$/
 ];
 
+const RUNTIME_FACING_SCAN_PATTERNS = [
+  /^AGENTS\.md$/,
+  /^README\.md$/,
+  /^ai\//,
+  /^agents\//,
+  /^prompts\//,
+  /^contracts\//,
+  /^bootstrap\.sh$/,
+  /^pipeline_driver\.md$/,
+  /^scripts\/validate-ai-workflow\.(?:js|sh)$/
+];
+
+const STALE_STANDARD_REFERENCES = [
+  "ai/enterprise-ai-standards.md",
+  "project-manager/enterprise-ai-standards.md"
+];
+
 const FRONTEND_FILE_PATTERNS = [
   /\.tsx$/,
   /\.jsx$/,
@@ -309,6 +326,10 @@ function isDocFile(relativePath) {
 
 function isStateOrMetaFile(relativePath) {
   return STATE_OR_META_PATTERNS.some((pattern) => pattern.test(relativePath));
+}
+
+function isRuntimeFacingScanFile(relativePath) {
+  return RUNTIME_FACING_SCAN_PATTERNS.some((pattern) => pattern.test(relativePath));
 }
 
 function pathMatchesPrefixList(relativePath, prefixes) {
@@ -946,6 +967,32 @@ function validateWorkflowFiles(repoRoot, failures) {
         addFailure(
           failures,
           `state/controller.md current_task (${controllerTaskId}) does not match state/current_task.md (${taskId})`
+        );
+      }
+    }
+  }
+}
+
+function validateNoStaleStandardsReferences(repoRoot, failures) {
+  const repoFiles = getRepoVisibleFiles(repoRoot).filter((relativePath) =>
+    isRuntimeFacingScanFile(relativePath)
+  );
+
+  for (const relativePath of repoFiles) {
+    const absolutePath = path.join(repoRoot, relativePath);
+    let content = "";
+
+    try {
+      content = readTextFile(absolutePath);
+    } catch {
+      continue;
+    }
+
+    for (const staleReference of STALE_STANDARD_REFERENCES) {
+      if (content.includes(staleReference)) {
+        addFailure(
+          failures,
+          `Runtime-facing repo file contains stale standards path ${staleReference}: ${relativePath}`
         );
       }
     }
@@ -1723,8 +1770,9 @@ function main() {
 
   try {
     validateGitignoreSafety(repoRoot, failures);
-    validateRequiredFiles(repoRoot, failures);
-    validateWorkflowFiles(repoRoot, failures);
+  validateRequiredFiles(repoRoot, failures);
+  validateWorkflowFiles(repoRoot, failures);
+  validateNoStaleStandardsReferences(repoRoot, failures);
     if (failures.length > 0) {
       throw new Error("missing-files");
     }
