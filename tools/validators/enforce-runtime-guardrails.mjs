@@ -98,6 +98,7 @@ const DOC_PATTERNS = [
 const STATE_OR_META_PATTERNS = [
   /^AGENTS\.md$/,
   /^ai\//,
+  /^templates\//,
   /^state\//,
   /^docs\/roadmap\//,
   /^ai\.config\.json$/,
