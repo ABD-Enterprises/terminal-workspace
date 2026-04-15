@@ -741,7 +741,7 @@ function readTextFile(filePath) {
 
 function extractMarkdownField(content, fieldName) {
   // Handles both "key: value" and "- key: value" (bullet-list) formats
-  const pattern = new RegExp(`^(?:-\\s+)?${fieldName}:\\s*(.+)$`, "mi");
+  const pattern = new RegExp(`^(?:-\\s+)?${fieldName}:[ \\t]*(.*)$`, "mi");
   const match = content.match(pattern);
   return match ? match[1].trim() : "";
 }

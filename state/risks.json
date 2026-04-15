@@ -1,4 +1,201 @@
 {
-  "last_updated": "2026-04-04T00:00:00Z",
-  "risks": []
+  "risks": [
+    {
+      "id": "risk-native-key-tooling-backend-proxy",
+      "title": "Native trust and key tooling still proxied through the backend",
+      "severity": "high",
+      "status": "resolved",
+      "summary": "Native mode previously proxied key inspection, key generation, and known-host scans through the Node backend.",
+      "assigned_phase": "native-trust-and-key-tooling",
+      "resolved_at": "2026-04-04T05:04:59-04:00"
+    },
+    {
+      "id": "risk-browser-native-divergence",
+      "title": "Browser and native transport paths diverge intentionally",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "Cross-surface runtime coverage now exercises browser and native transport seams through targeted unit tests and shared macOS CI coverage.",
+      "assigned_phase": "multi-surface-regression-hardening",
+      "resolved_at": "2026-04-04T09:07:17-04:00"
+    },
+    {
+      "id": "risk-local-fixtures-need-unsandboxed-runtime",
+      "title": "Local macOS SSH fixtures need an unsandboxed shell",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "Local fixture scripts now preflight temporary localhost sshd startup and host scanning before running the broader SSH Cargo suites.",
+      "assigned_phase": "local-fixture-sandbox-hardening",
+      "resolved_at": "2026-04-04T09:07:17-04:00"
+    },
+    {
+      "id": "risk-placeholder-bundle-identifier",
+      "title": "Native bundle still used a placeholder macOS bundle identifier",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "The signed bundle and release manifest still emitted `com.example.terminalworkspace`, which is invalid release metadata for a real macOS package.",
+      "assigned_phase": "packaging-and-release-hardening",
+      "resolved_at": "2026-04-04T08:23:51-04:00"
+    },
+    {
+      "id": "risk-macos-bundle-not-notarized",
+      "title": "Signed macOS bundle is not notarized",
+      "severity": "high",
+      "status": "resolved",
+      "summary": "The local release path now submits the signed archive to Apple, staples the accepted ticket, and produces a Gatekeeper-accepted app bundle plus a promoted stable manifest.",
+      "assigned_phase": "notarization-and-release-promotion",
+      "resolved_at": "2026-04-04T08:36:52-04:00"
+    },
+    {
+      "id": "risk-release-automation-requires-local-notary-profile",
+      "title": "Release automation still requires a machine-local notary profile",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "Portable App Store Connect key auth, Apple ID fallback, CI workflow support, and a documented env contract remove the machine-local profile requirement.",
+      "assigned_phase": "release-credential-portability-hardening",
+      "resolved_at": "2026-04-04T09:07:17-04:00"
+    },
+    {
+      "id": "risk-github-release-workflow-not-live-validated",
+      "title": "GitHub release workflow has not been executed with live repository secrets",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "The GitHub-hosted release workflow now runs on the verification branch and reaches the hosted preflight gate on Actions.",
+      "assigned_phase": "release-workflow-live-verification",
+      "resolved_at": "2026-04-04T18:09:48-04:00"
+    },
+    {
+      "id": "risk-github-release-workflow-missing-secrets",
+      "title": "GitHub-hosted release workflow is missing signing and notarization secrets",
+      "severity": "high",
+      "status": "open",
+      "summary": "The live hosted run on Actions now fails deterministically in the release-secret preflight because `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_KEYCHAIN_PASSWORD`, `MACOS_SIGN_IDENTITY`, and all notarization credential paths are unset in GitHub.",
+      "assigned_phase": "release-workflow-secret-provisioning"
+    },
+    {
+      "id": "risk-github-actions-node20-runtime-targets",
+      "title": "Pinned GitHub actions still target the deprecated Node 20 runtime",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "The workflows now use the current action majors (`actions/checkout@v6`, `actions/setup-node@v6`, `actions/upload-artifact@v7`, and `pnpm/action-setup@v5`), and the hosted release run on the modernization branch no longer emits the Node 20 runtime deprecation annotation.",
+      "assigned_phase": "workflow-runtime-modernization",
+      "resolved_at": "2026-04-04T18:40:56-04:00"
+    },
+    {
+      "id": "risk-vault-imports-replace-local-state",
+      "title": "Vault imports still replace the local workspace atomically",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "Same-vault imports now preview merge impact and can merge non-conflicting hosts, keys, snippets, and known-host entries instead of overwriting unrelated local records.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T15:33:30-04:00"
+    },
+    {
+      "id": "risk-vault-merge-deletions-and-conflicts",
+      "title": "Vault merges do not yet model deletions or user-resolvable conflicts",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "Same-vault imports now carry tombstone deletions, remove superseded local records during merge, and allow timestamp-tied conflicts to keep local or prefer imported state.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T16:52:13-04:00"
+    },
+    {
+      "id": "risk-vault-tombstones-have-no-retention-policy",
+      "title": "Vault tombstones have no retention or compaction policy",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Deletion tombstones are now deduplicated, age-limited, and capped per entity kind before persistence, import analysis, and local export, preventing unbounded local snapshot growth.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:18:36-04:00"
+    },
+    {
+      "id": "risk-vault-remote-envelope-has-no-key-rotation-rules",
+      "title": "Remote vault envelopes do not yet define key rotation or signer trust rules",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Remote vault envelopes now have an explicit trust policy model with allowed vault scopes, key validity windows, rotation thresholds, retirement cutoffs, and replacement key IDs.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:31:36-04:00"
+    },
+    {
+      "id": "risk-vault-trust-policy-not-persisted",
+      "title": "Remote sync trust policies are not yet persisted or enforced by runtime workflows",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Remote sync trust policies now persist in a dedicated store and the runtime envelope inspection path loads local vault context plus that policy automatically before accepting envelopes.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:41:32-04:00"
+    },
+    {
+      "id": "risk-vault-trust-policy-has-no-management-surface",
+      "title": "Trusted sync key policies have no operator management or bootstrap surface",
+      "severity": "low",
+      "status": "resolved",
+      "summary": "Settings now exposes trusted sync key import/export, allow-unknown-key policy control, explicit trusted-key edits, and operator bootstrap distribution for persisted remote sync trust rules.",
+      "assigned_phase": "vault-sync-architecture",
+      "resolved_at": "2026-04-04T17:47:46-04:00"
+    },
+    {
+      "id": "risk-local-release-secret-source-material-missing",
+      "title": "Local workstation does not expose exportable release secret material",
+      "severity": "high",
+      "status": "open",
+      "summary": "The repo can detect the local Developer ID identity, but there is no P12 bundle, certificate password, keychain password, or notarization credential material in env files or accessible local export paths, so automated GitHub secret provisioning cannot complete from this machine state alone.",
+      "assigned_phase": "release-workflow-secret-provisioning"
+    },
+    {
+      "id": "risk-non-ssh-protocols-inventory-only",
+      "title": "Telnet, serial, and mosh are modeled but not executable yet",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "Telnet, serial, and mosh now launch through the native PTY bridge with protocol-aware UI and host defaults instead of stopping at inventory only.",
+      "assigned_phase": "macos-network-protocol-execution",
+      "resolved_at": "2026-04-05T02:19:42-04:00"
+    },
+    {
+      "id": "risk-network-protocol-clients-may-be-missing",
+      "title": "Native telnet, serial, and mosh sessions depend on local client binaries",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "The desktop app now checks native client availability before session launch and surfaces inline install guidance in the host editor and terminal pane instead of failing later in the spawn path.",
+      "assigned_phase": "macos-network-protocol-execution",
+      "resolved_at": "2026-04-05T02:24:44-04:00"
+    },
+    {
+      "id": "risk-network-protocol-live-validation-missing",
+      "title": "Telnet, serial, and mosh runtime paths do not yet have live end-to-end validation fixtures",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "Live protocol fixtures now drive telnet, serial, and mosh through the native PTY launch path with deterministic client overrides, and the native transport script runs that coverage before the broader localhost SSH fixture.",
+      "assigned_phase": "macos-network-protocol-execution",
+      "resolved_at": "2026-04-05T06:35:41.515Z"
+    },
+    {
+      "id": "risk-session-history-explicit-dispatch-only",
+      "title": "Session history currently covers app-dispatched commands only",
+      "severity": "medium",
+      "status": "open",
+      "summary": "Session history now stores bounded output excerpts for app-dispatched commands, but manual terminal input is still intentionally excluded until safe capture and redaction rules exist.",
+      "assigned_phase": "macos-session-history-and-runbooks"
+    },
+    {
+      "id": "risk-session-output-preview-may-capture-sensitive-results",
+      "title": "Persisted session output previews may include sensitive command results",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The new output-history slice stores bounded response excerpts for app-dispatched commands, which improves replay and auditing but can still persist sensitive command results until redaction or sensitivity controls are added.",
+      "assigned_phase": "macos-session-history-and-runbooks"
+    },
+    {
+      "id": "risk-enterprise-standards-contract-drift",
+      "title": "Local validator usage and state contract drifted from the latest enterprise standard",
+      "severity": "medium",
+      "status": "resolved",
+      "summary": "The repo was still using the older runtime-guardrails invocation shape, an outdated `state/artifacts.json` schema, and handoff/roadmap state that no longer matched the config-driven enterprise validator contract.",
+      "assigned_phase": "macos-session-history-and-runbooks",
+      "resolution": "The repo now vendors the latest enterprise validator, ships a local `ai.config.json`, records evidence in the current artifact schema, and calls the validator through the config-driven path from package scripts, CI, bootstrap, prompts, and agent docs.",
+      "resolved_at": "2026-04-05T11:46:11Z"
+    }
+  ],
+  "updated_at": "2026-04-05T11:48:23Z",
+  "last_updated": "2026-04-13T00:48:13Z"
 }
