@@ -995,7 +995,7 @@ function validateNoStaleStandardsReferences(repoRoot, failures) {
 
   for (const relativePath of repoFiles) {
     const absolutePath = path.join(repoRoot, relativePath);
-    let content = "";
+    let content;
 
     try {
       content = readTextFile(absolutePath);
@@ -1594,8 +1594,7 @@ function validatePhaseRules(
   risks,
   handoff,
   config,
-  failures,
-  baseRoadmap
+  failures
 ) {
   const phaseType = normalizePhaseType(roadmap ? roadmap.phase_type : "build");
   const evidence = artifacts.evidence || {};
@@ -1834,8 +1833,7 @@ function main() {
       risks,
       handoff,
       config.value,
-      failures,
-      baseRoadmap
+      failures
     );
     validateUICompliance(repoRoot, changedFiles, failures);
 
