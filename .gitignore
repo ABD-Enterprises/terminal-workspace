@@ -5,6 +5,7 @@ apps/desktop/dist/
 src-tauri/target/
 playwright-report/
 test-results/
+artifacts/e2e/
 
 *.tsbuildinfo
 

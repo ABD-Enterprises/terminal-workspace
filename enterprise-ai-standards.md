@@ -233,6 +233,7 @@ Each participating product repo must enforce the live PR existence check in repo
 10. If review passes and the pull request is merged:
     - If tasks remain in `ai/tasks.md` with status `pending`, set `state/controller.md` to `ready_for_claude`.
     - If no tasks remain, mark the current task done and set `state/controller.md` to `done`.
+    - Post-merge automation must verify that `origin/main` reflects the expected controller, current-task, task-ledger, and roadmap state before the pipeline reports success.
     - Claude reads `ready_for_claude`, marks the finished task `done`, performs the pass-2 hardening review, advances `state/current_task.md` to the next task, and sets `state/controller.md` to `ready_for_codex`.
 
 ### TM-5 Required repo structure contract
@@ -311,6 +312,8 @@ These files are required execution-contract inputs, not optional chat supplement
 - commit
 - pull request or merge closure note when review acceptance completes the task
 - remaining issues
+- descriptive support state, not the merge gate
+- may be normalized or refreshed post-merge when controller state, current task, roadmap state, and retained evidence are already truthful
 
 `state/validation_report.md`
 
@@ -321,6 +324,8 @@ These files are required execution-contract inputs, not optional chat supplement
 - defects found
 - exact fix requests
 - merge acceptance or closure outcome when the review stage completes
+- descriptive support state, not the merge gate
+- may be normalized or refreshed post-merge when controller state, current task, roadmap state, and retained evidence are already truthful
 
 `scripts/validate.sh`
 
@@ -337,6 +342,26 @@ These files are required execution-contract inputs, not optional chat supplement
 
 - required event workflow for PR-closed and CI-failed signals
 - must resolve controller state from repo-visible files without external control-layer dependency
+- must declare the GitHub permissions needed for any repo-visible state advancement or `repository_dispatch` write path
+- when post-merge automation updates repo-visible state, `contents: write` is required
+
+### TM-6A Merge-gate contract
+
+PR-time merge blocking should stay focused on durable control-plane truth:
+
+- open or updated pull request
+- required GitHub checks passing
+- runtime validator passing
+- controller, current task, roadmap state, and task ledger coherence
+- retained evidence truthfulness in `state/artifacts.json`
+
+These items should not block merge by narrative freshness alone when the durable control plane is already truthful:
+
+- prose-only drift in `state/implementation_notes.md`
+- prose-only drift in `state/validation_report.md`
+- regenerable descriptive metadata that can be rebuilt from retained artifacts after merge
+
+Post-merge normalization is the right place to refresh descriptive state. PR validation should block lies, not lagging summaries.
 
 ### TM-7 Output contract
 
@@ -390,10 +415,12 @@ Required automation behavior:
 - one automation may own `ready_for_review` and `review_failed_fix_required` ("Address Open PRs")
 - the review watcher may merge the pull request when review acceptance criteria are satisfied
 - after merge, the automation should set `state/controller.md` to `ready_for_claude` if tasks remain, or `done` if no tasks remain
+- after merge, the automation must assert that `origin/main` converged on the expected `state/controller.md`, `state/current_task.md`, `state/tasks.json`, and `docs/roadmap/state.json` values before it reports success
 - Claude (scheduled or triggered) reads `ready_for_claude`, marks the finished task done, advances `state/current_task.md` to the next pending task, and sets `state/controller.md` to `ready_for_codex`
 - Claude (scheduled or triggered) reads `done`, checks for a roadmap or backlog source, and either plans the next batch or stays done
 - the next task must not move to `ready_for_codex` until Claude has selected and queued it
 - before any Codex-owned run starts work, it must check for an active execution lease plus existing branch and pull request state
+- before any Codex-owned run resumes from a checkpoint, it must confirm branch, worktree cleanliness, `origin/main`, lease freshness, and repo-visible task state still agree
 - a fresh execution lease must block re-entry by any Codex automation on the same repo and task
 - Codex must refresh `execution_heartbeat_at` and `execution_lease_expires_at` during long-running work
 - Codex must clear the execution lease when the task moves to `ready_for_review`, `ready_for_claude`, `blocked`, or `done`
@@ -450,6 +477,8 @@ Every adopting repo must track these files:
 - `state/artifacts.json`
 - `state/handoff.json`
 
+`state/risks.json` is required repo-visible workflow state for AI-managed repos. It must be sanitized for GitHub visibility, but it must not be gitignored or dropped from the execution contract.
+
 ### EX-2 State load before work
 
 Every material run must treat the files above as the repo source of truth for:
@@ -503,6 +532,8 @@ Product repos must not commit or retain:
 If configuration guidance is needed in-repo, commit sanitized templates or examples only.
 
 If logs, screenshots, reports, or evidence artifacts are retained in the repo, they must be redacted before commit so they do not expose secrets, local configuration, or operationally sensitive configuration.
+
+The same rule applies to `state/risks.json`: sanitize sensitive wording if needed, but keep the file tracked because the workflow and validator treat it as required shared state.
 
 ## 5. Evidence Contract
 
@@ -837,29 +868,26 @@ Required image: `semgrep/semgrep:latest`
 
 One-time setup: `semgrep login` on the developer's machine. Credentials are cached in `~/.semgrep/`. CI uses the `SEMGREP_APP_TOKEN` environment variable (never stored in the repo).
 
-### SC-2 Per-repo requirements
+### SC-2 PR validation posture
 
-Every managed repo must have:
+Semgrep in PR validation must be baseline-aware.
 
-- `.semgrepignore` — excludes `node_modules/`, `.next/`, `dist/`, `build/`, `runs/`, `state/`, `.git/`
-- A `semgrep` step in `scripts/validate.sh` that runs after the existing security step:
+- PR-time Semgrep should scan only changed, scannable files relative to the active base ref.
+- Validator-support files such as `tools/validators/` should be excluded from PR Semgrep targets unless the repo explicitly treats them as runtime-facing code.
+- If Docker is unavailable in the execution environment, the step should record `NOT RUN` rather than fail the entire validation contract.
+- PR validation must not silently fall back to a whole-repo backlog scan when a usable base ref is available.
 
-```bash
-docker run --rm \
-  -v "$(pwd)":/src \
-  -w /src \
-  -e SEMGREP_APP_TOKEN \
-  semgrep/semgrep \
-  semgrep --config=auto --error .
-```
+### SC-3 Fleet sweeps and maintenance scans
 
-If Docker is not available in the execution environment, the step must record `NOT RUN` rather than fail the entire validation.
+Full-repo Semgrep remains valid, but only as an explicit maintenance or fleet-sweep action:
 
-**This is enforced by `ai-pipeline.sh repair`.** The `check_semgrep_config` repair check ensures `.semgrepignore` exists and that `validate.sh` contains the semgrep Docker invocation.
-
-### SC-3 Fleet sweep
+- scheduled security sweeps
+- one-off repository maintenance
+- fleet-wide scans initiated from orchestration tools
 
 `brew-sync/tools/semgrep/scan-all.sh` runs Semgrep across all repos listed in `repos.json`. Use this for full-fleet scans on demand. Results are printed per-repo as PASS/FAIL.
+
+Full-repo scans should not be smuggled into normal PR validation, because that turns historical backlog into a false merge blocker for new work.
 
 ### SC-4 Custom rules
 
