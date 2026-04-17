@@ -2,6 +2,7 @@
 
 task_id: S2
 description: Environment grouping — organize hosts by account, cluster, region
+pr_link: https://github.com/deffenda/term-snip/pull/15
 scope: src/, apps/
 status: in_review
 current_state: ready_for_review
@@ -18,5 +19,5 @@ failure_type: none
 failure_reason:
 depends_on: S1 (done, merged to main)
 acceptance_criteria_reference: /ai/acceptance.md#S2
-last_action: Implemented persisted environment records, grouped host inventory and sidebar views, CRUD environment management, and ~/.ssh/config bootstrap import on branch codex/s2-environment-grouping. Local tests, desktop build, and Rust validation passed.
-next_action: Review the codex/s2-environment-grouping pull request, collect GitHub CI plus PR feedback, and keep this task in review until all checks are green.
+last_action: Implemented persisted environment records, grouped host inventory and sidebar views, CRUD environment management, and ~/.ssh/config bootstrap import on branch codex/s2-environment-grouping. Local tests, desktop build, Rust validation, and guardrails passed, then PR #15 was opened for review.
+next_action: Review PR #15, collect GitHub CI plus PR feedback, and keep this task in review until all checks are green.
