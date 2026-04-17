@@ -272,6 +272,12 @@ struct ProtocolRuntimeStatusRequest {
     protocol: String,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadSshConfigRequest {
+    path: Option<String>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProtocolRuntimeStatusResponse {
@@ -281,6 +287,13 @@ struct ProtocolRuntimeStatusResponse {
     message: String,
     protocol: String,
     resolved_path: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadSshConfigResponse {
+    contents: String,
+    path: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -2110,6 +2123,22 @@ fn termsnip_protocol_runtime_status(
 }
 
 #[tauri::command]
+fn termsnip_read_ssh_config(
+    request: Option<ReadSshConfigRequest>,
+) -> Result<ReadSshConfigResponse, String> {
+    let requested_path = request
+        .and_then(|value| value.path)
+        .unwrap_or_else(|| "~/.ssh/config".to_string());
+    let resolved_path = expand_home(&requested_path);
+    let contents = fs::read_to_string(&resolved_path).map_err(|error| error.to_string())?;
+
+    Ok(ReadSshConfigResponse {
+        contents,
+        path: resolved_path.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
 async fn termsnip_backend_status(
     bridge: State<'_, BackendBridge>,
 ) -> Result<BackendStatusResponse, String> {
@@ -2825,6 +2854,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             termsnip_transport_info,
             termsnip_protocol_runtime_status,
+            termsnip_read_ssh_config,
             termsnip_backend_status,
             termsnip_proxy_backend_json,
             termsnip_proxy_backend_binary,

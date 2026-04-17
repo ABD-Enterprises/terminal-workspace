@@ -23,6 +23,11 @@ export interface ProtocolRuntimeStatusResponse {
   resolvedPath?: string;
 }
 
+export interface ReadSshConfigResponse {
+  contents: string;
+  path: string;
+}
+
 export interface CreateSessionResponse {
   sessionId: string;
 }

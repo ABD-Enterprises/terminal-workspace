@@ -37,7 +37,13 @@ vi.mock("./demo-backend", () => ({
   uploadDemoRemoteFile: vi.fn(),
 }));
 
-import { generatePrivateKey, getProtocolRuntimeStatus, inspectPrivateKey, scanKnownHost } from "./api";
+import {
+  generatePrivateKey,
+  getProtocolRuntimeStatus,
+  inspectPrivateKey,
+  readSshConfigFile,
+  scanKnownHost,
+} from "./api";
 import {
   createLocalForward,
   executeSnippetOnHosts,
@@ -138,6 +144,19 @@ describe("native trust and key tooling API", () => {
     });
   });
 
+  it("routes native ssh config reads through the Tauri command bridge", async () => {
+    invokeTauriCommand.mockResolvedValue({
+      contents: "Host prod\n  HostName bastion.internal\n",
+      path: "/Users/deffenda/.ssh/config",
+    });
+
+    await readSshConfigFile();
+
+    expect(invokeTauriCommand).toHaveBeenCalledWith("termsnip_read_ssh_config", {
+      request: { path: undefined },
+    });
+  });
+
   it("routes browser key inspection through the backend HTTP seam", async () => {
     isTauriRuntime.mockReturnValue(false);
     fetchMock.mockResolvedValue(
@@ -183,6 +202,14 @@ describe("native trust and key tooling API", () => {
       message: "This protocol requires the native macOS runtime.",
       protocol: "telnet",
     });
+  });
+
+  it("requires the native runtime for ssh config import in the browser", async () => {
+    isTauriRuntime.mockReturnValue(false);
+
+    await expect(readSshConfigFile()).rejects.toThrow(
+      "Open the native macOS app to import ~/.ssh/config."
+    );
   });
 
   it("routes native forwards and snippet execution through the Tauri command bridge", async () => {

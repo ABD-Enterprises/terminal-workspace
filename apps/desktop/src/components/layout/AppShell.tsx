@@ -130,7 +130,7 @@ export function AppShell() {
 
   const matchingHosts = applyHostFilters(hosts, {
     query: paletteQuery,
-    activeGroup: "all",
+    activeEnvironmentId: "all",
     activeTag: "all",
     favoritesOnly: false,
   }).slice(0, 6);

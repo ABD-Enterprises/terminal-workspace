@@ -1,0 +1,23 @@
+
+> desktop@0.1.0 build
+> tsc -b && vite build
+
+vite v6.4.1 building for production...
+transforming...
+✓ 167 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                          0.46 kB │ gzip:   0.30 kB
+dist/assets/SessionsPage-LcAfv9l9.css    4.35 kB │ gzip:   1.67 kB
+dist/assets/index-BYIhJ_6w.css          27.51 kB │ gzip:   5.95 kB
+dist/assets/EmptyState-Buir6oZJ.js       0.61 kB │ gzip:   0.34 kB
+dist/assets/ConfirmDialog-Dt-9dYb_.js    0.73 kB │ gzip:   0.38 kB
+dist/assets/event-OkWMoV8X.js            1.16 kB │ gzip:   0.58 kB
+dist/assets/SnippetsPage-CikJpFOt.js    15.38 kB │ gzip:   3.78 kB
+dist/assets/KeysPage-Bk25mzzd.js        15.63 kB │ gzip:   3.69 kB
+dist/assets/TransfersPage-BtSu-LqM.js   16.71 kB │ gzip:   4.42 kB
+dist/assets/SettingsPage-D2cGtHSU.js    33.30 kB │ gzip:   8.10 kB
+dist/assets/HostsPage-C57zSwqV.js       35.63 kB │ gzip:   8.50 kB
+dist/assets/SessionsPage-DT4Rlhrr.js   317.54 kB │ gzip:  79.86 kB
+dist/assets/index-C08164zN.js          346.46 kB │ gzip: 106.85 kB
+✓ built in 1.63s

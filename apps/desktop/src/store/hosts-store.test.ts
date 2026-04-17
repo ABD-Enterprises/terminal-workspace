@@ -1,13 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { defaultHostKeyPolicy, defaultHostProtocol, emptyHostFormValues, sampleHosts } from "../types/host";
 import {
   applyHostFilters,
+  buildHostEnvironmentSections,
   createHostRecord,
   deleteHostFromCollection,
+  sampleEnvironments,
   sortHostCollection,
   toggleHostFavoriteInCollection,
   upsertHostCollection,
+  useHostsStore,
 } from "./hosts-store";
+
+const baseHostsState = useHostsStore.getState();
+
+afterEach(() => {
+  useHostsStore.setState(baseHostsState);
+});
 
 describe("hosts store helpers", () => {
   it("creates and updates host records", () => {
@@ -40,7 +49,7 @@ describe("hosts store helpers", () => {
   it("filters hosts by query, favorites, groups, and tags", () => {
     const results = applyHostFilters(sampleHosts, {
       query: "router",
-      activeGroup: "Network / Edge",
+      activeEnvironmentId: "env-east-region",
       activeTag: "router",
       favoritesOnly: false,
     });
@@ -50,7 +59,7 @@ describe("hosts store helpers", () => {
 
     const favoriteOnly = applyHostFilters(sampleHosts, {
       query: "",
-      activeGroup: "all",
+      activeEnvironmentId: "all",
       activeTag: "all",
       favoritesOnly: true,
     });
@@ -161,5 +170,44 @@ describe("hosts store helpers", () => {
     expect(created.privateKeyPath).toBe("~/.ssh/id_ops");
     expect(created.keyLabel).toBe("Ops Key");
     expect(created.hostKeyPolicy).toBe("requireTrusted");
+  });
+
+  it("builds grouped environment sections for nested host inventory", () => {
+    const sections = buildHostEnvironmentSections(sampleHosts, sampleEnvironments);
+
+    expect(sections[0]?.environment?.label).toBe("Acme Production Account");
+    expect(sections[0]?.hosts[0]?.id).toBe("prod-gateway");
+    expect(sections.some((section) => section.environment?.label === "Local Workstation")).toBe(
+      true
+    );
+  });
+
+  it("imports ssh config hosts into a named environment", () => {
+    const baseState = useHostsStore.getState();
+    const createdEnvironmentId = baseState.createEnvironment({
+      label: "Imported Config",
+      kind: "custom",
+      description: "Bootstrap imports",
+    });
+
+    const result = useHostsStore
+      .getState()
+      .importHostsFromSshConfig(
+        "Host prod-gateway\n  HostName bastion.acme.internal\n  User ops\n  IdentityFile ~/.ssh/id_ed25519\n",
+        createdEnvironmentId
+      );
+
+    const importedHost = useHostsStore
+      .getState()
+      .hosts.find((host) => host.id === "ssh-config-prod-gateway");
+
+    expect(result.importedCount).toBe(1);
+    expect(result.environmentId).toBe(createdEnvironmentId);
+    expect(importedHost).toMatchObject({
+      environmentId: createdEnvironmentId,
+      hostname: "bastion.acme.internal",
+      username: "ops",
+      privateKeyPath: "~/.ssh/id_ed25519",
+    });
   });
 });

@@ -13,7 +13,7 @@ Done when: SSH connect works with key and password auth. Multiple sessions in ta
 
 ### S2
 Title: Environment grouping — organize hosts by account, cluster, region
-Status: pending
+Status: in_review
 Phase: 1
 Depends on: S1
 Description: Group SSH hosts into environments: AWS accounts, Kubernetes clusters, regions, custom groups. Environment list as a filterable, collapsible table in the sidebar. Each environment shows: name, host count, status summary (N connected as text). Hosts within an environment shown as nested rows. CRUD for environments and hosts. Import from SSH config file (~/.ssh/config) as a bootstrap action. Drag-and-drop hosts between environments. Environments persisted locally as JSON.

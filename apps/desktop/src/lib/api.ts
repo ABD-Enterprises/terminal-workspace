@@ -11,6 +11,7 @@ import type {
   KnownHostScanResult,
   ListForwardsResponse,
   ProtocolRuntimeStatusResponse,
+  ReadSshConfigResponse,
   ResizeSessionPayload,
   SftpDirectoryResponse,
   SnippetExecutionResult,
@@ -138,6 +139,20 @@ export async function getProtocolRuntimeStatus(protocol: HostProtocol) {
         : "This protocol requires the native macOS runtime.",
     protocol,
   } satisfies ProtocolRuntimeStatusResponse;
+}
+
+export async function readSshConfigFile(path?: string) {
+  if (isDemoModeEnabled()) {
+    throw new Error("SSH config import is only available in the local desktop app.");
+  }
+
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<ReadSshConfigResponse>("termsnip_read_ssh_config", {
+      request: { path },
+    });
+  }
+
+  throw new Error("Open the native macOS app to import ~/.ssh/config.");
 }
 
 export async function createBackendSession(host: BackendHostConnection) {

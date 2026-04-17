@@ -1,27 +1,28 @@
+import type { HostEnvironmentRecord } from "../../types/environment";
 import { SearchInput } from "../common/SearchInput";
 
 interface HostFilterBarProps {
   query: string;
-  groups: string[];
+  environments: HostEnvironmentRecord[];
   tags: string[];
-  activeGroup: string;
+  activeEnvironmentId: string;
   activeTag: string;
   favoritesOnly: boolean;
   onQueryChange: (value: string) => void;
-  onGroupChange: (value: string) => void;
+  onEnvironmentChange: (value: string) => void;
   onTagChange: (value: string) => void;
   onFavoritesToggle: () => void;
 }
 
 export function HostFilterBar({
   query,
-  groups,
+  environments,
   tags,
-  activeGroup,
+  activeEnvironmentId,
   activeTag,
   favoritesOnly,
   onQueryChange,
-  onGroupChange,
+  onEnvironmentChange,
   onTagChange,
   onFavoritesToggle,
 }: HostFilterBarProps) {
@@ -35,17 +36,17 @@ export function HostFilterBar({
         />
         <label className="block">
           <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            Group
+            Environment
           </span>
           <select
-            value={activeGroup}
-            onChange={(event) => onGroupChange(event.target.value)}
+            value={activeEnvironmentId}
+            onChange={(event) => onEnvironmentChange(event.target.value)}
             className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-1.5 text-[13px] text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
           >
-            <option value="all">All groups</option>
-            {groups.map((group) => (
-              <option key={group} value={group}>
-                {group}
+            <option value="all">All environments</option>
+            {environments.map((environment) => (
+              <option key={environment.id} value={environment.id}>
+                {environment.label}
               </option>
             ))}
           </select>

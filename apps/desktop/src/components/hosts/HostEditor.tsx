@@ -16,6 +16,7 @@ import {
   type HostRecord,
   type HostFormValues,
 } from "../../types/host";
+import type { HostEnvironmentRecord } from "../../types/environment";
 import {
   type ConnectionSecretRecord,
   useConnectionSecretsStore,
@@ -26,6 +27,7 @@ import { Modal } from "../common/Modal";
 interface HostEditorProps {
   open: boolean;
   host?: HostRecord;
+  environments: HostEnvironmentRecord[];
   onClose: () => void;
   onSave: (values: HostFormValues) => void;
 }
@@ -42,6 +44,7 @@ interface RuntimeStatusMessage {
 interface HostEditorContentProps extends HostEditorProps {
   formId: string;
   hosts: HostRecord[];
+  environments: HostEnvironmentRecord[];
   runtimeSecrets?: ConnectionSecretRecord;
   hydrateHostSecrets: (hostId: string) => Promise<ConnectionSecretRecord | undefined>;
 }
@@ -64,6 +67,7 @@ function buildHostEditorValues(
 function HostEditorContent({
   formId,
   hosts,
+  environments,
   open,
   host,
   runtimeSecrets,
@@ -443,6 +447,23 @@ function HostEditorContent({
         </label>
         ) : null}
         <label className="block">
+          <span className="text-sm text-slate-300">Environment</span>
+          <select
+            value={values.environmentId}
+            onChange={(event) =>
+              setValues((current) => ({ ...current, environmentId: event.target.value }))
+            }
+            className={fieldClassName}
+          >
+            <option value="">Unassigned</option>
+            {environments.map((environment) => (
+              <option key={environment.id} value={environment.id}>
+                {environment.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
           <span className="text-sm text-slate-300">Group</span>
           <input
             value={values.group}
@@ -562,7 +583,7 @@ function HostEditorContent({
   );
 }
 
-export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
+export function HostEditor({ open, host, environments, onClose, onSave }: HostEditorProps) {
   const hosts = useHostsStore((state) => state.hosts);
   const runtimeSecrets = useConnectionSecretsStore((state) =>
     host ? state.secretsByHostId[host.id] : undefined
@@ -575,6 +596,7 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
       key={`${formId}-${open ? "open" : "closed"}`}
       formId={formId}
       hosts={hosts}
+      environments={environments}
       open={open}
       host={host}
       runtimeSecrets={runtimeSecrets}

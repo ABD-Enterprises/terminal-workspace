@@ -14,6 +14,7 @@ export interface HostRecord {
   port: number;
   authMethod: HostAuthMethod;
   privateKeyPath: string;
+  environmentId?: string;
   group: string;
   tags: string[];
   note: string;
@@ -41,6 +42,7 @@ export interface HostFormValues {
   password: string;
   privateKeyPath: string;
   passphrase: string;
+  environmentId: string;
   group: string;
   tags: string;
   note: string;
@@ -63,6 +65,7 @@ export const emptyHostFormValues: HostFormValues = {
   password: "",
   privateKeyPath: "",
   passphrase: "",
+  environmentId: "",
   group: "",
   tags: "",
   note: "",
@@ -85,6 +88,7 @@ export const sampleHosts: HostRecord[] = [
     port: 22,
     authMethod: "privateKey",
     privateKeyPath: "~/.ssh/id_ed25519",
+    environmentId: "env-acme-account",
     group: "Acme / Production",
     tags: ["prod", "bastion"],
     note: "Primary ingress host for customer-facing services.",
@@ -113,6 +117,7 @@ export const sampleHosts: HostRecord[] = [
     port: 2222,
     authMethod: "privateKey",
     privateKeyPath: "~/.ssh/deploy_key",
+    environmentId: "env-services-cluster",
     group: "Acme / Services",
     tags: ["linux", "api", "staging"],
     note: "Blue/green target used for deploy rehearsals and schema checks.",
@@ -140,6 +145,7 @@ export const sampleHosts: HostRecord[] = [
     port: 22,
     authMethod: "password",
     privateKeyPath: "",
+    environmentId: "env-east-region",
     group: "Network / Edge",
     tags: ["network", "lab", "router"],
     note: "Used for testing VLAN changes and failover validation.",
@@ -165,6 +171,7 @@ export const sampleHosts: HostRecord[] = [
     port: 0,
     authMethod: "none",
     privateKeyPath: "",
+    environmentId: "env-local-workstation",
     group: "Workstation / Local",
     tags: ["local", "shell"],
     note: "Launches the current macOS login shell inside the native desktop app.",
@@ -196,6 +203,7 @@ export function hostToFormValues(host: HostRecord): HostFormValues {
     privateKeyPath: host.privateKeyPath,
     password: "",
     passphrase: "",
+    environmentId: host.environmentId ?? "",
     group: host.group,
     tags: host.tags.filter((tag) => tag.trim().toLowerCase() !== "favorite").join(", "),
     note: host.note,

@@ -1,0 +1,24 @@
+   Compiling terminal-workspace v0.1.0 (/Users/deffenda/Code/term-snip/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.74s
+     Running unittests src/main.rs (src-tauri/target/debug/deps/terminal_workspace-29d7404b0b3051b9)
+
+running 16 tests
+test native_transport_fixtures::localhost_ssh_transport_fixture_flow ... ignored, requires an unsandboxed localhost sshd runtime
+test tests::public_known_host_scan_smoke ... ok
+test tests::detects_only_complete_passphrase_prompts ... ok
+test tests::resolves_remote_paths_relative_to_the_sftp_root ... ok
+test tests::normalizes_private_key_algorithms ... ok
+test tests::reports_builtin_and_unknown_protocol_runtime_status ... ok
+test tests::builds_known_hosts_patterns_for_nondefault_ports ... ok
+test tests::builds_prompt_responses_in_jump_chain_order ... ok
+test tests::validates_telnet_serial_and_mosh_session_targets ... ok
+test tests::builds_mosh_ssh_command_with_known_hosts_and_key_path ... ok
+test tests::computes_known_host_scan_fingerprints ... ok
+test tests::parses_sftp_directory_listing_output ... ok
+test tests::keychain_secret_round_trip ... ok
+test native_transport_fixtures::native_key_tooling_fixture_flow ... ok
+test native_transport_fixtures::native_external_protocol_runtime_fixture_flow ... ok
+test native_transport_fixtures::native_trust_tooling_fixture_flow ... ok
+
+test result: ok. 15 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.82s
+

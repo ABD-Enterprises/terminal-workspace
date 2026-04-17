@@ -3,8 +3,9 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { navigationItems } from "../../lib/navigation";
 import { cn, formatDurationSince } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
-import { useHostsStore } from "../../store/hosts-store";
+import { applyHostFilters, buildHostEnvironmentSections, useHostsStore } from "../../store/hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
+import { formatHostEnvironmentKind } from "../../types/environment";
 import { formatSessionConnectionState } from "../../types/session";
 import { SearchInput } from "../common/SearchInput";
 
@@ -12,6 +13,7 @@ export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const hosts = useHostsStore((state) => state.hosts);
+  const environments = useHostsStore((state) => state.environments);
   const sidebarSearch = useAppStore((state) => state.sidebarSearch);
   const setSidebarSearch = useAppStore((state) => state.setSidebarSearch);
   const workspaceDensity = useAppStore((state) => state.workspaceDensity);
@@ -20,7 +22,20 @@ export function Sidebar() {
   const activeSessionTabId = useSessionsStore((state) => state.activeTabId);
   const selectSessionTab = useSessionsStore((state) => state.selectTab);
   const favoriteCount = hosts.filter((host) => host.favorite).length;
-  const groupCount = new Set(hosts.map((host) => host.group).filter(Boolean)).size;
+  const environmentCount = environments.length;
+  const filteredEnvironmentSections = useMemo(
+    () =>
+      buildHostEnvironmentSections(
+        applyHostFilters(hosts, {
+          query: sidebarSearch,
+          activeEnvironmentId: "all",
+          activeTag: "all",
+          favoritesOnly: false,
+        }),
+        environments
+      ),
+    [environments, hosts, sidebarSearch]
+  );
   const sessionRows = useMemo(
     () =>
       sessionTabs.map((tab) => {
@@ -61,7 +76,7 @@ export function Sidebar() {
           <span>•</span>
           <span>{favoriteCount} favorites</span>
           <span>•</span>
-          <span>{groupCount} groups</span>
+          <span>{environmentCount} environments</span>
         </div>
       </div>
 
@@ -97,6 +112,56 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+
+      <div className="mt-2 overflow-hidden rounded-[18px] border border-slate-800/90 bg-slate-900/60">
+        <div className="border-b border-slate-800/80 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+            Environments
+          </p>
+        </div>
+        <div className="max-h-52 overflow-auto px-2 py-2">
+          {filteredEnvironmentSections.length ? (
+            <div className="space-y-1.5">
+              {filteredEnvironmentSections.map((section) => (
+                <details
+                  key={section.environment?.id ?? "unassigned"}
+                  open
+                  className="rounded-[14px] border border-slate-800 bg-slate-950/60"
+                >
+                  <summary className="cursor-pointer list-none px-2.5 py-2">
+                    <span className="block truncate text-[12px] font-medium text-slate-100">
+                      {section.environment?.label ?? "Unassigned hosts"}
+                    </span>
+                    <span className="mt-0.5 block text-[10px] text-slate-500">
+                      {section.hosts.length} hosts
+                      {section.environment
+                        ? ` · ${formatHostEnvironmentKind(section.environment.kind)}`
+                        : ""}
+                    </span>
+                  </summary>
+                  <div className="space-y-1 border-t border-slate-800/80 px-2 py-2">
+                    {section.hosts.slice(0, 6).map((host) => (
+                      <button
+                        key={host.id}
+                        type="button"
+                        onClick={() => navigate(`/hosts?focus=${encodeURIComponent(host.id)}`)}
+                        className="flex w-full items-center justify-between gap-2 rounded-[12px] border border-slate-800 bg-slate-950/80 px-2 py-1.5 text-left transition hover:border-slate-700 hover:bg-slate-900"
+                      >
+                        <span className="min-w-0 truncate text-[11px] text-slate-100">{host.label}</span>
+                        <span className="truncate text-[10px] text-slate-500">{host.group || "—"}</span>
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-[14px] border border-dashed border-slate-800 px-2.5 py-2 text-[11px] text-slate-500">
+              Search hosts to narrow the environment tree.
+            </p>
+          )}
+        </div>
+      </div>
 
       <div className="mt-2 min-h-0 flex-1 overflow-hidden rounded-[18px] border border-slate-800/90 bg-slate-900/60">
         <div className="border-b border-slate-800/80 px-3 py-2">
