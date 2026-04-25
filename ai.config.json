@@ -1,6 +1,6 @@
 {
   "run_profile": "standard",
-  "execution_mode": "strict",
+  "execution_mode": "solo",
   "requires_test_evidence": true,
   "requires_deploy_evidence": true,
   "allowed_phases_without_tests": [
