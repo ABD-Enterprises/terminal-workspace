@@ -17,7 +17,9 @@ import {
   hostSupportsPortForwarding,
   hostSupportsSftp,
   hostSupportsTrustedKeys,
+  emptyHostFormValues,
 } from "../types/host";
+import { parseSshConfig } from "../lib/ssh-config";
 
 export function HostsPage() {
   const navigate = useNavigate();
@@ -88,6 +90,29 @@ export function HostsPage() {
               {allHosts.length} hosts • {allHosts.filter((host) => host.favorite).length} favorites • {groups.length} groups • {tags.length} tags
             </p>
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const input = document.createElement("input");
+                  input.type = "file";
+                  input.onchange = (e) => {
+                    const file = (e.target as HTMLInputElement).files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const content = event.target?.result as string;
+                        const parsedHosts = parseSshConfig(content);
+                        parsedHosts.forEach(h => createHost({ ...emptyHostFormValues, ...h }));
+                      };
+                      reader.readAsText(file);
+                    }
+                  };
+                  input.click();
+                }}
+                className="rounded-xl border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
+              >
+                Import SSH config
+              </button>
               <button
                 type="button"
                 onClick={() => updateParams({ new: "1", edit: null })}

@@ -8,10 +8,11 @@
     },
     {
       "id": "S2",
-      "status": "pending",
+      "status": "done",
+      "completed_at": "2026-04-25T11:55:00Z",
       "title": "Environment grouping \u2014 organize hosts by account, cluster, region"
     }
   ],
-  "updated_at": "2026-04-16T12:30:00Z",
-  "last_updated": "2026-04-16T12:30:00Z"
+  "updated_at": "2026-04-25T11:55:00Z",
+  "last_updated": "2026-04-25T11:55:00Z"
 }

@@ -7,6 +7,7 @@ import { useHostsStore } from "../../store/hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
 import { formatSessionConnectionState } from "../../types/session";
 import { SearchInput } from "../common/SearchInput";
+import { SidebarEnvironments } from "./SidebarEnvironments";
 
 export function Sidebar() {
   const location = useLocation();
@@ -146,6 +147,8 @@ export function Sidebar() {
           )}
         </div>
       </div>
+
+      <SidebarEnvironments searchQuery={sidebarSearch} />
     </aside>
   );
 }
