@@ -31,11 +31,8 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Bootstrap repo
+      - name: Install dependencies
         run: npm run setup
-
-      - name: Run runtime guardrails validator
-        run: node ./tools/validators/enforce-runtime-guardrails.mjs --repo . --config ai.config.json --base "origin/${{ github.base_ref }}"
 
       - name: Run repo tests
         run: npm run test

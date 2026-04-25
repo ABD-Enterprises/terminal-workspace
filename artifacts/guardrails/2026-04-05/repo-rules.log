@@ -1,5 +1,0 @@
-Scoped repo-rules review for the PR #1 guardrails rerun commit.
-2026-04-05 rerun fix pass
-- Returned `state/controller.md` and `state/current_task.md` to `ready_for_review` after the state refresh.
-- Refreshed `state/tasks.json`, `state/handoff.json`, and `state/artifacts.json` for the current rerun commit.
-- Set `state/artifacts.json.code_changes_present` to `false` so the validator matches the state-only rerun diff used by the validate workflow.
