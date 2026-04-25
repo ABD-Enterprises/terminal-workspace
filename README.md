@@ -117,4 +117,4 @@ future sync architecture has stable identifiers without exporting runtime secret
   from CI when the required certificate and notarization secrets are present
 - `npm run native:build` regenerates icons and runs `cargo build --manifest-path src-tauri/Cargo.toml`
 
-More setup and milestone detail lives in [docs/development.md](/Users/deffenda/Code/term-snip/docs/development.md) and [docs/roadmap/roadmap.md](/Users/deffenda/Code/term-snip/docs/roadmap/roadmap.md).
+More setup and milestone detail lives in [docs/development.md](docs/development.md) and [docs/roadmap/roadmap.md](docs/roadmap/roadmap.md).
