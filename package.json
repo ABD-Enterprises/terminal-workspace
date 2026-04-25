@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "setup": "bash ./bootstrap.sh",
+    "setup": "node ./scripts/pnpmw.mjs install --frozen-lockfile",
     "dev": "node ./scripts/pnpmw.mjs --filter desktop dev:full",
     "dev:ui": "node ./scripts/pnpmw.mjs --filter desktop exec vite --host 127.0.0.1 --port 5173",
     "build": "npm --prefix ./apps/desktop run build",
@@ -27,7 +27,6 @@
     "native:key": "bash ./scripts/native-key-tooling-test.sh",
     "native:trust": "bash ./scripts/native-trust-tooling-test.sh",
     "native:build": "bash ./scripts/native-build.sh",
-    "validate:guardrails": "node ./tools/validators/enforce-runtime-guardrails.js --repo . --config ai.config.json",
     "lint": "eslint .",
     "test": "vitest run --config vitest.config.ts",
     "e2e": "playwright test --config playwright.config.ts",

@@ -19,21 +19,8 @@
 - `npm run native:fixtures`: macOS localhost transport fixture test
 - `npm run native:notary:auth:test`: portable notarization auth dry run
 - `npm run native:publish:dry-run`: promoted GitHub release publish dry run
-- `npm run validate:guardrails`: execution/state/evidence validator using `ai.config.json`
 - `TERMSNIP_RUN_E2E=1 npm run validate`: full lint/test/build/e2e pass
 
-## Execution Contracts
-
-- AI-assisted runs start at [ai/bootstrap.md](/Users/deffenda/Code/term-snip/ai/bootstrap.md); `/agents/*`, `/prompts/*`, and historical prompt files are supplemental repo-specific guidance only.
-- [docs/roadmap/state.json](/Users/deffenda/Code/term-snip/docs/roadmap/state.json) is canonical.
-- `/state/session.json`, `/state/tasks.json`, `/state/risks.json`, and `/state/decisions.json`
-  are the shared execution state layer.
-- `/state/artifacts.json` carries build, test, run, and deploy evidence.
-- `/state/handoff.json` carries the next action plus discovered issues linked to open risks.
-- [tools/validators/enforce-runtime-guardrails.js](/Users/deffenda/Code/term-snip/tools/validators/enforce-runtime-guardrails.js)
-  plus `ai.config.json` is the authoritative enforcement layer for evidence, phase, and risk integrity.
-- [.github/workflows/ci.yml](/Users/deffenda/Code/term-snip/.github/workflows/ci.yml) runs the
-  validator plus repo test/build gates on pull requests.
 
 ## Environment Files
 
