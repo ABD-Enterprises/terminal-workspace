@@ -1,0 +1,13 @@
+title = "TermSnip gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "release helper references notarization environment variable names only"
+paths = [
+  '''^scripts/github-release-secrets\.mjs$'''
+]
+regexes = [
+  '''MACOS_NOTARY_KEY_BASE64'''
+]
