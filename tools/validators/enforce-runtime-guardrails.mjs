@@ -1394,7 +1394,7 @@ function isGitIgnored(repoRoot, relativePath) {
   }
 }
 
-function validateGitignoreSafety(repoRoot, failures) {
+function validateGitignoreSafety(repoRoot, config, failures) {
   const pipelineFiles = [
     ...REQUIRED_REPO_FILES,
     "ai.config.json"
@@ -1405,6 +1405,24 @@ function validateGitignoreSafety(repoRoot, failures) {
       addFailure(
         failures,
         `Pipeline file ${relativePath} is matched by .gitignore — the validator, Codex, and Claude will not see changes to this file`
+      );
+    }
+  }
+
+  const protectedPrefixes = unique([
+    ...(config.protected_environment_paths || []),
+    ...(config.evidence_directories || []),
+    ...(config.meta_directories || [])
+  ])
+    .map((value) => String(value || "").replace(/\/+$/, ""))
+    .filter(Boolean);
+
+  for (const prefix of protectedPrefixes) {
+    const probePath = `${prefix}/.runtime-guardrails-probe`;
+    if (isGitIgnored(repoRoot, probePath)) {
+      addFailure(
+        failures,
+        `Protected directory ${prefix}/ is matched by .gitignore — hidden environment or evidence files would evade validation`
       );
     }
   }
@@ -1450,14 +1468,14 @@ function main() {
   const failures = [];
 
   try {
-    validateGitignoreSafety(repoRoot, failures);
+    const config = resolveConfig(repoRoot, options.config);
+    validateGitignoreSafety(repoRoot, config.value, failures);
     validateRequiredFiles(repoRoot, failures);
     validateWorkflowFiles(repoRoot, failures);
     if (failures.length > 0) {
       throw new Error("missing-files");
     }
 
-    const config = resolveConfig(repoRoot, options.config);
     const baseRef = resolveBaseRef(repoRoot, options.base);
 
     const roadmapPath = path.join(repoRoot, "docs/roadmap/state.json");
