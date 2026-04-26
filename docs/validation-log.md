@@ -377,7 +377,7 @@
     - `cat /tmp/termsnip-env-mode-shell.log`
     - output included `shell`
     - `cat /tmp/termsnip-agent-sock-shell.log`
-    - output included a forwarded `SSH_AUTH_SOCK` path under `/Users/deffenda/.ssh/agent/`
+    - output included a forwarded `SSH_AUTH_SOCK` path under `$HOME/.ssh/agent/`
     - `head -n 1 /tmp/termsnip-agent-shell.log`
     - output included `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG5dMY+4w9h88yfkabF/DKJ6PJw8/y/uaJnZ7LvMHnSw deffenda@fmwebide`
   - Direct exec/snippet validation passed against local sshd:
