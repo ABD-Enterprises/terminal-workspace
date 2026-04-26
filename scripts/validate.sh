@@ -27,6 +27,8 @@ else
   echo "[validate] browser e2e skipped (set TERMSNIP_RUN_E2E=1 to include)"
 fi
 
+VALIDATOR_ARGS=(--repo . --config ai.config.json)
+
 BASE_REF="${AI_VALIDATOR_BASE_REF:-${1:-}}"
 if [[ -z "$BASE_REF" && -n "${GITHUB_BASE_REF:-}" ]]; then
   BASE_REF="origin/${GITHUB_BASE_REF}"
@@ -38,6 +40,10 @@ fi
 if [[ -n "$BASE_REF" ]]; then
   VALIDATOR_ARGS+=(--base "$BASE_REF")
 fi
+
+node ./tools/validators/enforce-runtime-guardrails.mjs "${VALIDATOR_ARGS[@]}"
+
+node ./tools/validators/enforce-versioning-standard.mjs --repo .
 
 VALIDATION_ARTIFACT_DIR="artifacts/validation"
 SEMGREP_STATUS_FILE="${VALIDATION_ARTIFACT_DIR}/semgrep-status.txt"
