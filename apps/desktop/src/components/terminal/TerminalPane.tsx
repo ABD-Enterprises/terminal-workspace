@@ -741,6 +741,44 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       terminal.writeln(line);
     });
 
+    // Copy-on-select: when the user finishes selecting text in the terminal,
+    // copy it to the clipboard automatically. Mirrors the behaviour Termius
+    // / iTerm2 / native macOS Terminal users expect — see parity-and-hardening
+    // review §4.4. We swallow clipboard errors so a denied permission does
+    // not break terminal interaction.
+    const selectionDisposable = terminal.onSelectionChange(() => {
+      const selection = terminal.getSelection();
+      if (!selection) {
+        return;
+      }
+      if (typeof navigator === "undefined" || !navigator.clipboard) {
+        return;
+      }
+      navigator.clipboard.writeText(selection).catch(() => {});
+    });
+
+    // Right-click paste: matches the macOS / Termius idiom. We prevent the
+    // default browser context menu (which would offer Inspect Element etc.
+    // in dev) and inject the clipboard contents into the terminal as if the
+    // user typed them. xterm's paste() goes through onData, so the SSH
+    // transport sees it the same as keystrokes.
+    const contextMenuHandler = (event: MouseEvent) => {
+      event.preventDefault();
+      if (typeof navigator === "undefined" || !navigator.clipboard) {
+        return;
+      }
+      navigator.clipboard
+        .readText()
+        .then((text) => {
+          if (!text) {
+            return;
+          }
+          terminal.paste(text);
+        })
+        .catch(() => {});
+    };
+    container.addEventListener("contextmenu", contextMenuHandler);
+
     const disposable = terminal.onData((data) => {
       if (
         transportRef.current !== "mock" &&
@@ -838,6 +876,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       disposed = true;
       observer.disconnect();
       disposable.dispose();
+      selectionDisposable.dispose();
+      container.removeEventListener("contextmenu", contextMenuHandler);
       if (fitFrameId !== null) {
         window.cancelAnimationFrame(fitFrameId);
       }

@@ -22,7 +22,7 @@ If the bar is "could I move my 100-host fleet here on Monday and not regret it b
 | Host inventory CRUD | Implemented | ✅ Yes | Genuine. |
 | Groups, tags, favorites, search | Implemented | ⚠️ Partial | Three overlapping organization axes (see §2.2). Filter bar enforces single-tag/single-group; no multi-select. `apps/desktop/src/components/hosts/HostFilterBar.tsx`. |
 | Dense desktop shell, tabs, sidebar | Implemented | ⚠️ Partial | No favorites pinned in sidebar; reaching a known host always costs a navigation. |
-| Command palette | Implemented | ❌ Stub | `apps/desktop/src/hooks/useCommandPalette.ts` only opens/closes; the registry is effectively empty. No "quick connect," no "run last snippet." |
+| Command palette | Implemented | ⚠️ Substantially implemented but missing keyboard nav and active-session commands | The palette renders 4 sections (Sections, Sessions, Hosts, Snippets) with row actions for each — *correction to original audit, which over-claimed it as a stub.* The actual gaps were no arrow-key navigation, no active-session commands (split / duplicate / files / close), no Recent surface. Closed in Phase 1. |
 | SSH connect/disconnect | Implemented | ✅ Yes | Real, validated. |
 | Tabs and split panes | Implemented | ⚠️ Partial | Tabs not reorderable (`TerminalTabView.tsx:23`); splits are CSS-grid hard breakpoints, not draggable resize (`SplitLayout.tsx:14-25`). |
 | Key import and generation | Implemented | ✅ Yes | Native via `ssh-keygen`. But see §3 — passphrase passed via `-P` is visible in `ps`. |
@@ -162,7 +162,7 @@ The existence of a `useCommandPalette` hook with no command registry is misleadi
 
 ### 4.3 The "needs secrets" silence
 
-When a session restore needs a passphrase, `SessionRestoreManager` sets pane state to `pendingSecrets` and the tab badge turns cyan. **No modal opens, no prompt appears, no inline input.** The user sees a frozen tab and has to figure out the path: Hosts → host card → "Manage" → enter secret → back to Sessions → Resume. This is the exact opposite of Termius's "type passphrase, hit enter, you're in."
+*Correction to the original audit:* a real prompt modal does exist (`apps/desktop/src/components/common/ConnectionSecretPrompt.tsx`) and `ensureRuntimeSecrets()` opens it for **active** panes when secrets are missing. The actual silent gap was narrower: when `SessionRestoreManager` sets an **inactive** tab to `pendingSecrets` and the user later switches to that tab, nothing auto-triggers the prompt — the badge just sits cyan until the user manually triggers a reconnect. Closed in Phase 1 by adding a focus-watching effect that calls `ensureRuntimeSecrets` when a pendingSecrets pane becomes active.
 
 ### 4.4 Terminal pane — bare bones
 

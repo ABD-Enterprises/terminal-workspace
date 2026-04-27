@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createBackendSession } from "../../lib/api";
 import { buildBackendConnectionFromKnownHost, findKnownHostMatch } from "../../lib/connections";
-import { canRestoreSessionWithoutPrompt } from "../../lib/runtime-secrets";
+import { canRestoreSessionWithoutPrompt, ensureRuntimeSecrets } from "../../lib/runtime-secrets";
 import { useConnectionSecretsStore } from "../../store/connection-secrets-store";
 import { useHostsStore } from "../../store/hosts-store";
 import { useKnownHostsStore } from "../../store/known-hosts-store";
@@ -108,6 +108,58 @@ export function SessionRestoreManager() {
     setPaneTransport,
     tabs,
   ]);
+
+  // When the user activates a tab whose pane is sitting in `pendingSecrets`
+  // (set by the inactive-restore loop above when a passphrase was missing),
+  // proactively open the secrets prompt instead of leaving the badge cyan and
+  // silent. Closes the gap called out in
+  // docs/parity-and-hardening-review.md §4.3 — "the tab just sits there cyan
+  // and frozen". The actual reconnect happens on the next inactive-restore
+  // tick once the secrets store is hydrated.
+  const promptedPaneIdsRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (!activeTabId) {
+      return;
+    }
+    const activeTab = tabs.find((tab) => tab.id === activeTabId);
+    if (!activeTab) {
+      return;
+    }
+    const activePane = panes[activeTab.activePaneId];
+    if (!activePane || activePane.connectionState !== "pendingSecrets") {
+      return;
+    }
+    if (promptedPaneIdsRef.current.has(activePane.id)) {
+      return;
+    }
+    const host = hosts.find((entry) => entry.id === activePane.hostId);
+    if (!host || host.authMethod === "none") {
+      return;
+    }
+
+    promptedPaneIdsRef.current.add(activePane.id);
+    void ensureRuntimeSecrets(host, "Resume SSH session", { interactive: true })
+      .then((approved) => {
+        if (approved) {
+          // Move the pane out of pendingSecrets so the inactive-restore
+          // loop picks it up on its next tick. Setting "connecting" is
+          // intentional — the SSH connect is async and will overwrite to
+          // "connected" or "error" shortly after.
+          setPaneState(activePane.id, "connecting");
+        }
+      })
+      .catch(() => {
+        // The prompt was cancelled or another error occurred; leave the
+        // pane in pendingSecrets so the user can retry by switching tabs
+        // or by clicking through the connection panel.
+      })
+      .finally(() => {
+        // Allow re-prompt next time the same pane re-enters pendingSecrets
+        // (e.g. if the user typed the wrong passphrase and the connect
+        // failed and the secret store cleared).
+        promptedPaneIdsRef.current.delete(activePane.id);
+      });
+  }, [activeTabId, hosts, panes, setPaneState, tabs]);
 
   return null;
 }

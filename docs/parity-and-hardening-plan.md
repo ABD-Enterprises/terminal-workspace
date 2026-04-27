@@ -33,20 +33,20 @@ Each task is tagged with the originating section in the review (`§3.S-1`, `§4.
 
 ## Phase 1 — 1–2 week sprint
 
-Sized for one engineer, no product blockers.
+Sized for one engineer, no product blockers. Status updated 2026-04-27.
 
-| ID | Task | Effort | Source |
-|---|---|---|---|
-| P1-S3 | Convert in-memory secret storage in `apps/desktop/server/backend.mjs` to `Buffer` + zero-on-use. Reassign references to `null` after SSH `ready`/`error`. Document the limit (V8 string interning still leaks). | M | §3.S-3 |
-| P1-S4b | Backend startup mints a per-launch token; Tauri side reads it from a child-process env var; renderer attaches it as `X-Termsnip-Token` and origin must be `tauri://localhost` or `http://localhost:1420`. Reject otherwise with 403. | M | §3.S-4, §3.S-8 |
-| P1-S5 | Wire interactive passphrase prompts to Keychain in native mode. Key Keychain entries by **key fingerprint** (not host id) so passphrase reuse works across hosts. Garbage-collect orphaned entries when a key is deleted. | M | §3.S-5 |
-| P1-UX2 | "Needs secrets" state opens a modal with the passphrase prompt instead of just turning the tab badge cyan. Modal lives in `SessionRestoreManager` and consumes `connection-secret-prompt-store`. | M | §4.3 |
-| P1-UX4 | Add a Tauri menu (File / Edit / View / Window / Help) in `src-tauri/src/main.rs`. Hook standard shortcuts: `Cmd+,`, `Cmd+N` (new tab on active host), `Cmd+T` (new tab quick-connect), `Cmd+W` (close tab), `Cmd+Shift+]`/`[` (cycle tabs), `Cmd+F` (search-in-scrollback), `Cmd+K` (palette). | M | §4.7 |
-| P1-UX5 | Build a real command registry. Initial command set: quick-connect (any host by name), reconnect last, run snippet by name, jump to tab by name, open SFTP for active session, set port forward (with last-used preset), open settings. ~30 entries. Replace the empty `useCommandPalette` registry. | M | §4.2 |
-| P1-UX6 | Add `@xterm/addon-search`. Wire `Cmd+F` to a per-pane search overlay; wire `Esc` to close. Persist search history per pane for the session. | S | §4.4 |
-| P1-UX7 | Honor `prefers-color-scheme`. Extract the hardcoded slate/emerald palette in `TerminalPane.tsx` into a `themes` module with `dark`/`light`/`solarized-dark`/`monokai`. Add a Settings → Appearance pane to choose. | M | §4.4 |
-| P1-UX8 | xterm copy-on-select (`copyOnSelect` option) and right-click paste handler. Add `Cmd+Shift+C` and `Cmd+Shift+V` shortcuts. | XS | §4.4 |
-| P1-UX9 | Window title binds to active session: `term-snip — <hostname> [<protocol>]`. Falls back to "term-snip" when no session active. | XS | §4.7 |
+| ID | Task | Effort | Source | Status |
+|---|---|---|---|---|
+| P1-S3 | Convert in-memory secret storage in `apps/desktop/server/backend.mjs` to `Buffer` + zero-on-use. Reassign references to `null` after SSH `ready`/`error`. Document the limit (V8 string interning still leaks). | M | §3.S-3 | Pending |
+| P1-S4b | Backend startup mints a per-launch token; Tauri side reads it from a child-process env var; renderer attaches it as `X-Termsnip-Token` and origin must be `tauri://localhost` or `http://localhost:1420`. Reject otherwise with 403. | M | §3.S-4, §3.S-8 | Pending |
+| P1-S5 | Wire interactive passphrase prompts to Keychain in native mode. Key Keychain entries by **key fingerprint** (not host id) so passphrase reuse works across hosts. Garbage-collect orphaned entries when a key is deleted. | M | §3.S-5 | Pending |
+| P1-UX2 | When an inactive `pendingSecrets` pane becomes the active tab, auto-trigger `ensureRuntimeSecrets` to open the existing prompt modal (which already exists; the gap was the focus→prompt edge). | S | §4.3 | **✅ Landed** (commit `<phase-1-batch-1>`) |
+| P1-UX4 | Add a Tauri menu (File / Edit / View / Window / Help) in `src-tauri/src/main.rs`. Hook standard shortcuts: `Cmd+,`, `Cmd+N` (new tab on active host), `Cmd+T` (new tab quick-connect), `Cmd+W` (close tab), `Cmd+Shift+]`/`[` (cycle tabs), `Cmd+F` (search-in-scrollback), `Cmd+K` (palette). | M | §4.7 | Pending |
+| P1-UX5 | Add keyboard navigation (↑/↓/Enter) to the existing palette, plus an Active-session command surface (duplicate, split-h/v, files, close), plus a Recent surface (rerun last snippet, reconnect last host). The original audit incorrectly characterised the palette as a stub — it has four functional sections; the gap was the missing keyboard model + active-session commands. | M | §4.2 | **✅ Landed** (commit `<phase-1-batch-1>`) |
+| P1-UX6 | Add `@xterm/addon-search`. Wire `Cmd+F` to a per-pane search overlay; wire `Esc` to close. Persist search history per pane for the session. | S | §4.4 | Pending (deferred — addon not in offline cache; needs network for `pnpm add`) |
+| P1-UX7 | Honor `prefers-color-scheme`. Extract the hardcoded slate/emerald palette in `TerminalPane.tsx` into a `themes` module with `dark`/`light`/`solarized-dark`/`monokai`. Add a Settings → Appearance pane to choose. | M | §4.4 | Pending |
+| P1-UX8 | xterm copy-on-select via `onSelectionChange` + `navigator.clipboard.writeText`, and right-click paste via a `contextmenu` handler that calls `terminal.paste(clipboardText)`. | XS | §4.4 | **✅ Landed** (commit `<phase-1-batch-1>`) |
+| P1-UX9 | Window title binds to active session: `term-snip — <label> (<protocol>)`. Falls back to "term-snip" when no session active. Uses `getCurrentWindow().setTitle()` in Tauri, `document.title` in browser preview. | XS | §4.7 | **✅ Landed** (commit `<phase-1-batch-1>`) |
 
 ---
 

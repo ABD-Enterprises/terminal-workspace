@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCommandPalette } from "../../hooks/useCommandPalette";
+import { isTauriRuntime } from "../../lib/backend-runtime";
 import { navigationItems } from "../../lib/navigation";
 import { formatPrimaryShortcut, isPrimaryShortcut } from "../../lib/shortcuts";
 import { cn, formatHostAddress } from "../../lib/utils";
@@ -9,9 +10,11 @@ import { applyHostFilters, useHostsStore } from "../../store/hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
 import { useSnippetsStore } from "../../store/snippets-store";
 import { useTransfersStore } from "../../store/transfers-store";
-import { hostSupportsSftp, hostSupportsTrustedKeys } from "../../types/host";
+import { formatHostProtocol, hostSupportsSftp, hostSupportsTrustedKeys } from "../../types/host";
 import { SessionRestoreManager } from "../terminal/SessionRestoreManager";
 import { Sidebar } from "./Sidebar";
+
+const APP_TITLE = "term-snip";
 
 export function AppShell() {
   useCommandPalette();
@@ -20,6 +23,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [paletteQuery, setPaletteQuery] = useState("");
+  const [paletteSelectedIndex, setPaletteSelectedIndex] = useState(0);
   const hosts = useHostsStore((state) => state.hosts);
   const markConnected = useHostsStore((state) => state.markConnected);
   const sessionTabs = useSessionsStore((state) => state.tabs);
@@ -28,6 +32,10 @@ export function AppShell() {
   const openSession = useSessionsStore((state) => state.openSession);
   const queuePaneCommand = useSessionsStore((state) => state.queuePaneCommand);
   const selectSessionTab = useSessionsStore((state) => state.selectTab);
+  const closeTab = useSessionsStore((state) => state.closeTab);
+  const duplicateSession = useSessionsStore((state) => state.duplicateSession);
+  const splitTab = useSessionsStore((state) => state.splitTab);
+  const setSplitDirection = useSessionsStore((state) => state.setSplitDirection);
   const snippets = useSnippetsStore((state) => state.snippets);
   const markSnippetRun = useSnippetsStore((state) => state.markSnippetRun);
   const setActiveTransferHost = useTransfersStore((state) => state.setActiveHost);
@@ -54,8 +62,54 @@ export function AppShell() {
   useEffect(() => {
     if (commandPaletteOpen) {
       inputRef.current?.focus();
+      setPaletteSelectedIndex(0);
     }
   }, [commandPaletteOpen]);
+
+  // Reset selection when the result set changes so the highlight never points
+  // at a row that no longer exists.
+  useEffect(() => {
+    setPaletteSelectedIndex(0);
+  }, [paletteQuery]);
+
+  // Bind the macOS window title to the active session so the dock / Mission
+  // Control / Cmd-Tab labels reflect what the user is currently looking at.
+  // Falls back to the app name when there is no active session, and degrades
+  // to document.title in the browser preview path. See parity-and-hardening
+  // review §4.7.
+  const activeSessionHostForTitle = (() => {
+    const tab = sessionTabs.find((entry) => entry.id === activeSessionTabId) ?? sessionTabs[0];
+    if (!tab) {
+      return undefined;
+    }
+    return hosts.find((entry) => entry.id === tab.hostId);
+  })();
+  useEffect(() => {
+    const nextTitle = activeSessionHostForTitle
+      ? `${APP_TITLE} — ${activeSessionHostForTitle.label} (${formatHostProtocol(activeSessionHostForTitle.protocol)})`
+      : APP_TITLE;
+
+    document.title = nextTitle;
+
+    if (!isTauriRuntime()) {
+      return;
+    }
+    let cancelled = false;
+    void import("@tauri-apps/api/window")
+      .then(({ getCurrentWindow }) => {
+        if (cancelled) {
+          return;
+        }
+        return getCurrentWindow().setTitle(nextTitle);
+      })
+      .catch(() => {
+        // Ignore — the window may have been closed between effect schedule
+        // and resolve, or the build may not have the window plugin enabled.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionHostForTitle]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -222,6 +276,161 @@ export function AppShell() {
     closeCommandPalette();
   };
 
+  // ---- Active-session command surface ---------------------------------------
+  // When a session tab is open, expose the commands a power user reaches for
+  // most often (split, duplicate, files, close) directly in the palette so
+  // they do not require a tab-bar visit. Closes the gap called out in
+  // docs/parity-and-hardening-review.md §4.2.
+  type ActiveCommand = {
+    key: string;
+    label: string;
+    sublabel: string;
+    run: () => void;
+  };
+  const activeSessionHost = activeSessionPane
+    ? hosts.find((entry) => entry.id === activeSessionPane.hostId)
+    : undefined;
+  const activeSessionCommands: ActiveCommand[] = (() => {
+    if (!activeSessionTab || !activeSessionHost) {
+      return [];
+    }
+    const tabId = activeSessionTab.id;
+    const host = activeSessionHost;
+    return [
+      {
+        key: "active:duplicate",
+        label: "Duplicate this tab",
+        sublabel: `Open a second SSH session to ${host.label}`,
+        run: () => {
+          duplicateSession(host, host.label);
+          setPaletteQuery("");
+          navigate(`/sessions?tabId=${tabId}`);
+          closeCommandPalette();
+        },
+      },
+      {
+        key: "active:split-h",
+        label: "Split horizontally",
+        sublabel: `Add a side-by-side pane for ${host.label}`,
+        run: () => {
+          setSplitDirection(tabId, "horizontal");
+          splitTab(tabId, host);
+          setPaletteQuery("");
+          navigate(`/sessions?tabId=${tabId}`);
+          closeCommandPalette();
+        },
+      },
+      {
+        key: "active:split-v",
+        label: "Split vertically",
+        sublabel: `Stack a new pane below for ${host.label}`,
+        run: () => {
+          setSplitDirection(tabId, "vertical");
+          splitTab(tabId, host);
+          setPaletteQuery("");
+          navigate(`/sessions?tabId=${tabId}`);
+          closeCommandPalette();
+        },
+      },
+      ...(hostSupportsSftp(host.protocol)
+        ? [
+            {
+              key: "active:files",
+              label: "Open files (SFTP)",
+              sublabel: `Browse the remote filesystem on ${host.hostname}`,
+              run: () => openHostTransfers(host.id),
+            },
+          ]
+        : []),
+      {
+        key: "active:close",
+        label: "Close this tab",
+        sublabel: `Disconnect and remove "${activeSessionTab.title}"`,
+        run: () => {
+          closeTab(tabId);
+          setPaletteQuery("");
+          closeCommandPalette();
+        },
+      },
+    ];
+  })();
+
+  const matchingActiveCommands = activeSessionCommands.filter((command) => {
+    if (!paletteQuery.trim()) {
+      return true;
+    }
+    const haystack = `${command.label} ${command.sublabel}`.toLowerCase();
+    return haystack.includes(paletteQuery.trim().toLowerCase());
+  });
+
+  // ---- Recent --------------------------------------------------------------
+  const recentSnippet = snippets
+    .filter((snippet) => Boolean(snippet.lastRunAt))
+    .sort((left, right) => (right.lastRunAt ?? "").localeCompare(left.lastRunAt ?? ""))[0];
+  const recentHost = hosts
+    .filter((host) => Boolean(host.lastConnectedAt))
+    .sort((left, right) =>
+      (right.lastConnectedAt ?? "").localeCompare(left.lastConnectedAt ?? "")
+    )[0];
+
+  type RecentCommand = ActiveCommand;
+  const recentCommands: RecentCommand[] = [
+    ...(recentSnippet && activeSessionPane
+      ? [
+          {
+            key: `recent:rerun-${recentSnippet.id}`,
+            label: `Rerun: ${recentSnippet.title}`,
+            sublabel: "Send the most recently executed snippet to the active pane",
+            run: () => runSnippetInActivePane(recentSnippet.id),
+          },
+        ]
+      : []),
+    ...(recentHost && (!activeSessionTab || activeSessionTab.hostId !== recentHost.id)
+      ? [
+          {
+            key: `recent:reconnect-${recentHost.id}`,
+            label: `Reconnect to ${recentHost.label}`,
+            sublabel: `Last connected ${recentHost.lastConnectedAt ?? "recently"}`,
+            run: () => launchHostSession(recentHost.id),
+          },
+        ]
+      : []),
+  ];
+
+  const matchingRecent = recentCommands.filter((command) => {
+    if (!paletteQuery.trim()) {
+      return true;
+    }
+    const haystack = `${command.label} ${command.sublabel}`.toLowerCase();
+    return haystack.includes(paletteQuery.trim().toLowerCase());
+  });
+
+  // ---- Flat keyboard-nav row list -----------------------------------------
+  // All visible row primary-actions in render order. The palette tracks a
+  // single `paletteSelectedIndex` into this list so ArrowUp/Down + Enter work
+  // across every section without per-section focus management.
+  type PaletteRow = { key: string; run: () => void };
+  const paletteRows: PaletteRow[] = [
+    ...matchingActiveCommands.map((command) => ({ key: command.key, run: command.run })),
+    ...matchingRecent.map((command) => ({ key: command.key, run: command.run })),
+    ...matchingSections.map((item) => ({ key: `section:${item.path}`, run: () => focusSection(item.path) })),
+    ...matchingSessionTabs.map((tab) => ({ key: `session:${tab.id}`, run: () => focusSession(tab.id) })),
+    ...matchingHosts.map((host) => ({ key: `host:${host.id}`, run: () => launchHostSession(host.id) })),
+    ...matchingSnippets.map((snippet) => ({
+      key: `snippet:${snippet.id}`,
+      run: () => runSnippetInActivePane(snippet.id),
+    })),
+  ];
+  const clampedSelectedIndex = paletteRows.length
+    ? Math.min(paletteSelectedIndex, paletteRows.length - 1)
+    : 0;
+  const selectedRowKey = paletteRows[clampedSelectedIndex]?.key;
+
+  const isRowSelected = (key: string) => selectedRowKey === key;
+  const handleRowEnter = () => {
+    paletteRows[clampedSelectedIndex]?.run();
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent text-slate-100">
       <SessionRestoreManager />
@@ -304,27 +513,104 @@ export function AppShell() {
               value={paletteQuery}
               onChange={(event) => setPaletteQuery(event.target.value)}
               onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  if (paletteRows.length > 0) {
+                    setPaletteSelectedIndex((current) => (current + 1) % paletteRows.length);
+                  }
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  if (paletteRows.length > 0) {
+                    setPaletteSelectedIndex((current) =>
+                      current <= 0 ? paletteRows.length - 1 : current - 1
+                    );
+                  }
+                  return;
+                }
                 if (event.key === "Enter") {
-                  if (matchingSessionTabs[0]) {
-                    focusSession(matchingSessionTabs[0].id);
-                    return;
-                  }
-
-                  if (matchingHosts[0]) {
-                    launchHostSession(matchingHosts[0].id);
-                    return;
-                  }
-
-                  if (matchingSections[0]) {
-                    focusSection(matchingSections[0].path);
-                  }
+                  event.preventDefault();
+                  handleRowEnter();
                 }
               }}
-              placeholder="Search hosts, sessions, keys, snippets, settings"
+              placeholder="Search hosts, sessions, snippets, or jump to a section"
+              aria-label="Command palette query"
+              aria-activedescendant={selectedRowKey ? `palette-row-${selectedRowKey}` : undefined}
               className="mt-3.5 w-full rounded-[18px] border border-slate-700 bg-slate-950/80 px-4 py-2.5 text-sm text-slate-50 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
             />
+            {paletteRows.length > 0 ? (
+              <p className="mt-2 text-[11px] text-slate-500">
+                {paletteRows.length} result{paletteRows.length === 1 ? "" : "s"} • ↑/↓ to navigate •
+                Enter to activate
+              </p>
+            ) : (
+              <p className="mt-2 text-[11px] text-slate-500">No matches.</p>
+            )}
 
             <div className="mt-3.5 grid gap-3 lg:grid-cols-2 2xl:grid-cols-[0.8fr_0.9fr_1fr_1fr]">
+              {matchingActiveCommands.length > 0 ? (
+                <section className="rounded-[20px] border border-emerald-400/30 bg-emerald-400/5 p-3 lg:col-span-2 2xl:col-span-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300">
+                    Active session — {activeSessionTab?.title ?? "current"}
+                  </p>
+                  <div className="mt-2.5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {matchingActiveCommands.map((command) => (
+                      <button
+                        key={command.key}
+                        type="button"
+                        id={`palette-row-${command.key}`}
+                        onClick={() => command.run()}
+                        className={cn(
+                          "rounded-xl border px-3 py-2 text-left transition",
+                          isRowSelected(command.key)
+                            ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                            : "border-slate-800 bg-slate-900/80 hover:border-emerald-400/50 hover:bg-slate-900"
+                        )}
+                      >
+                        <span className="block text-sm font-medium text-slate-100">
+                          {command.label}
+                        </span>
+                        <span className="mt-1 block truncate text-[11px] text-slate-400">
+                          {command.sublabel}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              {matchingRecent.length > 0 ? (
+                <section className="rounded-[20px] border border-slate-800 bg-slate-950/60 p-3 lg:col-span-2 2xl:col-span-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                    Recent
+                  </p>
+                  <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
+                    {matchingRecent.map((command) => (
+                      <button
+                        key={command.key}
+                        type="button"
+                        id={`palette-row-${command.key}`}
+                        onClick={() => command.run()}
+                        className={cn(
+                          "rounded-xl border px-3 py-2 text-left transition",
+                          isRowSelected(command.key)
+                            ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                            : "border-slate-800 bg-slate-900/80 hover:border-slate-600 hover:bg-slate-900"
+                        )}
+                      >
+                        <span className="block text-sm font-medium text-slate-100">
+                          {command.label}
+                        </span>
+                        <span className="mt-1 block truncate text-[11px] text-slate-400">
+                          {command.sublabel}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
               <section className="rounded-[20px] border border-slate-800 bg-slate-950/60 p-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
                   Sections
@@ -339,12 +625,15 @@ export function AppShell() {
                       <button
                         key={item.path}
                         type="button"
+                        id={`palette-row-section:${item.path}`}
                         onClick={() => focusSection(item.path)}
                         className={cn(
                           "flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition",
-                          location.pathname.startsWith(item.path)
-                            ? "border-emerald-400/50 bg-emerald-400/10"
-                            : "border-slate-800 bg-slate-900/80 hover:border-slate-600 hover:bg-slate-900"
+                          isRowSelected(`section:${item.path}`)
+                            ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                            : location.pathname.startsWith(item.path)
+                              ? "border-emerald-400/50 bg-emerald-400/10"
+                              : "border-slate-800 bg-slate-900/80 hover:border-slate-600 hover:bg-slate-900"
                         )}
                       >
                         <span className="min-w-0">
@@ -380,12 +669,15 @@ export function AppShell() {
                         <button
                           key={tab.id}
                           type="button"
+                          id={`palette-row-session:${tab.id}`}
                           onClick={() => focusSession(tab.id)}
                           className={cn(
                             "flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition",
-                            activeSessionTabId === tab.id
-                              ? "border-emerald-400/50 bg-emerald-400/10"
-                              : "border-slate-800 bg-slate-900/80 hover:border-slate-600 hover:bg-slate-900"
+                            isRowSelected(`session:${tab.id}`)
+                              ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                              : activeSessionTabId === tab.id
+                                ? "border-emerald-400/50 bg-emerald-400/10"
+                                : "border-slate-800 bg-slate-900/80 hover:border-slate-600 hover:bg-slate-900"
                           )}
                         >
                           <span className="min-w-0">
@@ -429,7 +721,13 @@ export function AppShell() {
                     matchingHosts.map((host) => (
                       <div
                         key={host.id}
-                        className="rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2.5"
+                        id={`palette-row-host:${host.id}`}
+                        className={cn(
+                          "rounded-xl border px-3 py-2.5",
+                          isRowSelected(`host:${host.id}`)
+                            ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                            : "border-slate-800 bg-slate-900/80"
+                        )}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <button
@@ -507,7 +805,13 @@ export function AppShell() {
                     matchingSnippets.map((snippet) => (
                       <div
                         key={snippet.id}
-                        className="rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2.5"
+                        id={`palette-row-snippet:${snippet.id}`}
+                        className={cn(
+                          "rounded-xl border px-3 py-2.5",
+                          isRowSelected(`snippet:${snippet.id}`)
+                            ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                            : "border-slate-800 bg-slate-900/80"
+                        )}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <button
