@@ -33,6 +33,15 @@ export interface HostRecord {
   createdAt: string;
   updatedAt: string;
   lastConnectedAt?: string;
+  /**
+   * Optional foreign key into `useIdentitiesStore`. When present, the
+   * identity owns the canonical (username, authMethod, privateKeyPath)
+   * triple. Until P2-DM1 batch 3 lands, the runtime still reads the
+   * per-host fields above; this field is populated by the auto-migration
+   * so future batches can flip the read path without a separate migration
+   * step. See docs/parity-and-hardening-plan.md P2-DM1.
+   */
+  identityId?: string;
 }
 
 export interface HostFormValues {
@@ -107,6 +116,7 @@ export const sampleHosts: HostRecord[] = [
     createdAt: "2026-03-20T12:00:00.000Z",
     updatedAt: "2026-03-28T22:12:00.000Z",
     lastConnectedAt: "2026-03-29T11:10:00.000Z",
+    identityId: "identity-prod-bastion-ops",
   },
   {
     id: "billing-api",
@@ -134,6 +144,7 @@ export const sampleHosts: HostRecord[] = [
     createdAt: "2026-03-18T08:30:00.000Z",
     updatedAt: "2026-03-28T20:12:00.000Z",
     lastConnectedAt: "2026-03-28T17:45:00.000Z",
+    identityId: "identity-deploy",
   },
   {
     id: "edge-router-07",

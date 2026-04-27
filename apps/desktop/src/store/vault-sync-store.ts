@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 
-export type VaultSyncEntityKind = "hosts" | "keys" | "snippets" | "knownHosts";
+export type VaultSyncEntityKind =
+  | "hosts"
+  | "keys"
+  | "snippets"
+  | "knownHosts"
+  | "identities";
 
 export interface VaultDeletionEntry {
   id: string;
@@ -13,6 +18,11 @@ export interface VaultDeletionMap {
   keys: VaultDeletionEntry[];
   snippets: VaultDeletionEntry[];
   knownHosts: VaultDeletionEntry[];
+  /**
+   * Tombstones for reusable Identity records (P2-DM1). Older persisted
+   * snapshots may omit this field; callers must default to [] on load.
+   */
+  identities: VaultDeletionEntry[];
 }
 
 export const VAULT_TOMBSTONE_RETENTION_DAYS = 90;
@@ -64,6 +74,7 @@ export function compactDeletionMap(deletions: Partial<VaultDeletionMap> | null |
     keys: compactDeletionEntries(deletions?.keys ?? [], now),
     snippets: compactDeletionEntries(deletions?.snippets ?? [], now),
     knownHosts: compactDeletionEntries(deletions?.knownHosts ?? [], now),
+    identities: compactDeletionEntries(deletions?.identities ?? [], now),
   };
 }
 
@@ -84,6 +95,7 @@ function emptyDeletionMap(): VaultDeletionMap {
     keys: [],
     snippets: [],
     knownHosts: [],
+    identities: [],
   };
 }
 

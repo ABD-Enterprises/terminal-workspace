@@ -116,6 +116,9 @@ interface PreparedLocalConfigDeletions {
   keys: VaultDeletionEntry[];
   snippets: VaultDeletionEntry[];
   knownHosts: VaultDeletionEntry[];
+  /** P2-DM1: identity tombstones. Defaults to [] when an older bundle
+   *  without this collection is imported. */
+  identities: VaultDeletionEntry[];
 }
 
 interface MergeResult<T> {
@@ -229,6 +232,14 @@ function normalizeDeletions(deletions?: Partial<VaultDeletionMap> | null): Prepa
             typeof entry.deletedAt === "string"
         )
       : [],
+    identities: isDeletionArray(deletions?.identities)
+      ? deletions.identities.filter(
+          (entry): entry is VaultDeletionEntry =>
+            isRecord(entry) &&
+            typeof entry.id === "string" &&
+            typeof entry.deletedAt === "string"
+        )
+      : [],
   });
 
   return {
@@ -236,6 +247,7 @@ function normalizeDeletions(deletions?: Partial<VaultDeletionMap> | null): Prepa
     keys: compacted.keys,
     snippets: compacted.snippets,
     knownHosts: compacted.knownHosts,
+    identities: compacted.identities,
   };
 }
 
@@ -332,6 +344,15 @@ function buildAppliedDeletionMap(
       localDeletions.knownHosts,
       importedDeletions.knownHosts,
       survivingKnownHostIds
+    ),
+    // P2-DM1 batch 1: identities are not yet shipped in the bundle, but the
+    // map shape requires the field. Defer all local entries unconditionally
+    // (no surviving-id filter — identities don't yet have a corresponding
+    // applied collection in this bundle version).
+    identities: mergeDeletionEntries(
+      localDeletions.identities,
+      importedDeletions.identities,
+      new Set<string>()
     ),
   };
 }
@@ -571,6 +592,14 @@ function mergePreparedCollections(
 export function buildLocalConfigBundle(): LocalConfigBundle {
   const appState = useAppStore.getState();
 
+  // Note: Identity records (P2-DM1 batch 1) are NOT in the v3 export bundle
+  // yet — this is deliberate. The auto-migration in identities-store
+  // re-derives identities from hosts on import, so a v3 round-trip still
+  // produces an equivalent identity set. User-edited identity labels and
+  // comments are not yet preserved across import; that lands in batch 2
+  // alongside the Settings UI for managing identities, which is when
+  // version 4 of this bundle will be introduced with full merge-plan
+  // semantics for the new collection.
   return {
     app: "TermSnip",
     version: 3,

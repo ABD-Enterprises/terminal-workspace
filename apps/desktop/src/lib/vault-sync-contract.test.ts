@@ -90,6 +90,7 @@ const baseBundle: LocalConfigBundle = {
     keys: [],
     snippets: [],
     knownHosts: [{ id: "10.0.0.20:22:ssh-ed25519", deletedAt: "2026-04-04T15:25:00.000Z" }],
+    identities: [],
   },
 };
 

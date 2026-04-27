@@ -50,6 +50,7 @@ describe("local config", () => {
       keys: [],
       snippets: [],
       knownHosts: [],
+      identities: [],
     });
 
     useHostsStore.setState({
@@ -94,6 +95,7 @@ describe("local config", () => {
       keys: [],
       snippets: [],
       knownHosts: [],
+      identities: [],
     });
     expect(bundle.hosts).toHaveLength(1);
     expect(bundle.hosts[0]?.id).toBe("host-a");
@@ -178,6 +180,7 @@ describe("local config", () => {
         keys: [],
         snippets: [],
         knownHosts: [],
+        identities: [],
       },
       hosts: [
         {
@@ -323,6 +326,7 @@ describe("local config", () => {
         keys: [],
         snippets: [],
         knownHosts: [],
+        identities: [],
       },
       hosts: [
         {
@@ -428,6 +432,7 @@ describe("local config", () => {
         keys: [],
         snippets: [],
         knownHosts: [],
+        identities: [],
       },
       hosts: [
         {
@@ -558,6 +563,7 @@ describe("local config", () => {
         keys: [],
         snippets: [],
         knownHosts: [],
+        identities: [],
       },
       hosts: [],
       keys: [],

@@ -28,6 +28,7 @@ const baseBundle: LocalConfigBundle = {
     keys: [],
     snippets: [],
     knownHosts: [],
+    identities: [],
   },
 };
 
