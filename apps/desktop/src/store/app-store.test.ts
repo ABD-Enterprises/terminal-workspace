@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { DEFAULT_TERMINAL_THEME } from "../lib/terminal-themes";
 import { useAppStore } from "./app-store";
 
 const initialState = useAppStore.getState();
@@ -14,6 +15,7 @@ describe("app store preferences", () => {
     expect(state.workspaceDensity).toBe("compact");
     expect(state.sectionShortcutsEnabled).toBe(true);
     expect(state.demoModeEnabled).toBe(true);
+    expect(state.terminalTheme).toBe(DEFAULT_TERMINAL_THEME);
     expect(state.vaultId).toBeTruthy();
     expect(state.deviceId).toBeTruthy();
     expect(state.lastAppliedSnapshotId).toBeNull();
@@ -25,6 +27,7 @@ describe("app store preferences", () => {
     useAppStore.getState().setWorkspaceDensity("comfortable");
     useAppStore.getState().setSectionShortcutsEnabled(false);
     useAppStore.getState().setDemoModeEnabled(false);
+    useAppStore.getState().setTerminalTheme("monokai");
     useAppStore.getState().openCommandPalette();
     useAppStore.getState().setSidebarSearch("local");
 
@@ -33,9 +36,17 @@ describe("app store preferences", () => {
     expect(state.workspaceDensity).toBe("comfortable");
     expect(state.sectionShortcutsEnabled).toBe(false);
     expect(state.demoModeEnabled).toBe(false);
+    expect(state.terminalTheme).toBe("monokai");
     expect(state.vaultId).toBe("vault-imported");
     expect(state.lastAppliedSnapshotId).toBe("snapshot-imported");
     expect(state.commandPaletteOpen).toBe(true);
     expect(state.sidebarSearch).toBe("local");
+  });
+
+  it("setTerminalTheme rejects an unknown name and falls back to the default", () => {
+    useAppStore
+      .getState()
+      .setTerminalTheme("not-a-theme" as unknown as "auto");
+    expect(useAppStore.getState().terminalTheme).toBe(DEFAULT_TERMINAL_THEME);
   });
 });

@@ -14,6 +14,12 @@ import { isTauriRuntime } from "../../lib/backend-runtime";
 import { buildBackendConnectionFromKnownHost, findKnownHostMatch } from "../../lib/connections";
 import { canRestoreSessionWithoutPrompt, ensureRuntimeSecrets } from "../../lib/runtime-secrets";
 import { buildMockCommandResponse, buildTerminalIntro, formatPrompt } from "../../lib/terminal";
+import {
+  detectSystemColorScheme,
+  resolveTerminalTheme,
+  type TerminalAnsiPalette,
+  type TerminalThemeMode,
+} from "../../lib/terminal-themes";
 import { cn, formatHostAddress } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
 import { useKnownHostsStore } from "../../store/known-hosts-store";
@@ -117,6 +123,44 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const appendCommandOutput = useSessionsStore((state) => state.appendCommandOutput);
   const knownHosts = useKnownHostsStore((state) => state.knownHosts);
   const demoModeEnabled = useAppStore((state) => state.demoModeEnabled);
+  const terminalThemeName = useAppStore((state) => state.terminalTheme);
+
+  // Track the OS color-scheme preference and update it when the user toggles
+  // dark/light mode at the OS level. We re-resolve the active palette on
+  // every change so an "auto" theme follows the system without needing a
+  // restart. State stored in component scope so the layout effect's reads
+  // are stable. See parity-and-hardening-plan.md P1-UX7.
+  const [systemColorScheme, setSystemColorScheme] = useState<TerminalThemeMode>(() =>
+    detectSystemColorScheme()
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const query = window.matchMedia("(prefers-color-scheme: light)");
+    const handler = (event: MediaQueryListEvent) => {
+      setSystemColorScheme(event.matches ? "light" : "dark");
+    };
+    // addEventListener is the modern API; older Safari only had addListener.
+    if (typeof query.addEventListener === "function") {
+      query.addEventListener("change", handler);
+      return () => query.removeEventListener("change", handler);
+    }
+    query.addListener(handler);
+    return () => query.removeListener(handler);
+  }, []);
+
+  const resolvedTerminalPalette: TerminalAnsiPalette = useMemo(
+    () => resolveTerminalTheme(terminalThemeName, systemColorScheme).entry.palette,
+    [terminalThemeName, systemColorScheme]
+  );
+  // Refs that the layout effect reads when constructing the terminal. We do
+  // NOT include the resolved palette in the layout-effect dep list because
+  // recreating the terminal on every theme tweak would lose scrollback and
+  // tear down the live SSH stream. Instead a separate effect (below) hot-
+  // applies palette changes via `terminal.options.theme = …`.
+  const initialPaletteRef = useRef(resolvedTerminalPalette);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -194,6 +238,19 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     reconnectOnRestoreRef.current = pane.reconnectOnRestore;
   }, [pane.backendSessionId, pane.connectionState, pane.reconnectOnRestore, pane.transport]);
 
+  // Hot-apply terminal theme changes without recreating the terminal. Updating
+  // `terminal.options.theme` is the supported xterm.js path for live theme
+  // swaps and preserves scrollback + the underlying SSH session.
+  // See parity-and-hardening-plan.md P1-UX7.
+  useEffect(() => {
+    initialPaletteRef.current = resolvedTerminalPalette;
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+    terminal.options.theme = resolvedTerminalPalette;
+  }, [resolvedTerminalPalette]);
+
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) {
@@ -204,27 +261,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       cursorBlink: true,
       fontFamily: '"SFMono-Regular", "Menlo", "Monaco", monospace',
       fontSize: 13,
-      theme: {
-        background: "#08101a",
-        foreground: "#ebf2ff",
-        cursor: "#76e4c3",
-        black: "#0b1220",
-        brightBlack: "#6b7280",
-        brightBlue: "#93c5fd",
-        brightCyan: "#67e8f9",
-        brightGreen: "#86efac",
-        brightMagenta: "#f0abfc",
-        brightRed: "#fda4af",
-        brightWhite: "#ffffff",
-        brightYellow: "#fde68a",
-        blue: "#60a5fa",
-        cyan: "#22d3ee",
-        green: "#4ade80",
-        magenta: "#e879f9",
-        red: "#fb7185",
-        white: "#e2e8f0",
-        yellow: "#facc15",
-      },
+      theme: initialPaletteRef.current,
     });
     const fitAddon = new FitAddon();
     let fitFrameId: number | null = null;

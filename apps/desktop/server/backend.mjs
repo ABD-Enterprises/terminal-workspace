@@ -16,6 +16,7 @@ import {
   loadOrCreateBackendToken,
   parseAllowedOrigins,
 } from "./auth.mjs";
+import { SecretBuffer } from "./secrets.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appRoot = normalize(join(__dirname, ".."));
@@ -254,16 +255,62 @@ async function createConnectConfig(host) {
     connectConfig.agentForward = true;
   }
 
+  // Secret-handling: wrap any password / passphrase / private-key bytes in a
+  // SecretBuffer and remember a scrub callback for each. The caller is
+  // responsible for invoking `scrub()` on the returned bundle after
+  // ssh2's `client.connect()` has consumed the values (i.e. on both the
+  // ready and error edges). See parity-and-hardening-review §3.S-3 / plan
+  // P1-S3.
+  const cleanups = [];
+  const scrubBundle = () => {
+    while (cleanups.length > 0) {
+      const fn = cleanups.pop();
+      try {
+        fn();
+      } catch {
+        // Ignore — best-effort cleanup must not throw.
+      }
+    }
+  };
+
   if (host.authMethod === "password") {
-    connectConfig.password = host.password;
+    // ssh2 only accepts a string for the password field (the implementation
+    // explicitly checks `typeof === 'string'`). We keep our own copy as a
+    // SecretBuffer; the string version is materialised here, lives on
+    // connectConfig.password until scrub, and ssh2 will internalise its own
+    // copy synchronously when client.connect() runs.
+    const passwordSecret = SecretBuffer.fromString(host.password ?? "");
+    connectConfig.password = passwordSecret.asString();
+    cleanups.push(() => {
+      passwordSecret.scrub();
+      // Drop our reference to the materialised string so the V8 heap copy
+      // becomes garbage-collectable (does not zero the V8 string itself).
+      connectConfig.password = "";
+    });
   } else if (host.authMethod === "privateKey") {
-    connectConfig.privateKey = await readFile(expandHome(host.privateKeyPath), "utf8");
+    // Read the private key as a Buffer (the default for fs.readFile without
+    // an encoding) so we can fill it with zeros after ssh2 has parsed it.
+    const keyBuffer = await readFile(expandHome(host.privateKeyPath));
+    connectConfig.privateKey = keyBuffer;
+    cleanups.push(() => {
+      keyBuffer.fill(0);
+      connectConfig.privateKey = Buffer.alloc(0);
+    });
+
     if (host.passphrase) {
-      connectConfig.passphrase = host.passphrase;
+      // ssh2's parseKey accepts Buffer for the passphrase (used by
+      // bcrypt_pbkdf and crypto.createHash().update()), so we can pass the
+      // SecretBuffer's underlying Buffer directly.
+      const passphraseSecret = SecretBuffer.fromString(host.passphrase);
+      connectConfig.passphrase = passphraseSecret.asBuffer();
+      cleanups.push(() => {
+        passphraseSecret.scrub();
+        connectConfig.passphrase = Buffer.alloc(0);
+      });
     }
   }
 
-  return connectConfig;
+  return { config: connectConfig, scrub: scrubBundle };
 }
 
 async function openJumpSocket(host) {
@@ -290,27 +337,37 @@ async function openJumpSocket(host) {
 
 async function connectClient(host) {
   const client = new Client();
-  const connectConfig = await createConnectConfig(host);
+  const { config: connectConfig, scrub } = await createConnectConfig(host);
   const jumpConnection = host.jumpHost ? await openJumpSocket(host) : undefined;
 
   if (jumpConnection?.socket) {
     connectConfig.sock = jumpConnection.socket;
   }
 
-  return await new Promise((resolve, reject) => {
-    client.on("ready", () => {
-      if (jumpConnection?.jumpClient) {
-        client.once("close", () => jumpConnection.jumpClient.end());
-        client.once("error", () => jumpConnection.jumpClient.end());
-      }
-      resolve(client);
+  try {
+    return await new Promise((resolve, reject) => {
+      client.on("ready", () => {
+        if (jumpConnection?.jumpClient) {
+          client.once("close", () => jumpConnection.jumpClient.end());
+          client.once("error", () => jumpConnection.jumpClient.end());
+        }
+        resolve(client);
+      });
+      client.on("error", (error) => {
+        jumpConnection?.jumpClient?.end();
+        reject(error);
+      });
+      client.connect(connectConfig);
     });
-    client.on("error", (error) => {
-      jumpConnection?.jumpClient?.end();
-      reject(error);
-    });
-    client.connect(connectConfig);
-  });
+  } finally {
+    // Whether the SSH handshake succeeded or failed, ssh2 has already read
+    // password / passphrase / private-key bytes off connectConfig (the
+    // copies happen synchronously inside client.connect()). Wipe our
+    // copies so they do not sit on the heap for the lifetime of the
+    // session. ssh2 keeps its own internal copy of `password` (out of our
+    // scrub reach) — see parity-and-hardening-review §3.S-3.
+    scrub();
+  }
 }
 
 async function withSftp(host, callback) {

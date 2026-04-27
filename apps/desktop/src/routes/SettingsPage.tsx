@@ -10,6 +10,10 @@ import { parseVaultSyncTrustPolicy, type VaultSyncTrustedKey } from "../lib/vaul
 import { cn, splitCommaList } from "../lib/utils";
 import { useAppStore } from "../store/app-store";
 import { useVaultSyncTrustStore } from "../store/vault-sync-trust-store";
+import {
+  listTerminalThemeOptions,
+  type TerminalThemeName,
+} from "../lib/terminal-themes";
 
 interface TrustedKeyDraft {
   originalKeyId: string | null;
@@ -48,6 +52,9 @@ export function SettingsPage() {
   const setSectionShortcutsEnabled = useAppStore((state) => state.setSectionShortcutsEnabled);
   const demoModeEnabled = useAppStore((state) => state.demoModeEnabled);
   const setDemoModeEnabled = useAppStore((state) => state.setDemoModeEnabled);
+  const terminalTheme = useAppStore((state) => state.terminalTheme);
+  const setTerminalTheme = useAppStore((state) => state.setTerminalTheme);
+  const terminalThemeOptions = listTerminalThemeOptions();
   const vaultId = useAppStore((state) => state.vaultId);
   const deviceId = useAppStore((state) => state.deviceId);
   const lastAppliedSnapshotId = useAppStore((state) => state.lastAppliedSnapshotId);
@@ -308,6 +315,76 @@ export function SettingsPage() {
                 deterministic mock backend so screenshots and browser tests do not depend on live
                 SSH material. Native mode uses the live transport path.
               </p>
+            </div>
+
+            <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3 lg:col-span-2">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                Terminal theme
+              </p>
+              <p className="mt-1 text-sm leading-5 text-slate-300">
+                Pick a colour palette for every terminal pane. <strong>Auto</strong> follows the
+                macOS appearance setting via <code>prefers-color-scheme</code>. Theme changes apply
+                live without disconnecting open sessions.
+              </p>
+              <div
+                role="radiogroup"
+                aria-label="Terminal theme"
+                className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3"
+              >
+                {terminalThemeOptions.map((option) => {
+                  const selected = terminalTheme === option.name;
+                  return (
+                    <button
+                      key={option.name}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setTerminalTheme(option.name as TerminalThemeName)}
+                      className={cn(
+                        "flex items-stretch gap-3 rounded-[14px] border px-3 py-2 text-left transition",
+                        selected
+                          ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-50"
+                          : "border-slate-800 bg-slate-950/70 text-slate-300 hover:border-slate-700 hover:text-white"
+                      )}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-slate-800"
+                        style={{ background: option.preview.background }}
+                      >
+                        <span
+                          className="block h-1/2 w-full"
+                          style={{ background: option.preview.foreground, opacity: 0.18 }}
+                        />
+                        <span
+                          className="block h-1.5 w-full"
+                          style={{ background: option.preview.accent }}
+                        />
+                      </span>
+                      <span className="flex min-w-0 flex-col justify-center gap-0.5">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium">{option.label}</span>
+                          <span
+                            className={cn(
+                              "rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em]",
+                              option.mode === "auto"
+                                ? "border-sky-400/40 text-sky-200"
+                                : option.mode === "light"
+                                  ? "border-amber-400/40 text-amber-200"
+                                  : "border-slate-600 text-slate-300"
+                            )}
+                          >
+                            {option.mode}
+                          </span>
+                        </span>
+                        <span className="text-[11px] leading-4 text-slate-400">
+                          {option.description}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
