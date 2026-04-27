@@ -40,7 +40,17 @@ use native_transport::*;
 
 const SESSION_STREAM_EVENT_NAME: &str = "termsnip://session-stream";
 const KEYCHAIN_PASSWORD_SERVICE: &str = "com.termsnip.runtime.password";
+/// Per-host passphrase entry. Retained for backward compatibility (older
+/// builds wrote here) and as the migration source. New writes go to
+/// `KEYCHAIN_KEY_PASSPHRASE_SERVICE` keyed by SSH key fingerprint so that
+/// multiple hosts using the same private key share a single Keychain
+/// entry. See parity-and-hardening-plan.md P1-S5.
 const KEYCHAIN_PASSPHRASE_SERVICE: &str = "com.termsnip.runtime.passphrase";
+/// Per-key-fingerprint passphrase entry. Account is the SSH public-key
+/// fingerprint (`SHA256:<base64>` form). When a key is deleted from the
+/// keys store, the renderer calls `termsnip_clear_key_passphrase` to GC
+/// the orphaned entry.
+const KEYCHAIN_KEY_PASSPHRASE_SERVICE: &str = "com.termsnip.runtime.key-passphrase";
 const DEFAULT_TERMINAL_COLS: u16 = 120;
 const DEFAULT_TERMINAL_ROWS: u16 = 36;
 const DEFAULT_TERMINAL_PIXEL_WIDTH: u16 = DEFAULT_TERMINAL_COLS * 8;
@@ -533,6 +543,50 @@ struct StoreHostSecretsRequest {
 struct HostSecretsResponse {
     password: String,
     passphrase: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyPassphraseRequest {
+    fingerprint: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoreKeyPassphraseRequest {
+    fingerprint: String,
+    passphrase: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyPassphraseResponse {
+    passphrase: String,
+}
+
+/// Reject fingerprints that are obviously empty / malformed. The rest of the
+/// validation lives in the renderer (only known fingerprints from the keys
+/// store are forwarded), this is a defense-in-depth check that prevents an
+/// XSS-bypassed caller from probing arbitrary Keychain accounts. The
+/// fingerprint format is `SHA256:<43 base64 chars>` for SHA-256 and
+/// `MD5:xx:xx:..` for legacy MD5. We require the prefix and a non-empty
+/// payload, but do not validate the inner format strictly — Keychain
+/// accounts are arbitrary strings, and rejecting future fingerprint
+/// algorithms would create an upgrade footgun.
+fn validate_key_fingerprint(fingerprint: &str) -> Result<(), String> {
+    let trimmed = fingerprint.trim();
+    if trimmed.is_empty() {
+        return Err("Key fingerprint is required".to_string());
+    }
+    let Some((algo, payload)) = trimmed.split_once(':') else {
+        return Err(format!(
+            "Key fingerprint must use ALGO:VALUE format, got {trimmed:?}"
+        ));
+    };
+    if algo.is_empty() || payload.trim().is_empty() {
+        return Err("Key fingerprint algorithm and value must both be non-empty".to_string());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -2501,6 +2555,64 @@ async fn termsnip_clear_host_secrets(
     .map_err(|error| error.to_string())?
 }
 
+/// Read the passphrase for a private key by SSH key fingerprint. Multiple
+/// hosts using the same key share this entry, so the user only has to type
+/// the passphrase once per key. Returns an empty string when no entry
+/// exists. See parity-and-hardening-plan.md P1-S5.
+#[tauri::command]
+async fn termsnip_load_key_passphrase(
+    request: KeyPassphraseRequest,
+) -> Result<KeyPassphraseResponse, String> {
+    validate_key_fingerprint(&request.fingerprint)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(KeyPassphraseResponse {
+            passphrase: load_keychain_secret(
+                KEYCHAIN_KEY_PASSPHRASE_SERVICE,
+                &request.fingerprint,
+            )?
+            .unwrap_or_default(),
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn termsnip_store_key_passphrase(
+    request: StoreKeyPassphraseRequest,
+) -> Result<BackendBooleanResponse, String> {
+    validate_key_fingerprint(&request.fingerprint)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        store_keychain_secret(
+            KEYCHAIN_KEY_PASSPHRASE_SERVICE,
+            &request.fingerprint,
+            &request.passphrase,
+        )?;
+        Ok(BackendBooleanResponse {
+            ok: true,
+            pending: None,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn termsnip_clear_key_passphrase(
+    request: KeyPassphraseRequest,
+) -> Result<BackendBooleanResponse, String> {
+    validate_key_fingerprint(&request.fingerprint)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        delete_keychain_secret(KEYCHAIN_KEY_PASSPHRASE_SERVICE, &request.fingerprint)?;
+        Ok(BackendBooleanResponse {
+            ok: true,
+            pending: None,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[tauri::command]
 async fn termsnip_create_backend_session(
     bridge: State<'_, BackendBridge>,
@@ -3092,6 +3204,9 @@ fn main() {
             termsnip_load_host_secrets,
             termsnip_store_host_secrets,
             termsnip_clear_host_secrets,
+            termsnip_load_key_passphrase,
+            termsnip_store_key_passphrase,
+            termsnip_clear_key_passphrase,
             termsnip_create_backend_session,
             termsnip_close_backend_session,
             termsnip_resize_backend_session,
@@ -3343,6 +3458,49 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
         let cleared = load_keychain_secret(&service, &account)
             .expect("loading deleted test keychain secret should succeed");
         assert_eq!(cleared, None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn keychain_key_passphrase_round_trip() {
+        // Same shape as the per-host round-trip but exercises the new
+        // fingerprint-keyed service so a regression in the constant or in
+        // the per-fingerprint command path surfaces here. See
+        // parity-and-hardening-plan.md P1-S5.
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let fingerprint = format!("SHA256:term-snip-test-{}-{unique_suffix}", process::id());
+        let service = format!("{KEYCHAIN_KEY_PASSPHRASE_SERVICE}.tests");
+
+        store_keychain_secret(&service, &fingerprint, "key-pass")
+            .expect("storing test key passphrase should succeed");
+        let loaded = load_keychain_secret(&service, &fingerprint)
+            .expect("loading test key passphrase should succeed");
+        assert_eq!(loaded.as_deref(), Some("key-pass"));
+
+        delete_keychain_secret(&service, &fingerprint)
+            .expect("deleting test key passphrase should succeed");
+        let cleared = load_keychain_secret(&service, &fingerprint)
+            .expect("loading deleted test key passphrase should succeed");
+        assert_eq!(cleared, None);
+    }
+
+    #[test]
+    fn validates_key_fingerprint_shape() {
+        assert!(validate_key_fingerprint("SHA256:abc").is_ok());
+        assert!(validate_key_fingerprint("MD5:aa:bb:cc").is_ok());
+        // Unknown algorithms still pass — Keychain accounts are arbitrary
+        // strings and rejecting future algorithms would be an upgrade footgun.
+        assert!(validate_key_fingerprint("BLAKE3:xyz").is_ok());
+
+        assert!(validate_key_fingerprint("").is_err());
+        assert!(validate_key_fingerprint("   ").is_err());
+        assert!(validate_key_fingerprint("no-colon-here").is_err());
+        assert!(validate_key_fingerprint(":no-algo").is_err());
+        assert!(validate_key_fingerprint("SHA256:").is_err());
+        assert!(validate_key_fingerprint("SHA256:   ").is_err());
     }
 
     #[test]

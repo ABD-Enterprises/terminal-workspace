@@ -20,6 +20,7 @@ import {
   type TerminalAnsiPalette,
   type TerminalThemeMode,
 } from "../../lib/terminal-themes";
+import { findMatchesInBuffer, type SearchMatch } from "../../lib/terminal-search";
 import { cn, formatHostAddress } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
 import { useKnownHostsStore } from "../../store/known-hosts-store";
@@ -39,6 +40,7 @@ interface TerminalPaneProps {
   onSplit: () => void;
   onClose: () => void;
 }
+
 
 interface PrivateViewport {
   __termsnipGuarded?: boolean;
@@ -164,6 +166,22 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+
+  // ---- In-pane search-in-scrollback (Cmd+F) ------------------------------
+  // We do not depend on @xterm/addon-search here because it is not in the
+  // local pnpm offline cache and adding it would require network. Instead
+  // we drive xterm's own buffer + selection APIs directly. See
+  // parity-and-hardening-plan.md P1-UX6.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
+  const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
+  const [searchActiveIndex, setSearchActiveIndex] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  // Refs let the xterm custom-key handler call into the latest React state
+  // setters without needing to re-attach the handler on every render.
+  const setSearchOpenRef = useRef(setSearchOpen);
+  setSearchOpenRef.current = setSearchOpen;
   const socketRef = useRef<SessionSocketLike | null>(null);
   const commandBufferRef = useRef("");
   const transportRef = useRef<SessionTransport>(pane.transport);
@@ -250,6 +268,77 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     }
     terminal.options.theme = resolvedTerminalPalette;
   }, [resolvedTerminalPalette]);
+
+  // ---- Search effects ----------------------------------------------------
+  // Recompute matches when the query or case sensitivity changes, and reset
+  // the active index so the highlight starts at the first match. Empty
+  // query → no matches (clearSelection runs in the navigation effect).
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal || !searchOpen) {
+      return;
+    }
+    const matches = findMatchesInBuffer(
+      terminal.buffer.active,
+      searchQuery,
+      searchCaseSensitive
+    );
+    setSearchMatches(matches);
+    setSearchActiveIndex(0);
+  }, [searchOpen, searchQuery, searchCaseSensitive]);
+
+  // Move the viewport + selection to the active match. clearSelection on an
+  // empty match list keeps stale highlighting from previous queries from
+  // sticking around.
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal || !searchOpen) {
+      return;
+    }
+    if (searchMatches.length === 0) {
+      terminal.clearSelection();
+      return;
+    }
+    const safeIndex = Math.min(Math.max(0, searchActiveIndex), searchMatches.length - 1);
+    const match = searchMatches[safeIndex];
+    // scrollToLine wants a row index relative to the buffer's baseY; if the
+    // match is in scrollback above baseY, the same row index brings it on-
+    // screen because the viewport is positioned by row.
+    terminal.scrollToLine(match.row);
+    terminal.select(match.col, match.row, match.length);
+  }, [searchActiveIndex, searchMatches, searchOpen]);
+
+  // Focus the search input as soon as the overlay opens.
+  useEffect(() => {
+    if (searchOpen) {
+      // Defer to next frame so the input is in the DOM before .focus().
+      const id = window.requestAnimationFrame(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      });
+      return () => window.cancelAnimationFrame(id);
+    }
+    // Closing — clean up any leftover selection so it does not bleed into
+    // a non-search interaction.
+    terminalRef.current?.clearSelection();
+  }, [searchOpen]);
+
+  const advanceSearchMatch = (direction: 1 | -1) => {
+    setSearchActiveIndex((current) => {
+      if (searchMatches.length === 0) {
+        return 0;
+      }
+      const next = (current + direction + searchMatches.length) % searchMatches.length;
+      return next;
+    });
+  };
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchMatches([]);
+    setSearchActiveIndex(0);
+  };
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -816,6 +905,23 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     };
     container.addEventListener("contextmenu", contextMenuHandler);
 
+    // Cmd/Ctrl+F intercept: open the in-pane search overlay instead of
+    // letting xterm consume the key as plain input. Returning false from
+    // attachCustomKeyEventHandler tells xterm not to handle the event.
+    // See parity-and-hardening-plan.md P1-UX6.
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown") {
+        return true;
+      }
+      const isMeta = event.metaKey || event.ctrlKey;
+      if (isMeta && (event.key === "f" || event.key === "F")) {
+        event.preventDefault();
+        setSearchOpenRef.current(true);
+        return false;
+      }
+      return true;
+    });
+
     const disposable = terminal.onData((data) => {
       if (
         transportRef.current !== "mock" &&
@@ -1078,7 +1184,92 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           ) : null}
         </div>
       ) : null}
-      <div ref={containerRef} className="min-h-0 flex-1 px-3 py-3" />
+      <div className="relative min-h-0 flex-1">
+        <div ref={containerRef} className="absolute inset-0 px-3 py-3" />
+        {searchOpen ? (
+          <div
+            className="absolute right-3 top-3 z-10 flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950/95 px-3 py-2 shadow-lg shadow-slate-950/40 backdrop-blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeSearch();
+                  return;
+                }
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  advanceSearchMatch(event.shiftKey ? -1 : 1);
+                  return;
+                }
+                if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "g") {
+                  event.preventDefault();
+                  advanceSearchMatch(event.shiftKey ? -1 : 1);
+                }
+              }}
+              placeholder="Find in scrollback"
+              aria-label="Find in terminal scrollback"
+              className="w-56 rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60"
+            />
+            <span className="min-w-[60px] text-center text-[11px] tabular-nums text-slate-400">
+              {searchQuery
+                ? searchMatches.length === 0
+                  ? "no match"
+                  : `${searchActiveIndex + 1}/${searchMatches.length}`
+                : "—"}
+            </span>
+            <button
+              type="button"
+              onClick={() => advanceSearchMatch(-1)}
+              disabled={searchMatches.length === 0}
+              title="Previous match (Shift+Enter or ⇧⌘G)"
+              aria-label="Previous match"
+              className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              onClick={() => advanceSearchMatch(1)}
+              disabled={searchMatches.length === 0}
+              title="Next match (Enter or ⌘G)"
+              aria-label="Next match"
+              className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              onClick={() => setSearchCaseSensitive((value) => !value)}
+              title={searchCaseSensitive ? "Case-sensitive (click to disable)" : "Case-insensitive (click to enable)"}
+              aria-label="Toggle case sensitivity"
+              aria-pressed={searchCaseSensitive}
+              className={cn(
+                "rounded-md border px-2 py-1 text-xs transition",
+                searchCaseSensitive
+                  ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-100"
+                  : "border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white"
+              )}
+            >
+              Aa
+            </button>
+            <button
+              type="button"
+              onClick={closeSearch}
+              title="Close search (Esc)"
+              aria-label="Close search"
+              className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }

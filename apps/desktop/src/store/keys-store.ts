@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import { sampleKeys, type KeyMetadata, type KeyRecord, type KeySource } from "../types/key";
+import { clearKeyPassphraseByFingerprint } from "./connection-secrets-store";
 import { useVaultSyncStore } from "./vault-sync-store";
 
 const fallbackStorage: StateStorage = {
@@ -111,6 +112,11 @@ export const useKeysStore = create<KeysState>()(
         }));
         if (key) {
           useVaultSyncStore.getState().markDeleted("keys", key.id);
+          // GC the per-fingerprint Keychain passphrase entry. Fire-and-forget
+          // — failures are logged inside clearKeyPassphraseByFingerprint and
+          // must not block the synchronous delete return value. See
+          // parity-and-hardening-plan.md P1-S5.
+          void clearKeyPassphraseByFingerprint(key.fingerprint);
         }
         return key;
       },
