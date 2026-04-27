@@ -1,8 +1,24 @@
 # Feature Parity Matrix
 
-Research date: 2026-03-29
+Research date: 2026-03-29 (last full research pass)
+Honest-scoring overlay added: 2026-04-27
 
 Goal: build a local-first macOS replacement that reaches roughly 90% of the Termius daily-use value without cloning branding or chasing cloud/team features first.
+
+> **Honest-scoring overlay (2026-04-27)**
+>
+> The presence-based "Implemented" column below over-counts daily-use parity. Scoring the same matrix on quality, default-safety, and friction lands at **~70% practical parity**, not 96%. See:
+> - `docs/parity-and-hardening-review.md` — independent review with file:line citations.
+> - `docs/parity-and-hardening-plan.md` — phased remediation plan.
+>
+> Specifically, rows with material gaps despite "Implemented ✅":
+> - **Command palette** — `useCommandPalette.ts` only opens/closes; the registry is empty. Effectively a stub. (P1-UX5 in the plan)
+> - **Tabs and split panes** — tabs are not reorderable, splits are fixed CSS-grid breakpoints (no drag resize). (P1-UX6/UX8)
+> - **Passphrase + known hosts** — until 2026-04-27 the default `hostKeyPolicy` was `allowUnknown` (silent TOFU). Default has been flipped to `requireTrusted` and Node + Rust backends now defense-in-depth refuse to connect without a known key. The first-connect fingerprint UX is still a separate-page workflow rather than an inline modal (P2-FP).
+> - **Import/export config** — SSH config import was lossy (skipped wildcard `Host *` defaults, `ProxyJump`, `Match`, `Include`). Restored to a richer parser on 2026-04-27 with an import-summary modal that reports skipped lines.
+> - **Local prefs** — present, but no font picker, no theme picker, no `prefers-color-scheme` (P1-UX7).
+>
+> Phase 0 hardening landed 2026-04-27: see `docs/parity-and-hardening-plan.md` for what shipped and what is queued.
 
 Primary Termius evidence:
 - [Organizing data](https://termius.com/documentation/organizing-data)
@@ -15,7 +31,8 @@ Primary Termius evidence:
 - [Pricing and plan comparison](https://www.termius.com/pricing)
 - [Background sessions and history](https://support.termius.com/hc/en-us/articles/900006226306-Keep-your-Termius-sessions-alive-in-the-background)
 
-Current practical parity estimate: 96%
+Original presence-based parity estimate (2026-03-29): 96%
+Honest daily-use parity estimate (2026-04-27): ~70% — see review document.
 
 | Feature | User value | Termius behavior summary | Our implementation approach | Priority | Status | Evidence |
 |---|---|---|---|---|---|---|

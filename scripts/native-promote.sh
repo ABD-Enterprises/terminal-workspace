@@ -11,6 +11,34 @@ if [[ ! -f "$MANIFEST_PATH" ]]; then
   exit 1
 fi
 
+# Live re-verification of the signed bundle before promotion. The manifest
+# values are checked downstream, but a manifest can be edited or stale; the
+# only authoritative check is running codesign and spctl against the bundle
+# we are actually about to ship. See parity-and-hardening-review §3.S-7.
+APP_PATH_FROM_MANIFEST="$(MANIFEST_PATH="$MANIFEST_PATH" node -e '
+const fs = require("node:fs");
+const m = JSON.parse(fs.readFileSync(process.env.MANIFEST_PATH, "utf8"));
+const path = m.bundle?.path;
+if (!path) { process.exit(1); }
+process.stdout.write(path);
+' 2>/dev/null || true)"
+
+if [[ -z "$APP_PATH_FROM_MANIFEST" || ! -d "$APP_PATH_FROM_MANIFEST" ]]; then
+  echo "Cannot locate signed .app bundle from manifest for live re-verification: '$APP_PATH_FROM_MANIFEST'" >&2
+  exit 1
+fi
+
+echo "Re-verifying signed bundle before promotion: $APP_PATH_FROM_MANIFEST"
+if ! codesign --verify --deep --strict --verbose=2 "$APP_PATH_FROM_MANIFEST"; then
+  echo "codesign --verify failed on the bundle about to be promoted. Refusing to promote." >&2
+  exit 1
+fi
+if ! spctl -a -t exec -vv "$APP_PATH_FROM_MANIFEST"; then
+  echo "spctl --assess failed on the bundle about to be promoted. Refusing to promote." >&2
+  exit 1
+fi
+echo "Live re-verification passed."
+
 mapfile -t PROMOTION_INFO < <(MANIFEST_PATH="$MANIFEST_PATH" node <<'NODE'
 const fs = require("node:fs");
 const manifest = JSON.parse(fs.readFileSync(process.env.MANIFEST_PATH, "utf8"));

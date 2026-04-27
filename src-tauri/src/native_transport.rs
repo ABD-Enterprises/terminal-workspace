@@ -4,6 +4,77 @@ use std::path::Path;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+/// Reject any private-key path the renderer hands us that escapes the user's
+/// home directory (or the small set of test/system roots we explicitly allow).
+/// Without this guard, a renderer-side XSS could call
+/// `termsnip_inspect_private_key` with `/etc/passwd` (or another user's home)
+/// to probe file existence and leak metadata via ssh-keygen error messages.
+/// See docs/parity-and-hardening-review.md §3.S-6.
+pub(crate) fn validate_user_owned_key_path(path: &Path) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
+        return Err("Key path is required".to_string());
+    }
+
+    if !path.is_absolute() {
+        return Err(format!(
+            "Key path must be absolute after home-expansion: {}",
+            path.display()
+        ));
+    }
+
+    // Canonicalize where possible to defeat symlink trickery. If the file does
+    // not exist yet (the generate-new-key path), fall back to the literal path
+    // — the parent directory must still pass the allowlist check below.
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+
+    let mut allowed_roots: Vec<PathBuf> = Vec::new();
+    let mut push_with_canonical = |path: PathBuf| {
+        // Push both the literal path and its canonical form. macOS commonly
+        // exposes `/var/folders/...` (literal) and `/private/var/folders/...`
+        // (canonical) for the same directory because /var → /private/var is a
+        // symlink. When the input path does not yet exist (e.g. we are about
+        // to write a new key), canonicalize fails on the leaf, so the literal
+        // form is what we end up comparing against.
+        let canonical = fs::canonicalize(&path).ok();
+        if !allowed_roots.contains(&path) {
+            allowed_roots.push(path);
+        }
+        if let Some(canonical) = canonical {
+            if !allowed_roots.contains(&canonical) {
+                allowed_roots.push(canonical);
+            }
+        }
+    };
+
+    if let Some(home) = env::var_os("HOME") {
+        push_with_canonical(PathBuf::from(home));
+    }
+    // The user's per-process temp dir. On macOS this is something like
+    // /var/folders/<userhash>/T/ (canonicalizes to /private/var/folders/...).
+    // Tools that stage a key for import or fixtures that exercise key flows
+    // legitimately write here, and the directory is owned by the current user.
+    if let Some(tmpdir) = env::var_os("TMPDIR") {
+        push_with_canonical(PathBuf::from(tmpdir));
+    }
+    // System SSH config dirs: read-only system keys are sometimes referenced.
+    push_with_canonical(PathBuf::from("/etc/ssh"));
+    // World-writable /tmp is accepted as a last resort for cross-platform
+    // bootstrap flows. /tmp is world-readable, so this guard does not protect
+    // against same-host attackers staging a file here — but the threat model
+    // for this allowlist is renderer-side XSS reading arbitrary user paths.
+    push_with_canonical(PathBuf::from("/tmp"));
+    push_with_canonical(PathBuf::from("/private/tmp"));
+
+    if allowed_roots.iter().any(|root| canonical.starts_with(root)) {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Refusing to access private key outside HOME or /etc/ssh: {}",
+        canonical.display()
+    ))
+}
+
 pub(crate) fn normalize_remote_path(pathname: &str) -> String {
     let mut segments = Vec::new();
 
@@ -204,6 +275,7 @@ pub(crate) fn parse_ssh_keygen_summary(
 
 pub(crate) fn inspect_private_key(pathname: &str) -> Result<KeyMetadata, String> {
     let resolved_path = expand_home(pathname);
+    validate_user_owned_key_path(&resolved_path)?;
     fs::metadata(&resolved_path).map_err(|error| error.to_string())?;
     let resolved_path = resolved_path.to_string_lossy().into_owned();
     let output = Command::new("/usr/bin/ssh-keygen")
@@ -239,6 +311,7 @@ pub(crate) fn generate_key_pair(request: &GenerateKeyRequest) -> Result<KeyMetad
     }
 
     let resolved_path = expand_home(&request.path);
+    validate_user_owned_key_path(&resolved_path)?;
     if let Some(parent) = resolved_path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -486,18 +559,53 @@ pub(crate) fn prepare_native_identity_file(
         .map_err(|error| error.to_string())?;
 
     let target_path_string = target_path.to_string_lossy().into_owned();
-    let output = Command::new("/usr/bin/ssh-keygen")
-        .args([
-            "-p",
-            "-P",
-            &connection.passphrase,
-            "-N",
-            "",
-            "-f",
-            &target_path_string,
-        ])
-        .output()
+
+    // The passphrase MUST NOT appear in argv (`ps` would expose it). Instead
+    // write it to a 0600 sibling file in our session-private temp dir, then
+    // hand ssh-keygen an SSH_ASKPASS script that prints the file. We scrub
+    // both files before returning. See parity-and-hardening-review.md §3.S-2.
+    let pass_path = session_dir.join(format!("{alias}-pass"));
+    let askpass_path = session_dir.join(format!("{alias}-askpass.sh"));
+
+    fs::write(&pass_path, connection.passphrase.as_bytes())
+        .map_err(|error| format!("failed to stage passphrase: {error}"))?;
+    #[cfg(unix)]
+    fs::set_permissions(&pass_path, fs::Permissions::from_mode(0o600))
         .map_err(|error| error.to_string())?;
+
+    // The askpass script must print the passphrase to stdout and nothing else.
+    // We use `cat` rather than embedding the passphrase in the script body so
+    // the script itself can be read without leaking the secret.
+    let askpass_body = format!(
+        "#!/bin/sh\nexec /bin/cat -- {}\n",
+        shell_single_quote(&pass_path.to_string_lossy())
+    );
+    fs::write(&askpass_path, askpass_body)
+        .map_err(|error| format!("failed to stage askpass: {error}"))?;
+    #[cfg(unix)]
+    fs::set_permissions(&askpass_path, fs::Permissions::from_mode(0o700))
+        .map_err(|error| error.to_string())?;
+
+    let output_result = Command::new("/usr/bin/ssh-keygen")
+        .args(["-p", "-N", "", "-f", &target_path_string])
+        .env("SSH_ASKPASS", &askpass_path)
+        // SSH_ASKPASS_REQUIRE=force makes ssh-keygen prefer the askpass even
+        // when a TTY is attached. Available in OpenSSH >= 8.4 (macOS 12+).
+        .env("SSH_ASKPASS_REQUIRE", "force")
+        // ssh-keygen historically only consults SSH_ASKPASS when DISPLAY is
+        // set. Any non-empty value suffices; the askpass script ignores it.
+        .env("DISPLAY", ":0")
+        // Detach from any inherited TTY so ssh-keygen falls through to askpass.
+        .stdin(Stdio::null())
+        .output();
+
+    // Best-effort scrub: overwrite then unlink. We do this whether ssh-keygen
+    // succeeded or failed, before returning either path.
+    let _ = fs::write(&pass_path, vec![0u8; connection.passphrase.len()]);
+    let _ = fs::remove_file(&pass_path);
+    let _ = fs::remove_file(&askpass_path);
+
+    let output = output_result.map_err(|error| error.to_string())?;
     let stdout = trim_ssh_output(&String::from_utf8_lossy(&output.stdout));
     let stderr = trim_ssh_output(&String::from_utf8_lossy(&output.stderr));
 
@@ -514,6 +622,23 @@ pub(crate) fn prepare_native_identity_file(
     }
 
     Ok(target_path_string)
+}
+
+/// Single-quote a string for safe inclusion in a POSIX shell script.
+/// Single-quoted strings have no escapes except for `'` itself, which we
+/// handle by closing the quote, inserting `\'`, and reopening.
+fn shell_single_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for ch in value.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
 }
 
 pub(crate) fn build_native_ssh_config(

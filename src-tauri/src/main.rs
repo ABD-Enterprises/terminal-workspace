@@ -6,7 +6,7 @@ use std::{
     io::{self, Read, Write},
     net::TcpStream,
     path::PathBuf,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -192,6 +192,12 @@ struct BackendHostConnection {
     agent_forwarding: bool,
     auth_method: String,
     environment: Option<HashMap<String, String>>,
+    /// "requireTrusted" or "allowUnknown". Optional for backward compatibility
+    /// with renderer builds that pre-date the contract change. When absent or
+    /// "requireTrusted" we refuse to connect without a known_host_public_key.
+    /// See docs/parity-and-hardening-review.md §3.S-1.
+    #[serde(default)]
+    host_key_policy: Option<String>,
     hostname: String,
     jump_host: Option<Box<BackendHostConnection>>,
     known_host_algorithm: Option<String>,
@@ -204,6 +210,20 @@ struct BackendHostConnection {
     protocol: String,
     sftp_root: Option<String>,
     username: String,
+}
+
+fn host_requires_trusted_key(host: &BackendHostConnection) -> bool {
+    // Default to "requireTrusted" when absent for the same secure-by-default
+    // reason the TS layer flipped its default. Only an explicit "allowUnknown"
+    // opts a host out of strict checking. SSH and Mosh are the only protocols
+    // for which trusted-host-key checking is meaningful.
+    if host.protocol != "ssh" && host.protocol != "mosh" {
+        return false;
+    }
+    match host.host_key_policy.as_deref() {
+        Some("allowUnknown") => false,
+        _ => true,
+    }
 }
 
 fn default_backend_protocol() -> String {
@@ -1208,6 +1228,16 @@ fn validate_ssh_host(host: &BackendHostConnection) -> Result<(), String> {
 
     if host.auth_method == "none" {
         return Err("Host is configured without SSH auth".to_string());
+    }
+
+    // Defense-in-depth: refuse to connect when a host requires a trusted key
+    // and the renderer did not supply one. Mirrors the Node backend check in
+    // apps/desktop/server/backend.mjs createConnectConfig().
+    if host_requires_trusted_key(host) && host.known_host_public_key.is_none() {
+        return Err(format!(
+            "Trusted host key required for {}:{} but none was provided. Scan and trust the host first.",
+            host.hostname, host.port
+        ));
     }
 
     if let Some(jump_host) = &host.jump_host {
@@ -2874,11 +2904,13 @@ mod tests {
                 "APP_ENV".to_string(),
                 "production".to_string(),
             )])),
+            host_key_policy: None,
             hostname: "target.internal".to_string(),
             jump_host: Some(Box::new(BackendHostConnection {
                 agent_forwarding: false,
                 auth_method: "privateKey".to_string(),
                 environment: None,
+                host_key_policy: None,
                 hostname: "jump.internal".to_string(),
                 jump_host: None,
                 known_host_algorithm: Some("ssh-ed25519".to_string()),
@@ -2956,6 +2988,7 @@ mod tests {
             agent_forwarding: false,
             auth_method: "none".to_string(),
             environment: None,
+            host_key_policy: None,
             hostname: "legacy.internal".to_string(),
             jump_host: None,
             known_host_algorithm: None,
@@ -3009,6 +3042,7 @@ mod tests {
             agent_forwarding: true,
             auth_method: "privateKey".to_string(),
             environment: None,
+            host_key_policy: None,
             hostname: "ops.internal".to_string(),
             jump_host: None,
             known_host_algorithm: Some("ssh-ed25519".to_string()),

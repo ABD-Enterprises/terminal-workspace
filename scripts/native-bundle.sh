@@ -179,6 +179,11 @@ if [[ "$SIGNING_PERFORMED" == "true" ]]; then
     SPCTL_STATUS="accepted"
   else
     SPCTL_STATUS="not_accepted"
+    cat "$SPCTL_LOG" >&2
+    # Fail-closed: a signing-performed bundle that Gatekeeper refuses must not
+    # silently proceed to release-check or promote. See parity-and-hardening
+    # review §3.S-7.
+    exit 1
   fi
 else
   echo "Signing skipped (mode: $SIGN_MODE)"

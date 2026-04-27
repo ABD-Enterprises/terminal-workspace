@@ -13,6 +13,8 @@ export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const hosts = useHostsStore((state) => state.hosts);
+  const markConnected = useHostsStore((state) => state.markConnected);
+  const openSession = useSessionsStore((state) => state.openSession);
   const sidebarSearch = useAppStore((state) => state.sidebarSearch);
   const setSidebarSearch = useAppStore((state) => state.setSidebarSearch);
   const workspaceDensity = useAppStore((state) => state.workspaceDensity);
@@ -22,6 +24,13 @@ export function Sidebar() {
   const selectSessionTab = useSessionsStore((state) => state.selectTab);
   const favoriteCount = hosts.filter((host) => host.favorite).length;
   const groupCount = new Set(hosts.map((host) => host.group).filter(Boolean)).size;
+  const pinnedHosts = useMemo(
+    () =>
+      hosts
+        .filter((host) => host.favorite)
+        .sort((left, right) => left.label.localeCompare(right.label)),
+    [hosts]
+  );
   const sessionRows = useMemo(
     () =>
       sessionTabs.map((tab) => {
@@ -98,6 +107,60 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+
+      {pinnedHosts.length > 0 ? (
+        <div className="mt-2 rounded-[18px] border border-slate-800/90 bg-slate-900/60">
+          <div className="flex items-center justify-between border-b border-slate-800/80 px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-300/90">
+              Pinned
+            </p>
+            <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+              {pinnedHosts.length}
+            </span>
+          </div>
+          <div className="max-h-44 overflow-auto px-2 py-2 space-y-1">
+            {pinnedHosts.map((host) => {
+              const existingTab = sessionTabs.find((tab) => tab.hostId === host.id);
+              const active = existingTab && existingTab.id === activeSessionTabId;
+              return (
+                <button
+                  key={host.id}
+                  type="button"
+                  title={`${host.username}@${host.hostname}:${host.port}`}
+                  onClick={() => {
+                    markConnected(host.id);
+                    const tabId = openSession(host);
+                    navigate(`/sessions?tabId=${tabId}`);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-[14px] border px-2 py-1.5 text-left transition",
+                    active
+                      ? "border-emerald-400/50 bg-emerald-400/10"
+                      : "border-slate-800 bg-slate-950/60 hover:border-amber-400/40 hover:bg-slate-900"
+                  )}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "h-1.5 w-1.5 shrink-0 rounded-full",
+                      existingTab ? "bg-emerald-400" : "bg-amber-300"
+                    )}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12px] font-medium text-slate-100">
+                      {host.label}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[10px] text-slate-500">
+                      {host.hostname}
+                      {host.port && host.port !== 22 ? `:${host.port}` : ""}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-2 min-h-0 flex-1 overflow-hidden rounded-[18px] border border-slate-800/90 bg-slate-900/60">
         <div className="border-b border-slate-800/80 px-3 py-2">

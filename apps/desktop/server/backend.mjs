@@ -203,6 +203,15 @@ function failSession(session, error) {
 }
 
 async function createConnectConfig(host) {
+  // Defense-in-depth: even if a caller bypasses connections.ts (e.g. talks to
+  // the backend HTTP API directly), refuse to connect when the host requires
+  // a trusted key and we were not given one. See parity-and-hardening-review §3.S-1.
+  if (host.hostKeyPolicy === "requireTrusted" && !host.knownHostPublicKey) {
+    throw new Error(
+      `Trusted host key required for ${host.hostname}:${host.port} but none was provided. Scan and trust the host first.`
+    );
+  }
+
   const connectConfig = {
     host: host.hostname,
     port: host.port,

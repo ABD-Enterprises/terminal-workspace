@@ -19,7 +19,7 @@ import {
   hostSupportsTrustedKeys,
   emptyHostFormValues,
 } from "../types/host";
-import { parseSshConfig } from "../lib/ssh-config";
+import { parseSshConfig, toHostFormValues } from "../lib/ssh-config";
 
 export function HostsPage() {
   const navigate = useNavigate();
@@ -28,6 +28,15 @@ export function HostsPage() {
   const [activeTag, setActiveTag] = useState("all");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [hostPendingDelete, setHostPendingDelete] = useState<string | null>(null);
+  const [importReport, setImportReport] = useState<
+    | {
+        importedCount: number;
+        defaultsAppliedCount: number;
+        unresolvedProxyJumpAliases: string[];
+        skipped: { reason: string; detail: string }[];
+      }
+    | null
+  >(null);
   const query = useAppStore((state) => state.sidebarSearch);
   const setQuery = useAppStore((state) => state.setSidebarSearch);
   const setHostSecrets = useConnectionSecretsStore((state) => state.setHostSecrets);
@@ -101,8 +110,16 @@ export function HostsPage() {
                       const reader = new FileReader();
                       reader.onload = (event) => {
                         const content = event.target?.result as string;
-                        const parsedHosts = parseSshConfig(content);
-                        parsedHosts.forEach(h => createHost({ ...emptyHostFormValues, ...h }));
+                        const result = parseSshConfig(content);
+                        result.hosts.forEach((host) =>
+                          createHost({ ...emptyHostFormValues, ...toHostFormValues(host) })
+                        );
+                        setImportReport({
+                          importedCount: result.hosts.length,
+                          defaultsAppliedCount: result.defaultsAppliedCount,
+                          unresolvedProxyJumpAliases: result.unresolvedProxyJumpAliases,
+                          skipped: result.skipped,
+                        });
                       };
                       reader.readAsText(file);
                     }
@@ -365,6 +382,74 @@ export function HostsPage() {
           }
         }}
       />
+
+      {importReport ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ssh-import-report-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4"
+          onClick={() => setImportReport(null)}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-950 p-5 text-sm text-slate-200 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="ssh-import-report-title" className="text-base font-semibold text-white">
+              SSH config import summary
+            </h2>
+            <ul className="mt-3 space-y-1 text-slate-300">
+              <li>
+                Imported <strong className="text-white">{importReport.importedCount}</strong> host
+                {importReport.importedCount === 1 ? "" : "s"}.
+              </li>
+              {importReport.defaultsAppliedCount > 0 ? (
+                <li>
+                  Inherited defaults from <code>Host *</code> on{" "}
+                  <strong className="text-white">{importReport.defaultsAppliedCount}</strong> host
+                  {importReport.defaultsAppliedCount === 1 ? "" : "s"}.
+                </li>
+              ) : null}
+              {importReport.unresolvedProxyJumpAliases.length > 0 ? (
+                <li>
+                  ProxyJump targets not present in the file (assign manually):{" "}
+                  <span className="text-amber-300">
+                    {importReport.unresolvedProxyJumpAliases.join(", ")}
+                  </span>
+                </li>
+              ) : null}
+            </ul>
+            {importReport.skipped.length > 0 ? (
+              <div className="mt-3 rounded-xl border border-amber-700/40 bg-amber-950/30 p-3">
+                <p className="text-xs uppercase tracking-wider text-amber-300">
+                  Skipped ({importReport.skipped.length})
+                </p>
+                <ul className="mt-2 max-h-40 overflow-y-auto space-y-1 text-xs text-amber-100/90">
+                  {importReport.skipped.slice(0, 25).map((entry, index) => (
+                    <li key={`${entry.reason}-${index}`}>
+                      <span className="text-amber-300">{entry.reason}:</span> {entry.detail}
+                    </li>
+                  ))}
+                  {importReport.skipped.length > 25 ? (
+                    <li className="text-amber-300/80">
+                      …and {importReport.skipped.length - 25} more
+                    </li>
+                  ) : null}
+                </ul>
+              </div>
+            ) : null}
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setImportReport(null)}
+                className="rounded-xl bg-emerald-400 px-3 py-1.5 text-sm font-medium text-slate-950 transition hover:bg-emerald-300"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

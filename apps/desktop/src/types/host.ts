@@ -3,7 +3,11 @@ export type HostProtocol = "ssh" | "localShell" | "telnet" | "serial" | "mosh";
 export type HostKeyPolicy = "allowUnknown" | "requireTrusted";
 
 export const defaultHostProtocol: HostProtocol = "ssh";
-export const defaultHostKeyPolicy: HostKeyPolicy = "allowUnknown";
+// Secure-by-default: new hosts require an explicitly-trusted host key before
+// the first connection. Users can opt-in to "allowUnknown" per host in the
+// editor for lab/local-only targets, but the app must not silently TOFU.
+// See docs/parity-and-hardening-review.md §3.S-1.
+export const defaultHostKeyPolicy: HostKeyPolicy = "requireTrusted";
 
 export interface HostRecord {
   id: string;

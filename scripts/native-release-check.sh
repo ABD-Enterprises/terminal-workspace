@@ -36,6 +36,13 @@ if (manifest.signing?.performed && manifest.verification?.codesignStatus !== "pa
   throw new Error(`codesign verification failed: ${manifest.verification?.codesignStatus}`);
 }
 
+// Defense-in-depth: a signing-performed bundle must also pass Gatekeeper.
+// We already fail in native-bundle.sh on rejection, but re-check here in case
+// the manifest was hand-edited or the bundle script's check was bypassed.
+if (manifest.signing?.performed && manifest.verification?.spctlStatus && manifest.verification.spctlStatus !== "accepted") {
+  throw new Error(`Gatekeeper assessment failed: ${manifest.verification.spctlStatus}`);
+}
+
 console.log(JSON.stringify({
   productName: manifest.productName,
   version: manifest.version,

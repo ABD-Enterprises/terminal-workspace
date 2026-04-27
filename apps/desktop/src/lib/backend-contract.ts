@@ -1,5 +1,5 @@
 import type { PortForwardRecord } from "../types/forward";
-import type { HostAuthMethod, HostProtocol } from "../types/host";
+import type { HostAuthMethod, HostKeyPolicy, HostProtocol } from "../types/host";
 import type { KeyGenerationType } from "../types/key";
 import type { RemoteFileEntry } from "../types/transfer";
 
@@ -31,6 +31,7 @@ export interface BackendHostConnection {
   agentForwarding: boolean;
   authMethod: HostAuthMethod;
   environment?: Record<string, string>;
+  hostKeyPolicy?: HostKeyPolicy;
   hostname: string;
   jumpHost?: BackendHostConnection;
   knownHostAlgorithm?: string;

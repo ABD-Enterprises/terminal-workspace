@@ -66,6 +66,7 @@ function buildBackendConnectionRecursive(
     agentForwarding: host.agentForwarding,
     authMethod: host.authMethod,
     environment: host.environment,
+    hostKeyPolicy: host.hostKeyPolicy,
     hostname: host.hostname,
     jumpHost,
     knownHostAlgorithm: knownHost?.algorithm,
