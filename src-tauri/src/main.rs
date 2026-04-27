@@ -23,7 +23,10 @@ use reqwest::{Client, Method};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use ssh2::{Channel, Session};
-use tauri::{AppHandle, Emitter, State};
+use tauri::menu::{
+    AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder,
+};
+use tauri::{AppHandle, Emitter, Runtime, State};
 use tokio::sync::mpsc::{
     error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
@@ -55,19 +58,25 @@ static NATIVE_FORWARD_COUNTER: AtomicU64 = AtomicU64::new(1);
 struct BackendBridge {
     base_url: String,
     client: Client,
+    /// Per-launch authentication token shared with the Node backend. Populated
+    /// from `TERMSNIP_BACKEND_TOKEN` or the sidecar file the backend writes
+    /// to TMPDIR. None when the backend is unauthenticated (older builds).
+    /// See parity-and-hardening-review §3.S-4 / §3.S-8.
+    auth_token: Option<String>,
 }
 
 impl BackendBridge {
     fn new() -> Self {
-        let base_url = std::env::var("TERMSNIP_BACKEND_BASE_URL").unwrap_or_else(|_| {
-            let port =
-                std::env::var("TERMSNIP_BACKEND_PORT").unwrap_or_else(|_| "8790".to_string());
-            format!("http://127.0.0.1:{port}")
-        });
+        let port_str =
+            std::env::var("TERMSNIP_BACKEND_PORT").unwrap_or_else(|_| "8790".to_string());
+        let base_url = std::env::var("TERMSNIP_BACKEND_BASE_URL")
+            .unwrap_or_else(|_| format!("http://127.0.0.1:{port_str}"));
+        let auth_token = resolve_backend_auth_token(&port_str);
 
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             client: Client::new(),
+            auth_token,
         }
     }
 
@@ -83,6 +92,33 @@ impl BackendBridge {
         };
 
         format!("{prefix}{path}")
+    }
+}
+
+/// Read the per-launch backend token from the env, or fall back to the sidecar
+/// file the backend wrote to TMPDIR. Returns None if neither source has a
+/// usable value — the backend will still reject our requests in that case,
+/// but we surface a clearer error than a generic 403.
+fn resolve_backend_auth_token(port_str: &str) -> Option<String> {
+    if let Ok(value) = std::env::var("TERMSNIP_BACKEND_TOKEN") {
+        let trimmed = value.trim().to_string();
+        if trimmed.len() >= 32 {
+            return Some(trimmed);
+        }
+    }
+
+    let tmp = std::env::temp_dir();
+    let sidecar_path = tmp.join(format!("termsnip-backend.{port_str}.token"));
+    match fs::read_to_string(&sidecar_path) {
+        Ok(contents) => {
+            let trimmed = contents.trim().to_string();
+            if trimmed.len() >= 32 {
+                Some(trimmed)
+            } else {
+                None
+            }
+        }
+        Err(_) => None,
     }
 }
 
@@ -2075,6 +2111,9 @@ async fn proxy_json<T: DeserializeOwned>(
     body: Option<Value>,
 ) -> Result<T, String> {
     let mut request = bridge.client.request(method, bridge.url(path));
+    if let Some(token) = &bridge.auth_token {
+        request = request.header("X-Termsnip-Token", token);
+    }
     if let Some(body) = body {
         request = request.json(&body);
     }
@@ -2097,6 +2136,9 @@ async fn proxy_binary(
     body: Option<Value>,
 ) -> Result<BackendBinaryProxyResponse, String> {
     let mut request = bridge.client.request(method, bridge.url(path));
+    if let Some(token) = &bridge.auth_token {
+        request = request.header("X-Termsnip-Token", token);
+    }
     if let Some(body) = body {
         request = request.json(&body);
     }
@@ -2657,7 +2699,21 @@ async fn termsnip_open_backend_session_stream(
 
     let stream_id = next_session_stream_id();
     let ws_url = bridge.ws_url(&format!("/ws/sessions/{}", request.session_id));
-    let (backend_socket, _) = tokio_tungstenite::connect_async(&ws_url)
+
+    // Build the upgrade request manually so we can attach the per-launch
+    // auth token. tokio_tungstenite::connect_async accepts anything that
+    // implements IntoClientRequest; the Request<()> path lets us inject
+    // headers. See parity-and-hardening-review §3.S-4.
+    let mut upgrade_request = tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(ws_url.as_str())
+        .map_err(|error| error.to_string())?;
+    if let Some(token) = &bridge.auth_token {
+        upgrade_request.headers_mut().insert(
+            "X-Termsnip-Token",
+            tokio_tungstenite::tungstenite::http::HeaderValue::from_str(token)
+                .map_err(|error| error.to_string())?,
+        );
+    }
+    let (backend_socket, _) = tokio_tungstenite::connect_async(upgrade_request)
         .await
         .map_err(|error| error.to_string())?;
     let (sender, mut receiver) = unbounded_channel();
@@ -2846,12 +2902,174 @@ fn termsnip_close_backend_session_stream(
     })
 }
 
+/// Channel name the renderer subscribes to for native menu activations.
+/// Payload is the menu-item id string (e.g. "menu:nav-hosts").
+const MENU_EVENT_NAME: &str = "termsnip://menu-event";
+
+/// Build the macOS application menu. Each non-system item carries a stable
+/// string id (`menu:*`) that the renderer maps to an action via the
+/// `MENU_EVENT_NAME` event channel. Accelerators here become OS-handled
+/// keyboard shortcuts; the renderer's keydown handlers remain in place as a
+/// fallback for browser/dev mode where there is no native menu.
+/// See parity-and-hardening-review §4.7 / plan P1-UX4.
+fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let about = AboutMetadataBuilder::new()
+        .name(Some("term-snip".to_string()))
+        .build();
+
+    let app_submenu = SubmenuBuilder::new(app, "term-snip")
+        .about(Some(about))
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("menu:settings", "Settings…")
+                .accelerator("CmdOrCtrl+,")
+                .build(app)?,
+        )
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+
+    let file_submenu = SubmenuBuilder::new(app, "File")
+        .item(
+            &MenuItemBuilder::with_id("menu:new-tab", "New Tab")
+                .accelerator("CmdOrCtrl+T")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("menu:duplicate-tab", "Duplicate Tab")
+                .accelerator("CmdOrCtrl+Shift+T")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("menu:close-tab", "Close Tab")
+                .accelerator("CmdOrCtrl+W")
+                .build(app)?,
+        )
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("menu:import-ssh-config", "Import SSH config…")
+                .build(app)?,
+        )
+        .build()?;
+
+    let edit_submenu = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let view_submenu = SubmenuBuilder::new(app, "View")
+        .item(
+            &MenuItemBuilder::with_id("menu:nav-hosts", "Hosts")
+                .accelerator("CmdOrCtrl+1")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("menu:nav-sessions", "Sessions")
+                .accelerator("CmdOrCtrl+2")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("menu:nav-snippets", "Snippets")
+                .accelerator("CmdOrCtrl+3")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("menu:nav-keys", "Keys")
+                .accelerator("CmdOrCtrl+4")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("menu:nav-transfers", "Transfers")
+                .accelerator("CmdOrCtrl+5")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("menu:nav-settings", "Settings")
+                .accelerator("CmdOrCtrl+6")
+                .build(app)?,
+        )
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("menu:command-palette", "Command Palette")
+                .accelerator("CmdOrCtrl+K")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("menu:toggle-density", "Toggle Compact Density").build(app)?,
+        )
+        .separator()
+        .fullscreen()
+        .build()?;
+
+    let window_submenu = SubmenuBuilder::new(app, "Window")
+        .item(
+            &MenuItemBuilder::with_id("menu:next-tab", "Next Tab")
+                .accelerator("CmdOrCtrl+Shift+]")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("menu:prev-tab", "Previous Tab")
+                .accelerator("CmdOrCtrl+Shift+[")
+                .build(app)?,
+        )
+        .separator()
+        .minimize()
+        .build()?;
+
+    let help_submenu = SubmenuBuilder::new(app, "Help")
+        .item(
+            &MenuItemBuilder::with_id("menu:help", "term-snip Documentation").build(app)?,
+        )
+        .build()?;
+
+    MenuBuilder::new(app)
+        .items(&[
+            &app_submenu,
+            &file_submenu,
+            &edit_submenu,
+            &view_submenu,
+            &window_submenu,
+            &help_submenu,
+        ])
+        .build()
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(BackendBridge::new())
         .manage(SessionStreamRegistry::default())
         .manage(NativeSessionRegistry::default())
         .manage(NativeForwardRegistry::default())
+        .setup(|app| {
+            let handle = app.handle();
+            let menu = build_app_menu(&handle)?;
+            app.set_menu(menu)?;
+            // Bridge OS menu activations to the renderer. Errors are not
+            // recoverable here and the menu would degrade silently if we
+            // panicked, so we log and continue. The renderer treats missing
+            // events as "menu disabled in this build".
+            let event_handle = handle.clone();
+            app.on_menu_event(move |_app_handle, event| {
+                let id_str = event.id().0.clone();
+                if let Err(error) = event_handle.emit(MENU_EVENT_NAME, id_str.clone()) {
+                    eprintln!(
+                        "[termsnip] failed to forward menu event {id_str}: {error}"
+                    );
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             termsnip_transport_info,
             termsnip_protocol_runtime_status,

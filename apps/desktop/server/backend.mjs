@@ -11,11 +11,35 @@ import { fileURLToPath } from "node:url";
 import os from "node:os";
 import { Client } from "ssh2";
 import { WebSocketServer } from "ws";
+import {
+  isRequestAuthorized,
+  loadOrCreateBackendToken,
+  parseAllowedOrigins,
+} from "./auth.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appRoot = normalize(join(__dirname, ".."));
 const distRoot = join(appRoot, "dist");
 const port = Number.parseInt(process.env.TERMSNIP_BACKEND_PORT ?? "8790", 10);
+
+// Per-launch auth gate. The token is shared with the Tauri shell via env or a
+// 0600 sidecar file in TMPDIR; browser callers are authenticated by a
+// matching Origin header. See parity-and-hardening-review §3.S-4 / §3.S-8.
+const backendAuth = loadOrCreateBackendToken({
+  port,
+  env: process.env,
+  tmpdir: os.tmpdir(),
+});
+const allowedOrigins = parseAllowedOrigins(process.env.TERMSNIP_ALLOWED_ORIGINS);
+console.error(
+  `[termsnip] backend auth gate: token source=${backendAuth.source}, sidecar=${backendAuth.sidecarPath}`
+);
+console.error(`[termsnip] backend allowed origins: ${allowedOrigins.join(", ")}`);
+
+function denyUnauthorized(response, decision) {
+  response.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify({ error: "Unauthorized", reason: decision.reason }));
+}
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -951,6 +975,22 @@ const server = createServer(async (request, response) => {
 
   const url = new URL(request.url, "http://localhost");
 
+  // Auth gate: reject every request whose Origin is not in the allowlist AND
+  // does not present a valid per-launch token. See parity-and-hardening
+  // review §3.S-4 / §3.S-8. Static asset paths are also gated — the browser
+  // path serves the same dist that ships in production, but auth still
+  // applies because the backend is local-only and the dist is already
+  // bundled by Tauri in the native ship.
+  const authDecision = isRequestAuthorized({
+    headers: request.headers,
+    allowedOrigins,
+    expectedToken: backendAuth.token,
+  });
+  if (!authDecision.ok) {
+    denyUnauthorized(response, authDecision);
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/backend/status") {
     sendJson(response, 200, { ok: true });
     return;
@@ -1201,6 +1241,23 @@ server.on("upgrade", (request, socket, head) => {
   const match = url.pathname.match(/^\/ws\/sessions\/([^/]+)$/);
 
   if (!match) {
+    socket.destroy();
+    return;
+  }
+
+  // Same auth gate as the HTTP path. Browsers send Origin during the WS
+  // upgrade; native callers must present the per-launch token. Sending an
+  // explicit 401 line keeps debugging legible — `socket.destroy()` alone
+  // would just look like a network error to the caller.
+  const authDecision = isRequestAuthorized({
+    headers: request.headers,
+    allowedOrigins,
+    expectedToken: backendAuth.token,
+  });
+  if (!authDecision.ok) {
+    socket.write(
+      `HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\nContent-Length: ${authDecision.reason.length}\r\nConnection: close\r\n\r\n${authDecision.reason}`
+    );
     socket.destroy();
     return;
   }

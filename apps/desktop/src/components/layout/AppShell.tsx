@@ -72,6 +72,143 @@ export function AppShell() {
     setPaletteSelectedIndex(0);
   }, [paletteQuery]);
 
+  // ---- Native menu wiring -------------------------------------------------
+  // The macOS application menu emits `termsnip://menu-event` with a string
+  // payload like "menu:nav-hosts". We translate each id into the same actions
+  // that the in-app keyboard / palette already wire up. Browser preview has
+  // no native menu, so this listener simply does not fire.
+  // See parity-and-hardening-plan.md P1-UX4.
+  const setWorkspaceDensity = useAppStore((state) => state.setWorkspaceDensity);
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    let unlistenFn: (() => void) | undefined;
+    let cancelled = false;
+
+    const dispatchMenu = (id: string) => {
+      switch (id) {
+        case "menu:settings":
+        case "menu:nav-settings":
+          navigate("/settings");
+          break;
+        case "menu:nav-hosts":
+          navigate("/hosts");
+          break;
+        case "menu:nav-sessions":
+          navigate("/sessions");
+          break;
+        case "menu:nav-snippets":
+          navigate("/snippets");
+          break;
+        case "menu:nav-keys":
+          navigate("/keys");
+          break;
+        case "menu:nav-transfers":
+          navigate("/transfers");
+          break;
+        case "menu:command-palette":
+          openCommandPalette();
+          break;
+        case "menu:toggle-density":
+          setWorkspaceDensity(workspaceDensity === "compact" ? "comfortable" : "compact");
+          break;
+        case "menu:next-tab":
+        case "menu:prev-tab": {
+          if (sessionTabs.length === 0) {
+            break;
+          }
+          const currentIndex = sessionTabs.findIndex((tab) => tab.id === activeSessionTabId);
+          const startIndex = currentIndex >= 0 ? currentIndex : 0;
+          const direction = id === "menu:prev-tab" ? -1 : 1;
+          const nextIndex =
+            (startIndex + direction + sessionTabs.length) % sessionTabs.length;
+          const nextTabId = sessionTabs[nextIndex]?.id;
+          if (nextTabId) {
+            selectSessionTab(nextTabId);
+            navigate(`/sessions?tabId=${nextTabId}`, { replace: true });
+          }
+          break;
+        }
+        case "menu:new-tab":
+          // Open the palette so the user can type-to-connect. There is no
+          // single canonical "new tab" action in this app — every tab is
+          // bound to a host record.
+          openCommandPalette();
+          navigate("/sessions");
+          break;
+        case "menu:duplicate-tab": {
+          if (!activeSessionTab) {
+            break;
+          }
+          const host = hosts.find((entry) => entry.id === activeSessionTab.hostId);
+          if (host) {
+            duplicateSession(host, host.label);
+            navigate(`/sessions?tabId=${activeSessionTab.id}`);
+          }
+          break;
+        }
+        case "menu:close-tab": {
+          if (activeSessionTab) {
+            closeTab(activeSessionTab.id);
+          }
+          break;
+        }
+        case "menu:import-ssh-config":
+          // Routes the user to Hosts where the import button lives. A dedicated
+          // imperative trigger is queued for P2.
+          navigate("/hosts");
+          break;
+        case "menu:help":
+          // No bundled docs yet; leave a console crumb so the menu item is
+          // discoverable but does not silently no-op without explanation.
+          // P2 ticket: ship offline help bundle.
+          console.info("[termsnip] menu:help — docs site not yet wired");
+          break;
+        default:
+          // Unknown ids should be a no-op (forwards-compat for new menu
+          // items added on the Rust side before the renderer learns about
+          // them). Log only, do not throw.
+          console.warn(`[termsnip] unhandled menu id: ${id}`);
+      }
+    };
+
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<string>("termsnip://menu-event", (event) => {
+          dispatchMenu(event.payload);
+        })
+      )
+      .then((unlisten) => {
+        if (cancelled) {
+          unlisten();
+          return;
+        }
+        unlistenFn = unlisten;
+      })
+      .catch(() => {
+        // Tauri event API not available (browser preview) — listener silently
+        // disabled.
+      });
+
+    return () => {
+      cancelled = true;
+      unlistenFn?.();
+    };
+  }, [
+    activeSessionTab,
+    activeSessionTabId,
+    closeTab,
+    duplicateSession,
+    hosts,
+    navigate,
+    openCommandPalette,
+    selectSessionTab,
+    sessionTabs,
+    setWorkspaceDensity,
+    workspaceDensity,
+  ]);
+
   // Bind the macOS window title to the active session so the dock / Mission
   // Control / Cmd-Tab labels reflect what the user is currently looking at.
   // Falls back to the app name when there is no active session, and degrades
