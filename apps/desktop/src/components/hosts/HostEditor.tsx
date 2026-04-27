@@ -21,6 +21,8 @@ import {
   useConnectionSecretsStore,
 } from "../../store/connection-secrets-store";
 import { useHostsStore } from "../../store/hosts-store";
+import { useIdentitiesStore } from "../../store/identities-store";
+import type { IdentityRecord } from "../../types/identity";
 import { Modal } from "../common/Modal";
 
 interface HostEditorProps {
@@ -42,6 +44,7 @@ interface RuntimeStatusMessage {
 interface HostEditorContentProps extends HostEditorProps {
   formId: string;
   hosts: HostRecord[];
+  identities: IdentityRecord[];
   runtimeSecrets?: ConnectionSecretRecord;
   hydrateHostSecrets: (hostId: string) => Promise<ConnectionSecretRecord | undefined>;
 }
@@ -64,6 +67,7 @@ function buildHostEditorValues(
 function HostEditorContent({
   formId,
   hosts,
+  identities,
   open,
   host,
   runtimeSecrets,
@@ -322,6 +326,60 @@ function HostEditorContent({
         </label>
         ) : null}
         {supportsCredentials ? (
+        <label className="block md:col-span-2">
+          <span className="text-sm text-slate-300">
+            Reusable identity
+            <span className="ml-2 text-xs text-slate-500">
+              Optional — pre-fills username, auth method, and key path. Manage in Settings → Reusable identities.
+            </span>
+          </span>
+          <select
+            value={values.identityId}
+            onChange={(event) => {
+              const identityId = event.target.value;
+              if (!identityId) {
+                // User cleared the selection. Drop the binding but leave
+                // the credential fields where they are — clearing them
+                // would surprise users who only wanted to detach.
+                setValues((current) => ({ ...current, identityId: "" }));
+                return;
+              }
+              const identity = identities.find((entry) => entry.id === identityId);
+              if (!identity) {
+                setValues((current) => ({ ...current, identityId: "" }));
+                return;
+              }
+              // Populate the per-host credential fields from the identity.
+              // Backward compat: the runtime still reads these per-host
+              // fields in this build (see P2-DM1 batch 3).
+              setValues((current) => ({
+                ...current,
+                identityId: identity.id,
+                username: identity.username || current.username,
+                authMethod: identity.authMethod,
+                privateKeyPath:
+                  identity.authMethod === "privateKey"
+                    ? identity.privateKeyPath || current.privateKeyPath
+                    : "",
+                keyLabel:
+                  identity.authMethod === "privateKey"
+                    ? identity.label || current.keyLabel
+                    : current.keyLabel,
+              }));
+            }}
+            className={fieldClassName}
+          >
+            <option value="">No bound identity</option>
+            {identities.map((identity) => (
+              <option key={identity.id} value={identity.id}>
+                {identity.label}
+                {identity.username ? ` · ${identity.username}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        ) : null}
+        {supportsCredentials ? (
         <label className="block">
           <span className="text-sm text-slate-300">Auth method</span>
           <select
@@ -564,6 +622,7 @@ function HostEditorContent({
 
 export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
   const hosts = useHostsStore((state) => state.hosts);
+  const identities = useIdentitiesStore((state) => state.identities);
   const runtimeSecrets = useConnectionSecretsStore((state) =>
     host ? state.secretsByHostId[host.id] : undefined
   );
@@ -575,6 +634,7 @@ export function HostEditor({ open, host, onClose, onSave }: HostEditorProps) {
       key={`${formId}-${open ? "open" : "closed"}`}
       formId={formId}
       hosts={hosts}
+      identities={identities}
       open={open}
       host={host}
       runtimeSecrets={runtimeSecrets}

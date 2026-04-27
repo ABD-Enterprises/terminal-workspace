@@ -105,6 +105,12 @@ export function createHostRecord(values: HostFormValues, currentHost?: HostRecor
     createdAt: currentHost?.createdAt ?? now,
     updatedAt: now,
     lastConnectedAt: currentHost?.lastConnectedAt,
+    // P2-DM1 batch 2: form-supplied identityId wins, then existing host
+    // value, else undefined. Empty string from the form means "explicitly
+    // unbound" — drop to undefined so the persisted record stays sparse.
+    identityId: values.identityId?.trim()
+      ? values.identityId.trim()
+      : currentHost?.identityId,
   };
 }
 

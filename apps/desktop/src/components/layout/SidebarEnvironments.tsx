@@ -79,6 +79,7 @@ export function SidebarEnvironments({ searchQuery }: { searchQuery: string }) {
           environment: Object.entries(host.environment).map(([k, v]) => `${k}=${v}`).join("\\n"),
           jumpHostId: host.jumpHostId ?? "",
           sftpRoot: host.sftpRoot,
+          identityId: host.identityId ?? "",
         });
       }
     }

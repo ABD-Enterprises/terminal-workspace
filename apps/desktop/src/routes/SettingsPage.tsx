@@ -1,4 +1,7 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { ConfirmDialog } from "../components/common/ConfirmDialog";
+import { IdentityEditor, type IdentityEditorValues } from "../components/identities/IdentityEditor";
+import { IdentityList } from "../components/identities/IdentityList";
 import {
   applyImportedLocalConfigBundle,
   buildLocalConfigBundle,
@@ -6,9 +9,12 @@ import {
   type LocalConfigImportAnalysis,
 } from "../lib/local-config";
 import { isTauriRuntime } from "../lib/backend-runtime";
+import { buildIdentityUsage } from "../lib/identity-usage";
 import { parseVaultSyncTrustPolicy, type VaultSyncTrustedKey } from "../lib/vault-sync-contract";
 import { cn, splitCommaList } from "../lib/utils";
 import { useAppStore } from "../store/app-store";
+import { useHostsStore } from "../store/hosts-store";
+import { useIdentitiesStore } from "../store/identities-store";
 import { useVaultSyncTrustStore } from "../store/vault-sync-trust-store";
 import {
   listTerminalThemeOptions,
@@ -64,6 +70,61 @@ export function SettingsPage() {
   const removeTrustedKey = useVaultSyncTrustStore((state) => state.removeTrustedKey);
   const replacePolicy = useVaultSyncTrustStore((state) => state.replacePolicy);
   const [trustedKeyDraft, setTrustedKeyDraft] = useState<TrustedKeyDraft>(emptyTrustedKeyDraft);
+
+  // ---- Identity manager state (P2-DM1 batch 2) ---------------------------
+  const identities = useIdentitiesStore((state) => state.identities);
+  const upsertIdentity = useIdentitiesStore((state) => state.upsertIdentity);
+  const removeIdentity = useIdentitiesStore((state) => state.removeIdentity);
+  const allHosts = useHostsStore((state) => state.hosts);
+  const usageByIdentityId = useMemo(() => buildIdentityUsage(allHosts), [allHosts]);
+  const [identityEditorOpen, setIdentityEditorOpen] = useState(false);
+  const [editingIdentityId, setEditingIdentityId] = useState<string | undefined>();
+  const [identityPendingDelete, setIdentityPendingDelete] = useState<
+    | {
+        identityId: string;
+        label: string;
+        usageCount: number;
+      }
+    | null
+  >(null);
+
+  const submitIdentity = (values: IdentityEditorValues) => {
+    if (editingIdentityId) {
+      const existing = identities.find((entry) => entry.id === editingIdentityId);
+      upsertIdentity({
+        id: editingIdentityId,
+        label: values.label.trim(),
+        username: values.username.trim(),
+        authMethod: values.authMethod,
+        privateKeyPath:
+          values.authMethod === "privateKey" ? values.privateKeyPath.trim() : "",
+        keyId: existing?.keyId,
+        hasPassphrase: values.authMethod === "privateKey" ? values.hasPassphrase : false,
+        comment: values.comment.trim(),
+        // Editing always promotes to "imported" so a future re-derivation
+        // never overwrites the user's edits.
+        source: "imported",
+        createdAt: existing?.createdAt,
+      });
+      setStatusMessage(`Updated identity ${values.label.trim()}.`);
+    } else {
+      upsertIdentity({
+        id: crypto.randomUUID(),
+        label: values.label.trim(),
+        username: values.username.trim(),
+        authMethod: values.authMethod,
+        privateKeyPath:
+          values.authMethod === "privateKey" ? values.privateKeyPath.trim() : "",
+        hasPassphrase: values.authMethod === "privateKey" ? values.hasPassphrase : false,
+        comment: values.comment.trim(),
+        source: "imported",
+      });
+      setStatusMessage(`Created identity ${values.label.trim()}.`);
+    }
+    setErrorMessage(undefined);
+    setIdentityEditorOpen(false);
+    setEditingIdentityId(undefined);
+  };
 
   const exportConfig = () => {
     const bundle = buildLocalConfigBundle();
@@ -386,6 +447,68 @@ export function SettingsPage() {
                 })}
               </div>
             </div>
+          </div>
+        </div>
+
+        <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300">
+                Reusable identities
+              </p>
+              <p className="mt-1 text-sm leading-6 text-slate-400">
+                A reusable bundle of <code>(username, auth method, key path)</code> shared across hosts.
+                Editing the identity once propagates to every host that adopts it. The runtime still
+                reads each host's per-host fields in this build — switching the read path lands in the
+                next batch of P2-DM1.
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingIdentityId(undefined);
+                  setIdentityEditorOpen(true);
+                }}
+                className="rounded-lg bg-emerald-400 px-3 py-1.5 text-sm font-medium text-slate-950 transition hover:bg-emerald-300"
+              >
+                Add identity
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-3">
+            <IdentityList
+              identities={identities}
+              usageByIdentityId={usageByIdentityId}
+              editingIdentityId={editingIdentityId}
+              onEdit={(identityId) => {
+                setEditingIdentityId(identityId);
+                setIdentityEditorOpen(true);
+              }}
+              onDelete={(identityId) => {
+                const target = identities.find((entry) => entry.id === identityId);
+                if (!target) return;
+                setIdentityPendingDelete({
+                  identityId,
+                  label: target.label,
+                  usageCount: usageByIdentityId.get(identityId)?.length ?? 0,
+                });
+              }}
+            />
+            <IdentityEditor
+              open={identityEditorOpen}
+              identity={
+                editingIdentityId
+                  ? identities.find((entry) => entry.id === editingIdentityId)
+                  : undefined
+              }
+              onCancel={() => {
+                setIdentityEditorOpen(false);
+                setEditingIdentityId(undefined);
+              }}
+              onSubmit={(values) => submitIdentity(values)}
+            />
           </div>
         </div>
 
@@ -788,6 +911,33 @@ export function SettingsPage() {
           </p>
         </div>
       </aside>
+
+      <ConfirmDialog
+        open={Boolean(identityPendingDelete)}
+        title="Delete identity"
+        description={
+          identityPendingDelete?.usageCount
+            ? `${identityPendingDelete.label} is currently linked to ${identityPendingDelete.usageCount} host${identityPendingDelete.usageCount === 1 ? "" : "s"}. Those hosts will keep working from their per-host credential fields, but they will lose the link to this identity. You can re-bind them later in the host editor.`
+            : `Delete ${identityPendingDelete?.label ?? "this identity"}? No hosts currently reference it.`
+        }
+        confirmLabel="Delete identity"
+        onCancel={() => setIdentityPendingDelete(null)}
+        onConfirm={() => {
+          if (!identityPendingDelete) return;
+          const removed = removeIdentity(identityPendingDelete.identityId);
+          setIdentityPendingDelete(null);
+          if (editingIdentityId === identityPendingDelete.identityId) {
+            setIdentityEditorOpen(false);
+            setEditingIdentityId(undefined);
+          }
+          setErrorMessage(undefined);
+          setStatusMessage(
+            removed
+              ? `Removed identity ${removed.label}.`
+              : "Identity already removed."
+          );
+        }}
+      />
     </section>
   );
 }

@@ -37,6 +37,42 @@ describe("hosts store helpers", () => {
     expect(updatedHosts.find((host) => host.id === sampleHosts[1].id)?.label).toBe("Docs Box");
   });
 
+  it("propagates form-supplied identityId onto the host record (P2-DM1)", () => {
+    const draft = {
+      ...emptyHostFormValues,
+      label: "Bound to identity",
+      hostname: "bound.example.com",
+      identityId: "identity-deploy",
+    };
+    const created = createHostRecord(draft);
+    expect(created.identityId).toBe("identity-deploy");
+  });
+
+  it("preserves existing identityId when the form omits one (P2-DM1)", () => {
+    const existing = sampleHosts[0]; // sample host pre-stamped with identityId
+    expect(existing.identityId).toBeTruthy();
+    const draft = {
+      ...emptyHostFormValues,
+      label: existing.label,
+      hostname: existing.hostname,
+      identityId: "", // empty means "not set in this form submission"
+    };
+    const created = createHostRecord(draft, existing);
+    expect(created.identityId).toBe(existing.identityId);
+  });
+
+  it("trims whitespace identityId and preserves the existing binding (P2-DM1)", () => {
+    const existing = sampleHosts[0];
+    const draft = {
+      ...emptyHostFormValues,
+      label: existing.label,
+      hostname: existing.hostname,
+      identityId: "    ",
+    };
+    const created = createHostRecord(draft, existing);
+    expect(created.identityId).toBe(existing.identityId);
+  });
+
   it("filters hosts by query, favorites, groups, and tags", () => {
     const results = applyHostFilters(sampleHosts, {
       query: "router",

@@ -64,6 +64,14 @@ export interface HostFormValues {
   environment: string;
   jumpHostId: string;
   sftpRoot: string;
+  /**
+   * Optional reference to a reusable Identity (P2-DM1 batch 2). When set,
+   * the host editor pre-fills `username` / `authMethod` / `privateKeyPath`
+   * from the identity, and the saved record stamps the same id. Empty
+   * string means "no identity bound" — the runtime continues to read the
+   * per-host fields directly until P2-DM1 batch 3 lands.
+   */
+  identityId: string;
 }
 
 export const emptyHostFormValues: HostFormValues = {
@@ -86,6 +94,7 @@ export const emptyHostFormValues: HostFormValues = {
   environment: "",
   jumpHostId: "",
   sftpRoot: "/home",
+  identityId: "",
 };
 
 export const sampleHosts: HostRecord[] = [
@@ -223,6 +232,7 @@ export function hostToFormValues(host: HostRecord): HostFormValues {
       .join("\n"),
     jumpHostId: host.jumpHostId ?? "",
     sftpRoot: host.sftpRoot,
+    identityId: host.identityId ?? "",
   };
 }
 
