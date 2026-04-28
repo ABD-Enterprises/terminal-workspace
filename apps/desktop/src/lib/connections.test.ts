@@ -1,8 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { buildBackendConnection, buildBackendConnectionFromKnownHost } from "./connections";
 import { useConnectionSecretsStore } from "../store/connection-secrets-store";
 import { useHostsStore } from "../store/hosts-store";
+import { useIdentitiesStore } from "../store/identities-store";
+import type { IdentityRecord } from "../types/identity";
 import type { KnownHostRecord } from "../types/known-host";
+
+const initialIdentitiesState = useIdentitiesStore.getState();
+
+afterEach(() => {
+  useIdentitiesStore.setState(initialIdentitiesState);
+});
 
 const trustedKnownHost: KnownHostRecord = {
   id: "127.0.0.1:2222:ssh-ed25519",
@@ -138,6 +146,82 @@ describe("connection helpers", () => {
     expect(connection.jumpHost).toBeUndefined();
     expect(connection.password).toBe("");
     expect(connection.port).toBe(0);
+  });
+
+  it("prefers identity-supplied username, authMethod, and key path when bound (P2-DM1 B3)", () => {
+    const identity: IdentityRecord = {
+      id: "identity-shared",
+      label: "Shared Deploy",
+      username: "deploy",
+      authMethod: "privateKey",
+      privateKeyPath: "~/.ssh/shared-deploy",
+      hasPassphrase: false,
+      comment: "",
+      source: "imported",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    useIdentitiesStore.setState({
+      ...initialIdentitiesState,
+      identities: [identity],
+    });
+
+    const connection = buildBackendConnection(
+      {
+        ...baseHost,
+        // Per-host fields disagree with the identity — identity should win.
+        username: "stale-user",
+        privateKeyPath: "/tmp/stale-key",
+        authMethod: "password",
+        identityId: "identity-shared",
+      },
+      []
+    );
+
+    expect(connection.username).toBe("deploy");
+    expect(connection.authMethod).toBe("privateKey");
+    expect(connection.privateKeyPath).toBe("~/.ssh/shared-deploy");
+  });
+
+  it("falls back to per-host fields when no identity is bound (P2-DM1 B3)", () => {
+    useIdentitiesStore.setState({
+      ...initialIdentitiesState,
+      identities: [],
+    });
+
+    const connection = buildBackendConnection(
+      {
+        ...baseHost,
+        username: "perhost-user",
+        privateKeyPath: "/tmp/perhost-key",
+        identityId: undefined,
+      },
+      []
+    );
+
+    expect(connection.username).toBe("perhost-user");
+    expect(connection.authMethod).toBe("privateKey");
+    expect(connection.privateKeyPath).toBe("/tmp/perhost-key");
+  });
+
+  it("falls back to per-host fields when identityId points at a missing identity (P2-DM1 B3)", () => {
+    useIdentitiesStore.setState({
+      ...initialIdentitiesState,
+      identities: [],
+    });
+
+    const connection = buildBackendConnection(
+      {
+        ...baseHost,
+        username: "perhost-user",
+        privateKeyPath: "/tmp/perhost-key",
+        identityId: "missing-identity",
+      },
+      []
+    );
+
+    expect(connection.username).toBe("perhost-user");
+    expect(connection.privateKeyPath).toBe("/tmp/perhost-key");
   });
 
   it("applies trusted host requirements to mosh sessions", () => {

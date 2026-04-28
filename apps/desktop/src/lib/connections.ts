@@ -2,6 +2,8 @@ import type { BackendHostConnection } from "./api";
 import { hostSupportsJumpHosts, hostSupportsTrustedKeys, type HostRecord } from "../types/host";
 import { getHostConnectionSecrets } from "../store/connection-secrets-store";
 import { useHostsStore } from "../store/hosts-store";
+import { useIdentitiesStore } from "../store/identities-store";
+import { resolveIdentityForHost } from "./host-identity-resolver";
 import type { KnownHostRecord } from "../types/known-host";
 
 type BackendConnectionHost = Pick<
@@ -12,6 +14,7 @@ type BackendConnectionHost = Pick<
   | "hostKeyPolicy"
   | "id"
   | "hostname"
+  | "identityId"
   | "label"
   | "port"
   | "privateKeyPath"
@@ -46,6 +49,19 @@ function buildBackendConnectionRecursive(
     );
   }
 
+  // P2-DM1 batch 3: prefer identity-supplied credential fields when the host
+  // is bound to a reusable identity. Falls back to the per-host fields when
+  // there is no identity (transitional). The host-record fields stay
+  // populated by the editor so a partially-migrated workspace keeps working.
+  const identity = resolveIdentityForHost(host, useIdentitiesStore.getState().identities);
+  const effectiveUsername = identity?.username?.trim() || host.username;
+  const effectiveAuthMethod = identity?.authMethod ?? host.authMethod;
+  const effectivePrivateKeyPath = identity
+    ? identity.authMethod === "privateKey"
+      ? identity.privateKeyPath || host.privateKeyPath
+      : "" // identity is bound but does not use a key — clear the path
+    : host.privateKeyPath;
+
   let jumpHost: BackendHostConnection | undefined;
   if (hostSupportsJumpHosts(host.protocol) && host.jumpHostId) {
     const resolvedJumpHost = useHostsStore
@@ -64,7 +80,7 @@ function buildBackendConnectionRecursive(
 
   return {
     agentForwarding: host.agentForwarding,
-    authMethod: host.authMethod,
+    authMethod: effectiveAuthMethod,
     environment: host.environment,
     hostKeyPolicy: host.hostKeyPolicy,
     hostname: host.hostname,
@@ -74,10 +90,10 @@ function buildBackendConnectionRecursive(
     password: secrets.password,
     passphrase: secrets.passphrase,
     port: host.port,
-    privateKeyPath: host.privateKeyPath,
+    privateKeyPath: effectivePrivateKeyPath,
     protocol: host.protocol,
     sftpRoot: host.protocol === "ssh" ? host.sftpRoot : undefined,
-    username: host.username,
+    username: effectiveUsername,
   };
 }
 

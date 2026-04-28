@@ -51,6 +51,12 @@ const KEYCHAIN_PASSPHRASE_SERVICE: &str = "com.termsnip.runtime.passphrase";
 /// keys store, the renderer calls `termsnip_clear_key_passphrase` to GC
 /// the orphaned entry.
 const KEYCHAIN_KEY_PASSPHRASE_SERVICE: &str = "com.termsnip.runtime.key-passphrase";
+/// Per-identity passphrase entry (P2-DM1 batch 3). Account is the
+/// IdentityRecord's `id`. This is the canonical home for passphrases now
+/// that hosts route through reusable identities. The two older services
+/// remain for backward compatibility — `connection-secrets-store` reads
+/// identity → fingerprint → host and migrates forward at each found stage.
+const KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE: &str = "com.termsnip.runtime.identity-passphrase";
 const DEFAULT_TERMINAL_COLS: u16 = 120;
 const DEFAULT_TERMINAL_ROWS: u16 = 36;
 const DEFAULT_TERMINAL_PIXEL_WIDTH: u16 = DEFAULT_TERMINAL_COLS * 8;
@@ -562,6 +568,40 @@ struct StoreKeyPassphraseRequest {
 #[serde(rename_all = "camelCase")]
 struct KeyPassphraseResponse {
     passphrase: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IdentityPassphraseRequest {
+    identity_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoreIdentityPassphraseRequest {
+    identity_id: String,
+    passphrase: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdentityPassphraseResponse {
+    passphrase: String,
+}
+
+/// Reject identity ids that are obviously empty / malformed. The renderer
+/// only forwards UUIDs from the persisted identities store; this guard
+/// catches a rogue caller passing whitespace or empty so we don't probe
+/// the empty Keychain account by accident.
+fn validate_identity_id(identity_id: &str) -> Result<(), String> {
+    let trimmed = identity_id.trim();
+    if trimmed.is_empty() {
+        return Err("Identity id is required".to_string());
+    }
+    if trimmed.len() > 256 {
+        return Err("Identity id is unreasonably long".to_string());
+    }
+    Ok(())
 }
 
 /// Reject fingerprints that are obviously empty / malformed. The rest of the
@@ -2613,6 +2653,64 @@ async fn termsnip_clear_key_passphrase(
     .map_err(|error| error.to_string())?
 }
 
+/// Read the passphrase for a reusable Identity (P2-DM1 batch 3). Replaces
+/// the per-fingerprint workaround from P1-S5 — multiple hosts that share
+/// the same identity already share its (username, key) pair, so this is a
+/// strict generalisation. Returns an empty string when no entry exists.
+#[tauri::command]
+async fn termsnip_load_identity_passphrase(
+    request: IdentityPassphraseRequest,
+) -> Result<IdentityPassphraseResponse, String> {
+    validate_identity_id(&request.identity_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(IdentityPassphraseResponse {
+            passphrase: load_keychain_secret(
+                KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE,
+                &request.identity_id,
+            )?
+            .unwrap_or_default(),
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn termsnip_store_identity_passphrase(
+    request: StoreIdentityPassphraseRequest,
+) -> Result<BackendBooleanResponse, String> {
+    validate_identity_id(&request.identity_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        store_keychain_secret(
+            KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE,
+            &request.identity_id,
+            &request.passphrase,
+        )?;
+        Ok(BackendBooleanResponse {
+            ok: true,
+            pending: None,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn termsnip_clear_identity_passphrase(
+    request: IdentityPassphraseRequest,
+) -> Result<BackendBooleanResponse, String> {
+    validate_identity_id(&request.identity_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        delete_keychain_secret(KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE, &request.identity_id)?;
+        Ok(BackendBooleanResponse {
+            ok: true,
+            pending: None,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[tauri::command]
 async fn termsnip_create_backend_session(
     bridge: State<'_, BackendBridge>,
@@ -3207,6 +3305,9 @@ fn main() {
             termsnip_load_key_passphrase,
             termsnip_store_key_passphrase,
             termsnip_clear_key_passphrase,
+            termsnip_load_identity_passphrase,
+            termsnip_store_identity_passphrase,
+            termsnip_clear_identity_passphrase,
             termsnip_create_backend_session,
             termsnip_close_backend_session,
             termsnip_resize_backend_session,
@@ -3485,6 +3586,47 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
         let cleared = load_keychain_secret(&service, &fingerprint)
             .expect("loading deleted test key passphrase should succeed");
         assert_eq!(cleared, None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn keychain_identity_passphrase_round_trip() {
+        // Same shape as the per-host and per-fingerprint round-trips,
+        // exercising the new per-identity service introduced by P2-DM1
+        // batch 3. Catches regressions in either the constant or the
+        // command-level wrapper.
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let identity_id = format!(
+            "termsnip-identity-test-{}-{unique_suffix}",
+            process::id()
+        );
+        let service = format!("{KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE}.tests");
+
+        store_keychain_secret(&service, &identity_id, "identity-pass")
+            .expect("storing test identity passphrase should succeed");
+        let loaded = load_keychain_secret(&service, &identity_id)
+            .expect("loading test identity passphrase should succeed");
+        assert_eq!(loaded.as_deref(), Some("identity-pass"));
+
+        delete_keychain_secret(&service, &identity_id)
+            .expect("deleting test identity passphrase should succeed");
+        let cleared = load_keychain_secret(&service, &identity_id)
+            .expect("loading deleted test identity passphrase should succeed");
+        assert_eq!(cleared, None);
+    }
+
+    #[test]
+    fn validates_identity_id_shape() {
+        assert!(validate_identity_id("identity-prod-bastion-ops").is_ok());
+        assert!(validate_identity_id("00000000-0000-0000-0000-000000000000").is_ok());
+        assert!(validate_identity_id("").is_err());
+        assert!(validate_identity_id("   ").is_err());
+        // Rejects unreasonably long ids — defense-in-depth against bogus
+        // renderer input filling the Keychain index with garbage.
+        assert!(validate_identity_id(&"x".repeat(257)).is_err());
     }
 
     #[test]

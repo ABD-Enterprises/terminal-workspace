@@ -23,6 +23,18 @@ interface KeyPassphraseResponse {
   passphrase: string;
 }
 
+interface IdentityPassphraseRequest {
+  identityId: string;
+}
+
+interface StoreIdentityPassphraseRequest extends IdentityPassphraseRequest {
+  passphrase: string;
+}
+
+interface IdentityPassphraseResponse {
+  passphrase: string;
+}
+
 const emptySecrets: NativeHostSecrets = {
   password: "",
   passphrase: "",
@@ -104,5 +116,48 @@ export async function clearNativeKeyPassphrase(fingerprint: string) {
 
   await invokeTauriCommand("termsnip_clear_key_passphrase", {
     request: { fingerprint } satisfies KeyPassphraseRequest,
+  });
+}
+
+// ---- Per-identity passphrase plumbing (P2-DM1 batch 3) -------------------
+// The canonical home for per-host passphrases now that hosts route through
+// reusable identities. Strict generalisation of the per-fingerprint service
+// from P1-S5 — multiple hosts that share the same identity already share
+// the (username, key) pair, so they share this entry too. The two older
+// services remain for backward compatibility; connection-secrets-store
+// reads identity → fingerprint → host and migrates forward at each found
+// stage.
+
+export async function loadNativeIdentityPassphrase(identityId: string): Promise<string> {
+  if (!isTauriRuntime()) {
+    return "";
+  }
+
+  const response = await invokeTauriCommand<IdentityPassphraseResponse>(
+    "termsnip_load_identity_passphrase",
+    {
+      request: { identityId } satisfies IdentityPassphraseRequest,
+    }
+  );
+  return response.passphrase ?? "";
+}
+
+export async function storeNativeIdentityPassphrase(identityId: string, passphrase: string) {
+  if (!isTauriRuntime()) {
+    return;
+  }
+
+  await invokeTauriCommand("termsnip_store_identity_passphrase", {
+    request: { identityId, passphrase } satisfies StoreIdentityPassphraseRequest,
+  });
+}
+
+export async function clearNativeIdentityPassphrase(identityId: string) {
+  if (!isTauriRuntime()) {
+    return;
+  }
+
+  await invokeTauriCommand("termsnip_clear_identity_passphrase", {
+    request: { identityId } satisfies IdentityPassphraseRequest,
   });
 }

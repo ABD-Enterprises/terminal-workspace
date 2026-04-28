@@ -1,12 +1,16 @@
 import { create } from "zustand";
 import { isTauriRuntime } from "../lib/backend-runtime";
+import { resolveHostIdentity } from "../lib/host-identity-resolver";
 import { resolveHostKeyFingerprint } from "../lib/host-key-fingerprint";
 import {
   clearNativeHostSecrets,
+  clearNativeIdentityPassphrase,
   clearNativeKeyPassphrase,
   loadNativeHostSecrets,
+  loadNativeIdentityPassphrase,
   loadNativeKeyPassphrase,
   storeNativeHostSecrets,
+  storeNativeIdentityPassphrase,
   storeNativeKeyPassphrase,
 } from "../lib/native-secrets";
 
@@ -52,71 +56,111 @@ function logSecretPersistenceError(
 }
 
 /**
- * Load secrets for a host, preferring the per-key-fingerprint Keychain entry
- * for the passphrase when one is available. Falls back to the legacy
- * per-host entry and migrates it forward (write under fingerprint, clear
- * the per-host copy) so existing users keep their saved passphrases on
- * upgrade. See parity-and-hardening-plan.md P1-S5.
+ * Load secrets for a host, walking the three Keychain services in priority
+ * order (identity → fingerprint → host) and migrating forward whenever an
+ * older entry is found before a newer one. Password is always loaded from
+ * the per-host entry — passwords are intrinsically per-host.
  *
- * Password is always loaded from the per-host entry — passwords are
- * intrinsically per-host and have no shared identity to key on.
+ * P2-DM1 batch 3 introduces the per-identity service as the canonical home;
+ * the per-fingerprint service from P1-S5 and the legacy per-host service
+ * remain readable so existing users keep their saved passphrases on
+ * upgrade. Migration failures log and continue — the user still gets the
+ * passphrase even if the forward-write fails.
  */
-async function loadSecretsWithFingerprintMigration(
+async function loadSecretsWithMultiStageMigration(
   hostId: string,
+  identityId: string | undefined,
   fingerprint: string | undefined
 ): Promise<ConnectionSecretValues> {
   const perHost = await loadNativeHostSecrets(hostId);
-  if (!fingerprint) {
-    return perHost;
+
+  // Stage 1: per-identity (canonical).
+  if (identityId) {
+    const identityPassphrase = await loadNativeIdentityPassphrase(identityId);
+    if (identityPassphrase) {
+      return { password: perHost.password, passphrase: identityPassphrase };
+    }
   }
 
-  const keyedPassphrase = await loadNativeKeyPassphrase(fingerprint);
-  if (keyedPassphrase) {
-    return { password: perHost.password, passphrase: keyedPassphrase };
+  // Stage 2: per-fingerprint (P1-S5 transitional). If found and we have an
+  // identity, migrate forward to the identity service.
+  if (fingerprint) {
+    const keyedPassphrase = await loadNativeKeyPassphrase(fingerprint);
+    if (keyedPassphrase) {
+      if (identityId) {
+        try {
+          await storeNativeIdentityPassphrase(identityId, keyedPassphrase);
+          // Leave the per-fingerprint entry in place — other hosts that
+          // share the key but lack an identity binding may still need it.
+          // GC happens explicitly when the key is deleted.
+        } catch (error) {
+          logSecretPersistenceError("migrate", `identity:${identityId}`, error);
+        }
+      }
+      return { password: perHost.password, passphrase: keyedPassphrase };
+    }
   }
 
-  // Migration path: an older build wrote the passphrase under the per-host
-  // service. Move it to the per-fingerprint service and drop the legacy
-  // entry so the next reader does not have to repeat this dance. Failure
-  // here is logged but does not block the load — the user still gets the
-  // passphrase even if the migration write fails.
+  // Stage 3: legacy per-host passphrase. Migrate forward to identity (if
+  // bound) or to fingerprint (P1-S5 transitional behaviour).
   if (perHost.passphrase) {
-    try {
-      await storeNativeKeyPassphrase(fingerprint, perHost.passphrase);
-      await storeNativeHostSecrets(hostId, {
-        password: perHost.password,
-        passphrase: "",
-      });
-    } catch (error) {
-      logSecretPersistenceError("migrate", `key:${fingerprint}`, error);
+    if (identityId) {
+      try {
+        await storeNativeIdentityPassphrase(identityId, perHost.passphrase);
+        await storeNativeHostSecrets(hostId, {
+          password: perHost.password,
+          passphrase: "",
+        });
+      } catch (error) {
+        logSecretPersistenceError("migrate", `identity:${identityId}`, error);
+      }
+    } else if (fingerprint) {
+      try {
+        await storeNativeKeyPassphrase(fingerprint, perHost.passphrase);
+        await storeNativeHostSecrets(hostId, {
+          password: perHost.password,
+          passphrase: "",
+        });
+      } catch (error) {
+        logSecretPersistenceError("migrate", `key:${fingerprint}`, error);
+      }
     }
   }
 
   return perHost;
 }
 
-async function persistSecretsWithFingerprintRouting(
+async function persistSecretsWithIdentityRouting(
   hostId: string,
+  identityId: string | undefined,
   fingerprint: string | undefined,
   values: ConnectionSecretValues
 ): Promise<void> {
   // Password always lives in the per-host entry. The per-host passphrase
-  // slot stays empty when we have a fingerprint to key on so that there is
-  // exactly one source of truth.
-  const perHostPassphrase = fingerprint ? "" : values.passphrase;
+  // slot stays empty whenever we have a more-specific home (identity or
+  // fingerprint) so there is exactly one source of truth.
+  const perHostPassphrase = identityId || fingerprint ? "" : values.passphrase;
   await storeNativeHostSecrets(hostId, {
     password: values.password,
     passphrase: perHostPassphrase,
   });
 
-  if (fingerprint) {
+  if (identityId) {
     if (values.passphrase) {
-      await storeNativeKeyPassphrase(fingerprint, values.passphrase);
-    } else {
-      // Removing the passphrase for this host should not silently delete the
-      // shared per-fingerprint entry — other hosts using the same key still
-      // need it. We leave it alone; explicit GC happens via clearKeyPassphrase.
+      await storeNativeIdentityPassphrase(identityId, values.passphrase);
     }
+    // Removing the passphrase for one host should not silently delete the
+    // shared per-identity entry — other hosts that share the identity
+    // still need it. Explicit GC happens via clearIdentityPassphrase
+    // (called when the identity is deleted from the identities store).
+    return;
+  }
+
+  if (fingerprint && values.passphrase) {
+    // Backward compat: hosts not yet bound to an identity continue to use
+    // the per-fingerprint service. They will migrate forward next time
+    // they are loaded after the user binds an identity.
+    await storeNativeKeyPassphrase(fingerprint, values.passphrase);
   }
 }
 
@@ -134,7 +178,8 @@ export const useConnectionSecretsStore = create<ConnectionSecretsState>((set, ge
     }
 
     const fingerprint = resolveHostKeyFingerprint(hostId);
-    const hydrationPromise = loadSecretsWithFingerprintMigration(hostId, fingerprint)
+    const identityId = resolveHostIdentity(hostId)?.id;
+    const hydrationPromise = loadSecretsWithMultiStageMigration(hostId, identityId, fingerprint)
       .then((values) => {
         if (!hasConnectionSecrets(values)) {
           return undefined;
@@ -189,8 +234,9 @@ export const useConnectionSecretsStore = create<ConnectionSecretsState>((set, ge
     }
 
     const fingerprint = resolveHostKeyFingerprint(hostId);
+    const identityId = resolveHostIdentity(hostId)?.id;
     const persistPromise = hasConnectionSecrets(values)
-      ? persistSecretsWithFingerprintRouting(hostId, fingerprint, values)
+      ? persistSecretsWithIdentityRouting(hostId, identityId, fingerprint, values)
       : clearNativeHostSecrets(hostId);
 
     void persistPromise.catch((error) => {
@@ -237,6 +283,26 @@ export async function clearKeyPassphraseByFingerprint(
     await clearNativeKeyPassphrase(fingerprint);
   } catch (error) {
     logSecretPersistenceError("clear", `key:${fingerprint}`, error);
+  }
+}
+
+/**
+ * Garbage-collect the per-identity Keychain entry for an identity that is
+ * being removed from the identities store. Safe to call from any runtime
+ * — no-ops in the browser and swallows native errors so a failed GC does
+ * not block the identity deletion. See parity-and-hardening-plan.md
+ * P2-DM1 batch 3.
+ */
+export async function clearIdentityPassphraseById(
+  identityId: string | undefined
+): Promise<void> {
+  if (!identityId?.trim() || !isTauriRuntime()) {
+    return;
+  }
+  try {
+    await clearNativeIdentityPassphrase(identityId);
+  } catch (error) {
+    logSecretPersistenceError("clear", `identity:${identityId}`, error);
   }
 }
 

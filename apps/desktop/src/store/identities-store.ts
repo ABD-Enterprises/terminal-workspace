@@ -16,6 +16,7 @@ import {
   type IdentityRecord,
   type IdentitySource,
 } from "../types/identity";
+import { clearIdentityPassphraseById } from "./connection-secrets-store";
 import { useHostsStore } from "./hosts-store";
 import { useKeysStore } from "./keys-store";
 import { useVaultSyncStore } from "./vault-sync-store";
@@ -127,6 +128,11 @@ export const useIdentitiesStore = create<IdentitiesState>()(
           identities: state.identities.filter((entry) => entry.id !== identityId),
         }));
         useVaultSyncStore.getState().markDeleted("identities", identityId);
+        // GC the per-identity Keychain passphrase entry. Fire-and-forget —
+        // failures are logged inside clearIdentityPassphraseById and must
+        // not block the synchronous delete return value. See
+        // parity-and-hardening-plan.md P2-DM1 batch 3.
+        void clearIdentityPassphraseById(identityId);
         return target;
       },
       ensureMigrated: () => {
