@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCommandPalette } from "../../hooks/useCommandPalette";
 import { isTauriRuntime } from "../../lib/backend-runtime";
+import { launchHostSession as sharedLaunchHostSession } from "../../lib/launch-host-session";
 import { navigationItems } from "../../lib/navigation";
 import { formatPrimaryShortcut, isPrimaryShortcut } from "../../lib/shortcuts";
 import { cn, formatHostAddress } from "../../lib/utils";
@@ -356,16 +357,20 @@ export function AppShell() {
     closeCommandPalette();
   };
 
-  const launchHostSession = (hostId: string) => {
+  const launchHostSession = async (hostId: string) => {
     const host = hosts.find((entry) => entry.id === hostId);
     if (!host) {
       return;
     }
-
-    markConnected(host.id);
-    const tabId = openSession(host);
+    const result = await sharedLaunchHostSession(host);
+    if (!result.ok || !result.tabId) {
+      if (result.errorMessage) {
+        console.warn(`[palette] ${result.errorMessage}`);
+      }
+      return;
+    }
     setPaletteQuery("");
-    navigate(`/sessions?tabId=${tabId}`);
+    navigate(`/sessions?tabId=${result.tabId}`);
     closeCommandPalette();
   };
 

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { launchHostSession } from "../../lib/launch-host-session";
 import { navigationItems } from "../../lib/navigation";
 import { cn, formatDurationSince } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
@@ -13,8 +14,6 @@ export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const hosts = useHostsStore((state) => state.hosts);
-  const markConnected = useHostsStore((state) => state.markConnected);
-  const openSession = useSessionsStore((state) => state.openSession);
   const sidebarSearch = useAppStore((state) => state.sidebarSearch);
   const setSidebarSearch = useAppStore((state) => state.setSidebarSearch);
   const workspaceDensity = useAppStore((state) => state.workspaceDensity);
@@ -127,10 +126,15 @@ export function Sidebar() {
                   key={host.id}
                   type="button"
                   title={`${host.username}@${host.hostname}:${host.port}`}
-                  onClick={() => {
-                    markConnected(host.id);
-                    const tabId = openSession(host);
-                    navigate(`/sessions?tabId=${tabId}`);
+                  onClick={async () => {
+                    const result = await launchHostSession(host);
+                    if (!result.ok || !result.tabId) {
+                      if (result.errorMessage) {
+                        console.warn(`[sidebar] ${result.errorMessage}`);
+                      }
+                      return;
+                    }
+                    navigate(`/sessions?tabId=${result.tabId}`);
                   }}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-[14px] border px-2 py-1.5 text-left transition",

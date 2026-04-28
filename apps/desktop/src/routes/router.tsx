@@ -1,6 +1,7 @@
 import { Suspense, lazy } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ConnectionSecretPrompt } from "../components/common/ConnectionSecretPrompt";
+import { FingerprintTrustPrompt } from "../components/common/FingerprintTrustPrompt";
 import { AppShell } from "../components/layout/AppShell";
 
 const HostsPage = lazy(() => import("./HostsPage").then((module) => ({ default: module.HostsPage })));
@@ -91,6 +92,7 @@ export function AppRouter() {
           </Route>
         </Routes>
         <ConnectionSecretPrompt />
+        <FingerprintTrustPrompt />
       </>
     </BrowserRouter>
   );

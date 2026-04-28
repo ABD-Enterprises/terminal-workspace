@@ -19,6 +19,7 @@ import {
   hostSupportsTrustedKeys,
   emptyHostFormValues,
 } from "../types/host";
+import { launchHostSession } from "../lib/launch-host-session";
 import { parseSshConfig, toHostFormValues } from "../lib/ssh-config";
 
 export function HostsPage() {
@@ -79,15 +80,22 @@ export function HostsPage() {
     setSearchParams(nextParams);
   };
 
-  const launchSession = (hostId: string) => {
+  const launchSession = async (hostId: string) => {
     const host = allHosts.find((entry) => entry.id === hostId);
     if (!host) {
       return;
     }
-
-    markConnected(host.id);
-    const tabId = openSession(host);
-    navigate(`/sessions?tabId=${tabId}`);
+    const result = await launchHostSession(host);
+    if (!result.ok || !result.tabId) {
+      // Trust prompt rejected / scan failed — surface a non-blocking
+      // banner via console for now; future polish ticket can route this
+      // through a global toast.
+      if (result.errorMessage) {
+        console.warn(`[hosts] ${result.errorMessage}`);
+      }
+      return;
+    }
+    navigate(`/sessions?tabId=${result.tabId}`);
   };
 
   return (
