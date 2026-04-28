@@ -178,12 +178,19 @@ if [[ "$SIGNING_PERFORMED" == "true" ]]; then
   if spctl --assess --type execute --verbose=4 "$APP_PATH" >"$SPCTL_LOG" 2>&1; then
     SPCTL_STATUS="accepted"
   else
+    # Pre-notarization, spctl ALWAYS rejects with "source=Unnotarized Developer
+    # ID". That is expected and not a bundle-time failure. The notarize +
+    # promote scripts re-run spctl after stapling and refuse to ship a
+    # bundle that is rejected at THAT stage. Tracked in
+    # parity-and-hardening-review §3.S-7.
     SPCTL_STATUS="not_accepted"
-    cat "$SPCTL_LOG" >&2
-    # Fail-closed: a signing-performed bundle that Gatekeeper refuses must not
-    # silently proceed to release-check or promote. See parity-and-hardening
-    # review §3.S-7.
-    exit 1
+    if grep -q "Unnotarized Developer ID" "$SPCTL_LOG"; then
+      echo "[bundle] spctl flagged the bundle as Unnotarized Developer ID. Run native:notarize next." >&2
+    else
+      echo "[bundle] spctl rejected the bundle for an unexpected reason; failing the build." >&2
+      cat "$SPCTL_LOG" >&2
+      exit 1
+    fi
   fi
 else
   echo "Signing skipped (mode: $SIGN_MODE)"

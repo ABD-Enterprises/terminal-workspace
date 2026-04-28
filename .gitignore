@@ -6,6 +6,10 @@ src-tauri/target/
 playwright-report/
 test-results/
 artifacts/e2e/
+# Build output from native:bundle / native:notarize. Manifests, signed
+# archives, codesign + spctl + stapler logs all land here. Recreated by
+# every build; should not be tracked.
+artifacts/release/
 
 *.tsbuildinfo
 

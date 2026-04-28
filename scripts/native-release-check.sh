@@ -36,10 +36,19 @@ if (manifest.signing?.performed && manifest.verification?.codesignStatus !== "pa
   throw new Error(`codesign verification failed: ${manifest.verification?.codesignStatus}`);
 }
 
-// Defense-in-depth: a signing-performed bundle must also pass Gatekeeper.
-// We already fail in native-bundle.sh on rejection, but re-check here in case
-// the manifest was hand-edited or the bundle script's check was bypassed.
-if (manifest.signing?.performed && manifest.verification?.spctlStatus && manifest.verification.spctlStatus !== "accepted") {
+// Defense-in-depth note: a signing-performed bundle is expected to be
+// rejected by Gatekeeper at THIS stage with reason "Unnotarized Developer
+// ID" — notarization happens AFTER this script. native-promote.sh re-runs
+// the spctl check against the actual bundle right before promotion (live
+// re-verification), and that's the authoritative gate. We only fail here
+// when spctl rejected for an unexpected reason, surfaced as anything
+// other than the expected "not_accepted" state.
+if (
+  manifest.signing?.performed &&
+  manifest.verification?.spctlStatus &&
+  manifest.verification.spctlStatus !== "accepted" &&
+  manifest.verification.spctlStatus !== "not_accepted"
+) {
   throw new Error(`Gatekeeper assessment failed: ${manifest.verification.spctlStatus}`);
 }
 
