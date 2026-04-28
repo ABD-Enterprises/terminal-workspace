@@ -27,6 +27,8 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
   const closePane = useSessionsStore((state) => state.closePane);
   const selectPane = useSessionsStore((state) => state.selectPane);
   const setSplitDirection = useSessionsStore((state) => state.setSplitDirection);
+  const setSplitRatio = useSessionsStore((state) => state.setSplitRatio);
+  const reorderTab = useSessionsStore((state) => state.reorderTab);
   const allHosts = useHostsStore((state) => state.hosts);
   const quickConnectHosts = useMemo(() => {
     const normalizedQuery = quickConnectQuery.trim().toLowerCase();
@@ -76,6 +78,7 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
           activeTabId={activeTab.id}
           onSelect={selectTab}
           onClose={closeTab}
+          onReorder={reorderTab}
         />
       </div>
 
@@ -132,26 +135,30 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
             </div>
           </div>
 
-          <SplitLayout direction={activeTab.splitDirection} count={activePanes.length}>
-            {activePanes.map((pane) => {
-              const host = hosts[pane.hostId];
-              if (!host) {
-                return null;
-              }
-
-              return (
-                <TerminalPane
-                  key={pane.id}
-                  host={host}
-                  pane={pane}
-                  active={activeTab.activePaneId === pane.id}
-                  onActivate={() => selectPane(activeTab.id, pane.id)}
-                  onSplit={() => splitTab(activeTab.id, host)}
-                  onClose={() => closePane(activeTab.id, pane.id)}
-                />
-              );
-            })}
-          </SplitLayout>
+          <SplitLayout
+            direction={activeTab.splitDirection}
+            splitRatio={activeTab.splitRatio}
+            onSplitRatioChange={(next) => setSplitRatio(activeTab.id, next)}
+            panes={activePanes
+              .map((pane) => {
+                const host = hosts[pane.hostId];
+                if (!host) {
+                  return null;
+                }
+                return (
+                  <TerminalPane
+                    key={pane.id}
+                    host={host}
+                    pane={pane}
+                    active={activeTab.activePaneId === pane.id}
+                    onActivate={() => selectPane(activeTab.id, pane.id)}
+                    onSplit={() => splitTab(activeTab.id, host)}
+                    onClose={() => closePane(activeTab.id, pane.id)}
+                  />
+                );
+              })
+              .filter((node): node is NonNullable<typeof node> => node !== null)}
+          />
         </div>
 
         <aside className="min-h-0 overflow-auto rounded-[20px] border border-slate-800/80 bg-slate-950/45 p-2.5">

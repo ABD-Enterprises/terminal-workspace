@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sampleHosts } from "../types/host";
-import { formatSessionConnectionState } from "../types/session";
+import { formatSessionConnectionState, type SessionWorkspaceState } from "../types/session";
 import {
   appendPaneCommandHistoryOutput,
   cycleSessionTab,
@@ -11,8 +11,10 @@ import {
   queuePaneCommand,
   recordPaneCommandHistory,
   removeSessionPane,
+  reorderSessionTabs,
   sanitizePersistedCommandHistory,
   setTabSplitDirection,
+  setTabSplitRatio,
   splitSessionPane,
   updatePaneConnectionState,
   updatePanePreviewPersistence,
@@ -349,5 +351,70 @@ describe("sessions store helpers", () => {
     expect(telnetWorkspace.panes[telnetWorkspace.tabs[0]!.paneIds[0]!]!.transport).toBe("telnet");
     expect(serialWorkspace.panes[serialWorkspace.tabs[0]!.paneIds[0]!]!.transport).toBe("serial");
     expect(moshWorkspace.panes[moshWorkspace.tabs[0]!.paneIds[0]!]!.transport).toBe("mosh");
+  });
+
+  describe("setTabSplitRatio (bonus parity)", () => {
+    it("clamps the persisted ratio into [0.1, 0.9]", () => {
+      const initial = openSessionWorkspace(
+        { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+        sampleHosts[0]
+      );
+      const tabId = initial.tabs[0]!.id;
+
+      const tooSmall = setTabSplitRatio(initial, tabId, -1);
+      expect(tooSmall.tabs[0]!.splitRatio).toBe(0.1);
+
+      const tooLarge = setTabSplitRatio(initial, tabId, 99);
+      expect(tooLarge.tabs[0]!.splitRatio).toBe(0.9);
+
+      const justRight = setTabSplitRatio(initial, tabId, 0.625);
+      expect(justRight.tabs[0]!.splitRatio).toBe(0.625);
+    });
+
+    it("ignores non-finite inputs", () => {
+      const initial = openSessionWorkspace(
+        { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+        sampleHosts[0]
+      );
+      const tabId = initial.tabs[0]!.id;
+      const next = setTabSplitRatio(initial, tabId, Number.NaN);
+      // No-op — same reference back, splitRatio still undefined.
+      expect(next).toBe(initial);
+      expect(next.tabs[0]!.splitRatio).toBeUndefined();
+    });
+  });
+
+  describe("reorderSessionTabs (bonus parity)", () => {
+    function buildWorkspace() {
+      let workspace: SessionWorkspaceState = {
+        tabs: [],
+        panes: {},
+        activeTabId: undefined,
+        lastRestoredAt: undefined,
+      };
+      for (const host of sampleHosts.slice(0, 3)) {
+        workspace = openSessionWorkspace(workspace, host);
+      }
+      return workspace;
+    }
+
+    it("moves a tab from one index to another", () => {
+      const workspace = buildWorkspace();
+      const originalOrder = workspace.tabs.map((tab) => tab.id);
+      const moved = reorderSessionTabs(workspace, 0, 2);
+      const newOrder = moved.tabs.map((tab) => tab.id);
+      expect(newOrder).toEqual([originalOrder[1]!, originalOrder[2]!, originalOrder[0]!]);
+    });
+
+    it("is a no-op when the indices are equal", () => {
+      const workspace = buildWorkspace();
+      expect(reorderSessionTabs(workspace, 1, 1)).toBe(workspace);
+    });
+
+    it("is a no-op when an index is out of range", () => {
+      const workspace = buildWorkspace();
+      expect(reorderSessionTabs(workspace, -1, 0)).toBe(workspace);
+      expect(reorderSessionTabs(workspace, 0, workspace.tabs.length)).toBe(workspace);
+    });
   });
 });

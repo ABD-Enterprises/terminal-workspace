@@ -501,6 +501,48 @@ export function setTabSplitDirection(
   };
 }
 
+const MIN_SPLIT_RATIO = 0.1;
+const MAX_SPLIT_RATIO = 0.9;
+
+export function setTabSplitRatio(
+  state: SessionWorkspaceState,
+  tabId: string,
+  ratio: number
+): SessionWorkspaceState {
+  // Clamp so a runaway drag never collapses a pane completely. Reject
+  // non-finite inputs (NaN can sneak in from cancelled mouse-event math).
+  if (!Number.isFinite(ratio)) {
+    return state;
+  }
+  const clamped = Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio));
+  return {
+    ...state,
+    tabs: state.tabs.map((tab) =>
+      tab.id === tabId ? touchTab(tab, { splitRatio: clamped }) : tab
+    ),
+  };
+}
+
+export function reorderSessionTabs(
+  state: SessionWorkspaceState,
+  fromIndex: number,
+  toIndex: number
+): SessionWorkspaceState {
+  if (
+    fromIndex === toIndex ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= state.tabs.length ||
+    toIndex >= state.tabs.length
+  ) {
+    return state;
+  }
+  const next = [...state.tabs];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return { ...state, tabs: next };
+}
+
 export function recordPaneCommandHistory(
   state: SessionWorkspaceState & { commandHistory: SessionCommandHistoryEntry[] },
   paneId: string,
@@ -588,6 +630,18 @@ export interface SessionsState extends SessionWorkspaceState {
   queueCommandForHosts: (hosts: HostRecord[], command: string, label?: string) => string[];
   togglePaneConnection: (paneId: string) => void;
   setSplitDirection: (tabId: string, splitDirection: SplitDirection) => void;
+  /**
+   * Bonus parity round: persist a 0..1 ratio for the resizable splitter so
+   * the user's drag survives a reload. Clamped to [0.1, 0.9] inside
+   * setTabSplitRatio so a runaway drag never makes one pane invisible.
+   */
+  setSplitRatio: (tabId: string, ratio: number) => void;
+  /**
+   * Bonus parity round: drag-and-drop reorder for the tab strip. No-op when
+   * the indices are equal or out of range so callers don't need to bounds-
+   * check.
+   */
+  reorderTab: (fromIndex: number, toIndex: number) => void;
 }
 
 export const useSessionsStore = create<SessionsState>()(
@@ -671,6 +725,10 @@ export const useSessionsStore = create<SessionsState>()(
         }),
       setSplitDirection: (tabId, splitDirection) =>
         set((state) => setTabSplitDirection(state, tabId, splitDirection)),
+      setSplitRatio: (tabId, ratio) =>
+        set((state) => setTabSplitRatio(state, tabId, ratio)),
+      reorderTab: (fromIndex, toIndex) =>
+        set((state) => reorderSessionTabs(state, fromIndex, toIndex)),
     }),
     {
       name: "termsnip-sessions",

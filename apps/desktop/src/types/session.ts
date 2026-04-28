@@ -52,6 +52,12 @@ export interface SessionTab {
   paneIds: string[];
   activePaneId: string;
   splitDirection: SplitDirection;
+  /**
+   * For 2-pane splits, the fraction (0..1) of the container occupied by the
+   * first pane along the split axis. Default 0.5. Persisted per tab so a
+   * relaunch preserves the user's drag. Bonus parity round.
+   */
+  splitRatio?: number;
   createdAt: string;
   updatedAt: string;
 }
