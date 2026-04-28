@@ -14,14 +14,34 @@ export interface HostRecord {
   label: string;
   protocol: HostProtocol;
   hostname: string;
+  /**
+   * @deprecated P2-DM1 B4 — owned by the bound IdentityRecord; the runtime
+   * reads from the identity when `identityId` is set (see connections.ts).
+   * Kept on the host record as a fallback so a partially-migrated workspace
+   * keeps working. Slated for removal in 0.2.0 once we have evidence the
+   * auto-migration ran successfully on every upgrading install.
+   */
   username: string;
   port: number;
+  /**
+   * @deprecated P2-DM1 B4 — owned by the bound IdentityRecord. See
+   * `username` for the removal contract.
+   */
   authMethod: HostAuthMethod;
+  /**
+   * @deprecated P2-DM1 B4 — owned by the bound IdentityRecord. See
+   * `username` for the removal contract.
+   */
   privateKeyPath: string;
   group: string;
   tags: string[];
   note: string;
   favorite: boolean;
+  /**
+   * @deprecated P2-DM1 B4 — replaced by `IdentityRecord.label`. The
+   * HostEditor stops writing this field once an identity is bound; it
+   * stays on the record as display metadata for unmigrated hosts.
+   */
   keyLabel: string;
   hostKeyPolicy: HostKeyPolicy;
   agentForwarding: boolean;
@@ -34,12 +54,11 @@ export interface HostRecord {
   updatedAt: string;
   lastConnectedAt?: string;
   /**
-   * Optional foreign key into `useIdentitiesStore`. When present, the
-   * identity owns the canonical (username, authMethod, privateKeyPath)
-   * triple. Until P2-DM1 batch 3 lands, the runtime still reads the
-   * per-host fields above; this field is populated by the auto-migration
-   * so future batches can flip the read path without a separate migration
-   * step. See docs/parity-and-hardening-plan.md P2-DM1.
+   * Foreign key into `useIdentitiesStore`. When present, the identity owns
+   * the canonical (username, authMethod, privateKeyPath) triple and the
+   * runtime reads from the identity (see connections.ts P2-DM1 B3). The
+   * per-host duplicates above are deprecated and will be removed in 0.2.0
+   * (P2-DM1 B4).
    */
   identityId?: string;
 }
