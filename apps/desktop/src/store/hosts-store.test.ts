@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { defaultHostKeyPolicy, defaultHostProtocol, emptyHostFormValues, sampleHosts } from "../types/host";
 import {
   applyHostFilters,
@@ -7,7 +7,14 @@ import {
   sortHostCollection,
   toggleHostFavoriteInCollection,
   upsertHostCollection,
+  useHostsStore,
 } from "./hosts-store";
+
+const initialHostsState = useHostsStore.getState();
+
+afterEach(() => {
+  useHostsStore.setState(initialHostsState);
+});
 
 describe("hosts store helpers", () => {
   it("creates and updates host records", () => {
@@ -197,5 +204,54 @@ describe("hosts store helpers", () => {
     expect(created.privateKeyPath).toBe("~/.ssh/id_ops");
     expect(created.keyLabel).toBe("Ops Key");
     expect(created.hostKeyPolicy).toBe("requireTrusted");
+  });
+
+  it("renameGroup updates every host with the old name (P2-DM2)", () => {
+    useHostsStore.setState({
+      ...initialHostsState,
+      hosts: [
+        { ...sampleHosts[0], group: "Old" },
+        { ...sampleHosts[1], group: "Old" },
+        { ...sampleHosts[2], group: "Other" },
+      ],
+    });
+
+    const touched = useHostsStore.getState().renameGroup("Old", "New");
+
+    expect(touched).toBe(2);
+    const groups = useHostsStore.getState().hosts.map((h) => h.group);
+    expect(groups.filter((g) => g === "New")).toHaveLength(2);
+    expect(groups.filter((g) => g === "Other")).toHaveLength(1);
+    expect(groups.filter((g) => g === "Old")).toHaveLength(0);
+  });
+
+  it("renameGroup is a no-op when oldName is empty or matches newName (P2-DM2)", () => {
+    expect(useHostsStore.getState().renameGroup("", "New")).toBe(0);
+    expect(useHostsStore.getState().renameGroup("  ", "New")).toBe(0);
+    expect(useHostsStore.getState().renameGroup("Same", "Same")).toBe(0);
+  });
+
+  it("removeGroup clears host.group on every host in that group (P2-DM2)", () => {
+    useHostsStore.setState({
+      ...initialHostsState,
+      hosts: [
+        { ...sampleHosts[0], group: "Doomed" },
+        { ...sampleHosts[1], group: "Doomed" },
+        { ...sampleHosts[2], group: "Survivor" },
+      ],
+    });
+
+    const touched = useHostsStore.getState().removeGroup("Doomed");
+
+    expect(touched).toBe(2);
+    const groups = useHostsStore.getState().hosts.map((h) => h.group);
+    expect(groups.filter((g) => g === "Doomed")).toHaveLength(0);
+    expect(groups.filter((g) => g === "Survivor")).toHaveLength(1);
+    expect(groups.filter((g) => g === "")).toHaveLength(2);
+  });
+
+  it("removeGroup with an empty name is a no-op (P2-DM2)", () => {
+    expect(useHostsStore.getState().removeGroup("")).toBe(0);
+    expect(useHostsStore.getState().removeGroup("   ")).toBe(0);
   });
 });

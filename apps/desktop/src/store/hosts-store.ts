@@ -255,6 +255,20 @@ interface HostsState {
   setSnippetCounts: (counts: Record<string, number>) => void;
   assignKey: (hostId: string, key: { label: string; privateKeyPath: string }) => void;
   clearKeyByPath: (privateKeyPath: string) => void;
+  /**
+   * Rename a group across every host that currently belongs to it. Returns
+   * the number of hosts that were touched. P2-DM2: this is the inline-
+   * rename action invoked from `SidebarGroups`. No-op when `oldName` is
+   * empty (the unbound state) or matches `newName`.
+   */
+  renameGroup: (oldName: string, newName: string) => number;
+  /**
+   * Drop a group by clearing `host.group` on every host that belongs to it.
+   * Returns the number of hosts that were touched. P2-DM2: deleting a
+   * group does not delete any hosts — it only unbinds them so they fall
+   * into the "Ungrouped" bucket.
+   */
+  removeGroup: (groupName: string) => number;
 }
 
 export const useHostsStore = create<HostsState>()(
@@ -308,6 +322,47 @@ export const useHostsStore = create<HostsState>()(
         set((state) => ({
           hosts: clearKeyInCollection(state.hosts, privateKeyPath),
         })),
+      renameGroup: (oldName, newName) => {
+        const trimmedOld = oldName.trim();
+        const trimmedNew = newName.trim();
+        if (!trimmedOld || trimmedOld === trimmedNew) {
+          return 0;
+        }
+        let touched = 0;
+        const now = new Date().toISOString();
+        set((state) => ({
+          hosts: sortHostCollection(
+            state.hosts.map((host) => {
+              if (host.group !== trimmedOld) {
+                return host;
+              }
+              touched += 1;
+              return { ...host, group: trimmedNew, updatedAt: now };
+            })
+          ),
+        }));
+        return touched;
+      },
+      removeGroup: (groupName) => {
+        const trimmed = groupName.trim();
+        if (!trimmed) {
+          return 0;
+        }
+        let touched = 0;
+        const now = new Date().toISOString();
+        set((state) => ({
+          hosts: sortHostCollection(
+            state.hosts.map((host) => {
+              if (host.group !== trimmed) {
+                return host;
+              }
+              touched += 1;
+              return { ...host, group: "", updatedAt: now };
+            })
+          ),
+        }));
+        return touched;
+      },
     }),
     {
       name: "termsnip-hosts",
