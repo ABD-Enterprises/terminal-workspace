@@ -118,4 +118,46 @@ test.describe("modal viewport contract (1280x720)", () => {
 
     await cancelButton.click();
   });
+
+  test("Key editor (Import key): Import + Cancel reachable on a short viewport", async ({
+    page,
+  }) => {
+    await page.goto("/keys");
+    await page.getByRole("button", { name: "Import key" }).click();
+    await expect(page.getByRole("heading", { name: "Import private key" })).toBeVisible();
+
+    await expect(page.getByRole("button", { name: "Import key" }).nth(1)).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Cancel" })).toBeInViewport();
+
+    const dialog = page.getByRole("dialog");
+    const box = await dialog.boundingBox();
+    expect(box).not.toBeNull();
+    if (box) {
+      expect(box.height).toBeLessThanOrEqual(720);
+      expect(box.y + box.height).toBeLessThanOrEqual(720);
+    }
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+  });
+
+  test("Key editor (Generate key): Generate + Cancel reachable on a short viewport", async ({
+    page,
+  }) => {
+    await page.goto("/keys");
+    await page.getByRole("button", { name: "Generate key" }).click();
+    await expect(page.getByRole("heading", { name: "Generate private key" })).toBeVisible();
+
+    await expect(page.getByRole("button", { name: "Generate key" }).nth(1)).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Cancel" })).toBeInViewport();
+
+    const dialog = page.getByRole("dialog");
+    const box = await dialog.boundingBox();
+    expect(box).not.toBeNull();
+    if (box) {
+      expect(box.height).toBeLessThanOrEqual(720);
+      expect(box.y + box.height).toBeLessThanOrEqual(720);
+    }
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+  });
 });
