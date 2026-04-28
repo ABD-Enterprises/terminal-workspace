@@ -662,6 +662,9 @@ struct SessionStreamEvent {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)] // P2-NET: kept around for one release in case the renderer
+                    // contract changes again; field is read by serde when the
+                    // proxy_json path is exercised by older paths.
 struct RawBackendStatusResponse {
     ok: bool,
 }
@@ -2275,21 +2278,31 @@ fn termsnip_protocol_runtime_status(
     build_protocol_runtime_status(&request.protocol)
 }
 
+/// Backend status check. P2-NET — used to forward through the Node backend
+/// via `proxy_json`; the Tauri shell now owns SSH/SFTP/forwarding/snippets/
+/// keys directly so we no longer require the Node backend to be running.
+/// Returns synthetic `ok: true` to signal that the native transport is
+/// available. The `backend_base_url` field is preserved so the renderer
+/// keeps a coherent BackendStatusResponse shape, but the URL no longer
+/// implies anything about whether a Node process is listening.
 #[tauri::command]
 async fn termsnip_backend_status(
     bridge: State<'_, BackendBridge>,
 ) -> Result<BackendStatusResponse, String> {
-    let response =
-        proxy_json::<RawBackendStatusResponse>(&bridge, Method::GET, "/api/backend/status", None)
-            .await?;
-
     Ok(BackendStatusResponse {
-        ok: response.ok,
+        ok: true,
         backend_base_url: bridge.base_url.clone(),
         transport: "tauri-proxy",
     })
 }
 
+/// P2-NET — generic Node-backend proxy. No first-class renderer caller
+/// exercises this path anymore: every API function in `lib/api.ts` either
+/// invokes a dedicated `termsnip_*` command or falls through to the
+/// browser-mode `fetch()` path. Slated for removal in 0.2.0 alongside the
+/// `BackendBridge` HTTP client. Kept for one release as a safety valve in
+/// case an older renderer build or an out-of-tree caller still depends on
+/// it.
 #[tauri::command]
 async fn termsnip_proxy_backend_json(
     bridge: State<'_, BackendBridge>,
@@ -2304,6 +2317,7 @@ async fn termsnip_proxy_backend_json(
     .await
 }
 
+/// P2-NET — see {@link termsnip_proxy_backend_json} for the removal contract.
 #[tauri::command]
 async fn termsnip_proxy_backend_binary(
     bridge: State<'_, BackendBridge>,

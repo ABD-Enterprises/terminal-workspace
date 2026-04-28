@@ -23,8 +23,6 @@ import {
   invokeTauriCommand,
   isTauriRuntime,
   openSessionSocket,
-  proxyBackendBinary,
-  proxyBackendJson,
   resizeSession,
 } from "./backend-runtime";
 import {
@@ -56,11 +54,15 @@ export type {
 } from "./backend-contract";
 export type { SessionSocketLike } from "./backend-runtime";
 
+/**
+ * Fetch JSON from the Node backend. Browser-mode fallback only — every
+ * native (Tauri) caller short-circuits to a `termsnip_*` invokeTauriCommand
+ * before reaching here. P2-NET removed the now-dead `isTauriRuntime()`
+ * branch that used to forward through `proxyBackendJson`; the Tauri shell
+ * is the source of truth in native and never needs to hit the Node
+ * backend's HTTP surface anymore.
+ */
 async function backendFetch<T>(path: string, init?: RequestInit) {
-  if (isTauriRuntime()) {
-    return proxyBackendJson<T>(path, init);
-  }
-
   const response = await fetch(path, {
     ...init,
     headers: {
@@ -77,11 +79,11 @@ async function backendFetch<T>(path: string, init?: RequestInit) {
   return (await response.json()) as T;
 }
 
+/**
+ * Browser-mode binary fetch. See `backendFetch` — the dead Tauri-runtime
+ * branch was removed in P2-NET.
+ */
 async function backendBinaryFetch(path: string, init?: RequestInit) {
-  if (isTauriRuntime()) {
-    return proxyBackendBinary(path, init);
-  }
-
   const response = await fetch(path, init);
 
   if (!response.ok) {

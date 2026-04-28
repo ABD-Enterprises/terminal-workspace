@@ -393,6 +393,15 @@ async function browserFetchJson<T>(path: string, init?: RequestInit) {
   return (await response.json()) as T;
 }
 
+/**
+ * @deprecated P2-NET — kept for backward compatibility but no longer used
+ * in real flows. Every API call in `lib/api.ts` either invokes a first-
+ * class `termsnip_*` Tauri command or falls through to the browser-mode
+ * `fetch()` path; nothing routes through `proxyBackendJson` anymore.
+ * Slated for removal in 0.2.0 alongside the matching
+ * `termsnip_proxy_backend_json` Rust command and the `BackendBridge`
+ * HTTP client.
+ */
 export async function proxyBackendJson<T>(path: string, init?: RequestInit) {
   return invokeTauriCommand<T>("termsnip_proxy_backend_json", {
     request: {
@@ -403,6 +412,7 @@ export async function proxyBackendJson<T>(path: string, init?: RequestInit) {
   });
 }
 
+/** @deprecated P2-NET — see {@link proxyBackendJson} for the removal contract. */
 export async function proxyBackendBinary(path: string, init?: RequestInit) {
   const response = await invokeTauriCommand<BackendBinaryProxyResponse>(
     "termsnip_proxy_backend_binary",
