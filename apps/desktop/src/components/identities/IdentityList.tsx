@@ -83,6 +83,11 @@ export function IdentityList({
                         ? "User-owned. Re-running the migration will not overwrite this."
                         : "Auto-derived from a host. Editing will mark it as user-owned."
                     }
+                    aria-label={
+                      identity.source === "imported"
+                        ? "User-owned identity"
+                        : "Auto-derived identity"
+                    }
                   >
                     {identity.source}
                   </span>

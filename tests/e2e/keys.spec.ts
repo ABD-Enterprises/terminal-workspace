@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test  } from "./helpers";
 
 // Coverage for /keys: Import + Generate buttons open the editor; Known
 // hosts panel exposes Scan + Trust + Remove. Verifies seeded sample

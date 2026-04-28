@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test  } from "./helpers";
 
 // Sidebar surface is the navigation backbone — every page reaches it.
 // Test the search box, every nav item, the pinned-favorites panel, the

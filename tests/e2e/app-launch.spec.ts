@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test  } from "./helpers";
 import { capture } from "./helpers";
 
 test("walks the primary routes and captures browser screenshots", async ({ page }) => {

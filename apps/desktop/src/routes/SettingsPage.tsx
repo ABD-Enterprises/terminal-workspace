@@ -400,6 +400,11 @@ export function SettingsPage() {
                       type="button"
                       role="radio"
                       aria-checked={selected}
+                      // Explicit aria-label keeps the accessible name short
+                      // ("Slate Emerald") rather than the concatenated
+                      // label + mode badge + description text. Tests can
+                      // address radios by their theme name unambiguously.
+                      aria-label={option.label}
                       onClick={() => setTerminalTheme(option.name as TerminalThemeName)}
                       className={cn(
                         "flex items-stretch gap-3 rounded-[14px] border px-3 py-2 text-left transition",

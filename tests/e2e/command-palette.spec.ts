@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test  } from "./helpers";
 
 // Coverage for the command palette: open via button + Cmd+K, search,
 // keyboard navigation (Up/Down/Enter), and the four sections (Sections,

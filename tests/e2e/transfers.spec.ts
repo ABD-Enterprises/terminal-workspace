@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test  } from "./helpers";
 
 // Coverage for /transfers: active-host selector, file browser top affordances,
 // Open terminal + Edit host shortcuts, and the demo file listing.

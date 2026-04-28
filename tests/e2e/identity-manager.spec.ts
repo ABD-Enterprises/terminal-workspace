@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test  } from "./helpers";
 
 // End-to-end coverage for the Settings → Reusable identities surface.
 // Verifies the create flow, the inline edit flow, and the delete-with-warning

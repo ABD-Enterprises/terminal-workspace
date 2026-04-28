@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test  } from "./helpers";
 
 // Coverage for /sessions: mock session lifecycle, command-history toolbar,
 // and the workspace tab strip. Avoids unnecessary terminal interaction

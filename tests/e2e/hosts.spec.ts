@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test  } from "./helpers";
 
 // Comprehensive coverage for /hosts: every primary button on the page,
 // the filter bar, the editor flow, the delete confirm, and the SSH config

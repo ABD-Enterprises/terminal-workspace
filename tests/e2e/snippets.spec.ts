@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test  } from "./helpers";
 
 // Coverage for /snippets: list, search, new/duplicate disabled state, the
 // editor modal, and the original happy-path run-in-active-pane flow.

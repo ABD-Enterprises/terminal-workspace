@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test  } from "./helpers";
 
 // Coverage for /settings — every visible panel and the primary toggle for
 // each. Workspace preferences, terminal theme, runtime mode, identities

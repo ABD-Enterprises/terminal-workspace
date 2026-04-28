@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test  } from "./helpers";
 
 test("creates a folder in the demo transfer browser", async ({ page }) => {
   await page.goto("/transfers");

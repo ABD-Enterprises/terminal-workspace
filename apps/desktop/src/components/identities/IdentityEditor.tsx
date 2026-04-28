@@ -102,6 +102,7 @@ export function IdentityEditor({
         <label className="block text-xs uppercase tracking-[0.14em] text-slate-500">
           Label
           <input
+            aria-label="Identity label"
             value={values.label}
             onChange={(event) =>
               setValues((current) => ({ ...current, label: event.target.value }))
@@ -114,6 +115,7 @@ export function IdentityEditor({
         <label className="block text-xs uppercase tracking-[0.14em] text-slate-500">
           Username
           <input
+            aria-label="Identity username"
             value={values.username}
             onChange={(event) =>
               setValues((current) => ({ ...current, username: event.target.value }))
@@ -125,6 +127,7 @@ export function IdentityEditor({
         <label className="block text-xs uppercase tracking-[0.14em] text-slate-500">
           Auth method
           <select
+            aria-label="Identity auth method"
             value={values.authMethod}
             onChange={(event) =>
               setValues((current) => ({
@@ -143,6 +146,7 @@ export function IdentityEditor({
           <label className="block text-xs uppercase tracking-[0.14em] text-slate-500">
             Private key path
             <input
+              aria-label="Identity private key path"
               value={values.privateKeyPath}
               onChange={(event) =>
                 setValues((current) => ({
@@ -184,6 +188,7 @@ export function IdentityEditor({
         <label className="block text-xs uppercase tracking-[0.14em] text-slate-500 md:col-span-2">
           Notes
           <textarea
+            aria-label="Identity notes"
             value={values.comment}
             onChange={(event) =>
               setValues((current) => ({ ...current, comment: event.target.value }))
