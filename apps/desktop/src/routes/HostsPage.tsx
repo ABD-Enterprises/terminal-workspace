@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useHosts } from "../hooks/useHosts";
+import { useListKeyboardNavigation } from "../hooks/useListKeyboardNavigation";
 import { describeHostRuntime, formatEnvironmentVariables, formatHostAddress, formatRelativeTime } from "../lib/utils";
 import { useAppStore } from "../store/app-store";
 import { useConnectionSecretsStore } from "../store/connection-secrets-store";
@@ -40,6 +41,8 @@ export function HostsPage() {
   >(null);
   const query = useAppStore((state) => state.sidebarSearch);
   const setQuery = useAppStore((state) => state.setSidebarSearch);
+  const commandPaletteOpen = useAppStore((state) => state.commandPaletteOpen);
+  const cheatsheetOpen = useAppStore((state) => state.cheatsheetOpen);
   const setHostSecrets = useConnectionSecretsStore((state) => state.setHostSecrets);
   const clearHostSecrets = useConnectionSecretsStore((state) => state.clearHostSecrets);
   const createHost = useHostsStore((state) => state.createHost);
@@ -97,6 +100,26 @@ export function HostsPage() {
     }
     navigate(`/sessions?tabId=${result.tabId}`);
   };
+
+  // Keyboard navigation for the host list. Disabled while any dialog
+  // (Add/Edit, delete confirm, import report) or the global palette /
+  // cheatsheet is open, so j/k don't bleed through to the background.
+  // Enter on the selected host launches the session — the same action as
+  // the row's "Open" button. See QWEN review keyboard-first item.
+  const navDisabled =
+    creatingHost ||
+    editingHost !== undefined ||
+    hostPendingDelete !== null ||
+    importReport !== null ||
+    commandPaletteOpen ||
+    cheatsheetOpen;
+  useListKeyboardNavigation({
+    itemIds: filteredHosts.map((host) => host.id),
+    selectedId: selectedHost?.id,
+    onSelect: (hostId) => updateParams({ focus: hostId }),
+    onActivate: launchSession,
+    enabled: !navDisabled,
+  });
 
   return (
     <>

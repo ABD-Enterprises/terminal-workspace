@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCommandPalette } from "../../hooks/useCommandPalette";
+import { useKeyboardCheatsheet } from "../../hooks/useKeyboardCheatsheet";
+import { KeyboardCheatsheet } from "../common/KeyboardCheatsheet";
 import { isTauriRuntime } from "../../lib/backend-runtime";
 import { launchHostSession as sharedLaunchHostSession } from "../../lib/launch-host-session";
 import { navigationItems } from "../../lib/navigation";
@@ -19,6 +21,7 @@ const APP_TITLE = "term-snip";
 
 export function AppShell() {
   useCommandPalette();
+  useKeyboardCheatsheet();
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -999,6 +1002,7 @@ export function AppShell() {
           </div>
         </div>
       ) : null}
+      <KeyboardCheatsheet />
     </div>
   );
 }

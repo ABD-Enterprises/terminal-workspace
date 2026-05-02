@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { connect as connectNet, createServer as createNetServer } from "node:net";
 import { dirname, extname, join, normalize, posix as posixPath } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -848,6 +848,12 @@ async function inspectKey(pathname) {
   };
 }
 
+// Quote a path for safe inclusion inside a /bin/sh single-quoted string.
+// Mirrors shell_single_quote in src-tauri/src/native_transport.rs.
+function shellSingleQuote(value) {
+  return "'" + String(value).replace(/'/g, "'\\''") + "'";
+}
+
 async function generateKeyPair({ comment, passphrase, path, type }) {
   const resolvedPath = expandHome(path);
 
@@ -862,15 +868,80 @@ async function generateKeyPair({ comment, passphrase, path, type }) {
     }
   }
 
-  const args = ["-q", "-t", type, "-f", resolvedPath, "-N", passphrase ?? "", "-C", comment];
+  const baseArgs = ["-q", "-t", type, "-f", resolvedPath, "-C", comment];
   if (type === "rsa") {
-    args.splice(3, 0, "-b", "4096");
+    baseArgs.splice(3, 0, "-b", "4096");
   }
   if (type === "ecdsa") {
-    args.splice(3, 0, "-b", "521");
+    baseArgs.splice(3, 0, "-b", "521");
   }
 
-  await execFileAsync("/usr/bin/ssh-keygen", args);
+  const passphraseValue = passphrase ?? "";
+
+  if (passphraseValue.length === 0) {
+    // Empty passphrase — `-N ""` in argv leaks nothing.
+    await execFileAsync("/usr/bin/ssh-keygen", [...baseArgs, "-N", ""]);
+    return inspectKey(resolvedPath);
+  }
+
+  // Non-empty passphrase. The passphrase MUST NOT appear in argv (`ps`
+  // would expose it). Mirror the Tauri pattern from
+  // src-tauri/src/native_transport.rs:563-606 — write the passphrase to a
+  // 0600 file in a private temp dir, hand ssh-keygen an SSH_ASKPASS shim
+  // that prints it, scrub both files when done. Originally reported as
+  // QWEN security finding S-2 against this Node code path; the Tauri
+  // path was already protected.
+  const sessionDir = await mkdtemp(join(os.tmpdir(), "termsnip-keygen-"));
+  const passPath = join(sessionDir, "pass");
+  const askpassPath = join(sessionDir, "askpass.sh");
+
+  try {
+    await writeFile(passPath, passphraseValue, { mode: 0o600 });
+    // The askpass shim cats the pass file rather than embedding the
+    // passphrase, so the script body itself never holds the secret.
+    await writeFile(
+      askpassPath,
+      `#!/bin/sh\nexec /bin/cat -- ${shellSingleQuote(passPath)}\n`,
+      { mode: 0o700 }
+    );
+
+    await execFileAsync("/usr/bin/ssh-keygen", baseArgs, {
+      env: {
+        ...process.env,
+        SSH_ASKPASS: askpassPath,
+        // SSH_ASKPASS_REQUIRE=force makes ssh-keygen prefer the askpass
+        // shim even when a TTY is attached. OpenSSH >= 8.4 (macOS 12+).
+        SSH_ASKPASS_REQUIRE: "force",
+        // ssh-keygen historically only consults SSH_ASKPASS when DISPLAY
+        // is set. Any non-empty value suffices; the shim ignores it.
+        DISPLAY: ":0",
+      },
+    });
+  } finally {
+    // Best-effort scrub: overwrite with zeros, then unlink, then drop
+    // the dir. Run regardless of whether ssh-keygen succeeded.
+    try {
+      await writeFile(passPath, Buffer.alloc(passphraseValue.length, 0));
+    } catch {
+      // ignore
+    }
+    try {
+      await unlink(passPath);
+    } catch {
+      // ignore
+    }
+    try {
+      await unlink(askpassPath);
+    } catch {
+      // ignore
+    }
+    try {
+      await rmdir(sessionDir);
+    } catch {
+      // ignore
+    }
+  }
+
   return inspectKey(resolvedPath);
 }
 

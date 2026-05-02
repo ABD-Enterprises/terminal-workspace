@@ -33,6 +33,35 @@ export function Modal({
     };
   }, [open]);
 
+  // Esc closes the modal, matching the visible "Esc" button in the
+  // header. Without this listener the button was the only way out via
+  // keyboard, which broke the keyboard-first promise that QWEN's review
+  // called out. ConfirmDialog adds Enter handling on top of this; nested
+  // useCommandPalette / useKeyboardCheatsheet listeners also key off
+  // Escape, but those state machines guard their own opens so a single
+  // Esc cleans up exactly the topmost layer.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      // Don't compete with browser-level dismissals when a modifier is
+      // held — those combos belong to other handlers.
+      if (event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose, open]);
+
   if (!open) {
     return null;
   }

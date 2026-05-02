@@ -12,6 +12,7 @@ export type WorkspaceDensity = "compact" | "comfortable";
 interface AppState {
   sidebarSearch: string;
   commandPaletteOpen: boolean;
+  cheatsheetOpen: boolean;
   workspaceDensity: WorkspaceDensity;
   sectionShortcutsEnabled: boolean;
   demoModeEnabled: boolean;
@@ -22,6 +23,8 @@ interface AppState {
   setSidebarSearch: (search: string) => void;
   openCommandPalette: () => void;
   closeCommandPalette: () => void;
+  openCheatsheet: () => void;
+  closeCheatsheet: () => void;
   setWorkspaceDensity: (density: WorkspaceDensity) => void;
   setSectionShortcutsEnabled: (enabled: boolean) => void;
   setDemoModeEnabled: (enabled: boolean) => void;
@@ -59,6 +62,7 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       sidebarSearch: "",
       commandPaletteOpen: false,
+      cheatsheetOpen: false,
       workspaceDensity: "compact",
       sectionShortcutsEnabled: true,
       demoModeEnabled: getDefaultDemoModeEnabled(),
@@ -69,6 +73,8 @@ export const useAppStore = create<AppState>()(
       setSidebarSearch: (sidebarSearch) => set({ sidebarSearch }),
       openCommandPalette: () => set({ commandPaletteOpen: true }),
       closeCommandPalette: () => set({ commandPaletteOpen: false }),
+      openCheatsheet: () => set({ cheatsheetOpen: true }),
+      closeCheatsheet: () => set({ cheatsheetOpen: false }),
       setWorkspaceDensity: (workspaceDensity) => set({ workspaceDensity }),
       setSectionShortcutsEnabled: (sectionShortcutsEnabled) => set({ sectionShortcutsEnabled }),
       setDemoModeEnabled: (demoModeEnabled) => set({ demoModeEnabled }),

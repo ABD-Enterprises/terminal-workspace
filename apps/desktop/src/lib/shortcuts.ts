@@ -1,4 +1,4 @@
-function isMacClient() {
+export function isMacClient() {
   if (typeof navigator === "undefined") {
     return true;
   }
