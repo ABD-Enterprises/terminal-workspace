@@ -10,7 +10,6 @@
 
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import type { KnownHostScanResult } from "../../lib/api";
 import {
   type FingerprintTrustPromptRequest,
   useFingerprintTrustPromptStore,

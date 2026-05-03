@@ -7,7 +7,6 @@ import { useAppStore } from "../store/app-store";
 import { useConnectionSecretsStore } from "../store/connection-secrets-store";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
-import { useSessionsStore } from "../store/sessions-store";
 import { HostEditor } from "../components/hosts/HostEditor";
 import { HostFilterBar } from "../components/hosts/HostFilterBar";
 import { HostList } from "../components/hosts/HostList";
@@ -49,10 +48,8 @@ export function HostsPage() {
   const updateHost = useHostsStore((state) => state.updateHost);
   const deleteHost = useHostsStore((state) => state.deleteHost);
   const toggleFavorite = useHostsStore((state) => state.toggleFavorite);
-  const markConnected = useHostsStore((state) => state.markConnected);
   const knownHosts = useKnownHostsStore((state) => state.knownHosts);
   const removeKnownHost = useKnownHostsStore((state) => state.removeKnownHost);
-  const openSession = useSessionsStore((state) => state.openSession);
   const { allHosts, filteredHosts, groups, tags } = useHosts({
     activeGroup,
     activeTag,

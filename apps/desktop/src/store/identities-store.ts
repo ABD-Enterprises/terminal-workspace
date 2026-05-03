@@ -10,7 +10,6 @@ import {
   applyIdentityAssignments,
   migrateHostsToIdentities,
 } from "../lib/identity-migration";
-import type { HostRecord } from "../types/host";
 import {
   sampleIdentities,
   type IdentityRecord,
