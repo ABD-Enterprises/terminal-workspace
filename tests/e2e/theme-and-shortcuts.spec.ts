@@ -1,4 +1,4 @@
-import { expect, test  } from "./helpers";
+import { expect, primaryShortcut, test } from "./helpers";
 
 // Cross-cutting tests that exercise:
 //   - Cmd+1..6 section navigation shortcuts.
@@ -6,17 +6,17 @@ import { expect, test  } from "./helpers";
 //   - Sidebar group rename via the inline pencil affordance (P2-DM2).
 
 test.describe("section navigation shortcuts", () => {
-  test("Cmd+2 navigates to /sessions", async ({ page }) => {
+  test("primary+2 navigates to /sessions", async ({ page }) => {
     await page.goto("/hosts");
     await page.locator("body").click();
-    await page.keyboard.press("Meta+2");
+    await page.keyboard.press(primaryShortcut("2"));
     await expect(page).toHaveURL(/\/sessions/);
   });
 
-  test("Cmd+4 navigates to /keys", async ({ page }) => {
+  test("primary+4 navigates to /keys", async ({ page }) => {
     await page.goto("/hosts");
     await page.locator("body").click();
-    await page.keyboard.press("Meta+4");
+    await page.keyboard.press(primaryShortcut("4"));
     await expect(page).toHaveURL(/\/keys/);
   });
 });

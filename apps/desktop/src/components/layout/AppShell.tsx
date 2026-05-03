@@ -33,7 +33,6 @@ export function AppShell() {
   const sessionTabs = useSessionsStore((state) => state.tabs);
   const sessionPanes = useSessionsStore((state) => state.panes);
   const activeSessionTabId = useSessionsStore((state) => state.activeTabId);
-  const openSession = useSessionsStore((state) => state.openSession);
   const queuePaneCommand = useSessionsStore((state) => state.queuePaneCommand);
   const selectSessionTab = useSessionsStore((state) => state.selectTab);
   const closeTab = useSessionsStore((state) => state.closeTab);

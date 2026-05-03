@@ -26,8 +26,8 @@ and Sessions search can match against that saved output context.
 - Risk: the local workstation exposes the Developer ID identity, but it does not currently expose
   exportable certificate/password or notarization credential material, so automated GitHub secret
   provisioning cannot complete from the repo alone.
-- Opportunity: the repo now has a single canonical execution contract across roadmap, shared state,
-  validator enforcement, CI, agents, and prompts.
+- Opportunity: the repo now has a clear product roadmap and validation contract. Active AI task
+  state lives in GitHub Issues through `ai-pipeline`, not in roadmap markdown or local state files.
 - Opportunity: the exported local vault snapshot now carries stable vault and device identifiers,
   the UI previews, merges, deletes, and governs same-vault records before apply, and remote
   envelopes now carry encrypted lineage metadata plus persisted trusted-key governance with an

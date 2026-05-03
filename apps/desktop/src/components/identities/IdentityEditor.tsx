@@ -5,7 +5,7 @@
 //
 // See docs/parity-and-hardening-plan.md P2-DM1 (batch 2).
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { cn } from "../../lib/utils";
 import {
   type IdentityRecord,
@@ -59,20 +59,28 @@ export function IdentityEditor({
   onCancel,
   onSubmit,
 }: IdentityEditorProps) {
-  const [values, setValues] = useState<IdentityEditorValues>(() =>
-    buildInitialValues(identity)
-  );
-
-  // Reset the form when the editor switches between identities or transitions
-  // open ↔ closed. Without this the Settings panel keeps stale values when
-  // the user clicks Edit on a different row.
-  useEffect(() => {
-    setValues(buildInitialValues(identity));
-  }, [identity, open]);
-
   if (!open) {
     return null;
   }
+
+  return (
+    <IdentityEditorForm
+      key={identity?.id ?? "new"}
+      identity={identity}
+      onCancel={onCancel}
+      onSubmit={onSubmit}
+    />
+  );
+}
+
+function IdentityEditorForm({
+  identity,
+  onCancel,
+  onSubmit,
+}: Omit<IdentityEditorProps, "open">) {
+  const [values, setValues] = useState<IdentityEditorValues>(() =>
+    buildInitialValues(identity)
+  );
 
   const isInvalid =
     !values.label.trim() ||

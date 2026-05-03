@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import type { SplitDirection } from "../../types/session";
 
@@ -42,17 +42,7 @@ export function SplitLayout({
   onSplitRatioChange,
 }: SplitLayoutProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const ratioRef = useRef<number>(splitRatio ?? DEFAULT_RATIO);
-  const [draftRatio, setDraftRatio] = useState<number>(splitRatio ?? DEFAULT_RATIO);
-
-  // Sync the ref + draft state when the persisted ratio changes from
-  // outside (e.g. another window in a future multi-window setup, or a
-  // tab restore). Keeps the splitter visually in sync without flicker.
-  useEffect(() => {
-    const next = splitRatio ?? DEFAULT_RATIO;
-    ratioRef.current = next;
-    setDraftRatio(next);
-  }, [splitRatio]);
+  const [dragRatio, setDragRatio] = useState<number | null>(null);
 
   if (panes.length === 0) {
     return null;
@@ -75,7 +65,10 @@ export function SplitLayout({
 
   // 2-pane case — resizable.
   const isVertical = direction === "vertical";
-  const ratio = Math.min(MAX_RATIO, Math.max(MIN_RATIO, draftRatio));
+  const ratio = Math.min(
+    MAX_RATIO,
+    Math.max(MIN_RATIO, dragRatio ?? splitRatio ?? DEFAULT_RATIO)
+  );
   const gridTemplate = `${ratio}fr 6px ${1 - ratio}fr`;
 
   const startDrag = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -85,6 +78,7 @@ export function SplitLayout({
       return;
     }
     const rect = container.getBoundingClientRect();
+    let latestRatio = ratio;
     const handleMove = (moveEvent: MouseEvent) => {
       const offset = isVertical
         ? moveEvent.clientX - rect.left
@@ -94,15 +88,16 @@ export function SplitLayout({
         return;
       }
       const next = Math.min(MAX_RATIO, Math.max(MIN_RATIO, offset / total));
-      ratioRef.current = next;
-      setDraftRatio(next);
+      latestRatio = next;
+      setDragRatio(next);
     };
     const handleUp = () => {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
       // Persist on release rather than on every mousemove — keeps zustand
       // updates (and the localStorage write) at a sane rate.
-      onSplitRatioChange?.(ratioRef.current);
+      setDragRatio(null);
+      onSplitRatioChange?.(latestRatio);
     };
     window.addEventListener("mousemove", handleMove);
     window.addEventListener("mouseup", handleUp);
@@ -136,9 +131,7 @@ export function SplitLayout({
             event.preventDefault();
             const delta =
               event.key === "ArrowLeft" || event.key === "ArrowUp" ? -0.02 : 0.02;
-            const next = Math.min(MAX_RATIO, Math.max(MIN_RATIO, ratioRef.current + delta));
-            ratioRef.current = next;
-            setDraftRatio(next);
+            const next = Math.min(MAX_RATIO, Math.max(MIN_RATIO, ratio + delta));
             onSplitRatioChange?.(next);
           }
         }}
