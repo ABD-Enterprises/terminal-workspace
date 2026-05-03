@@ -1,4 +1,4 @@
-import { expect, test  } from "./helpers";
+import { expect, primaryShortcut, test } from "./helpers";
 
 // Coverage for the command palette: open via button + Cmd+K, search,
 // keyboard navigation (Up/Down/Enter), and the four sections (Sections,
@@ -15,14 +15,14 @@ test.describe("command palette", () => {
     await expect(page.getByPlaceholder(/Search hosts, sessions, snippets/i)).toHaveCount(0);
   });
 
-  test("opens via Cmd+K (Meta+K) keyboard shortcut", async ({ page }) => {
+  test("opens via the primary keyboard shortcut", async ({ page }) => {
     await page.goto("/hosts");
     // Click the page body first so a focused, non-input element receives
     // the keystroke. Without this, Playwright dispatches the key event
     // through the browser's chrome and the React global keydown handler
     // (attached to window) may not fire.
     await page.locator("body").click();
-    await page.keyboard.press("Meta+K");
+    await page.keyboard.press(primaryShortcut("K"));
     await expect(page.getByPlaceholder(/Search hosts, sessions, snippets/i)).toBeVisible();
     await page.keyboard.press("Escape");
   });

@@ -3,6 +3,11 @@ import { join } from "node:path";
 import { test as base, type Page } from "@playwright/test";
 
 const screenshotDir = join(process.cwd(), "artifacts", "e2e");
+const primaryShortcutModifier = process.platform === "darwin" ? "Meta" : "Control";
+
+export function primaryShortcut(key: string) {
+  return `${primaryShortcutModifier}+${key}`;
+}
 
 export async function capture(page: Page, filename: string) {
   mkdirSync(screenshotDir, { recursive: true });
