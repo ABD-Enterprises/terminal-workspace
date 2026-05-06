@@ -25,6 +25,39 @@
 - Release automation loads shared defaults from `.env.shared` and local overrides from `.env`
   without requiring those files in CI.
 
+## Manual Smoke Tests
+
+### SSH config import — Include directive (issue #28)
+
+The Include directive is resolved by the renderer's preprocessor calling
+`termsnip_read_ssh_config_file`, which reads files under `~/.ssh/` only.
+
+1. Create a parent config and an included file inside `~/.ssh/`:
+   ```bash
+   cat > ~/.ssh/parent-config <<'EOF'
+   Include conf.d/work
+   EOF
+   mkdir -p ~/.ssh/conf.d
+   cat > ~/.ssh/conf.d/work <<'EOF'
+   Host smoke-include-work
+     HostName work.example.com
+     User deploy
+   EOF
+   ```
+2. In the native app: Hosts → "Import SSH config" → pick `~/.ssh/parent-config`.
+3. Confirm the import summary shows 1 imported host (`smoke-include-work`) and
+   no `include-directive` skips.
+4. Place a file outside `~/.ssh/` and reference it from a config under `~/.ssh/`
+   to verify allowlist rejection:
+   ```bash
+   echo "Host attempted-escape" > /tmp/escape-config
+   cat > ~/.ssh/escape-test <<'EOF'
+   Include /tmp/escape-config
+   EOF
+   ```
+   Importing `~/.ssh/escape-test` should yield 0 hosts and a logged
+   `Include /tmp/escape-config (not found or rejected)` skip.
+
 ## Incident Handling
 
 - If browser screens regress, start with `npm run validate`.

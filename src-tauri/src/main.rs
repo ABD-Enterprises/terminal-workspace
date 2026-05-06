@@ -2725,6 +2725,76 @@ async fn termsnip_clear_identity_passphrase(
     .map_err(|error| error.to_string())?
 }
 
+#[derive(Deserialize)]
+struct ReadSshConfigFileRequest {
+    path: String,
+}
+
+#[derive(Serialize)]
+struct ReadSshConfigFileResponse {
+    content: String,
+}
+
+/// Read a single OpenSSH config file from the user's ~/.ssh/ tree. Used by
+/// the renderer's Include-directive preprocessor (issue #28). The path
+/// allowlist is the security boundary — any file outside the canonicalized
+/// ~/.ssh/ root is rejected before we open it. Symlinks are followed via
+/// `canonicalize`, which resolves the *destination*, not the link itself,
+/// so a symlink inside ~/.ssh/ that points outside is rejected too.
+///
+/// File size is capped because SSH configs are text and a 100 MB attacker-
+/// supplied file would otherwise pin a UI thread.
+#[tauri::command]
+async fn termsnip_read_ssh_config_file(
+    request: ReadSshConfigFileRequest,
+) -> Result<ReadSshConfigFileResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || read_ssh_config_file_blocking(&request.path))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+const SSH_CONFIG_MAX_BYTES: u64 = 1024 * 1024;
+
+fn read_ssh_config_file_blocking(raw_path: &str) -> Result<ReadSshConfigFileResponse, String> {
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "HOME env var is not set".to_string())?;
+    let ssh_root = home
+        .join(".ssh")
+        .canonicalize()
+        .map_err(|error| format!("cannot canonicalize ~/.ssh: {error}"))?;
+
+    let raw = expand_home(raw_path);
+    let canonical = raw
+        .canonicalize()
+        .map_err(|error| format!("cannot canonicalize {raw_path}: {error}"))?;
+
+    if !canonical.starts_with(&ssh_root) {
+        return Err(format!(
+            "path {} is not under {}",
+            canonical.display(),
+            ssh_root.display()
+        ));
+    }
+
+    let metadata = std::fs::metadata(&canonical)
+        .map_err(|error| format!("cannot stat {}: {error}", canonical.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("{} is not a regular file", canonical.display()));
+    }
+    if metadata.len() > SSH_CONFIG_MAX_BYTES {
+        return Err(format!(
+            "{} exceeds SSH config size limit of {} bytes",
+            canonical.display(),
+            SSH_CONFIG_MAX_BYTES
+        ));
+    }
+
+    let content = std::fs::read_to_string(&canonical)
+        .map_err(|error| format!("cannot read {}: {error}", canonical.display()))?;
+    Ok(ReadSshConfigFileResponse { content })
+}
+
 #[tauri::command]
 async fn termsnip_create_backend_session(
     bridge: State<'_, BackendBridge>,
@@ -3322,6 +3392,7 @@ fn main() {
             termsnip_load_identity_passphrase,
             termsnip_store_identity_passphrase,
             termsnip_clear_identity_passphrase,
+            termsnip_read_ssh_config_file,
             termsnip_create_backend_session,
             termsnip_close_backend_session,
             termsnip_resize_backend_session,

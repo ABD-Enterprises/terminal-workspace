@@ -21,6 +21,8 @@ import {
 } from "../types/host";
 import { launchHostSession } from "../lib/launch-host-session";
 import { parseSshConfig, toHostFormValues } from "../lib/ssh-config";
+import { resolveSshIncludes } from "../lib/ssh-config-include";
+import { readSshConfigFile } from "../lib/ssh-config-fs";
 
 export function HostsPage() {
   const navigate = useNavigate();
@@ -136,9 +138,16 @@ export function HostsPage() {
                     const file = (e.target as HTMLInputElement).files?.[0];
                     if (file) {
                       const reader = new FileReader();
-                      reader.onload = (event) => {
+                      reader.onload = async (event) => {
                         const content = event.target?.result as string;
-                        const result = parseSshConfig(content);
+                        // Resolve `Include` directives via the native bridge
+                        // when available; falls back to "log and skip" in
+                        // dev/web mode where readSshConfigFile returns null.
+                        const expanded = await resolveSshIncludes(content, {
+                          readFile: readSshConfigFile,
+                        });
+                        const result = parseSshConfig(expanded.text);
+                        const skipped = [...result.skipped, ...expanded.skipped];
                         result.hosts.forEach((host) =>
                           createHost({ ...emptyHostFormValues, ...toHostFormValues(host) })
                         );
@@ -146,7 +155,7 @@ export function HostsPage() {
                           importedCount: result.hosts.length,
                           defaultsAppliedCount: result.defaultsAppliedCount,
                           unresolvedProxyJumpAliases: result.unresolvedProxyJumpAliases,
-                          skipped: result.skipped,
+                          skipped,
                         });
                       };
                       reader.readAsText(file);

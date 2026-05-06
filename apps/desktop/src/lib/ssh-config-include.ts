@@ -1,0 +1,175 @@
+import type { SshConfigImportSkip } from "./ssh-config";
+
+/**
+ * Result of expanding `Include` directives in an OpenSSH config text. The
+ * caller passes the resulting `text` to `parseSshConfig`. `skipped` carries
+ * any Include lines that were rejected (cycle, not-found, allowlist), so the
+ * import-summary modal can still tell the user what was dropped.
+ */
+export interface ResolveSshIncludesResult {
+  text: string;
+  skipped: SshConfigImportSkip[];
+}
+
+/**
+ * Read an SSH config file's contents by user-supplied path. Returning `null`
+ * means the path was rejected (allowlist, missing, unreadable) — the caller
+ * logs an `include-directive` skip with an appropriate reason. Implementations
+ * are expected to:
+ *
+ * - resolve `~` to the user's home directory
+ * - canonicalize the path (resolve symlinks)
+ * - reject any canonical path that is not under `~/.ssh/`
+ *
+ * The renderer's native binding wraps the `termsnip_read_ssh_config_file`
+ * Tauri command. In dev/web mode the importer passes a no-op reader that
+ * returns `null` for every path, so Include lines fall back to the existing
+ * "log and skip" behavior.
+ */
+export type SshConfigFileReader = (resolvedPath: string) => Promise<string | null>;
+
+export interface ResolveSshIncludesOptions {
+  readFile: SshConfigFileReader;
+  /**
+   * Directory used to resolve relative Include paths. OpenSSH resolves
+   * relative includes against the directory of the file containing them.
+   * The renderer uses `~/.ssh` as the default because the import flow only
+   * knows the user picked a single file via FileReader, not its absolute
+   * path; that's the canonical location for `config` and the only one the
+   * Tauri allowlist permits.
+   */
+  baseDir?: string;
+  /**
+   * Maximum depth of nested Includes. Ten is generous — real configs nest
+   * two or three levels at most, and the visited-paths set blocks true
+   * cycles. The depth cap is a defensive limit on pathological chains
+   * (tens of thousands of files referenced from a top-level glob, etc).
+   */
+  maxDepth?: number;
+}
+
+const DEFAULT_BASE_DIR = "~/.ssh";
+const DEFAULT_MAX_DEPTH = 10;
+const INCLUDE_DIRECTIVE_RE = /^\s*include\s+(.*?)\s*(?:#.*)?$/i;
+
+function normalizePath(rawPath: string, baseDir: string): string {
+  const trimmed = rawPath.trim();
+  if (!trimmed) return trimmed;
+  if (trimmed.startsWith("/") || trimmed.startsWith("~")) return trimmed;
+  // Strip trailing slash from baseDir to keep "x" + "/" + "y" predictable.
+  const base = baseDir.endsWith("/") ? baseDir.slice(0, -1) : baseDir;
+  return `${base}/${trimmed}`;
+}
+
+function hasGlobChar(value: string): boolean {
+  return value.includes("*") || value.includes("?") || value.includes("[");
+}
+
+async function expandText(
+  text: string,
+  options: Required<ResolveSshIncludesOptions>,
+  visited: Set<string>,
+  depth: number,
+  skipped: SshConfigImportSkip[]
+): Promise<string> {
+  if (depth > options.maxDepth) {
+    skipped.push({
+      reason: "include-directive",
+      detail: `Include depth limit (${options.maxDepth}) exceeded`,
+    });
+    return "";
+  }
+
+  const lines = text.split(/\r?\n/);
+  const out: string[] = [];
+
+  for (const line of lines) {
+    const match = line.match(INCLUDE_DIRECTIVE_RE);
+    if (!match) {
+      out.push(line);
+      continue;
+    }
+    const rawValue = match[1];
+    if (!rawValue) {
+      out.push(line);
+      continue;
+    }
+    // Multiple paths per Include line are supported by OpenSSH; expand each.
+    const entries = rawValue.split(/\s+/).filter(Boolean);
+    for (const entry of entries) {
+      if (hasGlobChar(entry)) {
+        // Globs are valid OpenSSH but require directory listing in the
+        // backend. Deferring glob expansion to a follow-up; log explicitly
+        // so the user sees that part of their config was not imported.
+        skipped.push({
+          reason: "include-directive",
+          detail: `Include ${entry} (glob unsupported)`,
+        });
+        continue;
+      }
+      const normalized = normalizePath(entry, options.baseDir);
+      if (visited.has(normalized)) {
+        skipped.push({
+          reason: "include-directive",
+          detail: `Include ${entry} (cycle)`,
+        });
+        continue;
+      }
+      let included: string | null;
+      try {
+        included = await options.readFile(normalized);
+      } catch (error) {
+        skipped.push({
+          reason: "include-directive",
+          detail: `Include ${entry} (read error: ${(error as Error).message})`,
+        });
+        continue;
+      }
+      if (included === null) {
+        skipped.push({
+          reason: "include-directive",
+          detail: `Include ${entry} (not found or rejected)`,
+        });
+        continue;
+      }
+      const nextVisited = new Set(visited);
+      nextVisited.add(normalized);
+      const expanded = await expandText(
+        included,
+        options,
+        nextVisited,
+        depth + 1,
+        skipped
+      );
+      out.push(expanded);
+    }
+  }
+
+  return out.join("\n");
+}
+
+/**
+ * Inline OpenSSH `Include` directives in `initialText` by reading each
+ * referenced file via `options.readFile` and replacing the directive line
+ * with the included file's content. Recursively expands nested Includes.
+ *
+ * Rejections (cycles, allowlist failures, glob-unsupported, missing files)
+ * are returned in `skipped` so the parser's existing import-summary modal
+ * can surface them.
+ *
+ * Pure async. Does not mutate `initialText`. Designed to run before
+ * `parseSshConfig` so the parser stays sync and Include-agnostic.
+ */
+export async function resolveSshIncludes(
+  initialText: string,
+  options: ResolveSshIncludesOptions
+): Promise<ResolveSshIncludesResult> {
+  const skipped: SshConfigImportSkip[] = [];
+  const filled: Required<ResolveSshIncludesOptions> = {
+    readFile: options.readFile,
+    baseDir: options.baseDir ?? DEFAULT_BASE_DIR,
+    maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
+  };
+  const text = await expandText(initialText, filled, new Set(), 0, skipped);
+  return { text, skipped };
+}
