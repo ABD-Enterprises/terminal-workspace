@@ -87,23 +87,203 @@ Host workers
     expect(result.unresolvedProxyJumpAliases).toEqual(["missing-bastion"]);
   });
 
-  it("records Match and Include blocks as skipped", () => {
+  it("records Include blocks as skipped (split out to issue #28)", () => {
     const result = parseSshConfig(`
-Match host *.private
-  ForwardAgent yes
-
 Include ~/.ssh/work-config
 `);
 
     expect(result.hosts).toEqual([]);
     expect(result.skipped).toContainEqual({
-      reason: "match-block",
-      detail: "Match host *.private",
-    });
-    expect(result.skipped).toContainEqual({
       reason: "include-directive",
       detail: "Include ~/.ssh/work-config",
     });
+  });
+
+  it("Match host applies options to aliases matching the pattern", () => {
+    const result = parseSshConfig(`
+Host alpha
+  HostName alpha.example.com
+
+Host beta
+  HostName beta.example.com
+
+Match host alpha
+  User deploy
+  Port 2222
+`);
+
+    const alpha = result.hosts.find((host) => host.alias === "alpha");
+    const beta = result.hosts.find((host) => host.alias === "beta");
+    expect(alpha?.username).toBe("deploy");
+    expect(alpha?.port).toBe(2222);
+    // beta should not be touched by the Match block.
+    expect(beta?.username).toBe("");
+    expect(beta?.port).toBe(22);
+    // Match is no longer in skipped — it parsed cleanly.
+    expect(
+      result.skipped.some((entry) => entry.reason === "match-block")
+    ).toBe(false);
+  });
+
+  it("Match host accepts comma-separated patterns and globs", () => {
+    const result = parseSshConfig(`
+Host prod-api
+  HostName prod-api.example.com
+
+Host prod-worker
+  HostName prod-worker.example.com
+
+Host staging-api
+  HostName staging-api.example.com
+
+Match host prod-*,*-api
+  User ops
+`);
+
+    expect(result.hosts.find((host) => host.alias === "prod-api")?.username).toBe("ops");
+    expect(result.hosts.find((host) => host.alias === "prod-worker")?.username).toBe("ops");
+    // staging-api hits via the `*-api` half of the OR list.
+    expect(result.hosts.find((host) => host.alias === "staging-api")?.username).toBe("ops");
+  });
+
+  it("Match originalhost behaves the same as Match host for static imports", () => {
+    const result = parseSshConfig(`
+Host alpha
+  HostName alpha.example.com
+
+Match originalhost alpha
+  Port 2200
+`);
+
+    expect(result.hosts.find((host) => host.alias === "alpha")?.port).toBe(2200);
+  });
+
+  it("Match host plus user are AND'd together", () => {
+    const result = parseSshConfig(`
+Host alpha
+  HostName alpha.example.com
+  User deploy
+
+Host beta
+  HostName beta.example.com
+  User deploy
+
+Host gamma
+  HostName gamma.example.com
+  User ops
+
+Match host alpha,gamma user deploy
+  Port 4242
+`);
+
+    // alpha matches both host AND user — Port applies.
+    expect(result.hosts.find((host) => host.alias === "alpha")?.port).toBe(4242);
+    // gamma matches host but not user — no override.
+    expect(result.hosts.find((host) => host.alias === "gamma")?.port).toBe(22);
+    // beta matches user but not host — no override.
+    expect(result.hosts.find((host) => host.alias === "beta")?.port).toBe(22);
+  });
+
+  it("Match all applies options to every alias", () => {
+    const result = parseSshConfig(`
+Host alpha
+  HostName alpha.example.com
+
+Host beta
+  HostName beta.example.com
+
+Match all
+  User ops
+`);
+
+    expect(result.hosts.find((host) => host.alias === "alpha")?.username).toBe("ops");
+    expect(result.hosts.find((host) => host.alias === "beta")?.username).toBe("ops");
+  });
+
+  it("Match exec is rejected and its options are dropped", () => {
+    const result = parseSshConfig(`
+Host alpha
+  HostName alpha.example.com
+
+Match exec "true"
+  User pwned
+`);
+
+    // alpha has no user override.
+    expect(result.hosts.find((host) => host.alias === "alpha")?.username).toBe("");
+    // Skip reason captures the rejected Match.
+    expect(result.skipped).toContainEqual(
+      expect.objectContaining({
+        reason: "match-block",
+        detail: expect.stringContaining("exec"),
+      })
+    );
+  });
+
+  it("Match with unsupported criterion (canonical) is rejected", () => {
+    const result = parseSshConfig(`
+Host alpha
+  HostName alpha.example.com
+
+Match canonical
+  User shouldnotapply
+`);
+
+    expect(result.hosts.find((host) => host.alias === "alpha")?.username).toBe("");
+    expect(result.skipped).toContainEqual(
+      expect.objectContaining({
+        reason: "match-block",
+        detail: expect.stringContaining("canonical"),
+      })
+    );
+  });
+
+  it("Match with negated pattern excludes matching aliases", () => {
+    const result = parseSshConfig(`
+Host alpha
+  HostName alpha.example.com
+
+Host beta
+  HostName beta.example.com
+
+Match host *,!alpha
+  User ops
+`);
+
+    // alpha is excluded by the negation.
+    expect(result.hosts.find((host) => host.alias === "alpha")?.username).toBe("");
+    // beta matches the * positive pattern with no excluding negation hit.
+    expect(result.hosts.find((host) => host.alias === "beta")?.username).toBe("ops");
+  });
+
+  it("Match block before its target Host block still applies", () => {
+    const result = parseSshConfig(`
+Match host alpha
+  User deploy
+
+Host alpha
+  HostName alpha.example.com
+`);
+
+    expect(result.hosts.find((host) => host.alias === "alpha")?.username).toBe("deploy");
+  });
+
+  it("Match does not override values already set by an earlier Host block", () => {
+    const result = parseSshConfig(`
+Host alpha
+  HostName alpha.example.com
+  User deploy
+  Port 2222
+
+Match host alpha
+  User other
+  Port 9999
+`);
+
+    // OpenSSH "first value wins" — Host block options keep precedence.
+    const alpha = result.hosts.find((host) => host.alias === "alpha");
+    expect(alpha?.username).toBe("deploy");
+    expect(alpha?.port).toBe(2222);
   });
 
   it("ignores comments and inline comments", () => {
