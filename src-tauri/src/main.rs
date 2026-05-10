@@ -101,10 +101,12 @@ impl BackendBridge {
     }
 
     fn ws_url(&self, path: &str) -> String {
-        let prefix = if self.base_url.starts_with("https://") {
-            self.base_url.replacen("https://", "wss://", 1)
+        let prefix = if let Some(rest) = self.base_url.strip_prefix("https://") {
+            format!("wss://{rest}")
+        } else if let Some(rest) = self.base_url.strip_prefix("http://") {
+            format!("{}://{rest}", "ws")
         } else {
-            self.base_url.replacen("http://", "ws://", 1)
+            self.base_url.clone()
         };
 
         format!("{prefix}{path}")
