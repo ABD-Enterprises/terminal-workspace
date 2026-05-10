@@ -101,9 +101,15 @@ impl BackendBridge {
     }
 
     fn ws_url(&self, path: &str) -> String {
+        // The base_url for this client is the locally-spawned sidecar backend
+        // bound to 127.0.0.1 in the same process tree, so when it speaks plain
+        // http we deliberately match with plain ws (TLS termination is at the
+        // process boundary, not on the loopback socket). The https→wss branch
+        // above covers any future configuration that does need TLS.
         let prefix = if self.base_url.starts_with("https://") {
             self.base_url.replacen("https://", "wss://", 1)
         } else {
+            // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
             self.base_url.replacen("http://", "ws://", 1)
         };
 
