@@ -30,30 +30,30 @@ async function gotoHostsAndWait(page: Page) {
   });
 }
 
+async function expectFocusUrlChangeAfterKey(page: Page, key: string) {
+  const beforeUrl = page.url();
+  await page.keyboard.press(key);
+  await expect(page).not.toHaveURL(beforeUrl);
+  await expect(page).toHaveURL(/focus=/);
+}
+
 test.describe("hosts list keyboard navigation", () => {
   test("j moves the selection (URL focus param appears)", async ({ page }) => {
     await gotoHostsAndWait(page);
-    await page.keyboard.press("j");
-    await expect(page).toHaveURL(/focus=/);
+    await expectFocusUrlChangeAfterKey(page, "j");
   });
 
   test("k moves the selection back to a different host", async ({ page }) => {
     await gotoHostsAndWait(page);
-    await page.keyboard.press("j");
-    await page.keyboard.press("j");
-    const afterTwoJs = page.url();
-    await page.keyboard.press("k");
-    expect(page.url()).not.toBe(afterTwoJs);
-    await expect(page).toHaveURL(/focus=/);
+    await expectFocusUrlChangeAfterKey(page, "j");
+    await expectFocusUrlChangeAfterKey(page, "j");
+    await expectFocusUrlChangeAfterKey(page, "k");
   });
 
   test("ArrowDown / ArrowUp work alongside j/k", async ({ page }) => {
     await gotoHostsAndWait(page);
-    await page.keyboard.press("ArrowDown");
-    await expect(page).toHaveURL(/focus=/);
-    const afterArrow = page.url();
-    await page.keyboard.press("ArrowUp");
-    expect(page.url()).not.toBe(afterArrow);
+    await expectFocusUrlChangeAfterKey(page, "ArrowDown");
+    await expectFocusUrlChangeAfterKey(page, "ArrowUp");
   });
 
   test("typing j in the sidebar search inserts a literal j", async ({ page }) => {
