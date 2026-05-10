@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 interface ListKeyboardNavigationOptions<TId extends string> {
   /** Ordered list of item ids in the visible list. */
@@ -56,12 +56,27 @@ export function useListKeyboardNavigation<TId extends string>({
   onActivate,
   enabled = true,
 }: ListKeyboardNavigationOptions<TId>) {
+  const itemIdsRef = useRef(itemIds);
+  const selectedIdRef = useRef(selectedId);
+
   useEffect(() => {
-    if (!enabled || itemIds.length === 0) {
+    itemIdsRef.current = itemIds;
+  }, [itemIds]);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!enabled) {
       return;
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
+      const currentItemIds = itemIdsRef.current;
+      if (currentItemIds.length === 0) {
+        return;
+      }
       if (event.metaKey || event.ctrlKey || event.altKey) {
         return;
       }
@@ -79,29 +94,33 @@ export function useListKeyboardNavigation<TId extends string>({
 
       event.preventDefault();
 
-      if (activate && selectedId !== undefined) {
-        onActivate?.(selectedId);
+      const currentSelectedId = selectedIdRef.current;
+      if (activate && currentSelectedId !== undefined) {
+        onActivate?.(currentSelectedId);
         return;
       }
 
-      const currentIndex = selectedId !== undefined ? itemIds.indexOf(selectedId) : -1;
+      const currentIndex =
+        currentSelectedId !== undefined ? currentItemIds.indexOf(currentSelectedId) : -1;
       let nextIndex: number;
       if (currentIndex < 0) {
         // Nothing selected yet — first move lands on the first item
         // regardless of direction.
         nextIndex = 0;
       } else if (goNext) {
-        nextIndex = (currentIndex + 1) % itemIds.length;
+        nextIndex = (currentIndex + 1) % currentItemIds.length;
       } else {
-        nextIndex = currentIndex <= 0 ? itemIds.length - 1 : currentIndex - 1;
+        nextIndex = currentIndex <= 0 ? currentItemIds.length - 1 : currentIndex - 1;
       }
 
-      onSelect(itemIds[nextIndex]);
+      const nextId = currentItemIds[nextIndex];
+      selectedIdRef.current = nextId;
+      onSelect(nextId);
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [enabled, itemIds, onActivate, onSelect, selectedId]);
+  }, [enabled, onActivate, onSelect]);
 }
