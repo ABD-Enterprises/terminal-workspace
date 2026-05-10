@@ -39,6 +39,15 @@ interface ParsedSshConfigOptions {
   user?: string;
 }
 
+type ParsedSshConfigOptionKey = keyof ParsedSshConfigOptions;
+
+type OrderedSshConfigOptions = {
+  [key in ParsedSshConfigOptionKey]?: {
+    order: number;
+    value: string;
+  };
+};
+
 function isWildcardAlias(alias: string) {
   return alias.includes("*") || alias.includes("?") || alias.startsWith("!");
 }
@@ -48,22 +57,190 @@ function normalizeDirectiveValue(rawValue: string) {
   return (inlineCommentIndex === -1 ? rawValue : rawValue.slice(0, inlineCommentIndex)).trim();
 }
 
+type MatchCriterion =
+  | { type: "host" | "originalhost" | "user"; patterns: string[] }
+  | { type: "all" };
+
+interface MatchBlockState {
+  criteria: MatchCriterion[];
+  options: OrderedSshConfigOptions;
+}
+
+const SUPPORTED_MATCH_KEYWORDS = new Set(["host", "originalhost", "user", "all"]);
+
+const REJECTED_MATCH_KEYWORDS = new Set([
+  "exec",
+  "localuser",
+  "canonical",
+  "final",
+  "localnetwork",
+  "tagged",
+]);
+
+function cloneOptions(options: OrderedSshConfigOptions): OrderedSshConfigOptions {
+  return Object.fromEntries(Object.entries(options)) as OrderedSshConfigOptions;
+}
+
+function setOptionIfUnset(
+  options: OrderedSshConfigOptions,
+  key: ParsedSshConfigOptionKey,
+  value: string,
+  order: number
+) {
+  if (!options[key]) {
+    options[key] = { value, order };
+  }
+}
+
+function optionValue(options: OrderedSshConfigOptions, key: ParsedSshConfigOptionKey) {
+  return options[key]?.value;
+}
+
+function hasAnyOptions(options: OrderedSshConfigOptions) {
+  return Object.values(options).some((entry) => entry !== undefined);
+}
+
+/**
+ * Match an OpenSSH glob pattern (with `*` and `?` wildcards) against a value
+ * using a position-based iterative matcher. Deliberately avoids `new RegExp`
+ * here so there is no dynamic-regex / ReDoS surface — the matcher runs in
+ * O(n*m) worst case without backtracking explosion.
+ */
+function matchesGlob(pattern: string, value: string): boolean {
+  let pi = 0;
+  let vi = 0;
+  let starP = -1;
+  let starV = 0;
+  while (vi < value.length) {
+    if (pi < pattern.length && (pattern[pi] === "?" || pattern[pi] === value[vi])) {
+      pi += 1;
+      vi += 1;
+    } else if (pi < pattern.length && pattern[pi] === "*") {
+      starP = pi;
+      starV = vi;
+      pi += 1;
+    } else if (starP !== -1) {
+      pi = starP + 1;
+      starV += 1;
+      vi = starV;
+    } else {
+      return false;
+    }
+  }
+  while (pi < pattern.length && pattern[pi] === "*") pi += 1;
+  return pi === pattern.length;
+}
+
+/**
+ * Match an OpenSSH pattern list against a value: positive patterns are OR'd, a
+ * negated pattern (`!foo`) excludes the value if it matches. If the list has
+ * only negations, an unmatched value is considered a hit (the OpenSSH default
+ * for "host !foo,!bar" — anything but those).
+ */
+function patternListMatches(patterns: string[], value: string): boolean {
+  let hasPositive = false;
+  let positiveHit = false;
+  for (const pattern of patterns) {
+    if (!pattern) continue;
+    if (pattern.startsWith("!")) {
+      if (matchesGlob(pattern.slice(1), value)) return false;
+    } else {
+      hasPositive = true;
+      if (matchesGlob(pattern, value)) positiveHit = true;
+    }
+  }
+  return hasPositive ? positiveHit : true;
+}
+
+interface ParsedMatchHeader {
+  criteria: MatchCriterion[];
+  rejected?: string;
+}
+
+function parseMatchCriteria(value: string): ParsedMatchHeader {
+  const tokens = value.split(/\s+/).filter(Boolean);
+  const criteria: MatchCriterion[] = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const keyword = tokens[i].toLowerCase();
+    if (REJECTED_MATCH_KEYWORDS.has(keyword)) {
+      return { criteria: [], rejected: keyword };
+    }
+    if (keyword === "all") {
+      criteria.push({ type: "all" });
+      i += 1;
+      continue;
+    }
+    if (!SUPPORTED_MATCH_KEYWORDS.has(keyword)) {
+      return { criteria: [], rejected: `unknown:${keyword}` };
+    }
+    const rawPatterns = tokens[i + 1];
+    if (!rawPatterns) {
+      return { criteria: [], rejected: `${keyword}:missing-pattern` };
+    }
+    const patterns = rawPatterns.split(",").map((p) => p.trim()).filter(Boolean);
+    if (patterns.length === 0) {
+      return { criteria: [], rejected: `${keyword}:empty-pattern` };
+    }
+    criteria.push({
+      type: keyword as "host" | "originalhost" | "user",
+      patterns,
+    });
+    i += 2;
+  }
+  if (criteria.length === 0) {
+    return { criteria: [], rejected: "empty" };
+  }
+  if (criteria.some((criterion) => criterion.type === "all") && criteria.length > 1) {
+    return { criteria: [], rejected: "all:combined" };
+  }
+  return { criteria };
+}
+
+function applyMatchBlocks(
+  blocks: MatchBlockState[],
+  aliasMap: Map<string, OrderedSshConfigOptions>
+) {
+  for (const block of blocks) {
+    if (!hasAnyOptions(block.options)) {
+      // Match block carried no options the importer tracks; nothing to apply.
+      // Still useful to validate parsing without surprising callers.
+      continue;
+    }
+    for (const [alias, options] of aliasMap.entries()) {
+      const aliasUser = optionValue(options, "user") ?? "";
+      const matches = block.criteria.every((criterion) => {
+        if (criterion.type === "all") return true;
+        if (criterion.type === "user") return patternListMatches(criterion.patterns, aliasUser);
+        return patternListMatches(criterion.patterns, alias);
+      });
+      if (matches) {
+        aliasMap.set(alias, mergeOptions(options, block.options));
+      }
+    }
+  }
+}
+
 function parsePort(value?: string) {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 22;
 }
 
 function mergeOptions(
-  existing: ParsedSshConfigOptions | undefined,
-  next: ParsedSshConfigOptions
-): ParsedSshConfigOptions {
-  return {
-    hostname: next.hostname ?? existing?.hostname,
-    identityFile: next.identityFile ?? existing?.identityFile,
-    port: next.port ?? existing?.port,
-    proxyJump: next.proxyJump ?? existing?.proxyJump,
-    user: next.user ?? existing?.user,
-  };
+  existing: OrderedSshConfigOptions | undefined,
+  next: OrderedSshConfigOptions
+): OrderedSshConfigOptions {
+  const merged: OrderedSshConfigOptions = { ...existing };
+  const keys: ParsedSshConfigOptionKey[] = ["hostname", "identityFile", "port", "proxyJump", "user"];
+  for (const key of keys) {
+    const candidate = next[key];
+    if (!candidate) continue;
+    const current = merged[key];
+    if (!current || candidate.order < current.order) {
+      merged[key] = candidate;
+    }
+  }
+  return merged;
 }
 
 /**
@@ -78,32 +255,45 @@ function mergeOptions(
  *    target of a comma-separated chain is captured (one-hop, matching the
  *    desktop app's current jump-host model).
  *  - `IdentityFile`, `User`, `Port`, `HostName` are honored.
- *  - `Match` and `Include` blocks are skipped with a recorded reason so
- *    callers can warn the user that part of their config was not imported.
+ *  - `Match host`, `Match originalhost`, `Match user`, and `Match all` apply
+ *    their options to every concrete alias whose alias (host/originalhost) or
+ *    User (user) matches the comma-separated pattern list. Negated patterns
+ *    (`!foo`) exclude. `Match exec` and unsupported criteria (canonical, final,
+ *    localnetwork, localuser, tagged) are skipped with a recorded reason.
+ *  - `Include` blocks are skipped with a recorded reason so callers can warn
+ *    the user that part of their config was not imported (Include support
+ *    requires a backend filesystem primitive — see issue #28).
  *
  * Anything not listed (ProxyCommand, ControlMaster, etc.) is ignored.
  */
 export function parseSshConfig(text: string): SshConfigImportResult {
   const lines = text.split(/\r?\n/);
-  const globalOptions: ParsedSshConfigOptions = {};
+  const globalOptions: OrderedSshConfigOptions = {};
   let currentAliases: string[] = [];
-  let currentOptions: ParsedSshConfigOptions = {};
+  let currentOptions: OrderedSshConfigOptions = {};
   let currentInheritedDefault = false;
-  const aliasMap = new Map<string, ParsedSshConfigOptions>();
+  let currentMatch: MatchBlockState | null = null;
+  let currentSkip = false;
+  let optionOrder = 0;
+  const matchBlocks: MatchBlockState[] = [];
+  const aliasMap = new Map<string, OrderedSshConfigOptions>();
   const aliasInheritedDefault = new Set<string>();
   const skipped: SshConfigImportSkip[] = [];
 
   const flushCurrentBlock = () => {
-    if (!currentAliases.length) {
+    if (currentAliases.length) {
+      currentAliases.forEach((alias) => {
+        const existing = aliasMap.get(alias);
+        aliasMap.set(alias, mergeOptions(existing, currentOptions));
+        if (currentInheritedDefault) {
+          aliasInheritedDefault.add(alias);
+        }
+      });
       return;
     }
-    currentAliases.forEach((alias) => {
-      const existing = aliasMap.get(alias);
-      aliasMap.set(alias, mergeOptions(existing, currentOptions));
-      if (currentInheritedDefault) {
-        aliasInheritedDefault.add(alias);
-      }
-    });
+    if (currentMatch) {
+      matchBlocks.push(currentMatch);
+    }
   };
 
   lines.forEach((rawLine) => {
@@ -128,7 +318,18 @@ export function parseSshConfig(text: string): SshConfigImportResult {
     if (directive === "match") {
       flushCurrentBlock();
       currentAliases = [];
-      skipped.push({ reason: "match-block", detail: `Match ${value}` });
+      currentMatch = null;
+      currentSkip = false;
+      const parsed = parseMatchCriteria(value);
+      if (parsed.rejected) {
+        skipped.push({
+          reason: "match-block",
+          detail: `Match ${value} (skipped: ${parsed.rejected})`,
+        });
+        currentSkip = true;
+        return;
+      }
+      currentMatch = { criteria: parsed.criteria, options: {} };
       return;
     }
 
@@ -139,6 +340,8 @@ export function parseSshConfig(text: string): SshConfigImportResult {
 
     if (directive === "host") {
       flushCurrentBlock();
+      currentMatch = null;
+      currentSkip = false;
       const allEntries = value
         .split(/\s+/)
         .map((entry) => entry.trim())
@@ -154,30 +357,39 @@ export function parseSshConfig(text: string): SshConfigImportResult {
       }
 
       currentAliases = concreteAliases;
-      currentInheritedDefault = Object.values(globalOptions).some((entry) => Boolean(entry));
-      currentOptions = { ...globalOptions };
+      currentInheritedDefault = hasAnyOptions(globalOptions);
+      currentOptions = cloneOptions(globalOptions);
       return;
     }
 
-    // Directives outside any concrete Host block flow into globalOptions, so
-    // a later `Host alias` block can inherit them.
-    const targetOptions = currentAliases.length ? currentOptions : globalOptions;
+    if (currentSkip) {
+      return;
+    }
+
+    // Directives outside any concrete Host or Match block flow into
+    // globalOptions, so a later `Host alias` block can inherit them.
+    const targetOptions = currentAliases.length
+      ? currentOptions
+      : currentMatch
+      ? currentMatch.options
+      : globalOptions;
+    optionOrder += 1;
 
     switch (directive) {
       case "hostname":
-        targetOptions.hostname = value;
+        setOptionIfUnset(targetOptions, "hostname", value, optionOrder);
         break;
       case "user":
-        targetOptions.user = value;
+        setOptionIfUnset(targetOptions, "user", value, optionOrder);
         break;
       case "port":
-        targetOptions.port = value;
+        setOptionIfUnset(targetOptions, "port", value, optionOrder);
         break;
       case "identityfile":
-        targetOptions.identityFile = value;
+        setOptionIfUnset(targetOptions, "identityFile", value, optionOrder);
         break;
       case "proxyjump":
-        targetOptions.proxyJump = value;
+        setOptionIfUnset(targetOptions, "proxyJump", value, optionOrder);
         break;
       default:
         break;
@@ -185,27 +397,28 @@ export function parseSshConfig(text: string): SshConfigImportResult {
   });
 
   flushCurrentBlock();
+  applyMatchBlocks(matchBlocks, aliasMap);
 
   const hosts: ImportedSshConfigHost[] = [];
   const allConcreteAliases = new Set(aliasMap.keys());
   const referencedJumpAliases = new Set<string>();
 
   for (const [alias, options] of aliasMap.entries()) {
-    const hostname = options.hostname?.trim() || alias;
+    const hostname = optionValue(options, "hostname")?.trim() || alias;
     if (!hostname) {
       skipped.push({ reason: "missing-hostname", detail: `Host ${alias}` });
       continue;
     }
-    const jumpHostAlias = options.proxyJump?.split(",")[0]?.trim() || undefined;
+    const jumpHostAlias = optionValue(options, "proxyJump")?.split(",")[0]?.trim() || undefined;
     if (jumpHostAlias) {
       referencedJumpAliases.add(jumpHostAlias);
     }
     hosts.push({
       alias,
       hostname,
-      username: options.user?.trim() ?? "",
-      port: parsePort(options.port),
-      privateKeyPath: options.identityFile?.trim() ?? "",
+      username: optionValue(options, "user")?.trim() ?? "",
+      port: parsePort(optionValue(options, "port")),
+      privateKeyPath: optionValue(options, "identityFile")?.trim() ?? "",
       jumpHostAlias,
     });
   }
