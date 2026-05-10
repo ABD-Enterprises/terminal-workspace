@@ -38,10 +38,13 @@ jobs:
       - name: Resolve release metadata
         id: release_meta
         shell: bash
+        env:
+          RELEASE_CHANNEL_INPUT: ${{ github.event.inputs.release_channel }}
+          RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "tag=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
-            echo "channel=${{ github.event.inputs.release_channel }}" >> "$GITHUB_OUTPUT"
+            echo "tag=$RELEASE_TAG_INPUT" >> "$GITHUB_OUTPUT"
+            echo "channel=$RELEASE_CHANNEL_INPUT" >> "$GITHUB_OUTPUT"
             echo "target=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           elif [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"

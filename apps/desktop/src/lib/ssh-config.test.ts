@@ -200,6 +200,24 @@ Match all
     expect(result.hosts.find((host) => host.alias === "beta")?.username).toBe("ops");
   });
 
+  it("rejects Match all when combined with other criteria", () => {
+    const result = parseSshConfig(`
+Host alpha
+  HostName alpha.example.com
+
+Match all user deploy
+  Port 2222
+`);
+
+    expect(result.hosts.find((host) => host.alias === "alpha")?.port).toBe(22);
+    expect(result.skipped).toContainEqual(
+      expect.objectContaining({
+        reason: "match-block",
+        detail: expect.stringContaining("all:combined"),
+      })
+    );
+  });
+
   it("Match exec is rejected and its options are dropped", () => {
     const result = parseSshConfig(`
 Host alpha
@@ -266,6 +284,23 @@ Host alpha
 `);
 
     expect(result.hosts.find((host) => host.alias === "alpha")?.username).toBe("deploy");
+  });
+
+  it("Match block before Host block wins when both set the same option", () => {
+    const result = parseSshConfig(`
+Match host alpha
+  User deploy
+  Port 2222
+
+Host alpha
+  HostName alpha.example.com
+  User other
+  Port 9999
+`);
+
+    const alpha = result.hosts.find((host) => host.alias === "alpha");
+    expect(alpha?.username).toBe("deploy");
+    expect(alpha?.port).toBe(2222);
   });
 
   it("Match does not override values already set by an earlier Host block", () => {
