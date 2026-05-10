@@ -68,12 +68,35 @@ const REJECTED_MATCH_KEYWORDS = new Set([
   "tagged",
 ]);
 
-function compileGlob(pattern: string): RegExp {
-  const escaped = pattern
-    .replace(/[.+^$|(){}[\]\\]/g, "\\$&")
-    .replace(/\*/g, ".*")
-    .replace(/\?/g, ".");
-  return new RegExp(`^${escaped}$`);
+/**
+ * Match an OpenSSH glob pattern (with `*` and `?` wildcards) against a value
+ * using a position-based iterative matcher. Deliberately avoids `new RegExp`
+ * here so there is no dynamic-regex / ReDoS surface — the matcher runs in
+ * O(n*m) worst case without backtracking explosion.
+ */
+function matchesGlob(pattern: string, value: string): boolean {
+  let pi = 0;
+  let vi = 0;
+  let starP = -1;
+  let starV = 0;
+  while (vi < value.length) {
+    if (pi < pattern.length && (pattern[pi] === "?" || pattern[pi] === value[vi])) {
+      pi += 1;
+      vi += 1;
+    } else if (pi < pattern.length && pattern[pi] === "*") {
+      starP = pi;
+      starV = vi;
+      pi += 1;
+    } else if (starP !== -1) {
+      pi = starP + 1;
+      starV += 1;
+      vi = starV;
+    } else {
+      return false;
+    }
+  }
+  while (pi < pattern.length && pattern[pi] === "*") pi += 1;
+  return pi === pattern.length;
 }
 
 /**
@@ -88,10 +111,10 @@ function patternListMatches(patterns: string[], value: string): boolean {
   for (const pattern of patterns) {
     if (!pattern) continue;
     if (pattern.startsWith("!")) {
-      if (compileGlob(pattern.slice(1)).test(value)) return false;
+      if (matchesGlob(pattern.slice(1), value)) return false;
     } else {
       hasPositive = true;
-      if (compileGlob(pattern).test(value)) positiveHit = true;
+      if (matchesGlob(pattern, value)) positiveHit = true;
     }
   }
   return hasPositive ? positiveHit : true;
