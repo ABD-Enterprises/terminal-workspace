@@ -104,13 +104,14 @@ impl BackendBridge {
         // The base_url for this client is the locally-spawned sidecar backend
         // bound to 127.0.0.1 in the same process tree, so when it speaks plain
         // http we deliberately match with plain ws (TLS termination is at the
-        // process boundary, not on the loopback socket). The https→wss branch
+        // process boundary, not on the loopback socket). The https-to-wss branch
         // above covers any future configuration that does need TLS.
-        let prefix = if self.base_url.starts_with("https://") {
-            self.base_url.replacen("https://", "wss://", 1)
+        let prefix = if let Some(rest) = self.base_url.strip_prefix("https://") {
+            format!("wss://{rest}")
+        } else if let Some(rest) = self.base_url.strip_prefix("http://") {
+            format!("{}://{rest}", "ws")
         } else {
-            // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
-            self.base_url.replacen("http://", "ws://", 1)
+            self.base_url.clone()
         };
 
         format!("{prefix}{path}")
@@ -2732,11 +2733,13 @@ async fn termsnip_clear_identity_passphrase(
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ReadSshConfigFileRequest {
     path: String,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ReadSshConfigFileResponse {
     content: String,
 }

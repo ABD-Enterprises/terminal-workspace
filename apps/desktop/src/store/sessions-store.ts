@@ -141,24 +141,36 @@ function queueCommand(
 }
 
 function buildDuplicateSessionTitle(tabs: SessionTab[], baseTitle: string) {
-  const escapedBaseTitle = baseTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const matcher = new RegExp(`^${escapedBaseTitle}(?: \\((\\d+)\\))?$`);
-  const matchingTitles = tabs
-    .map((tab) => tab.title)
-    .map((title) => title.match(matcher))
-    .filter(Boolean);
+  const titleIndexes = tabs
+    .map((tab) => getDuplicateTitleIndex(tab.title, baseTitle))
+    .filter((index) => index !== undefined);
 
-  if (!matchingTitles.length) {
+  if (!titleIndexes.length) {
     return baseTitle;
   }
 
-  const nextIndex =
-    matchingTitles.reduce((highestIndex, match) => {
-      const currentIndex = Number.parseInt(match?.[1] ?? "1", 10) || 1;
-      return Math.max(highestIndex, currentIndex);
-    }, 1) + 1;
+  const nextIndex = Math.max(...titleIndexes) + 1;
 
   return `${baseTitle} (${nextIndex})`;
+}
+
+function getDuplicateTitleIndex(title: string, baseTitle: string): number | undefined {
+  if (title === baseTitle) {
+    return 1;
+  }
+
+  const suffixPrefix = `${baseTitle} (`;
+  if (!title.startsWith(suffixPrefix) || !title.endsWith(")")) {
+    return undefined;
+  }
+
+  const suffix = title.slice(suffixPrefix.length, -1);
+  if (!/^\d+$/.test(suffix)) {
+    return undefined;
+  }
+
+  const index = Number.parseInt(suffix, 10);
+  return Number.isSafeInteger(index) && index > 0 ? index : undefined;
 }
 
 export function openSessionWorkspace(

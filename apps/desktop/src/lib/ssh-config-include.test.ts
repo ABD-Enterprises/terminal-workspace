@@ -49,6 +49,42 @@ describe("resolveSshIncludes", () => {
     expect(text).toContain("Host level2");
   });
 
+  it("resolves nested relative Includes against the including file directory", async () => {
+    const readFile = fileReaderFromMap({
+      "~/.ssh/conf.d/root": "Include nested/leaf\n",
+      "~/.ssh/conf.d/nested/leaf": "Host leaf\n  HostName leaf.example.com\n",
+    });
+
+    const { text, skipped } = await resolveSshIncludes("Include conf.d/root\n", {
+      readFile,
+    });
+
+    expect(skipped).toEqual([]);
+    expect(text).toContain("Host leaf");
+  });
+
+  it("does not expand Includes inside Host or Match blocks unconditionally", async () => {
+    const readFile = vi.fn<SshConfigFileReader>(async () => "Host secret\n  HostName secret.example.com\n");
+
+    const { text, skipped } = await resolveSshIncludes(
+      "Host alpha\n  Include secret.conf\nMatch host beta\n  Include beta.conf\n",
+      { readFile }
+    );
+
+    expect(readFile).not.toHaveBeenCalled();
+    expect(text).not.toContain("Host secret");
+    expect(skipped).toEqual([
+      {
+        reason: "include-directive",
+        detail: "Include secret.conf (conditional block unsupported)",
+      },
+      {
+        reason: "include-directive",
+        detail: "Include beta.conf (conditional block unsupported)",
+      },
+    ]);
+  });
+
   it("detects an Include cycle and logs a skip", async () => {
     const readFile = fileReaderFromMap({
       "~/.ssh/cycle-a": "Include cycle-b\n",

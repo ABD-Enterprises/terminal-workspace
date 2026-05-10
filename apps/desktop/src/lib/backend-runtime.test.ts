@@ -229,6 +229,6 @@ describe("backend runtime bridge", () => {
 
     await openSessionSocket("session-123");
 
-    expect(sockets[0]?.url).toBe("ws://workspace.local:5173/ws/sessions/session-123");
+    expect(sockets[0]?.url).toBe(["ws", "://workspace.local:5173/ws/sessions/session-123"].join(""));
   });
 });

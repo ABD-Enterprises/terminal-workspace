@@ -51,6 +51,7 @@ export interface ResolveSshIncludesOptions {
 const DEFAULT_BASE_DIR = "~/.ssh";
 const DEFAULT_MAX_DEPTH = 10;
 const INCLUDE_DIRECTIVE_RE = /^\s*include\s+(.*?)\s*(?:#.*)?$/i;
+const BLOCK_DIRECTIVE_RE = /^\s*(host|match)\s+/i;
 
 function normalizePath(rawPath: string, baseDir: string): string {
   const trimmed = rawPath.trim();
@@ -61,6 +62,15 @@ function normalizePath(rawPath: string, baseDir: string): string {
   return `${base}/${trimmed}`;
 }
 
+function dirnamePath(path: string): string {
+  const trimmed = path.endsWith("/") ? path.slice(0, -1) : path;
+  const slashIndex = trimmed.lastIndexOf("/");
+  if (slashIndex <= 0) {
+    return slashIndex === 0 ? "/" : ".";
+  }
+  return trimmed.slice(0, slashIndex);
+}
+
 function hasGlobChar(value: string): boolean {
   return value.includes("*") || value.includes("?") || value.includes("[");
 }
@@ -68,6 +78,7 @@ function hasGlobChar(value: string): boolean {
 async function expandText(
   text: string,
   options: Required<ResolveSshIncludesOptions>,
+  currentBaseDir: string,
   visited: Set<string>,
   depth: number,
   skipped: SshConfigImportSkip[]
@@ -82,8 +93,15 @@ async function expandText(
 
   const lines = text.split(/\r?\n/);
   const out: string[] = [];
+  let insideConditionalBlock = false;
 
   for (const line of lines) {
+    if (BLOCK_DIRECTIVE_RE.test(line)) {
+      insideConditionalBlock = true;
+      out.push(line);
+      continue;
+    }
+
     const match = line.match(INCLUDE_DIRECTIVE_RE);
     if (!match) {
       out.push(line);
@@ -94,6 +112,15 @@ async function expandText(
       out.push(line);
       continue;
     }
+
+    if (insideConditionalBlock) {
+      skipped.push({
+        reason: "include-directive",
+        detail: `Include ${rawValue} (conditional block unsupported)`,
+      });
+      continue;
+    }
+
     // Multiple paths per Include line are supported by OpenSSH; expand each.
     const entries = rawValue.split(/\s+/).filter(Boolean);
     for (const entry of entries) {
@@ -107,7 +134,7 @@ async function expandText(
         });
         continue;
       }
-      const normalized = normalizePath(entry, options.baseDir);
+      const normalized = normalizePath(entry, currentBaseDir);
       if (visited.has(normalized)) {
         skipped.push({
           reason: "include-directive",
@@ -137,6 +164,7 @@ async function expandText(
       const expanded = await expandText(
         included,
         options,
+        dirnamePath(normalized),
         nextVisited,
         depth + 1,
         skipped
@@ -170,6 +198,6 @@ export async function resolveSshIncludes(
     baseDir: options.baseDir ?? DEFAULT_BASE_DIR,
     maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
   };
-  const text = await expandText(initialText, filled, new Set(), 0, skipped);
+  const text = await expandText(initialText, filled, filled.baseDir, new Set(), 0, skipped);
   return { text, skipped };
 }
