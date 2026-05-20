@@ -1,0 +1,11 @@
+name: EAS Diag Trivial Caller
+on:
+  pull_request:
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  call:
+    uses: deffenda/enterprise-ai-standards/.github/workflows/reusable/test-trivial.yml@diag/trivial-reusable
+    with:
+      msg: "trivial reusable call from term-snip"
