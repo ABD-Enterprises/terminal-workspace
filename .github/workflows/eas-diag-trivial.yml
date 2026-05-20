@@ -6,6 +6,6 @@ permissions:
   contents: read
 jobs:
   call:
-    uses: deffenda/enterprise-ai-standards/.github/workflows/reusable/test-trivial.yml@diag/trivial-reusable
+    uses: deffenda/enterprise-ai-standards/.github/workflows/reusable/test-trivial.yml@diag-v1
     with:
       msg: "trivial reusable call from term-snip"
