@@ -45,6 +45,18 @@ jobs:
             exit 2
           fi
 
+      # Checking out PR head here is required so subsequent steps can read the
+      # PR's commit metadata and changed-files for gate evaluation. The
+      # combination of pull_request_target + checking out PR head normally
+      # creates a secret-exfiltration vector (the standard pwn-request pattern),
+      # but here:
+      #   - persist-credentials: false strips the GITHUB_TOKEN from the checkout
+      #   - subsequent steps invoke only runner-side tools (gh, jq, bash),
+      #     never `npm install`, `make`, build scripts, or anything else that
+      #     would execute code from the PR
+      # The PR working tree is read, not run. Semgrep flags the pattern by
+      # shape, not by what the workflow does afterward.
+      # nosemgrep: yaml.github-actions.security.pull-request-target-code-checkout.pull-request-target-code-checkout
       - name: Checkout PR head
         uses: actions/checkout@v5
         with:
