@@ -18,6 +18,9 @@ const SnippetsPage = lazy(() =>
 const TransfersPage = lazy(() =>
   import("./TransfersPage").then((module) => ({ default: module.TransfersPage }))
 );
+const TunnelsPage = lazy(() =>
+  import("./TunnelsPage").then((module) => ({ default: module.TunnelsPage }))
+);
 
 function RouteFallback() {
   return (
@@ -78,6 +81,14 @@ export function AppRouter() {
               element={
                 <LazyRoute>
                   <TransfersPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/tunnels"
+              element={
+                <LazyRoute>
+                  <TunnelsPage />
                 </LazyRoute>
               }
             />

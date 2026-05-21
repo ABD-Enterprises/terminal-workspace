@@ -332,10 +332,51 @@ export function FileBrowser({ host }: FileBrowserProps) {
   };
 
   const draftCopy = draftAction ? promptLabels(draftAction.mode) : undefined;
+  // T15: drag-from-Finder upload via HTML5 drag-and-drop. Browser
+  // path reads DataTransfer.files; Tauri path will eventually bind
+  // tauri://file-drop to read native paths (follow-up; same handler
+  // shape).
+  const [dragActive, setDragActive] = useState(false);
 
   return (
     <>
-      <section className="flex h-full min-h-0 flex-col rounded-[22px] border border-slate-800/80 bg-slate-950/50">
+      <section
+        className={
+          "flex h-full min-h-0 flex-col rounded-[22px] border border-slate-800/80 bg-slate-950/50 transition" +
+          (dragActive ? " ring-2 ring-emerald-400/60" : "")
+        }
+        onDragOver={(event) => {
+          // Only accept the drop if files are being dragged. Without
+          // this check arbitrary text drags would highlight the panel.
+          if (!event.dataTransfer.types.includes("Files")) {
+            return;
+          }
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          if (!dragActive) {
+            setDragActive(true);
+          }
+        }}
+        onDragLeave={(event) => {
+          // Only clear the highlight if the leave is truly leaving the
+          // container — not just crossing a child node boundary.
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            return;
+          }
+          setDragActive(false);
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer.types.includes("Files")) {
+            return;
+          }
+          event.preventDefault();
+          setDragActive(false);
+          const files = Array.from(event.dataTransfer.files);
+          for (const file of files) {
+            void handleUpload(file);
+          }
+        }}
+        data-testid="sftp-file-browser">
         <div className="grid gap-3 border-b border-slate-800/80 px-3.5 py-2.5 xl:grid-cols-[minmax(0,1fr)_auto]">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">

@@ -31,6 +31,11 @@ export const navigationItems: NavigationItem[] = [
     description: "Remote files and transfer queue.",
   },
   {
+    path: "/tunnels",
+    label: "Tunnels",
+    description: "Active port forwards across sessions.",
+  },
+  {
     path: "/settings",
     label: "Settings",
     description: "Preferences, backup, and runtime mode.",
