@@ -7,6 +7,7 @@ import { FirstRunTour } from "../common/FirstRunTour";
 import { isTauriRuntime } from "../../lib/backend-runtime";
 import { launchHostSession as sharedLaunchHostSession } from "../../lib/launch-host-session";
 import { navigationItems } from "../../lib/navigation";
+import { scorePaletteMatch } from "../../lib/palette-score";
 import { formatPrimaryShortcut, isPrimaryShortcut } from "../../lib/shortcuts";
 import { cn, formatHostAddress } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
@@ -314,14 +315,21 @@ export function AppShell() {
     sessionTabs,
   ]);
 
-  const matchingSections = navigationItems.filter((item) => {
-    if (!paletteQuery.trim()) {
-      return true;
-    }
+  // T09: fuzzy + acronym match. We score each candidate's combined
+  // haystack against the query and sort high-score-first. Empty query
+  // shows everything in its natural order.
+  const trimmedQuery = paletteQuery.trim();
 
-    const haystack = `${item.label} ${item.description}`.toLowerCase();
-    return haystack.includes(paletteQuery.trim().toLowerCase());
-  });
+  const matchingSections = trimmedQuery
+    ? navigationItems
+        .map((item) => ({
+          item,
+          score: scorePaletteMatch(trimmedQuery, `${item.label} ${item.description}`),
+        }))
+        .filter(({ score }) => score > 0)
+        .sort((left, right) => right.score - left.score)
+        .map(({ item }) => item)
+    : navigationItems;
 
   const matchingHosts = applyHostFilters(hosts, {
     query: paletteQuery,
@@ -329,29 +337,34 @@ export function AppShell() {
     activeTag: "all",
     favoritesOnly: false,
   }).slice(0, 6);
-  const matchingSessionTabs = sessionTabs
-    .filter((tab) => {
-      if (!paletteQuery.trim()) {
-        return true;
-      }
-
-      const host = hosts.find((entry) => entry.id === tab.hostId);
-      const haystack = `${tab.title} ${host?.label ?? ""} ${host?.hostname ?? ""} ${host?.username ?? ""}`.toLowerCase();
-      return haystack.includes(paletteQuery.trim().toLowerCase());
-    })
-    .slice(0, 6);
-  const matchingSnippets = snippets
-    .filter((snippet) => {
-      if (!paletteQuery.trim()) {
-        return true;
-      }
-
-      const haystack = [snippet.title, snippet.description, snippet.command, snippet.tags.join(" ")]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(paletteQuery.trim().toLowerCase());
-    })
-    .slice(0, 6);
+  const matchingSessionTabs = trimmedQuery
+    ? sessionTabs
+        .map((tab) => {
+          const host = hosts.find((entry) => entry.id === tab.hostId);
+          const haystack = `${tab.title} ${host?.label ?? ""} ${host?.hostname ?? ""} ${host?.username ?? ""}`;
+          return { tab, score: scorePaletteMatch(trimmedQuery, haystack) };
+        })
+        .filter(({ score }) => score > 0)
+        .sort((left, right) => right.score - left.score)
+        .slice(0, 6)
+        .map(({ tab }) => tab)
+    : sessionTabs.slice(0, 6);
+  const matchingSnippets = trimmedQuery
+    ? snippets
+        .map((snippet) => {
+          const haystack = [
+            snippet.title,
+            snippet.description,
+            snippet.command,
+            snippet.tags.join(" "),
+          ].join(" ");
+          return { snippet, score: scorePaletteMatch(trimmedQuery, haystack) };
+        })
+        .filter(({ score }) => score > 0)
+        .sort((left, right) => right.score - left.score)
+        .slice(0, 6)
+        .map(({ snippet }) => snippet)
+    : snippets.slice(0, 6);
 
   const focusHost = (hostId: string) => {
     setPaletteQuery("");

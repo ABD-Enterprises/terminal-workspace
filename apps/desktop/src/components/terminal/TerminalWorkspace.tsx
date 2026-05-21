@@ -10,6 +10,7 @@ import { EmptyState } from "../common/EmptyState";
 import { PortForwardPanel } from "./PortForwardPanel";
 import { SplitLayout } from "./SplitLayout";
 import { TerminalPane } from "./TerminalPane";
+import { TabContextMenu, type TabContextMenuPayload } from "./TabContextMenu";
 import { TerminalTabView } from "./TerminalTabView";
 
 interface TerminalWorkspaceProps {
@@ -19,6 +20,10 @@ interface TerminalWorkspaceProps {
 export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
   const { tabs, panes, hosts, activeTab, activePanes } = useSessions();
   const [quickConnectQuery, setQuickConnectQuery] = useState("");
+  // T08: right-click context menu for tabs. The payload holds the
+  // clicked tab id + cursor coordinates so the menu renders at the
+  // press point. null = closed.
+  const [tabMenu, setTabMenu] = useState<TabContextMenuPayload | null>(null);
   const openSession = useSessionsStore((state) => state.openSession);
   const duplicateSession = useSessionsStore((state) => state.duplicateSession);
   const selectTab = useSessionsStore((state) => state.selectTab);
@@ -68,6 +73,38 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
   const activeHost = hosts[activeTab.hostId];
   const activePane = panes[activeTab.activePaneId];
 
+  // T08 actions — Close others / Close to the right are derived from
+  // the current tabs array. We snapshot the array before iterating so
+  // each closeTab call sees consistent indices (the store sorts/reflows
+  // on each call).
+  const closeOthers = (keepTabId: string) => {
+    for (const tab of [...tabs]) {
+      if (tab.id !== keepTabId) {
+        closeTab(tab.id);
+      }
+    }
+  };
+  const closeToRight = (anchorTabId: string) => {
+    const snapshot = [...tabs];
+    const anchorIndex = snapshot.findIndex((tab) => tab.id === anchorTabId);
+    if (anchorIndex < 0) {
+      return;
+    }
+    for (const tab of snapshot.slice(anchorIndex + 1)) {
+      closeTab(tab.id);
+    }
+  };
+  const duplicateByTabId = (tabId: string) => {
+    const tab = tabs.find((entry) => entry.id === tabId);
+    if (!tab) {
+      return;
+    }
+    const host = hosts[tab.hostId];
+    if (host) {
+      duplicateSession(host);
+    }
+  };
+
   return (
     <section className="flex h-full min-h-0 flex-col gap-2.5">
       <div className="rounded-[20px] border border-slate-800/80 bg-slate-950/45 p-2">
@@ -79,8 +116,17 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
           onSelect={selectTab}
           onClose={closeTab}
           onReorder={reorderTab}
+          onContextMenu={(tabId, x, y) => setTabMenu({ tabId, x, y })}
         />
       </div>
+      <TabContextMenu
+        payload={tabMenu}
+        onClose={() => setTabMenu(null)}
+        onCloseTab={closeTab}
+        onCloseOthers={closeOthers}
+        onCloseToRight={closeToRight}
+        onDuplicate={duplicateByTabId}
+      />
 
       <div className="grid min-h-0 flex-1 gap-2.5 xl:grid-cols-[minmax(0,1fr)_272px]">
         <div className="rounded-[20px] border border-slate-800/80 bg-slate-950/45 p-2">

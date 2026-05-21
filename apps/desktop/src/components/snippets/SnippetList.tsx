@@ -44,13 +44,24 @@ export function SnippetList({
       <div className="min-h-0 overflow-auto">
         {snippets.map((snippet) => {
           const selected = snippet.id === selectedSnippetId;
+          // T10: hover preview. The native title attribute is the
+          // accessibility floor and works in every browser; the
+          // CSS-driven group-hover overlay below is the visual sugar.
+          // Truncate the command body to 200 chars so the tooltip
+          // doesn't grow without bound.
+          const previewBody =
+            snippet.command.length > 200
+              ? `${snippet.command.slice(0, 197)}…`
+              : snippet.command;
 
           return (
             <Fragment key={snippet.id}>
               <div
-                className={`grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)_120px_164px] gap-3 border-b border-slate-900/80 px-3 py-2 text-sm transition ${
+                className={`group relative grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)_120px_164px] gap-3 border-b border-slate-900/80 px-3 py-2 text-sm transition ${
                   selected ? "bg-emerald-400/10" : "hover:bg-slate-900/70"
                 }`}
+                title={previewBody}
+                data-testid="snippet-row"
               >
                 <button type="button" onClick={() => onSelect(snippet.id)} className="min-w-0 text-left">
                   <p className="truncate font-medium text-slate-100">{snippet.title}</p>
@@ -58,6 +69,14 @@ export function SnippetList({
                     {snippet.tags.join(" · ") || "No tags"}
                   </p>
                 </button>
+                <div
+                  role="tooltip"
+                  aria-label="Snippet command preview"
+                  data-testid="snippet-hover-preview"
+                  className="pointer-events-none invisible absolute left-3 top-full z-20 mt-1 max-w-[480px] rounded-xl border border-emerald-400/40 bg-slate-950/95 px-3 py-2 text-[11px] font-mono leading-5 text-emerald-100 opacity-0 shadow-2xl shadow-slate-950/70 transition group-hover:visible group-hover:opacity-100"
+                >
+                  {previewBody}
+                </div>
 
                 <button type="button" onClick={() => onSelect(snippet.id)} className="min-w-0 text-left">
                   <p className="truncate text-sm text-slate-200">

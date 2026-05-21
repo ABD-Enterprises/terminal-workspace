@@ -17,6 +17,12 @@ interface TerminalTabViewProps {
    * snapshot tests that don't care about reorder state.
    */
   onReorder?: (fromIndex: number, toIndex: number) => void;
+  /**
+   * T08: right-click context menu. Called with the clicked tab id and
+   * cursor coordinates when the user right-clicks (or two-finger taps)
+   * a tab. Parent renders the actual menu UI.
+   */
+  onContextMenu?: (tabId: string, x: number, y: number) => void;
 }
 
 const DRAG_DATA_KEY = "application/x-termsnip-tab-index";
@@ -29,6 +35,7 @@ export function TerminalTabView({
   onSelect,
   onClose,
   onReorder,
+  onContextMenu,
 }: TerminalTabViewProps) {
   const [dragSourceIndex, setDragSourceIndex] = useState<number | null>(null);
   const [dragTargetIndex, setDragTargetIndex] = useState<number | null>(null);
@@ -75,7 +82,10 @@ export function TerminalTabView({
   };
 
   return (
-    <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+    <div
+      data-testid="terminal-tab-strip"
+      className="flex gap-1.5 overflow-x-auto pb-0.5"
+    >
       {tabs.map((tab, index) => {
         const activePane = panes[tab.activePaneId];
         const host = hosts[tab.hostId];
@@ -92,6 +102,14 @@ export function TerminalTabView({
             onDragOver={(event) => handleDragOver(event, index)}
             onDrop={(event) => handleDrop(event, index)}
             onDragEnd={handleDragEnd}
+            onContextMenu={
+              onContextMenu
+                ? (event) => {
+                    event.preventDefault();
+                    onContextMenu(tab.id, event.clientX, event.clientY);
+                  }
+                : undefined
+            }
             onClick={() => onSelect(tab.id)}
             className={cn(
               "group flex shrink-0 items-center gap-2.5 rounded-[16px] border px-2.5 py-1.5 text-left transition",
