@@ -23,8 +23,13 @@ test.describe("sidebar", () => {
     await search.fill("billing");
     // The HostsPage list responds to sidebar search via the shared store.
     await expect(page.getByText("Billing API").first()).toBeVisible();
-    // Other seeded hosts that don't match are filtered out of the list view.
-    await expect(page.getByRole("button", { name: /Edge Router/ })).toHaveCount(0);
+    // Other seeded hosts that don't match are filtered out of the *list* view.
+    // Recent / Pinned panels in the sidebar are NOT filtered by search
+    // (intentional — Recent is about "what you just did", not "what
+    // matches your current query") so scope to <main>.
+    await expect(
+      page.getByRole("main").getByRole("button", { name: /Edge Router/ })
+    ).toHaveCount(0);
     // Clearing the search restores the list.
     await search.fill("");
     await expect(page.getByText("Billing API").first()).toBeVisible();

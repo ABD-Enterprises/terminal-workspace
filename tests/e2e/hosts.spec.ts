@@ -15,7 +15,10 @@ test.describe("hosts page", () => {
 
   test("clicking the Billing API row reveals the trusted-key state", async ({ page }) => {
     await page.goto("/hosts");
-    await page.getByRole("button", { name: /Billing API/ }).first().click();
+    // Scope to <main> — the sidebar Recent/Pinned panels also render
+    // buttons containing the host label, which would otherwise win
+    // .first(). The host row is what owns the trusted-key expansion.
+    await page.getByRole("main").getByRole("button", { name: /Billing API/ }).first().click();
     await expect(page.getByText("Deploy Shared Key").first()).toBeVisible();
     await expect(page.getByText(/ssh-ed25519 · trusted/i).first()).toBeVisible();
   });
@@ -74,7 +77,9 @@ test.describe("hosts page", () => {
 
   test("Edit existing host shows the populated form", async ({ page }) => {
     await page.goto("/hosts");
-    await page.getByRole("button", { name: /Billing API/ }).first().click();
+    // Scope to <main> — the sidebar Recent panel also renders buttons
+    // with the host label, which would win .first() otherwise.
+    await page.getByRole("main").getByRole("button", { name: /Billing API/ }).first().click();
     const editButtons = page.getByRole("button", { name: /^Edit$/ });
     await editButtons.first().click();
     await expect(page.getByRole("heading", { name: /Edit / })).toBeVisible();

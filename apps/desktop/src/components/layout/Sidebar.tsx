@@ -53,6 +53,19 @@ export function Sidebar() {
         .sort((left, right) => left.label.localeCompare(right.label)),
     [hosts]
   );
+  // T06: Recent connections — top 5 by lastConnectedAt desc. Hosts
+  // that have never been connected are excluded so the panel only
+  // shows once the user has actually used the app.
+  const recentHosts = useMemo(
+    () =>
+      hosts
+        .filter((host) => Boolean(host.lastConnectedAt))
+        .sort((left, right) =>
+          (right.lastConnectedAt ?? "").localeCompare(left.lastConnectedAt ?? "")
+        )
+        .slice(0, 5),
+    [hosts]
+  );
   const sessionRows = useMemo(
     () =>
       sessionTabs.map((tab) => {
@@ -151,6 +164,74 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+
+      {recentHosts.length > 0 ? (
+        <div
+          role="region"
+          aria-label="Recent connections"
+          className="mt-2 rounded-[18px] border border-slate-800/90 bg-slate-900/60"
+        >
+          <div className="flex items-center justify-between border-b border-slate-800/80 px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-300/90">
+              Recent
+            </p>
+            <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+              {recentHosts.length}
+            </span>
+          </div>
+          <div className="max-h-44 overflow-auto px-2 py-2 space-y-1">
+            {recentHosts.map((host) => {
+              const existingTab = sessionTabs.find((tab) => tab.hostId === host.id);
+              const active = existingTab && existingTab.id === activeSessionTabId;
+              return (
+                <button
+                  key={`recent-${host.id}`}
+                  type="button"
+                  title={`${host.username}@${host.hostname}:${host.port}`}
+                  onClick={async () => {
+                    if (existingTab) {
+                      selectSessionTab(existingTab.id);
+                      navigate(`/sessions?tabId=${existingTab.id}`);
+                      return;
+                    }
+                    const result = await launchHostSession(host);
+                    if (!result.ok || !result.tabId) {
+                      if (result.errorMessage) {
+                        console.warn(`[sidebar:recent] ${result.errorMessage}`);
+                      }
+                      return;
+                    }
+                    navigate(`/sessions?tabId=${result.tabId}`);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-[14px] border px-2 py-1.5 text-left transition",
+                    active
+                      ? "border-emerald-400/50 bg-emerald-400/10"
+                      : "border-slate-800 bg-slate-950/60 hover:border-sky-400/40 hover:bg-slate-900"
+                  )}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "h-1.5 w-1.5 shrink-0 rounded-full",
+                      existingTab ? "bg-emerald-400" : "bg-sky-300/70"
+                    )}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12px] font-medium text-slate-100">
+                      {host.label}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[10px] text-slate-500">
+                      {host.hostname}
+                      {host.port && host.port !== 22 ? `:${host.port}` : ""}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {pinnedHosts.length > 0 ? (
         <div className="mt-2 rounded-[18px] border border-slate-800/90 bg-slate-900/60">

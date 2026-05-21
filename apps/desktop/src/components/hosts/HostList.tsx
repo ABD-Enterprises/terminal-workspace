@@ -1,5 +1,11 @@
 import { Fragment, type ReactNode } from "react";
+import {
+  deriveHostConnectionStatus,
+  statusDotAriaLabel,
+  statusDotClass,
+} from "../../lib/host-status";
 import { cn, describeHostRuntime, formatHostAddress, formatRelativeTime } from "../../lib/utils";
+import { useSessionsStore } from "../../store/sessions-store";
 import { formatHostProtocol, type HostRecord } from "../../types/host";
 import { EmptyState } from "../common/EmptyState";
 
@@ -32,6 +38,10 @@ export function HostList({
   onCreateHost,
   renderExpandedContent,
 }: HostListProps) {
+  // T07: per-host connection status dot. Subscribe to the pane map so
+  // dot colors re-render in real time when a session moves through
+  // connecting → connected → disconnected.
+  const sessionPanes = useSessionsStore((state) => state.panes);
   if (!hosts.length) {
     return (
       <EmptyState
@@ -65,6 +75,7 @@ export function HostList({
         {hosts.map((host) => {
           const selected = host.id === selectedHostId;
           const visibleTags = getVisibleTags(host.tags);
+          const status = deriveHostConnectionStatus(host.id, sessionPanes);
 
           return (
             <Fragment key={host.id}>
@@ -75,7 +86,19 @@ export function HostList({
                 )}
               >
                 <button type="button" onClick={() => onSelect(host.id)} className="min-w-0 text-left">
-                  <span className="block truncate font-medium text-slate-100">{host.label}</span>
+                  <span className="flex items-center gap-2">
+                    <span
+                      aria-label={statusDotAriaLabel(status)}
+                      role="img"
+                      data-testid="host-status-dot"
+                      data-status={status}
+                      className={cn(
+                        "h-1.5 w-1.5 shrink-0 rounded-full",
+                        statusDotClass(status)
+                      )}
+                    />
+                    <span className="block truncate font-medium text-slate-100">{host.label}</span>
+                  </span>
                   <p className="mt-0.5 truncate text-[11px] text-slate-500">
                     {[formatHostProtocol(host.protocol), ...visibleTags].slice(0, 3).join(" · ") || "No tags"}
                   </p>
