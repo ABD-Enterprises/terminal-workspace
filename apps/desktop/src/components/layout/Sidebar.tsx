@@ -14,6 +14,7 @@ export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const hosts = useHostsStore((state) => state.hosts);
+  const ensureLocalShellHost = useHostsStore((state) => state.ensureLocalShellHost);
   const sidebarSearch = useAppStore((state) => state.sidebarSearch);
   const setSidebarSearch = useAppStore((state) => state.setSidebarSearch);
   const workspaceDensity = useAppStore((state) => state.workspaceDensity);
@@ -21,6 +22,28 @@ export function Sidebar() {
   const sessionPanes = useSessionsStore((state) => state.panes);
   const activeSessionTabId = useSessionsStore((state) => state.activeTabId);
   const selectSessionTab = useSessionsStore((state) => state.selectTab);
+
+  // T01: one-click Local Terminal quick-launch. Ensures the canonical
+  // local-shell host record exists, then routes to (or reuses) its
+  // session. If a local-shell tab is already open, focus that tab
+  // instead of spawning a duplicate.
+  const openLocalTerminal = async () => {
+    const localShell = ensureLocalShellHost();
+    const existingTab = sessionTabs.find((tab) => tab.hostId === localShell.id);
+    if (existingTab) {
+      selectSessionTab(existingTab.id);
+      navigate(`/sessions?tabId=${existingTab.id}`);
+      return;
+    }
+    const result = await launchHostSession(localShell);
+    if (!result.ok || !result.tabId) {
+      if (result.errorMessage) {
+        console.warn(`[sidebar] ${result.errorMessage}`);
+      }
+      return;
+    }
+    navigate(`/sessions?tabId=${result.tabId}`);
+  };
   const favoriteCount = hosts.filter((host) => host.favorite).length;
   const groupCount = new Set(hosts.map((host) => host.group).filter(Boolean)).size;
   const pinnedHosts = useMemo(
@@ -81,6 +104,28 @@ export function Sidebar() {
           placeholder="Search the host inventory"
         />
       </div>
+
+      <button
+        type="button"
+        onClick={openLocalTerminal}
+        aria-label="Open local terminal"
+        className={cn(
+          "mt-2 flex items-center justify-between rounded-[14px] border border-emerald-400/40 bg-emerald-400/10 text-left transition hover:border-emerald-400/70 hover:bg-emerald-400/15",
+          workspaceDensity === "compact" ? "px-2.5 py-1.5" : "px-3 py-2"
+        )}
+      >
+        <span className="min-w-0">
+          <span className="block text-[13px] font-medium text-emerald-100">
+            Local terminal
+          </span>
+          <span className="mt-0.5 block truncate text-[10px] leading-4 text-emerald-200/70">
+            Spawn or focus your macOS login shell
+          </span>
+        </span>
+        <span aria-hidden="true" className="text-emerald-300">
+          ⌘
+        </span>
+      </button>
 
       <nav className={cn("mt-2", workspaceDensity === "compact" ? "space-y-1" : "space-y-1.5")}>
         {navigationItems.map((item) => (

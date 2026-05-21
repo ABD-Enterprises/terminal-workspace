@@ -2,10 +2,12 @@ import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import { buildHostSearchText, parseEnvironmentVariables, splitCommaList } from "../lib/utils";
 import {
+  createLocalShellHostRecord,
   defaultHostKeyPolicy,
   defaultHostProtocol,
   hostSupportsCredentialPrompt,
   hostSupportsJumpHosts,
+  LOCAL_SHELL_HOST_ID,
   protocolDefaultPort,
   protocolRequiresUsername,
   hostSupportsSftp,
@@ -269,6 +271,21 @@ interface HostsState {
    * into the "Ungrouped" bucket.
    */
   removeGroup: (groupName: string) => number;
+  /**
+   * Ensure the canonical local-shell host record exists in the inventory
+   * and return it. T01: the sidebar "Local terminal" quick-launch needs
+   * a stable record to hand to `launchHostSession`. Idempotent — only
+   * creates the record if it isn't already present.
+   */
+  ensureLocalShellHost: () => HostRecord;
+  /**
+   * T04: replace the current host inventory with the seeded sample
+   * fixture (Production Gateway, Billing API, Edge Router, Local Shell)
+   * so a user with an empty vault can "try with sample data" from the
+   * cold-start welcome panel without going through Settings. Clears any
+   * tombstones for the seeded ids so a previously-deleted seed re-appears.
+   */
+  loadSampleData: () => void;
 }
 
 export const useHostsStore = create<HostsState>()(
@@ -362,6 +379,54 @@ export const useHostsStore = create<HostsState>()(
           ),
         }));
         return touched;
+      },
+      ensureLocalShellHost: (): HostRecord => {
+        // Idempotent — returns the existing record if present, otherwise
+        // creates a fresh canonical local-shell HostRecord and persists
+        // it. T01: the sidebar quick-launch needs a stable handle. We
+        // compute the return value from inside the `set` callback so
+        // tsc can infer the store type without a self-reference cycle.
+        const slot: { record: HostRecord | null; created: boolean } = {
+          record: null,
+          created: false,
+        };
+        set((state) => {
+          const existing = state.hosts.find(
+            (host) => host.id === LOCAL_SHELL_HOST_ID
+          );
+          if (existing) {
+            slot.record = existing;
+            return state;
+          }
+          const fresh = createLocalShellHostRecord();
+          slot.record = fresh;
+          slot.created = true;
+          return {
+            hosts: sortHostCollection([...state.hosts, fresh]),
+          };
+        });
+        if (!slot.record) {
+          // Defensive — zustand runs the callback synchronously, so
+          // slot.record must be assigned by this point. If not, we have
+          // bigger problems than a thrown error.
+          throw new Error("ensureLocalShellHost: result not assigned");
+        }
+        if (slot.created) {
+          useVaultSyncStore.getState().clearDeleted("hosts", slot.record.id);
+        }
+        return slot.record;
+      },
+      loadSampleData: () => {
+        // Replace whatever's in the inventory with the seeded sample
+        // fixture. T04: the "Try with sample data" button on the
+        // cold-start welcome panel must produce inventory the user can
+        // immediately explore, even after they cleared everything once.
+        const fresh = sortHostCollection(sampleHosts);
+        set({ hosts: fresh });
+        const vault = useVaultSyncStore.getState();
+        for (const host of fresh) {
+          vault.clearDeleted("hosts", host.id);
+        }
       },
     }),
     {

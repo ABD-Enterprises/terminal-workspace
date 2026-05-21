@@ -20,6 +20,12 @@ interface AppState {
   vaultId: string;
   deviceId: string;
   lastAppliedSnapshotId: string | null;
+  /**
+   * One-shot onboarding flags. Persisted so the surfaces only render on
+   * first run. See T03 (import-SSH callout) and T05 (first-run mini-tour).
+   */
+  sawImportCallout: boolean;
+  sawFirstRunTour: boolean;
   setSidebarSearch: (search: string) => void;
   openCommandPalette: () => void;
   closeCommandPalette: () => void;
@@ -31,6 +37,8 @@ interface AppState {
   setTerminalTheme: (theme: TerminalThemeName) => void;
   setVaultId: (vaultId: string) => void;
   setLastAppliedSnapshotId: (snapshotId: string | null) => void;
+  markImportCalloutSeen: () => void;
+  markFirstRunTourSeen: () => void;
 }
 
 const fallbackStorage: StateStorage = {
@@ -51,6 +59,8 @@ interface PersistedAppState {
   vaultId: string;
   deviceId: string;
   lastAppliedSnapshotId: string | null;
+  sawImportCallout: boolean;
+  sawFirstRunTour: boolean;
 }
 
 function createPersistentId() {
@@ -70,6 +80,8 @@ export const useAppStore = create<AppState>()(
       vaultId: createPersistentId(),
       deviceId: createPersistentId(),
       lastAppliedSnapshotId: null,
+      sawImportCallout: false,
+      sawFirstRunTour: false,
       setSidebarSearch: (sidebarSearch) => set({ sidebarSearch }),
       openCommandPalette: () => set({ commandPaletteOpen: true }),
       closeCommandPalette: () => set({ commandPaletteOpen: false }),
@@ -84,10 +96,12 @@ export const useAppStore = create<AppState>()(
         }),
       setVaultId: (vaultId) => set({ vaultId }),
       setLastAppliedSnapshotId: (lastAppliedSnapshotId) => set({ lastAppliedSnapshotId }),
+      markImportCalloutSeen: () => set({ sawImportCallout: true }),
+      markFirstRunTourSeen: () => set({ sawFirstRunTour: true }),
     }),
     {
       name: "termsnip-app",
-      version: 4,
+      version: 5,
       storage: createJSONStorage(() =>
         typeof window === "undefined" ? fallbackStorage : window.localStorage
       ),
@@ -99,6 +113,8 @@ export const useAppStore = create<AppState>()(
         vaultId: state.vaultId,
         deviceId: state.deviceId,
         lastAppliedSnapshotId: state.lastAppliedSnapshotId,
+        sawImportCallout: state.sawImportCallout,
+        sawFirstRunTour: state.sawFirstRunTour,
       }),
       migrate: (persistedState, version): PersistedAppState => {
         const state = (persistedState ?? {}) as Partial<PersistedAppState>;
@@ -117,6 +133,26 @@ export const useAppStore = create<AppState>()(
             vaultId: state.vaultId ?? createPersistentId(),
             deviceId: state.deviceId ?? createPersistentId(),
             lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
+            // T03/T05: upgrading users have seen the app before, so flag
+            // the one-shot callouts as already-seen.
+            sawImportCallout: true,
+            sawFirstRunTour: true,
+          };
+        }
+
+        if (version < 5) {
+          // v4 → v5: introduced onboarding one-shots. Upgrade users have
+          // already learned the app — don't pop the callouts at them.
+          return {
+            workspaceDensity: state.workspaceDensity ?? "compact",
+            sectionShortcutsEnabled: state.sectionShortcutsEnabled ?? true,
+            demoModeEnabled: state.demoModeEnabled ?? getDefaultDemoModeEnabled(),
+            terminalTheme: safeTerminalTheme,
+            vaultId: state.vaultId ?? createPersistentId(),
+            deviceId: state.deviceId ?? createPersistentId(),
+            lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
+            sawImportCallout: true,
+            sawFirstRunTour: true,
           };
         }
 
@@ -128,6 +164,8 @@ export const useAppStore = create<AppState>()(
           vaultId: state.vaultId ?? createPersistentId(),
           deviceId: state.deviceId ?? createPersistentId(),
           lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
+          sawImportCallout: state.sawImportCallout ?? false,
+          sawFirstRunTour: state.sawFirstRunTour ?? false,
         };
       },
     }

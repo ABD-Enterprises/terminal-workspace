@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useHosts } from "../hooks/useHosts";
 import { useListKeyboardNavigation } from "../hooks/useListKeyboardNavigation";
@@ -10,6 +10,8 @@ import { useKnownHostsStore } from "../store/known-hosts-store";
 import { HostEditor } from "../components/hosts/HostEditor";
 import { HostFilterBar } from "../components/hosts/HostFilterBar";
 import { HostList } from "../components/hosts/HostList";
+import { ImportSshCallout } from "../components/hosts/ImportSshCallout";
+import { WelcomePanel } from "../components/hosts/WelcomePanel";
 import { ConfirmDialog } from "../components/common/ConfirmDialog";
 import {
   formatHostProtocol,
@@ -100,6 +102,42 @@ export function HostsPage() {
     navigate(`/sessions?tabId=${result.tabId}`);
   };
 
+  // Single source of truth for the SSH-config import flow. Used by the
+  // toolbar button, the cold-start WelcomePanel, and the ImportSshCallout
+  // banner — all three should pop the same file picker.
+  const openImportSshConfig = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          const content = event.target?.result as string;
+          // Resolve `Include` directives via the native bridge when
+          // available; falls back to "log and skip" in dev/web mode
+          // where readSshConfigFile returns null.
+          const expanded = await resolveSshIncludes(content, {
+            readFile: readSshConfigFile,
+          });
+          const result = parseSshConfig(expanded.text);
+          const skipped = [...result.skipped, ...expanded.skipped];
+          result.hosts.forEach((host) =>
+            createHost({ ...emptyHostFormValues, ...toHostFormValues(host) })
+          );
+          setImportReport({
+            importedCount: result.hosts.length,
+            defaultsAppliedCount: result.defaultsAppliedCount,
+            unresolvedProxyJumpAliases: result.unresolvedProxyJumpAliases,
+            skipped,
+          });
+        };
+        reader.readAsText(file);
+      }
+    };
+    input.click();
+  }, [createHost]);
+
   // Keyboard navigation for the host list. Disabled while any dialog
   // (Add/Edit, delete confirm, import report) or the global palette /
   // cheatsheet is open, so j/k don't bleed through to the background.
@@ -131,38 +169,7 @@ export function HostsPage() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  const input = document.createElement("input");
-                  input.type = "file";
-                  input.onchange = (e) => {
-                    const file = (e.target as HTMLInputElement).files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = async (event) => {
-                        const content = event.target?.result as string;
-                        // Resolve `Include` directives via the native bridge
-                        // when available; falls back to "log and skip" in
-                        // dev/web mode where readSshConfigFile returns null.
-                        const expanded = await resolveSshIncludes(content, {
-                          readFile: readSshConfigFile,
-                        });
-                        const result = parseSshConfig(expanded.text);
-                        const skipped = [...result.skipped, ...expanded.skipped];
-                        result.hosts.forEach((host) =>
-                          createHost({ ...emptyHostFormValues, ...toHostFormValues(host) })
-                        );
-                        setImportReport({
-                          importedCount: result.hosts.length,
-                          defaultsAppliedCount: result.defaultsAppliedCount,
-                          unresolvedProxyJumpAliases: result.unresolvedProxyJumpAliases,
-                          skipped,
-                        });
-                      };
-                      reader.readAsText(file);
-                    }
-                  };
-                  input.click();
-                }}
+                onClick={openImportSshConfig}
                 className="rounded-xl border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
               >
                 Import SSH config
@@ -191,30 +198,42 @@ export function HostsPage() {
           </div>
         </div>
 
-        <HostFilterBar
-          query={query}
-          groups={groups}
-          tags={tags}
-          activeGroup={activeGroup}
-          activeTag={activeTag}
-          favoritesOnly={favoritesOnly}
-          onQueryChange={setQuery}
-          onGroupChange={setActiveGroup}
-          onTagChange={setActiveTag}
-          onFavoritesToggle={() => setFavoritesOnly((current) => !current)}
-        />
+        {allHosts.length === 0 ? (
+          // Cold-start: skip the filter bar + list entirely. WelcomePanel
+          // has the three first-action CTAs the user needs.
+          <div className="min-h-0 flex-1">
+            <WelcomePanel
+              onAddHost={() => updateParams({ new: "1", edit: null })}
+              onImportSshConfig={openImportSshConfig}
+            />
+          </div>
+        ) : (
+          <>
+            <ImportSshCallout onImport={openImportSshConfig} />
+            <HostFilterBar
+              query={query}
+              groups={groups}
+              tags={tags}
+              activeGroup={activeGroup}
+              activeTag={activeTag}
+              favoritesOnly={favoritesOnly}
+              onQueryChange={setQuery}
+              onGroupChange={setActiveGroup}
+              onTagChange={setActiveTag}
+              onFavoritesToggle={() => setFavoritesOnly((current) => !current)}
+            />
 
-        <div className="min-h-0 flex-1">
-          <HostList
-            hosts={filteredHosts}
-            hostsById={hostsById}
-            selectedHostId={selectedHost?.id}
-            onSelect={(hostId) => updateParams({ focus: hostId })}
-            onConnect={launchSession}
-            onEdit={(hostId) => updateParams({ edit: hostId, new: null, focus: hostId })}
-            onDelete={setHostPendingDelete}
-            onToggleFavorite={toggleFavorite}
-            onCreateHost={() => updateParams({ new: "1", edit: null })}
+            <div className="min-h-0 flex-1">
+              <HostList
+                hosts={filteredHosts}
+                hostsById={hostsById}
+                selectedHostId={selectedHost?.id}
+                onSelect={(hostId) => updateParams({ focus: hostId })}
+                onConnect={launchSession}
+                onEdit={(hostId) => updateParams({ edit: hostId, new: null, focus: hostId })}
+                onDelete={setHostPendingDelete}
+                onToggleFavorite={toggleFavorite}
+                onCreateHost={() => updateParams({ new: "1", edit: null })}
             renderExpandedContent={(host) => {
               const trustedKnownHost = hostSupportsTrustedKeys(host.protocol)
                 ? knownHosts.find(
@@ -385,8 +404,10 @@ export function HostsPage() {
                 </>
               );
             }}
-          />
-        </div>
+              />
+            </div>
+          </>
+        )}
       </section>
 
       <HostEditor

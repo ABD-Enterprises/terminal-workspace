@@ -3,6 +3,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCommandPalette } from "../../hooks/useCommandPalette";
 import { useKeyboardCheatsheet } from "../../hooks/useKeyboardCheatsheet";
 import { KeyboardCheatsheet } from "../common/KeyboardCheatsheet";
+import { FirstRunTour } from "../common/FirstRunTour";
 import { isTauriRuntime } from "../../lib/backend-runtime";
 import { launchHostSession as sharedLaunchHostSession } from "../../lib/launch-host-session";
 import { navigationItems } from "../../lib/navigation";
@@ -1002,6 +1003,7 @@ export function AppShell() {
         </div>
       ) : null}
       <KeyboardCheatsheet />
+      <FirstRunTour />
     </div>
   );
 }

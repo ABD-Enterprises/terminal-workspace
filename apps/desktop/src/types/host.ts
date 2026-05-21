@@ -116,6 +116,47 @@ export const emptyHostFormValues: HostFormValues = {
   identityId: "",
 };
 
+/**
+ * Stable id for the built-in local-shell host. The id is fixed so that
+ * code paths needing "the local terminal" (the Sidebar quick-launch
+ * button, the cold-start welcome panel) can look it up without guessing.
+ * The record itself is created by `useHostsStore.ensureLocalShellHost()`
+ * if it isn't already present.
+ */
+export const LOCAL_SHELL_HOST_ID = "local-shell";
+
+/** Factory for the canonical local-shell HostRecord. */
+export function createLocalShellHostRecord(): HostRecord {
+  const now = new Date().toISOString();
+  return {
+    id: LOCAL_SHELL_HOST_ID,
+    label: "Local Shell",
+    protocol: "localShell",
+    hostname: "localhost",
+    username: "local",
+    port: 0,
+    authMethod: "none",
+    privateKeyPath: "",
+    group: "Workstation / Local",
+    tags: ["local", "shell"],
+    note: "Launches the current macOS login shell inside the native desktop app.",
+    favorite: false,
+    keyLabel: "",
+    hostKeyPolicy: defaultHostKeyPolicy,
+    agentForwarding: false,
+    environment: {
+      TERMSNIP_SHELL_MODE: "native",
+    },
+    jumpHostId: undefined,
+    sftpRoot: "",
+    snippetCount: 0,
+    forwardingCount: 0,
+    createdAt: now,
+    updatedAt: now,
+    lastConnectedAt: undefined,
+  };
+}
+
 export const sampleHosts: HostRecord[] = [
   {
     id: "prod-gateway",
