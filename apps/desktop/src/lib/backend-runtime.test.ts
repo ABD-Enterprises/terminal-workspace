@@ -6,8 +6,6 @@ import {
   getSessionBackendStatus,
   isTauriRuntime,
   openSessionSocket,
-  proxyBackendBinary,
-  proxyBackendJson,
   resetBackendRuntimeCacheForTests,
   resizeSession,
   resolveBackendHttpUrl,
@@ -78,7 +76,7 @@ describe("backend runtime bridge", () => {
   it("detects the tauri runtime when native internals are present", () => {
     setWindowStub({
       __TAURI_INTERNALS__: {
-        invoke: async () => ({ backendBaseUrl: "http://127.0.0.1:8790", sessionBridge: "tauri-proxy" }),
+        invoke: async () => ({ backendBaseUrl: "", sessionBridge: "tauri-native" }),
       },
     });
 
@@ -96,7 +94,7 @@ describe("backend runtime bridge", () => {
       __TAURI_INTERNALS__: {
         invoke: async () => ({
           backendBaseUrl: "http://127.0.0.1:8899",
-          sessionBridge: "tauri-proxy",
+          sessionBridge: "tauri-native",
         }),
       },
     });
@@ -146,17 +144,12 @@ describe("backend runtime bridge", () => {
     });
   });
 
-  it("uses the tauri invoke bridge for native backend status, lifecycle, and proxy calls", async () => {
+  it("uses the tauri invoke bridge for native backend status and lifecycle calls", async () => {
     const invoke = vi.fn()
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ sessionId: "native-session" })
       .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({
-        base64Body: "YmluYXJ5",
-        contentType: "application/octet-stream",
-      });
+      .mockResolvedValueOnce({ ok: true });
     setWindowStub({
       __TAURI_INTERNALS__: { invoke },
     });
@@ -165,14 +158,6 @@ describe("backend runtime bridge", () => {
     await createSession(hostFixture);
     await closeSession("native-session");
     await resizeSession("native-session", { cols: 80, rows: 24 });
-    await proxyBackendJson("/api/backend/known-hosts/scan", {
-      body: JSON.stringify({ hostname: "native.internal", port: 22 }),
-      method: "POST",
-    });
-    const binaryResponse = await proxyBackendBinary("/api/backend/sftp/download", {
-      body: JSON.stringify({ host: hostFixture, path: "README.txt" }),
-      method: "POST",
-    });
 
     expect(invoke).toHaveBeenNthCalledWith(1, "termsnip_backend_status", undefined);
     expect(invoke).toHaveBeenNthCalledWith(2, "termsnip_create_backend_session", {
@@ -184,21 +169,6 @@ describe("backend runtime bridge", () => {
     expect(invoke).toHaveBeenNthCalledWith(4, "termsnip_resize_backend_session", {
       request: { payload: { cols: 80, rows: 24 }, sessionId: "native-session" },
     });
-    expect(invoke).toHaveBeenNthCalledWith(5, "termsnip_proxy_backend_json", {
-      request: {
-        body: { hostname: "native.internal", port: 22 },
-        method: "POST",
-        path: "/api/backend/known-hosts/scan",
-      },
-    });
-    expect(invoke).toHaveBeenNthCalledWith(6, "termsnip_proxy_backend_binary", {
-      request: {
-        body: { host: hostFixture, path: "README.txt" },
-        method: "POST",
-        path: "/api/backend/sftp/download",
-      },
-    });
-    await expect(binaryResponse.text()).resolves.toBe("binary");
   });
 
   it("opens browser session sockets with the computed websocket URL", async () => {

@@ -5,11 +5,12 @@
 // batch 3 can flip the read path without a separate migration step.
 
 import { create } from "zustand";
-import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import {
   applyIdentityAssignments,
   migrateHostsToIdentities,
 } from "../lib/identity-migration";
+import { createTermsnipStorage } from "../lib/persistence";
 import {
   sampleIdentities,
   type IdentityRecord,
@@ -19,12 +20,6 @@ import { clearIdentityPassphraseById } from "./connection-secrets-store";
 import { useHostsStore } from "./hosts-store";
 import { useKeysStore } from "./keys-store";
 import { useVaultSyncStore } from "./vault-sync-store";
-
-const fallbackStorage: StateStorage = {
-  getItem: () => null,
-  setItem: () => undefined,
-  removeItem: () => undefined,
-};
 
 function sortIdentities(identities: IdentityRecord[]): IdentityRecord[] {
   return [...identities].sort((left, right) => left.label.localeCompare(right.label));
@@ -184,9 +179,7 @@ export const useIdentitiesStore = create<IdentitiesState>()(
     {
       name: "termsnip-identities",
       version: 1,
-      storage: createJSONStorage(() =>
-        typeof window === "undefined" ? fallbackStorage : window.localStorage
-      ),
+      storage: createJSONStorage(() => createTermsnipStorage("termsnip-identities")),
       partialize: (state): PersistedIdentitiesState => ({
         identities: state.identities,
       }),

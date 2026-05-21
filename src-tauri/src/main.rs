@@ -17,18 +17,16 @@ use std::{
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
-use futures_util::{SinkExt, StreamExt};
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use reqwest::{Client, Method};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use ssh2::{Channel, Session};
 use tauri::menu::{AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri_plugin_sql::{Migration, MigrationKind};
 use tokio::sync::mpsc::{
     error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
-use tokio_tungstenite::tungstenite::Message;
 
 mod keychain_support;
 mod native_transport;
@@ -64,95 +62,10 @@ const NATIVE_SESSION_PROMPT_WINDOW_SIZE: usize = 512;
 const NATIVE_SESSION_POLL_INTERVAL_MS: u64 = 10;
 const NATIVE_SESSION_BUFFER_LIMIT: usize = 128;
 const NATIVE_SSH_CONTROL_READY_TIMEOUT_MS: u64 = 15_000;
+const TERMSNIP_DATABASE_URL: &str = "sqlite:termsnip.db";
 static SESSION_STREAM_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NATIVE_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NATIVE_FORWARD_COUNTER: AtomicU64 = AtomicU64::new(1);
-
-#[derive(Clone)]
-struct BackendBridge {
-    base_url: String,
-    client: Client,
-    /// Per-launch authentication token shared with the Node backend. Populated
-    /// from `TERMSNIP_BACKEND_TOKEN` or the sidecar file the backend writes
-    /// to TMPDIR. None when the backend is unauthenticated (older builds).
-    /// See parity-and-hardening-review §3.S-4 / §3.S-8.
-    auth_token: Option<String>,
-}
-
-impl BackendBridge {
-    fn new() -> Self {
-        let port_str =
-            std::env::var("TERMSNIP_BACKEND_PORT").unwrap_or_else(|_| "8790".to_string());
-        let base_url = std::env::var("TERMSNIP_BACKEND_BASE_URL")
-            .unwrap_or_else(|_| format!("http://127.0.0.1:{port_str}"));
-        let auth_token = resolve_backend_auth_token(&port_str);
-
-        Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
-            client: Client::new(),
-            auth_token,
-        }
-    }
-
-    fn url(&self, path: &str) -> String {
-        format!("{}{}", self.base_url, path)
-    }
-
-    fn ws_url(&self, path: &str) -> String {
-        // The base_url for this client is the locally-spawned sidecar backend
-        // bound to 127.0.0.1 in the same process tree, so when it speaks plain
-        // http we deliberately match with plain ws (TLS termination is at the
-        // process boundary, not on the loopback socket). The https-to-wss branch
-        // above covers any future configuration that does need TLS.
-        let prefix = if let Some(rest) = self.base_url.strip_prefix("https://") {
-            format!("wss://{rest}")
-        } else if let Some(rest) = self.base_url.strip_prefix("http://") {
-            format!("{}://{rest}", "ws")
-        } else {
-            self.base_url.clone()
-        };
-
-        format!("{prefix}{path}")
-    }
-}
-
-/// Read the per-launch backend token from the env, or fall back to the sidecar
-/// file the backend wrote to TMPDIR. Returns None if neither source has a
-/// usable value — the backend will still reject our requests in that case,
-/// but we surface a clearer error than a generic 403.
-fn resolve_backend_auth_token(port_str: &str) -> Option<String> {
-    if let Ok(value) = std::env::var("TERMSNIP_BACKEND_TOKEN") {
-        let trimmed = value.trim().to_string();
-        if trimmed.len() >= 32 {
-            return Some(trimmed);
-        }
-    }
-
-    let tmp = std::env::temp_dir();
-    let sidecar_path = tmp.join(format!("termsnip-backend.{port_str}.token"));
-    match fs::read_to_string(&sidecar_path) {
-        Ok(contents) => {
-            let trimmed = contents.trim().to_string();
-            if trimmed.len() >= 32 {
-                Some(trimmed)
-            } else {
-                None
-            }
-        }
-        Err(_) => None,
-    }
-}
-
-#[derive(Clone)]
-struct SessionStreamBridge {
-    sender: UnboundedSender<SessionStreamCommand>,
-    stream_id: String,
-}
-
-#[derive(Clone, Default)]
-struct SessionStreamRegistry {
-    bridges: Arc<Mutex<HashMap<String, SessionStreamBridge>>>,
-}
 
 #[derive(Clone, Default)]
 struct NativeSessionRegistry {
@@ -162,12 +75,6 @@ struct NativeSessionRegistry {
 #[derive(Clone, Default)]
 struct NativeForwardRegistry {
     forwards: Arc<Mutex<HashMap<String, NativeForwardHandle>>>,
-}
-
-#[derive(Clone)]
-enum SessionStreamCommand {
-    Close,
-    Send(String),
 }
 
 #[derive(Clone)]
@@ -521,15 +428,9 @@ struct BackendBooleanResponse {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BackendProxyRequest {
-    body: Option<Value>,
-    method: String,
-    path: String,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct BackendBinaryProxyResponse {
+struct BackendBinaryResponse {
     base64_body: String,
     content_disposition: Option<String>,
     content_type: Option<String>,
@@ -666,19 +567,6 @@ struct SessionStreamEvent {
     stream_id: String,
 }
 
-#[derive(Deserialize)]
-#[allow(dead_code)] // P2-NET: kept around for one release in case the renderer
-                    // contract changes again; field is read by serde when the
-                    // proxy_json path is exercised by older paths.
-struct RawBackendStatusResponse {
-    ok: bool,
-}
-
-#[derive(Deserialize)]
-struct BackendErrorBody {
-    error: Option<String>,
-}
-
 fn next_session_stream_id() -> String {
     SESSION_STREAM_COUNTER
         .fetch_add(1, Ordering::Relaxed)
@@ -697,24 +585,6 @@ fn next_native_forward_id() -> String {
         "forward-{}",
         NATIVE_FORWARD_COUNTER.fetch_add(1, Ordering::Relaxed)
     )
-}
-
-fn extract_backend_error(status: reqwest::StatusCode, body: &str) -> String {
-    if let Ok(parsed) = serde_json::from_str::<BackendErrorBody>(body) {
-        if let Some(error) = parsed.error {
-            return error;
-        }
-    }
-
-    if body.trim().is_empty() {
-        format!("Backend request failed with status {status}")
-    } else {
-        body.to_string()
-    }
-}
-
-fn parse_backend_method(value: &str) -> Result<Method, String> {
-    Method::from_bytes(value.as_bytes()).map_err(|error| error.to_string())
 }
 
 fn expand_home(pathname: &str) -> PathBuf {
@@ -1119,46 +989,6 @@ fn build_external_command_session_spec(
 
 fn emit_session_stream_event(app: &AppHandle, event: SessionStreamEvent) {
     let _ = app.emit(SESSION_STREAM_EVENT_NAME, event);
-}
-
-fn get_session_stream(
-    registry: &SessionStreamRegistry,
-    session_id: &str,
-) -> Option<SessionStreamBridge> {
-    registry
-        .bridges
-        .lock()
-        .expect("session stream registry lock poisoned")
-        .get(session_id)
-        .cloned()
-}
-
-fn insert_session_stream(
-    registry: &SessionStreamRegistry,
-    session_id: &str,
-    bridge: SessionStreamBridge,
-) {
-    registry
-        .bridges
-        .lock()
-        .expect("session stream registry lock poisoned")
-        .insert(session_id.to_string(), bridge);
-}
-
-fn remove_session_stream_if_current(
-    registry: &SessionStreamRegistry,
-    session_id: &str,
-    stream_id: &str,
-) -> Option<SessionStreamBridge> {
-    let mut registry = registry
-        .bridges
-        .lock()
-        .expect("session stream registry lock poisoned");
-
-    match registry.get(session_id) {
-        Some(active_bridge) if active_bridge.stream_id == stream_id => registry.remove(session_id),
-        _ => None,
-    }
 }
 
 fn get_native_session(
@@ -2218,73 +2048,11 @@ fn close_native_session_stream(
     })
 }
 
-async fn proxy_json<T: DeserializeOwned>(
-    bridge: &BackendBridge,
-    method: Method,
-    path: &str,
-    body: Option<Value>,
-) -> Result<T, String> {
-    let mut request = bridge.client.request(method, bridge.url(path));
-    if let Some(token) = &bridge.auth_token {
-        request = request.header("X-Termsnip-Token", token);
-    }
-    if let Some(body) = body {
-        request = request.json(&body);
-    }
-
-    let response = request.send().await.map_err(|error| error.to_string())?;
-    let status = response.status();
-    let text = response.text().await.map_err(|error| error.to_string())?;
-
-    if !status.is_success() {
-        return Err(extract_backend_error(status, &text));
-    }
-
-    serde_json::from_str(&text).map_err(|error| error.to_string())
-}
-
-async fn proxy_binary(
-    bridge: &BackendBridge,
-    method: Method,
-    path: &str,
-    body: Option<Value>,
-) -> Result<BackendBinaryProxyResponse, String> {
-    let mut request = bridge.client.request(method, bridge.url(path));
-    if let Some(token) = &bridge.auth_token {
-        request = request.header("X-Termsnip-Token", token);
-    }
-    if let Some(body) = body {
-        request = request.json(&body);
-    }
-
-    let response = request.send().await.map_err(|error| error.to_string())?;
-    let status = response.status();
-    if !status.is_success() {
-        let text = response.text().await.map_err(|error| error.to_string())?;
-        return Err(extract_backend_error(status, &text));
-    }
-
-    let headers = response.headers().clone();
-    let bytes = response.bytes().await.map_err(|error| error.to_string())?;
-
-    Ok(BackendBinaryProxyResponse {
-        base64_body: BASE64_STANDARD.encode(bytes),
-        content_disposition: headers
-            .get("content-disposition")
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.to_string()),
-        content_type: headers
-            .get("content-type")
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.to_string()),
-    })
-}
-
 #[tauri::command]
-fn termsnip_transport_info(bridge: State<'_, BackendBridge>) -> BackendTransportInfo {
+fn termsnip_transport_info() -> BackendTransportInfo {
     BackendTransportInfo {
-        backend_base_url: bridge.base_url.clone(),
-        session_bridge: "tauri-proxy",
+        backend_base_url: String::new(),
+        session_bridge: "tauri-native",
     }
 }
 
@@ -2295,58 +2063,15 @@ fn termsnip_protocol_runtime_status(
     build_protocol_runtime_status(&request.protocol)
 }
 
-/// Backend status check. P2-NET — used to forward through the Node backend
-/// via `proxy_json`; the Tauri shell now owns SSH/SFTP/forwarding/snippets/
-/// keys directly so we no longer require the Node backend to be running.
-/// Returns synthetic `ok: true` to signal that the native transport is
-/// available. The `backend_base_url` field is preserved so the renderer
-/// keeps a coherent BackendStatusResponse shape, but the URL no longer
-/// implies anything about whether a Node process is listening.
+/// Backend status check. P2-NET: the native shell owns SSH/SFTP/forwarding,
+/// snippets, key tooling, and persistence, so no Node backend is contacted.
 #[tauri::command]
-async fn termsnip_backend_status(
-    bridge: State<'_, BackendBridge>,
-) -> Result<BackendStatusResponse, String> {
+async fn termsnip_backend_status() -> Result<BackendStatusResponse, String> {
     Ok(BackendStatusResponse {
         ok: true,
-        backend_base_url: bridge.base_url.clone(),
-        transport: "tauri-proxy",
+        backend_base_url: String::new(),
+        transport: "tauri-native",
     })
-}
-
-/// P2-NET — generic Node-backend proxy. No first-class renderer caller
-/// exercises this path anymore: every API function in `lib/api.ts` either
-/// invokes a dedicated `termsnip_*` command or falls through to the
-/// browser-mode `fetch()` path. Slated for removal in 0.2.0 alongside the
-/// `BackendBridge` HTTP client. Kept for one release as a safety valve in
-/// case an older renderer build or an out-of-tree caller still depends on
-/// it.
-#[tauri::command]
-async fn termsnip_proxy_backend_json(
-    bridge: State<'_, BackendBridge>,
-    request: BackendProxyRequest,
-) -> Result<Value, String> {
-    proxy_json(
-        &bridge,
-        parse_backend_method(&request.method)?,
-        &request.path,
-        request.body,
-    )
-    .await
-}
-
-/// P2-NET — see {@link termsnip_proxy_backend_json} for the removal contract.
-#[tauri::command]
-async fn termsnip_proxy_backend_binary(
-    bridge: State<'_, BackendBridge>,
-    request: BackendProxyRequest,
-) -> Result<BackendBinaryProxyResponse, String> {
-    proxy_binary(
-        &bridge,
-        parse_backend_method(&request.method)?,
-        &request.path,
-        request.body,
-    )
-    .await
 }
 
 #[tauri::command]
@@ -2502,7 +2227,7 @@ fn termsnip_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathRe
 #[tauri::command]
 fn termsnip_sftp_download_file(
     request: SftpPathRequest,
-) -> Result<BackendBinaryProxyResponse, String> {
+) -> Result<BackendBinaryResponse, String> {
     validate_ssh_host(&request.host)?;
     let target_path = resolve_remote_path(
         request.host.sftp_root.as_deref().unwrap_or("/"),
@@ -2526,7 +2251,7 @@ fn termsnip_sftp_download_file(
             )],
         )?;
         let bytes = fs::read(download_path).map_err(|error| error.to_string())?;
-        Ok(BackendBinaryProxyResponse {
+        Ok(BackendBinaryResponse {
             base64_body: BASE64_STANDARD.encode(bytes),
             content_disposition: Some(format!("attachment; filename=\"{filename}\"")),
             content_type: Some("application/octet-stream".to_string()),
@@ -2816,7 +2541,6 @@ fn read_ssh_config_file_blocking(raw_path: &str) -> Result<ReadSshConfigFileResp
 
 #[tauri::command]
 async fn termsnip_create_backend_session(
-    bridge: State<'_, BackendBridge>,
     native_sessions: State<'_, NativeSessionRegistry>,
     native_forwards: State<'_, NativeForwardRegistry>,
     app: AppHandle,
@@ -2825,13 +2549,10 @@ async fn termsnip_create_backend_session(
     validate_session_target(&request.host)?;
 
     if !should_use_native_session(&request.host) {
-        return proxy_json(
-            &bridge,
-            Method::POST,
-            "/api/backend/sessions",
-            Some(serde_json::to_value(request).map_err(|error| error.to_string())?),
-        )
-        .await;
+        return Err(format!(
+            "Native transport does not support {} sessions without credentials",
+            request.host.protocol
+        ));
     }
 
     let session_id = next_native_session_id();
@@ -2938,7 +2659,6 @@ async fn termsnip_create_backend_session(
 
 #[tauri::command]
 async fn termsnip_close_backend_session(
-    bridge: State<'_, BackendBridge>,
     native_sessions: State<'_, NativeSessionRegistry>,
     native_forwards: State<'_, NativeForwardRegistry>,
     request: SessionIdRequest,
@@ -2952,18 +2672,11 @@ async fn termsnip_close_backend_session(
         });
     }
 
-    proxy_json(
-        &bridge,
-        Method::DELETE,
-        &format!("/api/backend/sessions/{}", request.session_id),
-        None,
-    )
-    .await
+    Err("Session not found in native runtime".to_string())
 }
 
 #[tauri::command]
 async fn termsnip_resize_backend_session(
-    bridge: State<'_, BackendBridge>,
     native_sessions: State<'_, NativeSessionRegistry>,
     request: ResizeBackendSessionRequest,
 ) -> Result<BackendBooleanResponse, String> {
@@ -2982,234 +2695,33 @@ async fn termsnip_resize_backend_session(
         });
     }
 
-    proxy_json(
-        &bridge,
-        Method::POST,
-        &format!("/api/backend/sessions/{}/resize", request.session_id),
-        Some(serde_json::to_value(request.payload).map_err(|error| error.to_string())?),
-    )
-    .await
+    Err("Session not found in native runtime".to_string())
 }
 
 #[tauri::command]
 async fn termsnip_open_backend_session_stream(
     app: AppHandle,
-    bridge: State<'_, BackendBridge>,
-    registry: State<'_, SessionStreamRegistry>,
     native_sessions: State<'_, NativeSessionRegistry>,
     request: SessionStreamRequest,
 ) -> Result<SessionStreamOpenResponse, String> {
-    if get_native_session(native_sessions.inner(), &request.session_id).is_some() {
-        return open_native_session_stream(&app, native_sessions.inner(), &request.session_id);
-    }
-
-    if let Some(active_bridge) = get_session_stream(&registry, &request.session_id) {
-        return Ok(SessionStreamOpenResponse {
-            ok: true,
-            stream_id: active_bridge.stream_id,
-        });
-    }
-
-    let stream_id = next_session_stream_id();
-    let ws_url = bridge.ws_url(&format!("/ws/sessions/{}", request.session_id));
-
-    // Build the upgrade request manually so we can attach the per-launch
-    // auth token. tokio_tungstenite::connect_async accepts anything that
-    // implements IntoClientRequest; the Request<()> path lets us inject
-    // headers. See parity-and-hardening-review §3.S-4.
-    let mut upgrade_request =
-        tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
-            ws_url.as_str(),
-        )
-        .map_err(|error| error.to_string())?;
-    if let Some(token) = &bridge.auth_token {
-        upgrade_request.headers_mut().insert(
-            "X-Termsnip-Token",
-            tokio_tungstenite::tungstenite::http::HeaderValue::from_str(token)
-                .map_err(|error| error.to_string())?,
-        );
-    }
-    let (backend_socket, _) = tokio_tungstenite::connect_async(upgrade_request)
-        .await
-        .map_err(|error| error.to_string())?;
-    let (sender, mut receiver) = unbounded_channel();
-
-    insert_session_stream(
-        &registry,
-        &request.session_id,
-        SessionStreamBridge {
-            sender,
-            stream_id: stream_id.clone(),
-        },
-    );
-
-    let app_handle = app.clone();
-    let registry_state = registry.inner().clone();
-    let session_id = request.session_id.clone();
-    let spawned_stream_id = stream_id.clone();
-
-    tauri::async_runtime::spawn(async move {
-        let (mut write, mut read) = backend_socket.split();
-
-        loop {
-            tokio::select! {
-                maybe_command = receiver.recv() => match maybe_command {
-                    Some(SessionStreamCommand::Send(data)) => {
-                        if let Err(error) = write.send(Message::Text(data.into())).await {
-                            emit_session_stream_event(
-                                &app_handle,
-                                SessionStreamEvent {
-                                    data: None,
-                                    kind: "error",
-                                    message: Some(error.to_string()),
-                                    session_id: session_id.clone(),
-                                    stream_id: spawned_stream_id.clone(),
-                                },
-                            );
-                            break;
-                        }
-                    }
-                    Some(SessionStreamCommand::Close) | None => {
-                        let _ = write.send(Message::Close(None)).await;
-                        break;
-                    }
-                },
-                maybe_message = read.next() => match maybe_message {
-                    Some(Ok(Message::Text(text))) => {
-                        emit_session_stream_event(
-                            &app_handle,
-                            SessionStreamEvent {
-                                data: Some(text.to_string()),
-                                kind: "message",
-                                message: None,
-                                session_id: session_id.clone(),
-                                stream_id: spawned_stream_id.clone(),
-                            },
-                        );
-                    }
-                    Some(Ok(Message::Binary(bytes))) => {
-                        match String::from_utf8(bytes.to_vec()) {
-                            Ok(text) => emit_session_stream_event(
-                                &app_handle,
-                                SessionStreamEvent {
-                                    data: Some(text),
-                                    kind: "message",
-                                    message: None,
-                                    session_id: session_id.clone(),
-                                    stream_id: spawned_stream_id.clone(),
-                                },
-                            ),
-                            Err(error) => emit_session_stream_event(
-                                &app_handle,
-                                SessionStreamEvent {
-                                    data: None,
-                                    kind: "error",
-                                    message: Some(error.to_string()),
-                                    session_id: session_id.clone(),
-                                    stream_id: spawned_stream_id.clone(),
-                                },
-                            ),
-                        }
-                    }
-                    Some(Ok(Message::Ping(payload))) => {
-                        let _ = write.send(Message::Pong(payload)).await;
-                    }
-                    Some(Ok(Message::Close(_))) => {
-                        break;
-                    }
-                    Some(Ok(_)) => {}
-                    Some(Err(error)) => {
-                        emit_session_stream_event(
-                            &app_handle,
-                            SessionStreamEvent {
-                                data: None,
-                                kind: "error",
-                                message: Some(error.to_string()),
-                                session_id: session_id.clone(),
-                                stream_id: spawned_stream_id.clone(),
-                            },
-                        );
-                        break;
-                    }
-                    None => {
-                        break;
-                    }
-                }
-            }
-        }
-
-        remove_session_stream_if_current(&registry_state, &session_id, &spawned_stream_id);
-        emit_session_stream_event(
-            &app_handle,
-            SessionStreamEvent {
-                data: None,
-                kind: "close",
-                message: None,
-                session_id,
-                stream_id: spawned_stream_id,
-            },
-        );
-    });
-
-    Ok(SessionStreamOpenResponse {
-        ok: true,
-        stream_id: stream_id,
-    })
+    open_native_session_stream(&app, native_sessions.inner(), &request.session_id)
 }
 
 #[tauri::command]
 fn termsnip_send_backend_session_stream(
-    registry: State<'_, SessionStreamRegistry>,
     native_sessions: State<'_, NativeSessionRegistry>,
     request: SessionStreamSendRequest,
 ) -> Result<BackendBooleanResponse, String> {
-    if get_native_session(native_sessions.inner(), &request.session_id).is_some() {
-        return send_native_session_stream(native_sessions.inner(), request);
-    }
-
-    let active_bridge = get_session_stream(&registry, &request.session_id)
-        .ok_or_else(|| "Session stream not found".to_string())?;
-
-    if active_bridge.stream_id != request.stream_id {
-        return Err("Session stream is stale".to_string());
-    }
-
-    active_bridge
-        .sender
-        .send(SessionStreamCommand::Send(request.data))
-        .map_err(|_| "Session stream is closed".to_string())?;
-
-    Ok(BackendBooleanResponse {
-        ok: true,
-        pending: None,
-    })
+    send_native_session_stream(native_sessions.inner(), request)
 }
 
 #[tauri::command]
 fn termsnip_close_backend_session_stream(
-    registry: State<'_, SessionStreamRegistry>,
     native_sessions: State<'_, NativeSessionRegistry>,
     request: SessionStreamRequest,
 ) -> Result<BackendBooleanResponse, String> {
     if let Some(response) = close_native_session_stream(native_sessions.inner(), request.clone()) {
         return Ok(response);
-    }
-
-    let bridge = match request.stream_id {
-        Some(stream_id) => {
-            remove_session_stream_if_current(&registry, &request.session_id, &stream_id)
-        }
-        None => get_session_stream(&registry, &request.session_id).and_then(|active_bridge| {
-            remove_session_stream_if_current(
-                &registry,
-                &request.session_id,
-                &active_bridge.stream_id,
-            )
-        }),
-    };
-
-    if let Some(bridge) = bridge {
-        let _ = bridge.sender.send(SessionStreamCommand::Close);
     }
 
     Ok(BackendBooleanResponse {
@@ -3357,10 +2869,56 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build()
 }
 
+fn persistence_migrations() -> Vec<Migration> {
+    vec![Migration {
+        version: 1,
+        description: "create_termsnip_persistence_tables",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS hosts_store (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS keys_store (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS known_hosts_store (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS identities_store (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS snippets_store (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS deletions (
+                kind TEXT NOT NULL,
+                id TEXT NOT NULL,
+                deleted_at TEXT NOT NULL,
+                PRIMARY KEY (kind, id)
+            );
+            CREATE INDEX IF NOT EXISTS deletions_deleted_at_idx
+                ON deletions (deleted_at DESC);
+        "#,
+        kind: MigrationKind::Up,
+    }]
+}
+
 fn main() {
     tauri::Builder::default()
-        .manage(BackendBridge::new())
-        .manage(SessionStreamRegistry::default())
+        .plugin(
+            tauri_plugin_sql::Builder::default()
+                .add_migrations(TERMSNIP_DATABASE_URL, persistence_migrations())
+                .build(),
+        )
         .manage(NativeSessionRegistry::default())
         .manage(NativeForwardRegistry::default())
         .setup(|app| {
@@ -3384,8 +2942,6 @@ fn main() {
             termsnip_transport_info,
             termsnip_protocol_runtime_status,
             termsnip_backend_status,
-            termsnip_proxy_backend_json,
-            termsnip_proxy_backend_binary,
             termsnip_inspect_private_key,
             termsnip_generate_private_key,
             termsnip_scan_known_host,

@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { createTermsnipStorage } from "../lib/persistence";
 import type { KnownHostScanResult } from "../lib/api";
 import {
   createKnownHostId,
@@ -8,12 +9,6 @@ import {
   type KnownHostRecord,
 } from "../types/known-host";
 import { useVaultSyncStore } from "./vault-sync-store";
-
-const fallbackStorage: StateStorage = {
-  getItem: () => null,
-  setItem: () => undefined,
-  removeItem: () => undefined,
-};
 
 function sortKnownHosts(knownHosts: KnownHostRecord[]) {
   return [...knownHosts].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -54,9 +49,7 @@ export const useKnownHostsStore = create<KnownHostsState>()(
     }),
     {
       name: "termsnip-known-hosts",
-      storage: createJSONStorage(() =>
-        typeof window === "undefined" ? fallbackStorage : window.localStorage
-      ),
+      storage: createJSONStorage(() => createTermsnipStorage("termsnip-known-hosts")),
     }
   )
 );

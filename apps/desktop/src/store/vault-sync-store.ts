@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { createTermsnipDeletionStorage } from "../lib/persistence";
 
 export type VaultSyncEntityKind =
   | "hosts"
@@ -28,12 +29,6 @@ export interface VaultDeletionMap {
 export const VAULT_TOMBSTONE_RETENTION_DAYS = 90;
 export const VAULT_TOMBSTONE_MAX_ENTRIES_PER_KIND = 256;
 const VAULT_TOMBSTONE_RETENTION_MS = VAULT_TOMBSTONE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-
-const fallbackStorage: StateStorage = {
-  getItem: () => null,
-  setItem: () => undefined,
-  removeItem: () => undefined,
-};
 
 function sortDeletionEntries(entries: VaultDeletionEntry[]) {
   return [...entries].sort((left, right) => right.deletedAt.localeCompare(left.deletedAt));
@@ -132,9 +127,7 @@ export const useVaultSyncStore = create<VaultSyncState>()(
     {
       name: "termsnip-vault-sync",
       version: 1,
-      storage: createJSONStorage(() =>
-        typeof window === "undefined" ? fallbackStorage : window.localStorage
-      ),
+      storage: createJSONStorage(() => createTermsnipDeletionStorage("termsnip-vault-sync")),
       partialize: (state) => ({
         deletions: compactDeletionMap(state.deletions),
       }),

@@ -1,14 +1,9 @@
 import { create } from "zustand";
-import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { createTermsnipStorage } from "../lib/persistence";
 import { sampleKeys, type KeyMetadata, type KeyRecord, type KeySource } from "../types/key";
 import { clearKeyPassphraseByFingerprint } from "./connection-secrets-store";
 import { useVaultSyncStore } from "./vault-sync-store";
-
-const fallbackStorage: StateStorage = {
-  getItem: () => null,
-  setItem: () => undefined,
-  removeItem: () => undefined,
-};
 
 function sortKeys(keys: KeyRecord[]) {
   return [...keys].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -139,9 +134,7 @@ export const useKeysStore = create<KeysState>()(
     }),
     {
       name: "termsnip-keys",
-      storage: createJSONStorage(() =>
-        typeof window === "undefined" ? fallbackStorage : window.localStorage
-      ),
+      storage: createJSONStorage(() => createTermsnipStorage("termsnip-keys")),
     }
   )
 );

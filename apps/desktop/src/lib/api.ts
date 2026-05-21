@@ -62,8 +62,7 @@ export type { SessionSocketLike } from "./backend-runtime";
 /**
  * Fetch JSON from the Node backend. Browser-mode fallback only — every
  * native (Tauri) caller short-circuits to a `termsnip_*` invokeTauriCommand
- * before reaching here. P2-NET removed the now-dead `isTauriRuntime()`
- * branch that used to forward through `proxyBackendJson`; the Tauri shell
+ * before reaching here. P2-NET removed the now-dead native proxy path; the Tauri shell
  * is the source of truth in native and never needs to hit the Node
  * backend's HTTP surface anymore.
  */
