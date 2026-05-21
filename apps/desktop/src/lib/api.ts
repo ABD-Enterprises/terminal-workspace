@@ -5,9 +5,12 @@ import type { KeyMetadata } from "../types/key";
 import type {
   BackendBooleanResponse,
   BackendHostConnection,
+  CopyKeyToHostPayload,
+  CopyKeyToHostResponse,
   CreateForwardPayload,
   DownloadRemoteFileResponse,
   GenerateKeyPayload,
+  ImportPrivateKeyFromBodyPayload,
   KnownHostScanResult,
   ListForwardsResponse,
   ProtocolRuntimeStatusResponse,
@@ -26,6 +29,7 @@ import {
   resizeSession,
 } from "./backend-runtime";
 import {
+  copyDemoKeyToHost,
   createDemoForward,
   createDemoRemoteDirectory,
   deleteDemoForward,
@@ -33,6 +37,7 @@ import {
   downloadDemoRemoteFile,
   executeDemoSnippetOnHosts,
   generateDemoPrivateKey,
+  importDemoPrivateKeyFromBody,
   inspectDemoPrivateKey,
   listDemoForwards,
   listDemoRemoteDirectory,
@@ -343,6 +348,51 @@ export async function generatePrivateKey(payload: GenerateKeyPayload) {
   }
 
   return backendFetch<KeyMetadata>("/api/backend/keys/generate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * T13: write a pasted private key body to disk (0600 perms) and
+ * return inspect metadata. Validation of the body shape happens
+ * client-side in lib/private-key-validation.ts before we get here.
+ */
+export async function importPrivateKeyFromBody(payload: ImportPrivateKeyFromBodyPayload) {
+  if (isDemoModeEnabled()) {
+    return importDemoPrivateKeyFromBody(payload);
+  }
+
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<KeyMetadata>("termsnip_import_private_key_from_body", {
+      request: payload,
+    });
+  }
+
+  return backendFetch<KeyMetadata>("/api/backend/keys/import-from-body", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * T12: install a public key on a remote host (ssh-copy-id equivalent).
+ * Caller hands us the private key path (we read .pub next to it) and a
+ * BackendHostConnection so the backend can open the one-shot SSH
+ * session itself.
+ */
+export async function copyKeyToHost(payload: CopyKeyToHostPayload) {
+  if (isDemoModeEnabled()) {
+    return copyDemoKeyToHost(payload);
+  }
+
+  if (isTauriRuntime()) {
+    return invokeTauriCommand<CopyKeyToHostResponse>("termsnip_copy_key_to_host", {
+      request: payload,
+    });
+  }
+
+  return backendFetch<CopyKeyToHostResponse>("/api/backend/keys/copy-to-host", {
     method: "POST",
     body: JSON.stringify(payload),
   });

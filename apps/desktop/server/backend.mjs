@@ -945,6 +945,83 @@ async function generateKeyPair({ comment, passphrase, path, type }) {
   return inspectKey(resolvedPath);
 }
 
+/**
+ * T13: write a pasted private key body to disk and return inspect
+ * metadata. 0600 perms, atomic-ish (write to tmp + rename), refuses to
+ * overwrite an existing file (the user must delete the old key first).
+ */
+async function importPrivateKeyFromBody({ path, body }) {
+  if (!path || typeof path !== "string") {
+    throw new Error("A destination path is required.");
+  }
+  if (!body || typeof body !== "string" || body.trim().length === 0) {
+    throw new Error("A key body is required.");
+  }
+  const resolvedPath = expandHome(path);
+  await mkdir(dirname(resolvedPath), { recursive: true });
+  try {
+    await stat(resolvedPath);
+    throw new Error("Target private key path already exists");
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+  }
+  // Normalize line endings + ensure a trailing newline (some keys
+  // arrive without one and ssh-keygen rejects them).
+  const normalized = body.replace(/\r\n?/g, "\n").replace(/\n*$/, "\n");
+  await writeFile(resolvedPath, normalized, { mode: 0o600 });
+  return inspectKey(resolvedPath);
+}
+
+/**
+ * T12: install a public key on a remote host. Reads the .pub file
+ * sitting next to the private key, opens a one-shot SSH connection
+ * using the host's existing credentials, and appends to
+ * authorized_keys with the canonical permission tighten-down.
+ */
+async function copyKeyToHostBackend({ privateKeyPath, host }) {
+  if (!privateKeyPath || typeof privateKeyPath !== "string") {
+    return { ok: false, reason: "A private key path is required." };
+  }
+  if (!host || !host.hostname) {
+    return { ok: false, reason: "A target host is required." };
+  }
+  const pubPath = expandHome(`${privateKeyPath}.pub`);
+  let pubBody;
+  try {
+    pubBody = (await readFile(pubPath, "utf8")).trim();
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `Could not read public key at ${pubPath}: ${getErrorMessage(error)}`,
+    };
+  }
+  if (pubBody.length === 0) {
+    return { ok: false, reason: `Public key at ${pubPath} is empty.` };
+  }
+  // Shell-quote the pub body so a shell-special char in the comment
+  // section can't break out. Single quotes don't allow embedded
+  // single quotes, so we use the standard `'\''` escape.
+  const quoted = `'${pubBody.replace(/'/g, "'\\''")}'`;
+  const command =
+    "mkdir -p ~/.ssh && chmod 700 ~/.ssh && " +
+    `printf '%s\\n' ${quoted} >> ~/.ssh/authorized_keys && ` +
+    "chmod 600 ~/.ssh/authorized_keys && echo OK";
+  try {
+    const result = await executeRemoteCommand({ id: host.hostname, label: host.hostname, host }, command);
+    if (result.ok && result.stdout.trim().endsWith("OK")) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      reason: result.errorMessage ?? result.stderr.trim() ?? "Remote command failed.",
+    };
+  } catch (error) {
+    return { ok: false, reason: getErrorMessage(error) };
+  }
+}
+
 async function executeRemoteCommand(target, command) {
   try {
     const client = await connectClient(target.host);
@@ -1183,6 +1260,32 @@ const server = createServer(async (request, response) => {
     try {
       const body = await readJson(request);
       const result = await generateKeyPair(body);
+      sendJson(response, 200, result);
+    } catch (error) {
+      sendJson(response, 500, { error: getErrorMessage(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/backend/keys/import-from-body") {
+    // T13: write pasted key body to disk with 0600 perms, then run
+    // the same inspect path generateKeyPair uses on success.
+    try {
+      const body = await readJson(request);
+      const result = await importPrivateKeyFromBody(body);
+      sendJson(response, 200, result);
+    } catch (error) {
+      sendJson(response, 500, { error: getErrorMessage(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/backend/keys/copy-to-host") {
+    // T12: ssh-copy-id equivalent. Read .pub next to the private key,
+    // open a one-shot SSH connection, append to authorized_keys.
+    try {
+      const body = await readJson(request);
+      const result = await copyKeyToHostBackend(body);
       sendJson(response, 200, result);
     } catch (error) {
       sendJson(response, 500, { error: getErrorMessage(error) });

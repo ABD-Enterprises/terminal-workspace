@@ -114,6 +114,52 @@ export function KeyEditor({
             />
             Key uses a passphrase
           </label>
+
+          {/*
+            T13: paste-from-clipboard. Fill the textarea with a key
+            body (we validate the PEM headers client-side before the
+            backend write). When non-empty, the import flow writes the
+            body to `privateKeyPath` with 0600 perms before inspecting.
+            When empty, the existing path-only inspect path runs.
+          */}
+          <div className="rounded-[18px] border border-slate-800 bg-slate-950/60 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Paste key body (optional)
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const text = await navigator.clipboard.readText();
+                    setImportValues((current) => ({ ...current, pastedKeyBody: text }));
+                  } catch {
+                    // Clipboard read denied — leave the textarea
+                    // untouched; the user can paste manually.
+                  }
+                }}
+                className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-medium text-emerald-200 transition hover:border-emerald-400/60 hover:bg-emerald-400/15"
+              >
+                Paste from clipboard
+              </button>
+            </div>
+            <textarea
+              value={importValues.pastedKeyBody}
+              onChange={(event) =>
+                setImportValues((current) => ({ ...current, pastedKeyBody: event.target.value }))
+              }
+              placeholder={
+                "-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----"
+              }
+              spellCheck={false}
+              rows={5}
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-[11px] leading-5 text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
+            />
+            <p className="mt-2 text-[11px] leading-5 text-slate-500">
+              If the body is non-empty it will be written to the path above (0600 perms) before
+              inspection. Leave empty to import an existing file by path.
+            </p>
+          </div>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
@@ -159,10 +205,18 @@ export function KeyEditor({
               }
               className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
             >
-              <option value="ed25519">Ed25519</option>
+              <option value="ed25519">Ed25519 (recommended)</option>
               <option value="ecdsa">ECDSA</option>
               <option value="rsa">RSA</option>
             </select>
+            {/* T11: per-type guidance so new users pick the right algorithm. */}
+            <p className="mt-2 text-[11px] leading-5 text-slate-500">
+              {generateValues.type === "ed25519"
+                ? "Modern default. Small key, fast, supported by every OpenSSH ≥ 6.5."
+                : generateValues.type === "ecdsa"
+                  ? "521-bit curve. Compatible with hardware tokens that don't support Ed25519."
+                  : "4096-bit RSA. Required for ancient SSH servers (pre-2014); avoid otherwise."}
+            </p>
           </label>
 
           <label className="block">
@@ -181,6 +235,9 @@ export function KeyEditor({
           <label className="block sm:col-span-2">
             <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               Passphrase
+              <span className="ml-2 normal-case tracking-normal text-emerald-300/90">
+                recommended
+              </span>
             </span>
             <input
               type="password"
@@ -189,9 +246,12 @@ export function KeyEditor({
               onChange={(event) =>
                 setGenerateValues((current) => ({ ...current, passphrase: event.target.value }))
               }
-              placeholder="Optional"
+              placeholder="Optional but strongly recommended"
               className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
             />
+            <p className="mt-2 text-[11px] leading-5 text-slate-500">
+              Without a passphrase, anyone with read access to the key file can use it.
+            </p>
           </label>
         </div>
       )}

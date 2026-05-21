@@ -458,6 +458,52 @@ export async function generateDemoPrivateKey(payload: GenerateKeyPayload): Promi
   };
 }
 
+/**
+ * T13: demo implementation of import-from-body. In demo/browser mode
+ * we don't actually write to disk — we just synthesize metadata from
+ * the path + body hash so the rest of the UI flow can complete. The
+ * client-side validator (lib/private-key-validation.ts) has already
+ * rejected obviously-wrong bodies by the time we get here.
+ */
+export async function importDemoPrivateKeyFromBody(payload: {
+  path: string;
+  body: string;
+}): Promise<KeyMetadata> {
+  const normalizedPath = payload.path.trim();
+  if (!normalizedPath) {
+    throw new Error("A destination path is required.");
+  }
+  if (!payload.body.trim()) {
+    throw new Error("A key body is required.");
+  }
+  const metadata = algorithmForPath(normalizedPath);
+  return {
+    ...metadata,
+    comment: `${basename(normalizedPath)}@demo`,
+    fingerprint: fingerprint(`pasted:${normalizedPath}:${payload.body.length}`),
+    privateKeyPath: normalizedPath,
+    publicKeyPath: `${normalizedPath}.pub`,
+  };
+}
+
+/**
+ * T12: demo implementation of ssh-copy-id. We don't actually open an
+ * SSH connection in browser mode; we just simulate success when the
+ * host config looks sane.
+ */
+export async function copyDemoKeyToHost(payload: {
+  privateKeyPath: string;
+  host: { hostname: string; port: number };
+}): Promise<{ ok: boolean; reason?: string }> {
+  if (!payload.privateKeyPath.trim()) {
+    return { ok: false, reason: "A private key path is required." };
+  }
+  if (!payload.host.hostname.trim()) {
+    return { ok: false, reason: "A target host is required." };
+  }
+  return { ok: true };
+}
+
 export async function scanDemoKnownHost(
   hostname: string,
   port: number

@@ -70,6 +70,35 @@ export interface GenerateKeyPayload {
   type: KeyGenerationType;
 }
 
+/**
+ * T13: import a private key by pasting its body. The backend writes
+ * the body to `path` with 0600 perms, then runs inspect and returns
+ * the same KeyMetadata shape as a path-only import.
+ */
+export interface ImportPrivateKeyFromBodyPayload {
+  path: string;
+  body: string;
+}
+
+/**
+ * T12: install a public key on a remote host via the SSH exec channel.
+ * Runs the equivalent of `ssh-copy-id`:
+ *   mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo <key> >> ~/.ssh/authorized_keys
+ *   && chmod 600 ~/.ssh/authorized_keys
+ * Returns ok=true on a clean exit, otherwise ok=false + a short reason.
+ */
+export interface CopyKeyToHostPayload {
+  /** Path to the local private key (we read `{path}.pub` to get the body). */
+  privateKeyPath: string;
+  /** Full BackendHostConnection — backend opens a one-shot SSH session. */
+  host: BackendHostConnection;
+}
+
+export interface CopyKeyToHostResponse {
+  ok: boolean;
+  reason?: string;
+}
+
 export interface CreateForwardPayload {
   direction: "local" | "remote";
   localHost: string;

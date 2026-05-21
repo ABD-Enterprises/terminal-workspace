@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/common/ConfirmDialog";
+import { CopyKeyToHostDialog } from "../components/keys/CopyKeyToHostDialog";
 import { KeyEditor } from "../components/keys/KeyEditor";
 import { KeyList } from "../components/keys/KeyList";
-import { generatePrivateKey, inspectPrivateKey, scanKnownHost } from "../lib/api";
+import {
+  copyKeyToHost,
+  generatePrivateKey,
+  importPrivateKeyFromBody,
+  inspectPrivateKey,
+  scanKnownHost,
+} from "../lib/api";
+import { validatePastedPrivateKey } from "../lib/private-key-validation";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useKeysStore } from "../store/keys-store";
@@ -44,6 +52,11 @@ export function KeysPage() {
   const [scanResults, setScanResults] = useState<
     Awaited<ReturnType<typeof scanKnownHost>>["entries"]
   >([]);
+  // T12: ssh-copy-id state.
+  const [copyKeyId, setCopyKeyId] = useState<string | undefined>(undefined);
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copyError, setCopyError] = useState<string | undefined>(undefined);
+  const [copySuccess, setCopySuccess] = useState<string | undefined>(undefined);
 
   const selectedKey = keys.find((key) => key.id === selectedKeyId) ?? keys[0];
   const resolvedAssignHostId = assignHostId || hosts[0]?.id || "";
@@ -63,7 +76,22 @@ export function KeysPage() {
     setEditorError(undefined);
 
     try {
-      const metadata = await inspectPrivateKey(values.privateKeyPath.trim());
+      const pasted = values.pastedKeyBody.trim();
+      let metadata;
+      if (pasted) {
+        // T13: validate the body shape client-side before the
+        // backend writes anything to disk.
+        const validation = validatePastedPrivateKey(pasted);
+        if (!validation.ok) {
+          throw new Error(validation.reason ?? "Pasted key body is invalid.");
+        }
+        metadata = await importPrivateKeyFromBody({
+          path: values.privateKeyPath.trim(),
+          body: pasted,
+        });
+      } else {
+        metadata = await inspectPrivateKey(values.privateKeyPath.trim());
+      }
       const keyId = importKey(
         values.label.trim() || metadata.comment || deriveLabel(metadata.privateKeyPath),
         metadata,
@@ -204,6 +232,11 @@ export function KeysPage() {
               selectedKeyId={selectedKey?.id}
               onSelect={setSelectedKeyId}
               onDelete={setDeletePendingKeyId}
+              onCopyToHost={(keyId) => {
+                setCopyKeyId(keyId);
+                setCopyError(undefined);
+                setCopySuccess(undefined);
+              }}
               renderExpandedContent={(key) => (
                 <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -380,6 +413,57 @@ export function KeysPage() {
         confirmLabel="Delete"
         onCancel={() => setDeletePendingKeyId(undefined)}
         onConfirm={handleDelete}
+      />
+
+      <CopyKeyToHostDialog
+        open={Boolean(copyKeyId)}
+        keyRecord={keys.find((k) => k.id === copyKeyId)}
+        hosts={hosts}
+        busy={copyBusy}
+        errorMessage={copyError}
+        successMessage={copySuccess}
+        onCancel={() => {
+          setCopyKeyId(undefined);
+          setCopyError(undefined);
+          setCopySuccess(undefined);
+        }}
+        onConfirm={async (hostId) => {
+          const keyRecord = keys.find((k) => k.id === copyKeyId);
+          const host = hosts.find((h) => h.id === hostId);
+          if (!keyRecord || !host) {
+            return;
+          }
+          setCopyBusy(true);
+          setCopyError(undefined);
+          setCopySuccess(undefined);
+          try {
+            const result = await copyKeyToHost({
+              privateKeyPath: keyRecord.privateKeyPath,
+              host: {
+                hostname: host.hostname,
+                port: host.port,
+                username: host.username,
+                authMethod: host.authMethod,
+                privateKeyPath: host.privateKeyPath,
+                password: "",
+                passphrase: "",
+                hostKeyPolicy: host.hostKeyPolicy,
+                agentForwarding: host.agentForwarding,
+                protocol: host.protocol,
+                environment: host.environment,
+              },
+            });
+            if (result.ok) {
+              setCopySuccess(`Installed key on ${host.label}.`);
+            } else {
+              setCopyError(result.reason ?? "Copy failed.");
+            }
+          } catch (error) {
+            setCopyError(error instanceof Error ? error.message : String(error));
+          } finally {
+            setCopyBusy(false);
+          }
+        }}
       />
     </>
   );

@@ -31,6 +31,13 @@ export interface ImportKeyValues {
   label: string;
   privateKeyPath: string;
   hasPassphrase: boolean;
+  /**
+   * T13: when non-empty, the import flow writes this body to
+   * `privateKeyPath` (with 0600 perms) before running the inspect
+   * step. Lets the user paste a key body from clipboard / a password
+   * manager rather than going through the file picker.
+   */
+  pastedKeyBody: string;
 }
 
 export interface GenerateKeyValues {
@@ -45,6 +52,7 @@ export const emptyImportKeyValues: ImportKeyValues = {
   label: "",
   privateKeyPath: "~/.ssh/id_ed25519",
   hasPassphrase: false,
+  pastedKeyBody: "",
 };
 
 export const emptyGenerateKeyValues: GenerateKeyValues = {

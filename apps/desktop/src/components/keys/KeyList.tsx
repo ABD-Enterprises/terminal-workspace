@@ -8,6 +8,12 @@ interface KeyListProps {
   selectedKeyId?: string;
   onSelect: (keyId: string) => void;
   onDelete: (keyId: string) => void;
+  /**
+   * T12: open the Copy-to-host dialog for this key. When omitted the
+   * button is hidden — used by tests that don't exercise the ssh-copy-id
+   * flow.
+   */
+  onCopyToHost?: (keyId: string) => void;
   renderExpandedContent?: (key: KeyRecord) => ReactNode;
 }
 
@@ -17,6 +23,7 @@ export function KeyList({
   selectedKeyId,
   onSelect,
   onDelete,
+  onCopyToHost,
   renderExpandedContent,
 }: KeyListProps) {
   if (!keys.length) {
@@ -29,7 +36,7 @@ export function KeyList({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[22px] border border-slate-800/80 bg-slate-950/65">
-      <div className="grid grid-cols-[minmax(0,1.2fr)_90px_160px_120px_80px] gap-3 border-b border-slate-800/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+      <div className="grid grid-cols-[minmax(0,1.2fr)_90px_160px_120px_180px] gap-3 border-b border-slate-800/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
         <span>Identity</span>
         <span>Bits</span>
         <span>Fingerprint</span>
@@ -43,7 +50,7 @@ export function KeyList({
           return (
             <Fragment key={key.id}>
               <div
-                className={`grid grid-cols-[minmax(0,1.2fr)_90px_160px_120px_80px] gap-3 border-b border-slate-900/80 px-3 py-2 text-sm ${
+                className={`grid grid-cols-[minmax(0,1.2fr)_90px_160px_120px_180px] gap-3 border-b border-slate-900/80 px-3 py-2 text-sm ${
                   selected ? "bg-emerald-400/10" : "bg-transparent hover:bg-slate-900/70"
                 }`}
               >
@@ -65,13 +72,24 @@ export function KeyList({
                     ? key.assignedHostIds.map((hostId) => hosts[hostId]?.label ?? hostId).join(", ")
                     : "Unassigned"}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onDelete(key.id)}
-                  className="rounded-lg border border-rose-500/40 px-3 py-1 text-xs text-rose-200 transition hover:border-rose-400 hover:text-white"
-                >
-                  Delete
-                </button>
+                <div className="flex items-center justify-end gap-1.5">
+                  {onCopyToHost ? (
+                    <button
+                      type="button"
+                      onClick={() => onCopyToHost(key.id)}
+                      className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white"
+                    >
+                      Copy to host…
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => onDelete(key.id)}
+                    className="rounded-lg border border-rose-500/40 px-2.5 py-1 text-xs text-rose-200 transition hover:border-rose-400 hover:text-white"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
 
               {selected && renderExpandedContent ? (
