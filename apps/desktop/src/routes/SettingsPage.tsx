@@ -61,6 +61,15 @@ export function SettingsPage() {
   const terminalTheme = useAppStore((state) => state.terminalTheme);
   const setTerminalTheme = useAppStore((state) => state.setTerminalTheme);
   const terminalThemeOptions = listTerminalThemeOptions();
+  // T17-T20 polish toggles.
+  const appShellTheme = useAppStore((state) => state.appShellTheme);
+  const setAppShellTheme = useAppStore((state) => state.setAppShellTheme);
+  const notificationsEnabled = useAppStore((state) => state.notificationsEnabled);
+  const setNotificationsEnabled = useAppStore((state) => state.setNotificationsEnabled);
+  const dockBadgeEnabled = useAppStore((state) => state.dockBadgeEnabled);
+  const setDockBadgeEnabled = useAppStore((state) => state.setDockBadgeEnabled);
+  const autoUpdateCheckOnLaunch = useAppStore((state) => state.autoUpdateCheckOnLaunch);
+  const setAutoUpdateCheckOnLaunch = useAppStore((state) => state.setAutoUpdateCheckOnLaunch);
   const vaultId = useAppStore((state) => state.vaultId);
   const deviceId = useAppStore((state) => state.deviceId);
   const lastAppliedSnapshotId = useAppStore((state) => state.lastAppliedSnapshotId);
@@ -452,6 +461,89 @@ export function SettingsPage() {
                 })}
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* T17-T20 polish: app-shell theme + native OS integrations. */}
+        <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300">
+            Appearance &amp; OS integration
+          </p>
+          <p className="mt-1 text-sm leading-6 text-slate-400">
+            App shell theme follows the system by default. The three OS-integration toggles are
+            no-ops in browser preview; they activate in the Tauri ship.
+          </p>
+
+          <div className="mt-3 space-y-3">
+            <div role="radiogroup" aria-label="App shell theme" className="flex flex-wrap gap-2">
+              {(["system", "light", "dark"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={appShellTheme === option}
+                  aria-label={`App shell theme ${option}`}
+                  onClick={() => setAppShellTheme(option)}
+                  className={cn(
+                    "rounded-2xl border px-3 py-1.5 text-sm capitalize transition",
+                    appShellTheme === option
+                      ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-100"
+                      : "border-slate-700 bg-slate-950/50 text-slate-300 hover:border-slate-500 hover:text-white"
+                  )}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+
+            <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-2.5">
+              <span className="min-w-0">
+                <span className="block text-sm text-slate-200">Native notifications</span>
+                <span className="mt-0.5 block text-[11px] leading-5 text-slate-500">
+                  T17 — fire a notification when a session disconnects or a snippet finishes
+                  outside the focused tab.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                aria-label="Enable native notifications"
+                checked={notificationsEnabled}
+                onChange={(event) => setNotificationsEnabled(event.target.checked)}
+                className="h-4 w-4 accent-emerald-400"
+              />
+            </label>
+
+            <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-2.5">
+              <span className="min-w-0">
+                <span className="block text-sm text-slate-200">Dock badge</span>
+                <span className="mt-0.5 block text-[11px] leading-5 text-slate-500">
+                  T18 — show the active session count on the macOS dock icon.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                aria-label="Enable dock badge"
+                checked={dockBadgeEnabled}
+                onChange={(event) => setDockBadgeEnabled(event.target.checked)}
+                className="h-4 w-4 accent-emerald-400"
+              />
+            </label>
+
+            <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-2.5">
+              <span className="min-w-0">
+                <span className="block text-sm text-slate-200">Check for updates on launch</span>
+                <span className="mt-0.5 block text-[11px] leading-5 text-slate-500">
+                  T19 — auto-checks GitHub Releases; install + restart is offered via banner.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                aria-label="Check for updates on launch"
+                checked={autoUpdateCheckOnLaunch}
+                onChange={(event) => setAutoUpdateCheckOnLaunch(event.target.checked)}
+                className="h-4 w-4 accent-emerald-400"
+              />
+            </label>
           </div>
         </div>
 

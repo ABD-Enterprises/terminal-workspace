@@ -8,6 +8,11 @@ import {
 } from "../lib/terminal-themes";
 
 export type WorkspaceDensity = "compact" | "comfortable";
+/**
+ * T20: app-shell theme. "system" follows prefers-color-scheme in
+ * real time; "light" / "dark" override.
+ */
+export type AppShellTheme = "system" | "light" | "dark";
 
 interface AppState {
   sidebarSearch: string;
@@ -26,6 +31,18 @@ interface AppState {
    */
   sawImportCallout: boolean;
   sawFirstRunTour: boolean;
+  /**
+   * T20: app shell theme (system / light / dark). Default "system".
+   */
+  appShellTheme: AppShellTheme;
+  /**
+   * T17 / T18 / T19: opt-in toggles for the OS-integration polish.
+   * Default false in browser preview; default true in Tauri ship
+   * (set by the migrate fn).
+   */
+  notificationsEnabled: boolean;
+  dockBadgeEnabled: boolean;
+  autoUpdateCheckOnLaunch: boolean;
   setSidebarSearch: (search: string) => void;
   openCommandPalette: () => void;
   closeCommandPalette: () => void;
@@ -39,6 +56,10 @@ interface AppState {
   setLastAppliedSnapshotId: (snapshotId: string | null) => void;
   markImportCalloutSeen: () => void;
   markFirstRunTourSeen: () => void;
+  setAppShellTheme: (theme: AppShellTheme) => void;
+  setNotificationsEnabled: (enabled: boolean) => void;
+  setDockBadgeEnabled: (enabled: boolean) => void;
+  setAutoUpdateCheckOnLaunch: (enabled: boolean) => void;
 }
 
 const fallbackStorage: StateStorage = {
@@ -61,6 +82,10 @@ interface PersistedAppState {
   lastAppliedSnapshotId: string | null;
   sawImportCallout: boolean;
   sawFirstRunTour: boolean;
+  appShellTheme: AppShellTheme;
+  notificationsEnabled: boolean;
+  dockBadgeEnabled: boolean;
+  autoUpdateCheckOnLaunch: boolean;
 }
 
 function createPersistentId() {
@@ -82,6 +107,10 @@ export const useAppStore = create<AppState>()(
       lastAppliedSnapshotId: null,
       sawImportCallout: false,
       sawFirstRunTour: false,
+      appShellTheme: "system",
+      notificationsEnabled: false,
+      dockBadgeEnabled: false,
+      autoUpdateCheckOnLaunch: false,
       setSidebarSearch: (sidebarSearch) => set({ sidebarSearch }),
       openCommandPalette: () => set({ commandPaletteOpen: true }),
       closeCommandPalette: () => set({ commandPaletteOpen: false }),
@@ -98,10 +127,15 @@ export const useAppStore = create<AppState>()(
       setLastAppliedSnapshotId: (lastAppliedSnapshotId) => set({ lastAppliedSnapshotId }),
       markImportCalloutSeen: () => set({ sawImportCallout: true }),
       markFirstRunTourSeen: () => set({ sawFirstRunTour: true }),
+      setAppShellTheme: (appShellTheme) => set({ appShellTheme }),
+      setNotificationsEnabled: (notificationsEnabled) => set({ notificationsEnabled }),
+      setDockBadgeEnabled: (dockBadgeEnabled) => set({ dockBadgeEnabled }),
+      setAutoUpdateCheckOnLaunch: (autoUpdateCheckOnLaunch) =>
+        set({ autoUpdateCheckOnLaunch }),
     }),
     {
       name: "termsnip-app",
-      version: 5,
+      version: 6,
       storage: createJSONStorage(() =>
         typeof window === "undefined" ? fallbackStorage : window.localStorage
       ),
@@ -115,6 +149,10 @@ export const useAppStore = create<AppState>()(
         lastAppliedSnapshotId: state.lastAppliedSnapshotId,
         sawImportCallout: state.sawImportCallout,
         sawFirstRunTour: state.sawFirstRunTour,
+        appShellTheme: state.appShellTheme,
+        notificationsEnabled: state.notificationsEnabled,
+        dockBadgeEnabled: state.dockBadgeEnabled,
+        autoUpdateCheckOnLaunch: state.autoUpdateCheckOnLaunch,
       }),
       migrate: (persistedState, version): PersistedAppState => {
         const state = (persistedState ?? {}) as Partial<PersistedAppState>;
@@ -137,6 +175,10 @@ export const useAppStore = create<AppState>()(
             // the one-shot callouts as already-seen.
             sawImportCallout: true,
             sawFirstRunTour: true,
+            appShellTheme: "system",
+            notificationsEnabled: isTauriRuntime(),
+            dockBadgeEnabled: isTauriRuntime(),
+            autoUpdateCheckOnLaunch: isTauriRuntime(),
           };
         }
 
@@ -153,6 +195,31 @@ export const useAppStore = create<AppState>()(
             lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
             sawImportCallout: true,
             sawFirstRunTour: true,
+            appShellTheme: "system",
+            notificationsEnabled: isTauriRuntime(),
+            dockBadgeEnabled: isTauriRuntime(),
+            autoUpdateCheckOnLaunch: isTauriRuntime(),
+          };
+        }
+
+        if (version < 6) {
+          // v5 → v6: introduced T17-T20 polish toggles. Defaults
+          // mirror the runtime: opt-in for browser preview, opt-out
+          // for the Tauri ship.
+          return {
+            workspaceDensity: state.workspaceDensity ?? "compact",
+            sectionShortcutsEnabled: state.sectionShortcutsEnabled ?? true,
+            demoModeEnabled: state.demoModeEnabled ?? getDefaultDemoModeEnabled(),
+            terminalTheme: safeTerminalTheme,
+            vaultId: state.vaultId ?? createPersistentId(),
+            deviceId: state.deviceId ?? createPersistentId(),
+            lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
+            sawImportCallout: state.sawImportCallout ?? false,
+            sawFirstRunTour: state.sawFirstRunTour ?? false,
+            appShellTheme: "system",
+            notificationsEnabled: isTauriRuntime(),
+            dockBadgeEnabled: isTauriRuntime(),
+            autoUpdateCheckOnLaunch: isTauriRuntime(),
           };
         }
 
@@ -166,6 +233,11 @@ export const useAppStore = create<AppState>()(
           lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
           sawImportCallout: state.sawImportCallout ?? false,
           sawFirstRunTour: state.sawFirstRunTour ?? false,
+          appShellTheme: state.appShellTheme ?? "system",
+          notificationsEnabled: state.notificationsEnabled ?? isTauriRuntime(),
+          dockBadgeEnabled: state.dockBadgeEnabled ?? isTauriRuntime(),
+          autoUpdateCheckOnLaunch:
+            state.autoUpdateCheckOnLaunch ?? isTauriRuntime(),
         };
       },
     }

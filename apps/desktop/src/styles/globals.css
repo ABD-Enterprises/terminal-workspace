@@ -2,7 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+/*
+ * T20: app-shell theme variables. `data-app-theme` on <html> is set
+ * by useAppShellTheme() to "light" or "dark". Defaults to dark when
+ * the attribute is absent.
+ */
+:root,
+html[data-app-theme="dark"] {
   color-scheme: dark;
   --shell-base: #07111b;
   --shell-panel: #0d1724;
@@ -10,6 +16,16 @@
   --shell-text: #ebf2ff;
   --shell-muted: #8ea0bd;
   --shell-accent: #76e4c3;
+}
+
+html[data-app-theme="light"] {
+  color-scheme: light;
+  --shell-base: #f2f6fa;
+  --shell-panel: #ffffff;
+  --shell-border: #d4dde7;
+  --shell-text: #122033;
+  --shell-muted: #5c708a;
+  --shell-accent: #1a9474;
 }
 
 html,

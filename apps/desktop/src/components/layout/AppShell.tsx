@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useAppShellTheme } from "../../hooks/useAppShellTheme";
 import { useCommandPalette } from "../../hooks/useCommandPalette";
 import { useKeyboardCheatsheet } from "../../hooks/useKeyboardCheatsheet";
 import { KeyboardCheatsheet } from "../common/KeyboardCheatsheet";
@@ -22,6 +23,7 @@ import { Sidebar } from "./Sidebar";
 const APP_TITLE = "term-snip";
 
 export function AppShell() {
+  useAppShellTheme();
   useCommandPalette();
   useKeyboardCheatsheet();
 
