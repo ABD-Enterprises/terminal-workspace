@@ -42,6 +42,16 @@ function denyUnauthorized(response, decision) {
   response.end(JSON.stringify({ error: "Unauthorized", reason: decision.reason }));
 }
 
+// Single response shape for every catch-block in the HTTP handlers
+// below. Audit pickup: the pattern
+//   sendJson(response, 500, { error: getErrorMessage(error) })
+// was duplicated 16 times in this file, which made the contract
+// implicit and brittle (e.g. one site forgot the `error` key, would
+// be hard to notice). Use this helper instead.
+function respondError(response, error, status = 500) {
+  sendJson(response, status, { error: getErrorMessage(error) });
+}
+
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -1229,7 +1239,7 @@ const server = createServer(async (request, response) => {
       const session = await createSshSession(host);
       sendJson(response, 200, { sessionId: session.id });
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1240,7 +1250,7 @@ const server = createServer(async (request, response) => {
       const result = await listRemoteDirectory(body.host, body.path);
       sendJson(response, 200, result);
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1251,7 +1261,7 @@ const server = createServer(async (request, response) => {
       const result = await inspectKey(body.path);
       sendJson(response, 200, result);
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1262,7 +1272,7 @@ const server = createServer(async (request, response) => {
       const result = await generateKeyPair(body);
       sendJson(response, 200, result);
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1275,7 +1285,7 @@ const server = createServer(async (request, response) => {
       const result = await importPrivateKeyFromBody(body);
       sendJson(response, 200, result);
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1288,7 +1298,7 @@ const server = createServer(async (request, response) => {
       const result = await copyKeyToHostBackend(body);
       sendJson(response, 200, result);
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1299,7 +1309,7 @@ const server = createServer(async (request, response) => {
       const entries = await scanKnownHost(body);
       sendJson(response, 200, { entries });
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1323,7 +1333,7 @@ const server = createServer(async (request, response) => {
       const results = await Promise.all(targets.map((target) => executeRemoteCommand(target, command)));
       sendJson(response, 200, { results });
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1346,7 +1356,7 @@ const server = createServer(async (request, response) => {
           : await createLocalForward(body);
       sendJson(response, 200, result);
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1357,7 +1367,7 @@ const server = createServer(async (request, response) => {
       const path = await createRemoteDirectory(body.host, body.path);
       sendJson(response, 200, { ok: true, path });
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1368,7 +1378,7 @@ const server = createServer(async (request, response) => {
       const path = await renameRemoteEntry(body.host, body.currentPath, body.nextPath);
       sendJson(response, 200, { ok: true, path });
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1379,7 +1389,7 @@ const server = createServer(async (request, response) => {
       await deleteRemoteEntry(body.host, body.path, body.isDirectory);
       sendJson(response, 200, { ok: true });
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1390,7 +1400,7 @@ const server = createServer(async (request, response) => {
       const path = await uploadRemoteFile(body.host, body.path, body.contentsBase64);
       sendJson(response, 200, { ok: true, path });
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1401,7 +1411,7 @@ const server = createServer(async (request, response) => {
       await sendRemoteFile(response, body.host, body.path);
     } catch (error) {
       if (!response.headersSent) {
-        sendJson(response, 500, { error: getErrorMessage(error) });
+        respondError(response, error);
       } else {
         response.end();
       }
@@ -1427,7 +1437,7 @@ const server = createServer(async (request, response) => {
       session.stream.setWindow(body.rows, body.cols, body.rows * 16, body.cols * 8);
       sendJson(response, 200, { ok: true });
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }
@@ -1451,7 +1461,7 @@ const server = createServer(async (request, response) => {
       await closeLocalForward(deleteForwardMatch[1]);
       sendJson(response, 200, { ok: true });
     } catch (error) {
-      sendJson(response, 500, { error: getErrorMessage(error) });
+      respondError(response, error);
     }
     return;
   }

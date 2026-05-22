@@ -60,8 +60,12 @@ export function TunnelsPage() {
           for (const forward of result.forwards) {
             next.push({
               forward,
-              hostId,
-              hostLabel: host?.label ?? "Unknown host",
+              hostId: host?.id,
+              // Audit fix: when the host has been deleted from
+              // inventory after the forward was created, surface that
+              // explicitly rather than silently showing "Unknown host"
+              // (which gives the user no path forward).
+              hostLabel: host?.label ?? "(host deleted)",
             });
           }
         } catch {
@@ -143,13 +147,21 @@ export function TunnelsPage() {
             <span className="text-right">Manage</span>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            {rows.map(({ forward, hostLabel }) => (
+            {rows.map(({ forward, hostId, hostLabel }) => (
               <div
                 key={forward.id}
                 className="grid grid-cols-[minmax(0,1fr)_120px_180px_180px_100px] gap-3 border-b border-slate-900/80 px-3 py-2 text-sm text-slate-200"
                 data-testid="tunnel-row"
+                data-host-deleted={hostId === undefined ? "true" : undefined}
               >
-                <span className="truncate font-medium text-slate-100">{hostLabel}</span>
+                <span
+                  className={
+                    "truncate font-medium " +
+                    (hostId === undefined ? "text-rose-200" : "text-slate-100")
+                  }
+                >
+                  {hostLabel}
+                </span>
                 <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
                   {forward.direction}
                 </span>
