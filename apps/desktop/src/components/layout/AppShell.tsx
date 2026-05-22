@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAppShellTheme } from "../../hooks/useAppShellTheme";
+import { useAutoUpdateCheck } from "../../hooks/useAutoUpdateCheck";
 import { useCommandPalette } from "../../hooks/useCommandPalette";
+import { useDisconnectNotifications } from "../../hooks/useDisconnectNotifications";
+import { useDockBadgeSync } from "../../hooks/useDockBadgeSync";
 import { useKeyboardCheatsheet } from "../../hooks/useKeyboardCheatsheet";
 import { KeyboardCheatsheet } from "../common/KeyboardCheatsheet";
 import { FirstRunTour } from "../common/FirstRunTour";
@@ -26,6 +29,16 @@ export function AppShell() {
   useAppShellTheme();
   useCommandPalette();
   useKeyboardCheatsheet();
+  // T18 + T17 audit fix: wire the previously-dead notification and
+  // dock badge helpers to their actual triggers. Both internally
+  // short-circuit when the user has the corresponding opt-in toggle
+  // off, so unmounting them isn't needed when disabled.
+  useDockBadgeSync();
+  useDisconnectNotifications();
+  // T19 audit fix: one-shot auto-check on launch when the user
+  // opted in. Result banner is surfaced from the Settings page on
+  // demand (and via future toast wiring — placeholder).
+  useAutoUpdateCheck();
 
   const location = useLocation();
   const navigate = useNavigate();

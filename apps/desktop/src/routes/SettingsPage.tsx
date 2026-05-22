@@ -8,6 +8,7 @@ import {
   inspectImportedLocalConfigBundle,
   type LocalConfigImportAnalysis,
 } from "../lib/local-config";
+import { checkForUpdates } from "../lib/auto-update";
 import { isTauriRuntime } from "../lib/backend-runtime";
 import { buildIdentityUsage } from "../lib/identity-usage";
 import { parseVaultSyncTrustPolicy, type VaultSyncTrustedKey } from "../lib/vault-sync-contract";
@@ -70,6 +71,9 @@ export function SettingsPage() {
   const setDockBadgeEnabled = useAppStore((state) => state.setDockBadgeEnabled);
   const autoUpdateCheckOnLaunch = useAppStore((state) => state.autoUpdateCheckOnLaunch);
   const setAutoUpdateCheckOnLaunch = useAppStore((state) => state.setAutoUpdateCheckOnLaunch);
+  // T19 audit fix: manual check button status. null = idle (button
+  // text shown by default); string = last result.
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<string | null>(null);
   const vaultId = useAppStore((state) => state.vaultId);
   const deviceId = useAppStore((state) => state.deviceId);
   const lastAppliedSnapshotId = useAppStore((state) => state.lastAppliedSnapshotId);
@@ -544,6 +548,48 @@ export function SettingsPage() {
                 className="h-4 w-4 accent-emerald-400"
               />
             </label>
+
+            {/* T19 audit fix: manual "Check for updates" button. The
+                button is always present; in browser preview the
+                checkForUpdates call returns null and we show "Not
+                available in browser preview". In the Tauri ship it
+                routes through tauri-plugin-updater. */}
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-2.5">
+              <span className="min-w-0">
+                <span className="block text-sm text-slate-200">Check for updates now</span>
+                <span className="mt-0.5 block text-[11px] leading-5 text-slate-500">
+                  {updateCheckStatus ?? "Hit the button to query GitHub Releases."}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  setUpdateCheckStatus("Checking…");
+                  try {
+                    const result = await checkForUpdates();
+                    if (!result) {
+                      setUpdateCheckStatus(
+                        "Not available in browser preview — wire to GitHub Releases in the Tauri ship."
+                      );
+                      return;
+                    }
+                    setUpdateCheckStatus(
+                      result.available
+                        ? `Update ${result.version ?? ""} available.`
+                        : "You're on the latest version."
+                    );
+                  } catch (error) {
+                    setUpdateCheckStatus(
+                      error instanceof Error ? error.message : String(error)
+                    );
+                  }
+                }}
+                aria-label="Check for updates"
+                className="rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
+              >
+                Check
+              </button>
+            </div>
           </div>
         </div>
 
