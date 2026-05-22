@@ -92,6 +92,85 @@ function createPersistentId() {
   return crypto.randomUUID();
 }
 
+/**
+ * Single source of truth for the persisted-state shape used by both
+ * `partialize` (write path) and `migrate` (read path on schema bump).
+ * Pass whatever the persisted payload carries; missing fields fall
+ * back to runtime-appropriate defaults (browser preview opts out of
+ * the OS-integration toggles; the Tauri ship opts in).
+ *
+ * Per-version overrides in `migrate` layer on top of this — they only
+ * need to override the handful of fields that need different
+ * historical-aware values, not re-state the full shape.
+ *
+ * Exported for unit-test coverage.
+ */
+export function buildBaselineDefaults(state: Partial<PersistedAppState>): PersistedAppState {
+  const safeTerminalTheme = isKnownTheme(state.terminalTheme)
+    ? state.terminalTheme
+    : DEFAULT_TERMINAL_THEME;
+  return {
+    workspaceDensity: state.workspaceDensity ?? "compact",
+    sectionShortcutsEnabled: state.sectionShortcutsEnabled ?? true,
+    demoModeEnabled: state.demoModeEnabled ?? getDefaultDemoModeEnabled(),
+    terminalTheme: safeTerminalTheme,
+    vaultId: state.vaultId ?? createPersistentId(),
+    deviceId: state.deviceId ?? createPersistentId(),
+    lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
+    sawImportCallout: state.sawImportCallout ?? false,
+    sawFirstRunTour: state.sawFirstRunTour ?? false,
+    appShellTheme: state.appShellTheme ?? "system",
+    notificationsEnabled: state.notificationsEnabled ?? isTauriRuntime(),
+    dockBadgeEnabled: state.dockBadgeEnabled ?? isTauriRuntime(),
+    autoUpdateCheckOnLaunch: state.autoUpdateCheckOnLaunch ?? isTauriRuntime(),
+  };
+}
+
+/**
+ * Read-side migration: take a payload from any prior persisted
+ * version + the version number, return the v6 shape. Exported for
+ * unit-test coverage.
+ *
+ * Audit pickup: the prior shape had four near-identical return blocks
+ * (14 fields each) differing only in a handful of per-version
+ * overrides. Build a single baseline from whatever the persisted
+ * payload happens to carry, then layer the historical-aware
+ * overrides on top.
+ */
+export function migrateAppState(
+  persistedState: unknown,
+  version: number
+): PersistedAppState {
+  const state = (persistedState ?? {}) as Partial<PersistedAppState>;
+  const baseline = buildBaselineDefaults(state);
+
+  if (version < 1) {
+    // v0 → today: a pre-v1 payload predates the Tauri runtime gate
+    // AND the onboarding one-shots. The native ship must never enable
+    // demo mode; the upgrading user has already learned the app.
+    return {
+      ...baseline,
+      demoModeEnabled: isTauriRuntime() ? false : baseline.demoModeEnabled,
+      sawImportCallout: true,
+      sawFirstRunTour: true,
+    };
+  }
+  if (version < 5) {
+    // v4 → v5: introduced the onboarding one-shots. Treat upgrade
+    // users as if they've already dismissed them so we don't pop
+    // callouts at someone who has used the app for months.
+    return {
+      ...baseline,
+      sawImportCallout: true,
+      sawFirstRunTour: true,
+    };
+  }
+  // v5 → v6 and v6 → current: baseline defaults already encode the
+  // right behavior (Tauri ship opts into the OS-integration toggles,
+  // browser preview opts out).
+  return baseline;
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
@@ -154,92 +233,7 @@ export const useAppStore = create<AppState>()(
         dockBadgeEnabled: state.dockBadgeEnabled,
         autoUpdateCheckOnLaunch: state.autoUpdateCheckOnLaunch,
       }),
-      migrate: (persistedState, version): PersistedAppState => {
-        const state = (persistedState ?? {}) as Partial<PersistedAppState>;
-        const safeTerminalTheme = isKnownTheme(state.terminalTheme)
-          ? state.terminalTheme
-          : DEFAULT_TERMINAL_THEME;
-
-        if (version < 1) {
-          return {
-            workspaceDensity: state.workspaceDensity ?? "compact",
-            sectionShortcutsEnabled: state.sectionShortcutsEnabled ?? true,
-            demoModeEnabled: isTauriRuntime()
-              ? false
-              : state.demoModeEnabled ?? getDefaultDemoModeEnabled(),
-            terminalTheme: safeTerminalTheme,
-            vaultId: state.vaultId ?? createPersistentId(),
-            deviceId: state.deviceId ?? createPersistentId(),
-            lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
-            // T03/T05: upgrading users have seen the app before, so flag
-            // the one-shot callouts as already-seen.
-            sawImportCallout: true,
-            sawFirstRunTour: true,
-            appShellTheme: "system",
-            notificationsEnabled: isTauriRuntime(),
-            dockBadgeEnabled: isTauriRuntime(),
-            autoUpdateCheckOnLaunch: isTauriRuntime(),
-          };
-        }
-
-        if (version < 5) {
-          // v4 → v5: introduced onboarding one-shots. Upgrade users have
-          // already learned the app — don't pop the callouts at them.
-          return {
-            workspaceDensity: state.workspaceDensity ?? "compact",
-            sectionShortcutsEnabled: state.sectionShortcutsEnabled ?? true,
-            demoModeEnabled: state.demoModeEnabled ?? getDefaultDemoModeEnabled(),
-            terminalTheme: safeTerminalTheme,
-            vaultId: state.vaultId ?? createPersistentId(),
-            deviceId: state.deviceId ?? createPersistentId(),
-            lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
-            sawImportCallout: true,
-            sawFirstRunTour: true,
-            appShellTheme: "system",
-            notificationsEnabled: isTauriRuntime(),
-            dockBadgeEnabled: isTauriRuntime(),
-            autoUpdateCheckOnLaunch: isTauriRuntime(),
-          };
-        }
-
-        if (version < 6) {
-          // v5 → v6: introduced T17-T20 polish toggles. Defaults
-          // mirror the runtime: opt-in for browser preview, opt-out
-          // for the Tauri ship.
-          return {
-            workspaceDensity: state.workspaceDensity ?? "compact",
-            sectionShortcutsEnabled: state.sectionShortcutsEnabled ?? true,
-            demoModeEnabled: state.demoModeEnabled ?? getDefaultDemoModeEnabled(),
-            terminalTheme: safeTerminalTheme,
-            vaultId: state.vaultId ?? createPersistentId(),
-            deviceId: state.deviceId ?? createPersistentId(),
-            lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
-            sawImportCallout: state.sawImportCallout ?? false,
-            sawFirstRunTour: state.sawFirstRunTour ?? false,
-            appShellTheme: "system",
-            notificationsEnabled: isTauriRuntime(),
-            dockBadgeEnabled: isTauriRuntime(),
-            autoUpdateCheckOnLaunch: isTauriRuntime(),
-          };
-        }
-
-        return {
-          workspaceDensity: state.workspaceDensity ?? "compact",
-          sectionShortcutsEnabled: state.sectionShortcutsEnabled ?? true,
-          demoModeEnabled: state.demoModeEnabled ?? getDefaultDemoModeEnabled(),
-          terminalTheme: safeTerminalTheme,
-          vaultId: state.vaultId ?? createPersistentId(),
-          deviceId: state.deviceId ?? createPersistentId(),
-          lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
-          sawImportCallout: state.sawImportCallout ?? false,
-          sawFirstRunTour: state.sawFirstRunTour ?? false,
-          appShellTheme: state.appShellTheme ?? "system",
-          notificationsEnabled: state.notificationsEnabled ?? isTauriRuntime(),
-          dockBadgeEnabled: state.dockBadgeEnabled ?? isTauriRuntime(),
-          autoUpdateCheckOnLaunch:
-            state.autoUpdateCheckOnLaunch ?? isTauriRuntime(),
-        };
-      },
+      migrate: migrateAppState,
     }
   )
 );
