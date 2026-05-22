@@ -20,6 +20,7 @@ import {
   type TerminalAnsiPalette,
   type TerminalThemeMode,
 } from "../../lib/terminal-themes";
+import { classifySshError } from "../../lib/ssh-error-classifier";
 import { findMatchesInBuffer, type SearchMatch } from "../../lib/terminal-search";
 import { cn, formatHostAddress } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
@@ -715,14 +716,28 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           setPaneState(pane.id, "error");
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        // T16: classify the raw ssh2 / OpenSSH error string into a
+        // user-facing message + actionable hint. Keep the raw error in
+        // the terminal output as a follow-up line so diagnostics
+        // aren't lost. Audit fix: the classifier shipped in Round 5
+        // existed but wasn't wired into any error display surface.
+        const classified = classifySshError(error);
+        const raw = classified.raw || (error instanceof Error ? error.message : String(error));
+        const friendly = classified.hint
+          ? `${classified.message} ${classified.hint}`
+          : classified.message;
+
         clearBackendSession();
         if (connectedOnceRef.current || reconnectOnRestoreRef.current) {
-          scheduleReconnect(`${protocolLabel} connect failed: ${message}`);
+          scheduleReconnect(`${protocolLabel} connect failed: ${friendly}`);
           return;
         }
 
-        terminal.writeln(`\r\n${protocolLabel} connect failed: ${message}`);
+        terminal.writeln(`\r\n${protocolLabel} connect failed.`);
+        terminal.writeln(`\r\n${friendly}`);
+        if (raw && raw !== classified.message) {
+          terminal.writeln(`\r\n(raw: ${raw})`);
+        }
         connectionStateRef.current = "error";
         setPaneState(pane.id, "error");
       } finally {

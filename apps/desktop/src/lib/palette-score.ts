@@ -74,6 +74,12 @@ export function scorePaletteMatch(query: string, target: string): number {
 /**
  * Returns true if the query matches the target by any of the scoring
  * paths. Convenience wrapper for filter() callers.
+ *
+ * Audit pickup: currently only used by unit tests; the actual
+ * palette code in AppShell already uses scorePaletteMatch + score
+ * sorting. Keep the export — it's the canonical "yes/no" predicate
+ * if a future caller (e.g. a generic search hook) wants it without
+ * caring about the score.
  */
 export function matchesPalette(query: string, target: string): boolean {
   return scorePaletteMatch(query, target) > 0;
