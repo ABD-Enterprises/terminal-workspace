@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { launchHostSession } from "../../lib/launch-host-session";
 import { navigationItems } from "../../lib/navigation";
+import { selectMostRecentlyConnectedHosts } from "../../lib/recents";
 import { cn, formatDurationSince } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
 import { useHostsStore } from "../../store/hosts-store";
@@ -56,16 +57,7 @@ export function Sidebar() {
   // T06: Recent connections — top 5 by lastConnectedAt desc. Hosts
   // that have never been connected are excluded so the panel only
   // shows once the user has actually used the app.
-  const recentHosts = useMemo(
-    () =>
-      hosts
-        .filter((host) => Boolean(host.lastConnectedAt))
-        .sort((left, right) =>
-          (right.lastConnectedAt ?? "").localeCompare(left.lastConnectedAt ?? "")
-        )
-        .slice(0, 5),
-    [hosts]
-  );
+  const recentHosts = useMemo(() => selectMostRecentlyConnectedHosts(hosts, 5), [hosts]);
   const sessionRows = useMemo(
     () =>
       sessionTabs.map((tab) => {

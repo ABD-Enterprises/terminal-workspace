@@ -12,6 +12,10 @@ import { isTauriRuntime } from "../../lib/backend-runtime";
 import { launchHostSession as sharedLaunchHostSession } from "../../lib/launch-host-session";
 import { navigationItems } from "../../lib/navigation";
 import { scorePaletteMatch } from "../../lib/palette-score";
+import {
+  selectMostRecentlyConnectedHosts,
+  selectMostRecentlyRunSnippets,
+} from "../../lib/recents";
 import { formatPrimaryShortcut, isPrimaryShortcut } from "../../lib/shortcuts";
 import { cn, formatHostAddress } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
@@ -537,14 +541,8 @@ export function AppShell() {
   });
 
   // ---- Recent --------------------------------------------------------------
-  const recentSnippet = snippets
-    .filter((snippet) => Boolean(snippet.lastRunAt))
-    .sort((left, right) => (right.lastRunAt ?? "").localeCompare(left.lastRunAt ?? ""))[0];
-  const recentHost = hosts
-    .filter((host) => Boolean(host.lastConnectedAt))
-    .sort((left, right) =>
-      (right.lastConnectedAt ?? "").localeCompare(left.lastConnectedAt ?? "")
-    )[0];
+  const recentSnippet = selectMostRecentlyRunSnippets(snippets, 1)[0];
+  const recentHost = selectMostRecentlyConnectedHosts(hosts, 1)[0];
 
   type RecentCommand = ActiveCommand;
   const recentCommands: RecentCommand[] = [
