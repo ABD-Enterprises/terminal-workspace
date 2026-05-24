@@ -28,7 +28,23 @@ env:
 
 jobs:
   release-macos:
-    runs-on: macos-latest
+    # Self-hosted ABD-Enterprises org runner with Xcode 26.5 and
+    # Apple Silicon. Declared in deffenda/brew-sync
+    # manifests/github-runners.yaml. macos-latest hosted runners
+    # carry a 10x minute multiplier and this job has a 90-minute
+    # timeout — moving it to self-hosted is a material savings on
+    # every release.
+    #
+    # Signing secrets are still injected by GitHub at run time; the
+    # workflow's "Import signing certificate" step builds an isolated
+    # $RUNNER_TEMP keychain per run, so this is safe to run on a
+    # shared dev machine without polluting the user's login keychain.
+    #
+    # To temporarily route a release back to GitHub-hosted (e.g. if
+    # the runner is offline), change this single line back to
+    # `macos-latest` and re-run; no other workflow step depends on
+    # the runner kind.
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 90
 
     steps:
