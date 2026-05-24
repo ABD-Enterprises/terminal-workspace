@@ -75,7 +75,7 @@ describe("github release secrets tooling", () => {
     const notaryKeyPath = makeTempFile("AuthKey_TEST.p8", "fake-p8-bytes");
 
     const audit = auditReleaseSecrets({
-      repo: "deffenda/term-snip",
+      repo: "ABD-Enterprises/term-snip",
       env: {
         MACOS_CERTIFICATE_P12_PATH: certificatePath,
         MACOS_CERTIFICATE_PASSWORD: "certificate-password",
@@ -91,7 +91,7 @@ describe("github release secrets tooling", () => {
       detectIdentity: () => "Developer ID Application: ABD Enterprises, Inc. (2R4WAH4R53)",
     });
 
-    expect(audit.repo).toBe("deffenda/term-snip");
+    expect(audit.repo).toBe("ABD-Enterprises/term-snip");
     expect(audit.github.ready).toBe(false);
     expect(audit.github.missingSigning).toEqual([
       "MACOS_CERTIFICATE_P12_BASE64",
@@ -105,7 +105,7 @@ describe("github release secrets tooling", () => {
     const applied: Array<{ name: string; value: string }> = [];
 
     const result = applyReleaseSecretsFromEnv({
-      repo: "deffenda/term-snip",
+      repo: "ABD-Enterprises/term-snip",
       env: {
         MACOS_CERTIFICATE_P12_BASE64: "ZmFrZS1wMTI=",
         MACOS_CERTIFICATE_PASSWORD: "certificate-password",
@@ -122,7 +122,7 @@ describe("github release secrets tooling", () => {
       detectIdentity: () => "",
     });
 
-    expect(result.repo).toBe("deffenda/term-snip");
+    expect(result.repo).toBe("ABD-Enterprises/term-snip");
     expect(result.notaryMode).toBe("apple-id");
     expect(result.appliedNames).toEqual([
       "MACOS_CERTIFICATE_P12_BASE64",
@@ -139,7 +139,7 @@ describe("github release secrets tooling", () => {
 
   it("supports dry-run application without invoking gh secret writes", () => {
     const result = applyReleaseSecretsFromEnv({
-      repo: "deffenda/term-snip",
+      repo: "ABD-Enterprises/term-snip",
       dryRun: true,
       env: {
         MACOS_CERTIFICATE_P12_BASE64: "ZmFrZS1wMTI=",
@@ -171,7 +171,7 @@ describe("github release secrets tooling", () => {
   it("fails apply-env when the local environment cannot satisfy the signing contract", () => {
     expect(() =>
       applyReleaseSecretsFromEnv({
-        repo: "deffenda/term-snip",
+        repo: "ABD-Enterprises/term-snip",
         env: {},
         detectIdentity: () => "",
       }),
