@@ -21,48 +21,73 @@ import {
   updatePaneReconnectPreference,
 } from "./sessions-store";
 
+function emptyWorkspaceState(): SessionWorkspaceState {
+  return {
+    tabs: [],
+    panes: {},
+    activeTabId: undefined,
+    lastRestoredAt: undefined,
+  };
+}
+
+function openSampleSession(hostIndex = 0) {
+  return openSessionWorkspace(emptyWorkspaceState(), sampleHosts[hostIndex]!);
+}
+
+function recordSampleCommandHistory(workspace = openSampleSession()) {
+  const paneId = workspace.tabs[0]!.paneIds[0]!;
+  const recorded = recordPaneCommandHistory(
+    {
+      ...workspace,
+      commandHistory: [],
+    },
+    paneId,
+    "uptime",
+    "queued"
+  );
+
+  return {
+    entryId: recorded.commandHistory[0]!.id,
+    paneId,
+    recorded,
+    tabId: workspace.tabs[0]!.id,
+  };
+}
+
+function buildThreeTabWorkspace() {
+  return sampleHosts
+    .slice(0, 3)
+    .reduce<SessionWorkspaceState>(
+      (workspace, host) => openSessionWorkspace(workspace, host),
+      emptyWorkspaceState()
+    );
+}
+
 describe("sessions store helpers", () => {
   it("opens a session and focuses an existing tab for the same host", () => {
-    const initial = {
-      tabs: [],
-      panes: {},
-      activeTabId: undefined,
-      lastRestoredAt: undefined,
-    };
-
-    const opened = openSessionWorkspace(initial, sampleHosts[0]);
+    const opened = openSampleSession();
     expect(opened.tabs).toHaveLength(1);
     expect(opened.activeTabId).toBe(opened.tabs[0]?.id);
 
-    const openedAgain = openSessionWorkspace(opened, sampleHosts[0]);
+    const openedAgain = openSessionWorkspace(opened, sampleHosts[0]!);
     expect(openedAgain.tabs).toHaveLength(1);
     expect(openedAgain.activeTabId).toBe(opened.tabs[0]?.id);
   });
 
   it("duplicates a session into a new tab with a distinct title", () => {
-    const initial = {
-      tabs: [],
-      panes: {},
-      activeTabId: undefined,
-      lastRestoredAt: undefined,
-    };
-
-    const opened = openSessionWorkspace(initial, sampleHosts[0]);
-    const duplicated = duplicateSessionWorkspace(opened, sampleHosts[0]);
+    const opened = openSampleSession();
+    const duplicated = duplicateSessionWorkspace(opened, sampleHosts[0]!);
 
     expect(duplicated.tabs).toHaveLength(2);
     expect(duplicated.activeTabId).toBe(duplicated.tabs[1]?.id);
-    expect(duplicated.tabs[1]?.title).toBe(`${sampleHosts[0].label} (2)`);
+    expect(duplicated.tabs[1]?.title).toBe(`${sampleHosts[0]!.label} (2)`);
   });
 
   it("splits and removes panes inside a tab", () => {
-    const opened = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      sampleHosts[0]
-    );
+    const opened = openSampleSession();
     const tabId = opened.tabs[0]!.id;
 
-    const split = splitSessionPane(opened, tabId, sampleHosts[0]);
+    const split = splitSessionPane(opened, tabId, sampleHosts[0]!);
     expect(split.tabs[0]?.paneIds).toHaveLength(2);
 
     const secondPaneId = split.tabs[0]!.paneIds[1]!;
@@ -71,10 +96,7 @@ describe("sessions store helpers", () => {
   });
 
   it("updates connection state and closes tabs", () => {
-    const opened = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      sampleHosts[1]
-    );
+    const opened = openSampleSession(1);
     const paneId = opened.tabs[0]!.paneIds[0]!;
 
     const connected = updatePaneConnectionState(opened, paneId, "connected");
@@ -90,16 +112,9 @@ describe("sessions store helpers", () => {
   });
 
   it("cycles through open tabs in both directions", () => {
-    const initial = {
-      tabs: [],
-      panes: {},
-      activeTabId: undefined,
-      lastRestoredAt: undefined,
-    };
-
-    const first = openSessionWorkspace(initial, sampleHosts[0]);
-    const second = duplicateSessionWorkspace(first, sampleHosts[1]);
-    const third = duplicateSessionWorkspace(second, sampleHosts[2]);
+    const first = openSampleSession();
+    const second = duplicateSessionWorkspace(first, sampleHosts[1]!);
+    const third = duplicateSessionWorkspace(second, sampleHosts[2]!);
 
     expect(third.activeTabId).toBe(third.tabs[2]?.id);
 
@@ -111,10 +126,7 @@ describe("sessions store helpers", () => {
   });
 
   it("preserves reconnect intent until the user explicitly clears it", () => {
-    const opened = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      sampleHosts[1]
-    );
+    const opened = openSampleSession(1);
     const paneId = opened.tabs[0]!.paneIds[0]!;
 
     const connected = updatePaneConnectionState(opened, paneId, "connected");
@@ -127,10 +139,7 @@ describe("sessions store helpers", () => {
   });
 
   it("keeps reconnect intent when a restored pane is waiting on runtime secrets", () => {
-    const opened = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      sampleHosts[1]
-    );
+    const opened = openSampleSession(1);
     const paneId = opened.tabs[0]!.paneIds[0]!;
 
     const connected = updatePaneConnectionState(opened, paneId, "connected");
@@ -142,10 +151,7 @@ describe("sessions store helpers", () => {
   });
 
   it("queues and consumes pane commands", () => {
-    const opened = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      sampleHosts[0]
-    );
+    const opened = openSampleSession();
     const paneId = opened.tabs[0]!.paneIds[0]!;
 
     const queued = queuePaneCommand(opened, paneId, "uptime", "Check uptime");
@@ -157,26 +163,12 @@ describe("sessions store helpers", () => {
   });
 
   it("records executed pane commands in persisted history", () => {
-    const opened = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      sampleHosts[0]
-    );
-    const paneId = opened.tabs[0]!.paneIds[0]!;
-
-    const recorded = recordPaneCommandHistory(
-      {
-        ...opened,
-        commandHistory: [],
-      },
-      paneId,
-      "uptime",
-      "queued"
-    );
+    const { paneId, recorded } = recordSampleCommandHistory();
 
     expect(recorded.commandHistory).toHaveLength(1);
     expect(recorded.commandHistory[0]).toMatchObject({
       paneId,
-      hostId: sampleHosts[0].id,
+      hostId: sampleHosts[0]!.id,
       transport: "ssh",
       command: "uptime",
       source: "queued",
@@ -184,21 +176,7 @@ describe("sessions store helpers", () => {
   });
 
   it("appends sanitized output previews to recorded history entries", () => {
-    const opened = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      sampleHosts[0]
-    );
-    const paneId = opened.tabs[0]!.paneIds[0]!;
-    const recorded = recordPaneCommandHistory(
-      {
-        ...opened,
-        commandHistory: [],
-      },
-      paneId,
-      "uptime",
-      "queued"
-    );
-    const entryId = recorded.commandHistory[0]!.id;
+    const { entryId, recorded } = recordSampleCommandHistory();
 
     const updated = appendPaneCommandHistoryOutput(
       recorded,
@@ -213,28 +191,14 @@ describe("sessions store helpers", () => {
   });
 
   it("redacts persisted output previews when a pane opts out", () => {
-    const opened = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      sampleHosts[0]
-    );
-    const paneId = opened.tabs[0]!.paneIds[0]!;
-    const recorded = recordPaneCommandHistory(
-      {
-        ...opened,
-        commandHistory: [],
-      },
-      paneId,
-      "uptime",
-      "queued"
-    );
-    const entryId = recorded.commandHistory[0]!.id;
+    const { entryId, paneId, recorded } = recordSampleCommandHistory();
     const updated = appendPaneCommandHistoryOutput(recorded, entryId, "load average: 1.00");
     const optedOut = updatePanePreviewPersistence(updated, paneId, false);
     const persisted = sanitizePersistedCommandHistory(optedOut.commandHistory, optedOut.panes);
 
     expect(persisted[0]).toMatchObject({
       paneId,
-      hostId: sampleHosts[0].id,
+      hostId: sampleHosts[0]!.id,
       transport: "ssh",
       command: "uptime",
       source: "queued",
@@ -244,22 +208,7 @@ describe("sessions store helpers", () => {
   });
 
   it("keeps opted-out command history redacted after the pane is removed", () => {
-    const opened = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      sampleHosts[0]
-    );
-    const tabId = opened.tabs[0]!.id;
-    const paneId = opened.tabs[0]!.paneIds[0]!;
-    const recorded = recordPaneCommandHistory(
-      {
-        ...opened,
-        commandHistory: [],
-      },
-      paneId,
-      "uptime",
-      "queued"
-    );
-    const entryId = recorded.commandHistory[0]!.id;
+    const { entryId, paneId, recorded, tabId } = recordSampleCommandHistory();
     const updated = appendPaneCommandHistoryOutput(recorded, entryId, "load average: 1.00");
     const optedOut = updatePanePreviewPersistence(updated, paneId, false);
     const closed = closeSessionTab(optedOut, tabId);
@@ -278,22 +227,7 @@ describe("sessions store helpers", () => {
   });
 
   it("keeps opted-in command history previews after the pane is removed", () => {
-    const opened = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      sampleHosts[0]
-    );
-    const tabId = opened.tabs[0]!.id;
-    const paneId = opened.tabs[0]!.paneIds[0]!;
-    const recorded = recordPaneCommandHistory(
-      {
-        ...opened,
-        commandHistory: [],
-      },
-      paneId,
-      "uptime",
-      "queued"
-    );
-    const entryId = recorded.commandHistory[0]!.id;
+    const { entryId, paneId, recorded, tabId } = recordSampleCommandHistory();
     const updated = appendPaneCommandHistoryOutput(recorded, entryId, "load average: 1.00");
     const closed = closeSessionTab(updated, tabId);
     const persisted = sanitizePersistedCommandHistory(updated.commandHistory, closed.panes);
@@ -335,18 +269,9 @@ describe("sessions store helpers", () => {
       authMethod: "none" as const,
     };
 
-    const telnetWorkspace = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      telnetHost
-    );
-    const serialWorkspace = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      serialHost
-    );
-    const moshWorkspace = openSessionWorkspace(
-      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-      moshHost
-    );
+    const telnetWorkspace = openSessionWorkspace(emptyWorkspaceState(), telnetHost);
+    const serialWorkspace = openSessionWorkspace(emptyWorkspaceState(), serialHost);
+    const moshWorkspace = openSessionWorkspace(emptyWorkspaceState(), moshHost);
 
     expect(telnetWorkspace.panes[telnetWorkspace.tabs[0]!.paneIds[0]!]!.transport).toBe("telnet");
     expect(serialWorkspace.panes[serialWorkspace.tabs[0]!.paneIds[0]!]!.transport).toBe("serial");
@@ -355,10 +280,7 @@ describe("sessions store helpers", () => {
 
   describe("setTabSplitRatio (bonus parity)", () => {
     it("clamps the persisted ratio into [0.1, 0.9]", () => {
-      const initial = openSessionWorkspace(
-        { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-        sampleHosts[0]
-      );
+      const initial = openSampleSession();
       const tabId = initial.tabs[0]!.id;
 
       const tooSmall = setTabSplitRatio(initial, tabId, -1);
@@ -372,10 +294,7 @@ describe("sessions store helpers", () => {
     });
 
     it("ignores non-finite inputs", () => {
-      const initial = openSessionWorkspace(
-        { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
-        sampleHosts[0]
-      );
+      const initial = openSampleSession();
       const tabId = initial.tabs[0]!.id;
       const next = setTabSplitRatio(initial, tabId, Number.NaN);
       // No-op — same reference back, splitRatio still undefined.
@@ -385,21 +304,8 @@ describe("sessions store helpers", () => {
   });
 
   describe("reorderSessionTabs (bonus parity)", () => {
-    function buildWorkspace() {
-      let workspace: SessionWorkspaceState = {
-        tabs: [],
-        panes: {},
-        activeTabId: undefined,
-        lastRestoredAt: undefined,
-      };
-      for (const host of sampleHosts.slice(0, 3)) {
-        workspace = openSessionWorkspace(workspace, host);
-      }
-      return workspace;
-    }
-
     it("moves a tab from one index to another", () => {
-      const workspace = buildWorkspace();
+      const workspace = buildThreeTabWorkspace();
       const originalOrder = workspace.tabs.map((tab) => tab.id);
       const moved = reorderSessionTabs(workspace, 0, 2);
       const newOrder = moved.tabs.map((tab) => tab.id);
@@ -407,12 +313,12 @@ describe("sessions store helpers", () => {
     });
 
     it("is a no-op when the indices are equal", () => {
-      const workspace = buildWorkspace();
+      const workspace = buildThreeTabWorkspace();
       expect(reorderSessionTabs(workspace, 1, 1)).toBe(workspace);
     });
 
     it("is a no-op when an index is out of range", () => {
-      const workspace = buildWorkspace();
+      const workspace = buildThreeTabWorkspace();
       expect(reorderSessionTabs(workspace, -1, 0)).toBe(workspace);
       expect(reorderSessionTabs(workspace, 0, workspace.tabs.length)).toBe(workspace);
     });

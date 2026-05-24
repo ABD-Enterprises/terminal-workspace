@@ -7,6 +7,7 @@ import type {
   CreateSessionResponse,
   ResizeSessionPayload,
 } from "./backend-contract";
+import { fetchJson } from "./http";
 
 interface TauriInternals {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
@@ -376,23 +377,6 @@ class NativeSessionSocket implements SessionSocketLike {
   }
 }
 
-async function browserFetchJson<T>(path: string, init?: RequestInit) {
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(errorBody || `Backend request failed: ${response.status}`);
-  }
-
-  return (await response.json()) as T;
-}
-
 /**
  * @deprecated P2-NET — kept for backward compatibility but no longer used
  * in real flows. Every API call in `lib/api.ts` either invokes a first-
@@ -462,7 +446,7 @@ export async function getSessionBackendStatus() {
     return invokeTauriCommand<BackendStatusResponse>("termsnip_backend_status");
   }
 
-  return browserFetchJson<BackendStatusResponse>("/api/backend/status");
+  return fetchJson<BackendStatusResponse>("/api/backend/status");
 }
 
 export async function createSession(host: BackendHostConnection) {
@@ -472,7 +456,7 @@ export async function createSession(host: BackendHostConnection) {
     });
   }
 
-  return browserFetchJson<CreateSessionResponse>("/api/backend/sessions", {
+  return fetchJson<CreateSessionResponse>("/api/backend/sessions", {
     method: "POST",
     body: JSON.stringify({ host }),
   });
@@ -485,7 +469,7 @@ export async function closeSession(sessionId: string) {
     });
   }
 
-  return browserFetchJson<BackendBooleanResponse>(`/api/backend/sessions/${sessionId}`, {
+  return fetchJson<BackendBooleanResponse>(`/api/backend/sessions/${sessionId}`, {
     method: "DELETE",
   });
 }
@@ -497,7 +481,7 @@ export async function resizeSession(sessionId: string, payload: ResizeSessionPay
     });
   }
 
-  return browserFetchJson<BackendBooleanResponse>(`/api/backend/sessions/${sessionId}/resize`, {
+  return fetchJson<BackendBooleanResponse>(`/api/backend/sessions/${sessionId}/resize`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

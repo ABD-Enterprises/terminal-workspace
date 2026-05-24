@@ -1,5 +1,5 @@
-import { create } from "zustand";
 import type { KnownHostScanResult } from "../lib/api";
+import { createSingleFlightPromptStore } from "./single-flight-prompt-store";
 
 // Cross-component request bus for the inline first-connect fingerprint
 // prompt (P2-FP). Mirrors the shape of `connection-secret-prompt-store`
@@ -26,62 +26,15 @@ export interface FingerprintTrustPromptRequest {
   candidates: KnownHostScanResult[];
 }
 
-interface FingerprintTrustPromptState {
-  pendingRequest?: FingerprintTrustPromptRequest;
-  resolveRequest?: (accepted: KnownHostScanResult | null) => void;
-  openPrompt: (
-    request: FingerprintTrustPromptRequest
-  ) => Promise<KnownHostScanResult | null>;
-  clearPrompt: (accepted: KnownHostScanResult | null) => void;
-}
-
-let activePromptKey: string | undefined;
-let activePromptPromise: Promise<KnownHostScanResult | null> | undefined;
-
 function getPromptKey(request: FingerprintTrustPromptRequest) {
   return [request.hostId, request.hostname, request.port].join(":");
 }
 
-export const useFingerprintTrustPromptStore = create<FingerprintTrustPromptState>(
-  (set, get) => ({
-    pendingRequest: undefined,
-    resolveRequest: undefined,
-    openPrompt: async (request) => {
-      const promptKey = getPromptKey(request);
-
-      if (activePromptPromise && activePromptKey === promptKey) {
-        return activePromptPromise;
-      }
-
-      if (activePromptPromise) {
-        // A different prompt is already pending — refuse rather than
-        // queue. The caller can retry once the user has resolved the
-        // current one. Avoids stacking modals.
-        return null;
-      }
-
-      activePromptKey = promptKey;
-      activePromptPromise = new Promise<KnownHostScanResult | null>((resolve) => {
-        set({
-          pendingRequest: request,
-          resolveRequest: (accepted) => resolve(accepted),
-        });
-      });
-
-      const result = await activePromptPromise;
-      activePromptKey = undefined;
-      activePromptPromise = undefined;
-      return result;
-    },
-    clearPrompt: (accepted) => {
-      get().resolveRequest?.(accepted);
-      set({
-        pendingRequest: undefined,
-        resolveRequest: undefined,
-      });
-    },
-  })
-);
+export const useFingerprintTrustPromptStore =
+  createSingleFlightPromptStore<FingerprintTrustPromptRequest, KnownHostScanResult | null>({
+    busyResult: null,
+    getPromptKey,
+  });
 
 export function requestFingerprintTrustPrompt(
   request: FingerprintTrustPromptRequest

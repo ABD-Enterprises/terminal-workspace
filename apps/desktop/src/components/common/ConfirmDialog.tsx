@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { hasCommandModifier, isTypingTarget } from "../../lib/dom-events";
 import { Modal } from "./Modal";
 
 interface ConfirmDialogProps {
@@ -8,20 +9,6 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
-}
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  const tag = target.tagName;
-  // Confirm dialogs in this app don't currently host any inputs, but the
-  // guard is cheap and future-proofs against someone adding e.g. a
-  // "type the host name to confirm" prompt.
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
-    return true;
-  }
-  return target.isContentEditable;
 }
 
 export function ConfirmDialog({
@@ -44,7 +31,7 @@ export function ConfirmDialog({
       if (event.key !== "Enter") {
         return;
       }
-      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+      if (hasCommandModifier(event) || event.shiftKey) {
         return;
       }
       if (isTypingTarget(event.target)) {

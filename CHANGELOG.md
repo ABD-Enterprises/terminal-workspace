@@ -32,7 +32,7 @@ PR title prefix matches the highest-tier label added:
 
 ### [INTERNAL]
 
-- None.
+- Fixed issue #65 by removing stale lint suppressions, extracting shared helpers for duplicated prompt, fetch, and keyboard-event logic, and adding coverage for previously untested desktop surfaces.
 
 ### [SECURITY]
 

@@ -2,6 +2,7 @@ import { isDemoModeEnabled } from "../store/app-store";
 import type { PortForwardRecord } from "../types/forward";
 import type { HostProtocol } from "../types/host";
 import type { KeyMetadata } from "../types/key";
+import { fetchJson, fetchResponse } from "./http";
 import type {
   BackendBooleanResponse,
   BackendHostConnection,
@@ -58,46 +59,6 @@ export type {
   SnippetExecutionTarget,
 } from "./backend-contract";
 export type { SessionSocketLike } from "./backend-runtime";
-
-/**
- * Fetch JSON from the Node backend. Browser-mode fallback only — every
- * native (Tauri) caller short-circuits to a `termsnip_*` invokeTauriCommand
- * before reaching here. P2-NET removed the now-dead `isTauriRuntime()`
- * branch that used to forward through `proxyBackendJson`; the Tauri shell
- * is the source of truth in native and never needs to hit the Node
- * backend's HTTP surface anymore.
- */
-async function backendFetch<T>(path: string, init?: RequestInit) {
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(errorBody || `Backend request failed: ${response.status}`);
-  }
-
-  return (await response.json()) as T;
-}
-
-/**
- * Browser-mode binary fetch. See `backendFetch` — the dead Tauri-runtime
- * branch was removed in P2-NET.
- */
-async function backendBinaryFetch(path: string, init?: RequestInit) {
-  const response = await fetch(path, init);
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(errorBody || `Backend request failed: ${response.status}`);
-  }
-
-  return response;
-}
 
 function encodeBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
@@ -170,7 +131,7 @@ export async function listRemoteDirectory(host: BackendHostConnection, path: str
     });
   }
 
-  return backendFetch<SftpDirectoryResponse>("/api/backend/sftp/list", {
+  return fetchJson<SftpDirectoryResponse>("/api/backend/sftp/list", {
     method: "POST",
     body: JSON.stringify({ host, path }),
   });
@@ -187,7 +148,7 @@ export async function createRemoteDirectory(host: BackendHostConnection, path: s
     });
   }
 
-  return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/mkdir", {
+  return fetchJson<{ ok: boolean; path: string }>("/api/backend/sftp/mkdir", {
     method: "POST",
     body: JSON.stringify({ host, path }),
   });
@@ -208,7 +169,7 @@ export async function renameRemoteEntry(
     });
   }
 
-  return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/rename", {
+  return fetchJson<{ ok: boolean; path: string }>("/api/backend/sftp/rename", {
     method: "POST",
     body: JSON.stringify({ host, currentPath, nextPath }),
   });
@@ -229,7 +190,7 @@ export async function deleteRemoteEntry(
     });
   }
 
-  return backendFetch<{ ok: boolean }>("/api/backend/sftp/delete", {
+  return fetchJson<{ ok: boolean }>("/api/backend/sftp/delete", {
     method: "POST",
     body: JSON.stringify({ host, path, isDirectory }),
   });
@@ -255,7 +216,7 @@ export async function uploadRemoteFile(
     });
   }
 
-  return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/upload", {
+  return fetchJson<{ ok: boolean; path: string }>("/api/backend/sftp/upload", {
     method: "POST",
     body: JSON.stringify({
       host,
@@ -291,7 +252,7 @@ export async function downloadRemoteFile(host: BackendHostConnection, path: stri
     return { blob, filename } satisfies DownloadRemoteFileResponse;
   }
 
-  const response = await backendBinaryFetch("/api/backend/sftp/download", {
+  const response = await fetchResponse("/api/backend/sftp/download", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -330,7 +291,7 @@ export async function inspectPrivateKey(path: string) {
     });
   }
 
-  return backendFetch<KeyMetadata>("/api/backend/keys/inspect", {
+  return fetchJson<KeyMetadata>("/api/backend/keys/inspect", {
     method: "POST",
     body: JSON.stringify({ path }),
   });
@@ -347,7 +308,7 @@ export async function generatePrivateKey(payload: GenerateKeyPayload) {
     });
   }
 
-  return backendFetch<KeyMetadata>("/api/backend/keys/generate", {
+  return fetchJson<KeyMetadata>("/api/backend/keys/generate", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -369,7 +330,7 @@ export async function importPrivateKeyFromBody(payload: ImportPrivateKeyFromBody
     });
   }
 
-  return backendFetch<KeyMetadata>("/api/backend/keys/import-from-body", {
+  return fetchJson<KeyMetadata>("/api/backend/keys/import-from-body", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -392,7 +353,7 @@ export async function copyKeyToHost(payload: CopyKeyToHostPayload) {
     });
   }
 
-  return backendFetch<CopyKeyToHostResponse>("/api/backend/keys/copy-to-host", {
+  return fetchJson<CopyKeyToHostResponse>("/api/backend/keys/copy-to-host", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -409,7 +370,7 @@ export async function scanKnownHost(hostname: string, port: number) {
     });
   }
 
-  return backendFetch<{ entries: KnownHostScanResult[] }>("/api/backend/known-hosts/scan", {
+  return fetchJson<{ entries: KnownHostScanResult[] }>("/api/backend/known-hosts/scan", {
     method: "POST",
     body: JSON.stringify({ hostname, port }),
   });
@@ -426,7 +387,7 @@ export async function listLocalForwards(sessionId: string) {
     });
   }
 
-  return backendFetch<ListForwardsResponse>(
+  return fetchJson<ListForwardsResponse>(
     `/api/backend/forwards?sessionId=${encodeURIComponent(sessionId)}`
   );
 }
@@ -442,7 +403,7 @@ export async function createLocalForward(payload: CreateForwardPayload) {
     });
   }
 
-  return backendFetch<PortForwardRecord>("/api/backend/forwards", {
+  return fetchJson<PortForwardRecord>("/api/backend/forwards", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -459,7 +420,7 @@ export async function deleteLocalForward(forwardId: string) {
     });
   }
 
-  return backendFetch<BackendBooleanResponse>(`/api/backend/forwards/${forwardId}`, {
+  return fetchJson<BackendBooleanResponse>(`/api/backend/forwards/${forwardId}`, {
     method: "DELETE",
   });
 }
@@ -478,7 +439,7 @@ export async function executeSnippetOnHosts(command: string, targets: SnippetExe
     );
   }
 
-  return backendFetch<{ results: SnippetExecutionResult[] }>("/api/backend/snippets/execute", {
+  return fetchJson<{ results: SnippetExecutionResult[] }>("/api/backend/snippets/execute", {
     method: "POST",
     body: JSON.stringify({ command, targets }),
   });

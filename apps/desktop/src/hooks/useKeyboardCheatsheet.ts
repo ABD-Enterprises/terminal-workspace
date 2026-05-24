@@ -1,24 +1,6 @@
 import { useEffect } from "react";
+import { hasCommandModifier, isTypingTarget } from "../lib/dom-events";
 import { useAppStore } from "../store/app-store";
-
-// Returns true when the active element is something the user types into —
-// an <input>, <textarea>, or contenteditable element. We use this to skip
-// global keypress handlers that would otherwise eat the user's keystrokes
-// (e.g. typing "?" into the host search field should not open the
-// cheatsheet).
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  const tag = target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
-    return true;
-  }
-  if (target.isContentEditable) {
-    return true;
-  }
-  return false;
-}
 
 /**
  * Global keyboard cheatsheet hook. Press `?` (Shift+/) anywhere outside an
@@ -51,7 +33,7 @@ export function useKeyboardCheatsheet() {
       if (event.key !== "?") {
         return;
       }
-      if (event.metaKey || event.ctrlKey || event.altKey) {
+      if (hasCommandModifier(event)) {
         return;
       }
       if (isTypingTarget(event.target)) {

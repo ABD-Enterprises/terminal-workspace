@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { hasCommandModifier } from "../../lib/dom-events";
 import { cn } from "../../lib/utils";
 
 interface ModalProps {
@@ -50,7 +51,7 @@ export function Modal({
       }
       // Don't compete with browser-level dismissals when a modifier is
       // held — those combos belong to other handlers.
-      if (event.metaKey || event.ctrlKey || event.altKey) {
+      if (hasCommandModifier(event)) {
         return;
       }
       event.preventDefault();

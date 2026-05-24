@@ -9,7 +9,11 @@ test.describe("T14: Tunnels page", () => {
     await page.goto("/hosts");
     await page.getByRole("link", { name: /^Tunnels/ }).first().click();
     await expect(page).toHaveURL(/\/tunnels/);
-    await expect(page.getByRole("main").getByRole("heading", { name: "Tunnels" }).first()).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "Active port forwards" })
+        .getByRole("heading", { name: "Tunnels", exact: true }),
+    ).toBeVisible();
   });
 
   test("with no active forwards, empty state explains how to add one", async ({ page }) => {

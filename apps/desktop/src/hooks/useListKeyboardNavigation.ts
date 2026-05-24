@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { hasCommandModifier, isTypingTarget } from "../lib/dom-events";
 
 interface ListKeyboardNavigationOptions<TId extends string> {
   /** Ordered list of item ids in the visible list. */
@@ -18,17 +19,6 @@ interface ListKeyboardNavigationOptions<TId extends string> {
    * while a modal is open or the list is offscreen.
    */
   enabled?: boolean;
-}
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  const tag = target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
-    return true;
-  }
-  return target.isContentEditable;
 }
 
 /**
@@ -77,7 +67,7 @@ export function useListKeyboardNavigation<TId extends string>({
       if (currentItemIds.length === 0) {
         return;
       }
-      if (event.metaKey || event.ctrlKey || event.altKey) {
+      if (hasCommandModifier(event)) {
         return;
       }
       if (isTypingTarget(event.target)) {
