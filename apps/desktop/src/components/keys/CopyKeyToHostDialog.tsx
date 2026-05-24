@@ -5,7 +5,7 @@
 //   && chmod 600 ~/.ssh/authorized_keys
 // over the existing exec channel.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { HostRecord } from "../../types/host";
 import type { KeyRecord } from "../../types/key";
 import { Modal } from "../common/Modal";
@@ -32,13 +32,21 @@ export function CopyKeyToHostDialog({
   onConfirm,
 }: CopyKeyToHostDialogProps) {
   const sshHosts = hosts.filter((host) => host.protocol === "ssh");
-  const [selectedHostId, setSelectedHostId] = useState<string>("");
+  const [selectedHostId, setSelectedHostId] = useState<string>(
+    () => sshHosts[0]?.id ?? "",
+  );
 
-  useEffect(() => {
+  // Reset the selection to the first SSH host whenever the dialog transitions
+  // from closed -> open. Uses the "Adjusting state during render" pattern from
+  // the React docs (https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
+  // instead of a useEffect to avoid the cascading-render lint warning.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) {
       setSelectedHostId(sshHosts[0]?.id ?? "");
     }
-  }, [open, sshHosts]);
+  }
 
   if (!keyRecord) {
     return null;
