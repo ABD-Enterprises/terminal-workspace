@@ -416,6 +416,7 @@ export function KeysPage() {
       />
 
       <CopyKeyToHostDialog
+        key={copyKeyId ?? "closed"}
         open={Boolean(copyKeyId)}
         keyRecord={keys.find((k) => k.id === copyKeyId)}
         hosts={hosts}

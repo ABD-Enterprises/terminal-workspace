@@ -34,7 +34,6 @@ export function WelcomePanel({ onAddHost, onImportSshConfig }: WelcomePanelProps
     const result = await launchHostSession(localShell);
     if (!result.ok || !result.tabId) {
       if (result.errorMessage) {
-        // eslint-disable-next-line no-console
         console.warn(`[welcome] ${result.errorMessage}`);
       }
       return;
