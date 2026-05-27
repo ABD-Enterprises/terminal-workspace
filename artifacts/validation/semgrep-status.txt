@@ -1,0 +1,1 @@
+PASS: no scannable changed files for semgrep
