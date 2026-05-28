@@ -3,12 +3,12 @@
 ┌─────────────┐
 │ Scan Status │
 └─────────────┘
-  Scanning 75 files tracked by git with 1059 Code rules:
+  Scanning 87 files tracked by git with 1059 Code rules:
                                                                                                                         
   Language      Rules   Files          Origin      Rules                                                                
  ─────────────────────────────        ───────────────────                                                               
-  <multilang>      47      75          Community    1059                                                                
-  ts              163      74                                                                                           
+  <multilang>      47      87          Community    1059                                                                
+  ts              163      81                                                                                           
   bash              4       1                                                                                           
                                                                                                                         
                 
@@ -19,10 +19,10 @@
 ✅ Scan completed successfully.
  • Findings: 0 (0 blocking)
  • Rules run: 213
- • Targets scanned: 75
+ • Targets scanned: 87
  • Parsed lines: ~100.0%
  • No ignore information available
-Ran 213 rules on 75 files: 0 findings.
+Ran 213 rules on 87 files: 0 findings.
 (need more rules? `semgrep login` for additional free Semgrep Registry rules)
 
 If Semgrep missed a finding, please send us feedback to let us know!
