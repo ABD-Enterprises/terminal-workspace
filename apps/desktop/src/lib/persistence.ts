@@ -123,6 +123,7 @@ async function setNativeStoreItem(name: PersistedStoreName, value: string) {
          updated_at = excluded.updated_at`,
     ["state", value]
   );
+  setLocalStorageItem(name, value);
 }
 
 async function getNativeDeletionItem(name: string) {
@@ -145,23 +146,31 @@ async function getNativeDeletionItem(name: string) {
 async function setNativeDeletionItem(value: string) {
   const db = await loadDatabase();
   const deletions = parsePersistedDeletions(value);
-  await db.execute("DELETE FROM deletions");
+  await db.execute("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    await db.execute("DELETE FROM deletions");
 
-  for (const kind of DELETION_KINDS) {
-    for (const entry of deletions[kind] ?? []) {
-      await db.execute(
-        `INSERT INTO deletions (kind, id, deleted_at)
-           VALUES ($1, $2, $3)
-           ON CONFLICT(kind, id) DO UPDATE SET deleted_at = excluded.deleted_at`,
-        [kind, entry.id, entry.deletedAt]
-      );
+    for (const kind of DELETION_KINDS) {
+      for (const entry of deletions[kind] ?? []) {
+        await db.execute(
+          `INSERT INTO deletions (kind, id, deleted_at)
+             VALUES ($1, $2, $3)
+             ON CONFLICT(kind, id) DO UPDATE SET deleted_at = excluded.deleted_at`,
+          [kind, entry.id, entry.deletedAt]
+        );
+      }
     }
+    await db.execute("COMMIT");
+  } catch (error) {
+    await db.execute("ROLLBACK").catch(() => undefined);
+    throw error;
   }
 }
 
 async function removeNativeStoreItem(name: PersistedStoreName) {
   const db = await loadDatabase();
   await db.execute(`DELETE FROM ${STORE_TABLES[name]} WHERE id = $1`, ["state"]);
+  removeLocalStorageItem(name);
 }
 
 async function removeNativeDeletionItem() {
@@ -234,6 +243,7 @@ export function createTermsnipDeletionStorage(name: string): StateStorage {
       }
       try {
         await setNativeDeletionItem(value);
+        setLocalStorageItem(name, value);
       } catch (error) {
         logPersistenceFallback("setItem", name, error);
         setLocalStorageItem(name, value);
@@ -246,6 +256,7 @@ export function createTermsnipDeletionStorage(name: string): StateStorage {
       }
       try {
         await removeNativeDeletionItem();
+        removeLocalStorageItem(name);
       } catch (error) {
         logPersistenceFallback("removeItem", name, error);
         removeLocalStorageItem(name);

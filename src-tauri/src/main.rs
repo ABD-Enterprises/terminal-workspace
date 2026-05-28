@@ -426,8 +426,6 @@ struct BackendBooleanResponse {
     pending: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BackendBinaryResponse {
