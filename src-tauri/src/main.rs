@@ -23,9 +23,7 @@ use reqwest::{Client, Method};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use ssh2::{Channel, Session};
-use tauri::menu::{
-    AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder,
-};
+use tauri::menu::{AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tokio::sync::mpsc::{
     error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender,
@@ -928,7 +926,10 @@ fn build_protocol_runtime_status(protocol: &str) -> ProtocolRuntimeStatusRespons
     }
 }
 
-fn validate_network_host(host: &BackendHostConnection, require_username: bool) -> Result<(), String> {
+fn validate_network_host(
+    host: &BackendHostConnection,
+    require_username: bool,
+) -> Result<(), String> {
     if host.hostname.trim().is_empty() || host.port == 0 {
         return Err("Missing host connection fields".to_string());
     }
@@ -990,7 +991,11 @@ fn build_mosh_ssh_command(
 
     if host.auth_method == "privateKey" && !host.private_key_path.trim().is_empty() {
         arguments.push("-i".to_string());
-        arguments.push(expand_home(&host.private_key_path).to_string_lossy().into_owned());
+        arguments.push(
+            expand_home(&host.private_key_path)
+                .to_string_lossy()
+                .into_owned(),
+        );
         arguments.push("-o".to_string());
         arguments.push("IdentitiesOnly=yes".to_string());
     }
@@ -1024,9 +1029,11 @@ fn build_external_command_session_spec(
             })
         }
         "telnet" => {
-            let executable =
-                resolve_command_path_with_override(Some("TERMSNIP_TELNET_PATH"), &["/usr/bin/telnet", "telnet"])
-                    .ok_or_else(|| "Telnet client is not installed on this workstation".to_string())?;
+            let executable = resolve_command_path_with_override(
+                Some("TERMSNIP_TELNET_PATH"),
+                &["/usr/bin/telnet", "telnet"],
+            )
+            .ok_or_else(|| "Telnet client is not installed on this workstation".to_string())?;
             let mut command = CommandBuilder::new(executable);
             command.arg(host.hostname.clone());
             command.arg(host.port.to_string());
@@ -1043,8 +1050,7 @@ fn build_external_command_session_spec(
             let mut command = if let Some(executable) = resolve_command_path_with_override(
                 Some("TERMSNIP_SCREEN_PATH"),
                 &["/usr/bin/screen", "screen"],
-            )
-            {
+            ) {
                 let mut command = CommandBuilder::new(executable);
                 command.arg(host.hostname.clone());
                 command.arg(host.port.to_string());
@@ -1347,7 +1353,10 @@ fn should_use_native_session(host: &BackendHostConnection) -> bool {
 
 fn validate_ssh_host(host: &BackendHostConnection) -> Result<(), String> {
     if host.protocol != "ssh" {
-        return Err(format!("Unsupported SSH transport protocol: {}", host.protocol));
+        return Err(format!(
+            "Unsupported SSH transport protocol: {}",
+            host.protocol
+        ));
     }
 
     if host.hostname.trim().is_empty() || host.username.trim().is_empty() || host.port == 0 {
@@ -1467,7 +1476,7 @@ fn connect_native_session(host: &BackendHostConnection) -> Result<(Session, Chan
         host.hostname.as_str(),
         u16::try_from(host.port).map_err(|_| "SSH port must be between 1 and 65535".to_string())?,
     ))
-        .map_err(|error| error.to_string())?;
+    .map_err(|error| error.to_string())?;
     let _ = tcp_stream.set_nodelay(true);
 
     let mut session = Session::new().map_err(|error| error.to_string())?;
@@ -1545,13 +1554,14 @@ fn spawn_jump_session_reader(
                     }
 
                     while let Some(kind) = detect_prompt_kind(&prompt_window) {
-                        let response = take_prompt_response(&mut prompt_responses, kind).or_else(|| {
-                            reusable_responses
-                                .iter()
-                                .rev()
-                                .find(|response| response.kind == kind)
-                                .cloned()
-                        });
+                        let response =
+                            take_prompt_response(&mut prompt_responses, kind).or_else(|| {
+                                reusable_responses
+                                    .iter()
+                                    .rev()
+                                    .find(|response| response.kind == kind)
+                                    .cloned()
+                            });
                         let Some(response) = response else {
                             break;
                         };
@@ -3007,7 +3017,10 @@ async fn termsnip_open_backend_session_stream(
     // auth token. tokio_tungstenite::connect_async accepts anything that
     // implements IntoClientRequest; the Request<()> path lets us inject
     // headers. See parity-and-hardening-review §3.S-4.
-    let mut upgrade_request = tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(ws_url.as_str())
+    let mut upgrade_request =
+        tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
+            ws_url.as_str(),
+        )
         .map_err(|error| error.to_string())?;
     if let Some(token) = &bridge.auth_token {
         upgrade_request.headers_mut().insert(
@@ -3255,10 +3268,7 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 .build(app)?,
         )
         .separator()
-        .item(
-            &MenuItemBuilder::with_id("menu:import-ssh-config", "Import SSH config…")
-                .build(app)?,
-        )
+        .item(&MenuItemBuilder::with_id("menu:import-ssh-config", "Import SSH config…").build(app)?)
         .build()?;
 
     let edit_submenu = SubmenuBuilder::new(app, "Edit")
@@ -3309,7 +3319,8 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 .build(app)?,
         )
         .item(
-            &MenuItemBuilder::with_id("menu:toggle-density", "Toggle Compact Density").build(app)?,
+            &MenuItemBuilder::with_id("menu:toggle-density", "Toggle Compact Density")
+                .build(app)?,
         )
         .separator()
         .fullscreen()
@@ -3331,9 +3342,7 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build()?;
 
     let help_submenu = SubmenuBuilder::new(app, "Help")
-        .item(
-            &MenuItemBuilder::with_id("menu:help", "term-snip Documentation").build(app)?,
-        )
+        .item(&MenuItemBuilder::with_id("menu:help", "term-snip Documentation").build(app)?)
         .build()?;
 
     MenuBuilder::new(app)
@@ -3366,9 +3375,7 @@ fn main() {
             app.on_menu_event(move |_app_handle, event| {
                 let id_str = event.id().0.clone();
                 if let Err(error) = event_handle.emit(MENU_EVENT_NAME, id_str.clone()) {
-                    eprintln!(
-                        "[termsnip] failed to forward menu event {id_str}: {error}"
-                    );
+                    eprintln!("[termsnip] failed to forward menu event {id_str}: {error}");
                 }
             });
             Ok(())
@@ -3561,7 +3568,9 @@ mod tests {
         assert!(ssh_status.available);
         assert_eq!(ssh_status.protocol, "ssh");
         assert!(!unknown_status.available);
-        assert!(unknown_status.message.contains("Unsupported protocol runtime"));
+        assert!(unknown_status
+            .message
+            .contains("Unsupported protocol runtime"));
     }
 
     #[test]
@@ -3693,10 +3702,7 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
-        let identity_id = format!(
-            "termsnip-identity-test-{}-{unique_suffix}",
-            process::id()
-        );
+        let identity_id = format!("termsnip-identity-test-{}-{unique_suffix}", process::id());
         let service = format!("{KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE}.tests");
 
         store_keychain_secret(&service, &identity_id, "identity-pass")

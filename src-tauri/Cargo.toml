@@ -18,4 +18,4 @@ sha2 = "0.10"
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 tauri = { version = "2", features = [] }
 tokio = { version = "1", features = ["macros", "sync"] }
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }

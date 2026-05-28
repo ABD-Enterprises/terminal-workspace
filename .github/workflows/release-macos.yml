@@ -13,10 +13,6 @@ on:
         default: stable
         type: string
   push:
-    branches:
-      - "phase/release-workflow-live-verification"
-      - "phase/release-workflow-secret-provisioning"
-      - "phase/workflow-runtime-modernization"
     tags:
       - "v*"
 

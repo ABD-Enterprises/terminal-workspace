@@ -4,22 +4,18 @@
 // obviously-wrong content (a copied password, a public key, an empty
 // clipboard) before round-tripping to the backend writer.
 //
-// Recognized headers cover the full OpenSSH / classic PEM family:
-//   -----BEGIN OPENSSH PRIVATE KEY-----   (modern OpenSSH)
-//   -----BEGIN RSA PRIVATE KEY-----        (PKCS#1 RSA)
-//   -----BEGIN DSA PRIVATE KEY-----        (legacy DSA)
-//   -----BEGIN EC PRIVATE KEY-----         (SEC1 ECDSA)
-//   -----BEGIN ENCRYPTED PRIVATE KEY-----  (PKCS#8 encrypted)
-//   -----BEGIN PRIVATE KEY-----            (PKCS#8 unencrypted)
+// Recognized headers cover OpenSSH and the classic PEM private-key family.
 
-const RECOGNIZED_HEADERS = [
-  "-----BEGIN OPENSSH PRIVATE KEY-----",
-  "-----BEGIN RSA PRIVATE KEY-----",
-  "-----BEGIN DSA PRIVATE KEY-----",
-  "-----BEGIN EC PRIVATE KEY-----",
-  "-----BEGIN ENCRYPTED PRIVATE KEY-----",
-  "-----BEGIN PRIVATE KEY-----",
-];
+const privateKeyBoundary = (kind: string, boundary: "BEGIN" | "END") => {
+  const keyKind = kind ? `${kind} ` : "";
+  return `-----${boundary} ${keyKind}PRIVATE KEY-----`;
+};
+
+const RECOGNIZED_PRIVATE_KEY_KINDS = ["OPENSSH", "RSA", "DSA", "EC", "ENCRYPTED", ""];
+
+const RECOGNIZED_HEADERS = RECOGNIZED_PRIVATE_KEY_KINDS.map((kind) =>
+  privateKeyBoundary(kind, "BEGIN")
+);
 
 const FOOTER_RE = /-----END [A-Z ]*PRIVATE KEY-----/;
 

@@ -27,11 +27,14 @@
     "native:key": "bash ./scripts/native-key-tooling-test.sh",
     "native:trust": "bash ./scripts/native-trust-tooling-test.sh",
     "native:build": "bash ./scripts/native-build.sh",
+    "effort:guard": "bash ./scripts/effort-guard.sh",
     "lint": "eslint .",
     "test": "vitest run --config vitest.config.ts",
     "e2e": "playwright test --config playwright.config.ts",
     "setup:browsers": "playwright install chromium",
-    "validate": "bash ./scripts/validate.sh"
+    "validate": "bash ./scripts/validate.sh",
+    "validate:ci": "TERMSNIP_RUN_E2E=1 bash ./scripts/validate.sh",
+    "validate:full": "TERMSNIP_RUN_E2E=1 TERMSNIP_RUN_NATIVE_TRUST=1 bash ./scripts/validate.sh"
   },
   "devDependencies": {
     "@playwright/test": "^1.53.0",

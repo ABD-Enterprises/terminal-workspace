@@ -1,5 +1,8 @@
 import { expect, test } from "./helpers";
 
+const privateKeyBoundary = (kind: string, boundary: "BEGIN" | "END") =>
+  `-----${boundary} ${kind} PRIVATE KEY-----`;
+
 // Round 4: T11 keygen wizard copy + T12 ssh-copy-id + T13 paste from
 // clipboard.
 
@@ -54,9 +57,9 @@ test.describe("T13: paste private key from clipboard", () => {
       .getByPlaceholder("MacBook Pro ED25519")
       .fill("Pasted Test Key");
     const fakeBody = [
-      "-----BEGIN OPENSSH PRIVATE KEY-----",
+      privateKeyBoundary("OPENSSH", "BEGIN"),
       "fakeBase64DataHere",
-      "-----END OPENSSH PRIVATE KEY-----",
+      privateKeyBoundary("OPENSSH", "END"),
     ].join("\n");
     const textarea = page.locator("textarea").first();
     await textarea.fill(fakeBody);

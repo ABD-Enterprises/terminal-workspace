@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     env,
     ffi::OsString,
@@ -11,8 +13,6 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::mpsc::unbounded_channel;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 
 const FIXTURE_TIMEOUT: Duration = Duration::from_secs(15);
 const FIXTURE_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -1027,44 +1027,55 @@ fn native_external_protocol_runtime_fixture_flow() {
         telnet_status.message,
         "Telnet client resolved for native session launch."
     );
-    assert_eq!(telnet_status.resolved_path.as_deref(), Some(telnet_path.to_string_lossy().as_ref()));
+    assert_eq!(
+        telnet_status.resolved_path.as_deref(),
+        Some(telnet_path.to_string_lossy().as_ref())
+    );
     assert!(Path::new(telnet_status.resolved_path.as_deref().unwrap_or_default()).is_file());
     assert!(serial_status.available);
     assert_eq!(serial_status.protocol, "serial");
     assert_eq!(serial_status.client.as_deref(), Some("screen"));
     assert_eq!(serial_status.install_hint, None);
-    assert_eq!(serial_status.message, "Serial sessions will launch with screen.");
-    assert_eq!(serial_status.resolved_path.as_deref(), Some(screen_path.to_string_lossy().as_ref()));
+    assert_eq!(
+        serial_status.message,
+        "Serial sessions will launch with screen."
+    );
+    assert_eq!(
+        serial_status.resolved_path.as_deref(),
+        Some(screen_path.to_string_lossy().as_ref())
+    );
     assert!(Path::new(serial_status.resolved_path.as_deref().unwrap_or_default()).is_file());
     assert!(mosh_status.available);
     assert_eq!(mosh_status.protocol, "mosh");
     assert_eq!(mosh_status.client.as_deref(), Some("mosh"));
     assert_eq!(mosh_status.install_hint, None);
-    assert_eq!(mosh_status.message, "Mosh client resolved for native session launch.");
-    assert_eq!(mosh_status.resolved_path.as_deref(), Some(mosh_path.to_string_lossy().as_ref()));
+    assert_eq!(
+        mosh_status.message,
+        "Mosh client resolved for native session launch."
+    );
+    assert_eq!(
+        mosh_status.resolved_path.as_deref(),
+        Some(mosh_path.to_string_lossy().as_ref())
+    );
     assert!(Path::new(mosh_status.resolved_path.as_deref().unwrap_or_default()).is_file());
 
     let telnet_output =
         run_external_protocol_fixture(&telnet_host, "TELNET_INPUT:status", Some("status"));
     assert!(telnet_output.contains("TELNET:legacy.internal:2323"));
     assert!(telnet_output.contains("TELNET_INPUT:status"));
-    assert!(
-        telnet_output
-            .replace("\r\n", "\n")
-            .trim()
-            .ends_with("TELNET:legacy.internal:2323\nTELNET_INPUT:status")
-    );
+    assert!(telnet_output
+        .replace("\r\n", "\n")
+        .trim()
+        .ends_with("TELNET:legacy.internal:2323\nTELNET_INPUT:status"));
 
     let serial_output =
         run_external_protocol_fixture(&serial_host, "SERIAL_INPUT:ping", Some("ping"));
     assert!(serial_output.contains("SERIAL:/dev/cu.fixture:115200"));
     assert!(serial_output.contains("SERIAL_INPUT:ping"));
-    assert!(
-        serial_output
-            .replace("\r\n", "\n")
-            .trim()
-            .ends_with("SERIAL:/dev/cu.fixture:115200\nSERIAL_INPUT:ping")
-    );
+    assert!(serial_output
+        .replace("\r\n", "\n")
+        .trim()
+        .ends_with("SERIAL:/dev/cu.fixture:115200\nSERIAL_INPUT:ping"));
 
     let mosh_output = run_external_protocol_fixture(&mosh_host, "MOSH_AUTH:fixture-secret", None);
     assert!(mosh_output.contains("MOSH:ops@ops.internal:"));

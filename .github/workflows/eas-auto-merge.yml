@@ -18,6 +18,10 @@ on:
   pull_request_review:
     types: [submitted, dismissed]
 
+concurrency:
+  group: eas-auto-merge-${{ github.event.pull_request.number || github.event.check_suite.head_sha || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
