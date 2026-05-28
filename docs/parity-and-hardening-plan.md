@@ -92,14 +92,14 @@ Depends on Phase 2 completing.
 ## Definition of done per phase
 
 - **Phase 0:** all P0 tasks land in one commit, tests pass, `FEATURE_PARITY.md` reflects honest scoring, `parity-and-hardening-review.md` is referenced from `README.md`.
-- **Phase 1:** the review's "Click-count vs Termius" table flips from 4-of-6 worse to 2-of-6 worse; security findings drop to zero Critical, ≤ 1 High.
+- **Phase 1:** the review's "Click-count vs competitor" table flips from 4-of-6 worse to 2-of-6 worse; security findings drop to zero Critical, ≤ 1 High.
 - **Phase 2:** Identity entity in production, IA collapsed to (folders + tags), SQLite-backed persistence, Node backend retired in native.
 - **Phase 3:** sync alpha for the maintainer's own fleet across two macs.
 
 ## What this plan does NOT promise
 
 - Mobile / iPad parity. Out of scope per `README.md` "Initial Scope."
-- Termius branding parity (intentional — see review §1).
+- competitor branding parity (intentional — see review §1).
 - Windows or Linux ports.
 - Real-time collaboration / terminal sharing — deferred per existing `FEATURE_PARITY.md` row.
 

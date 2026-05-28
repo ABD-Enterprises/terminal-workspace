@@ -3,7 +3,7 @@
 // user has at least one host) but only until they dismiss it once. The
 // `sawImportCallout` flag in app-store persists the dismissal.
 //
-// T03 from the Termius-parity 20. WelcomePanel covers the empty-state
+// T03 from the feature-parity 20. WelcomePanel covers the empty-state
 // cold-start case (which has its own Import CTA); this callout is the
 // "by the way, in case you missed it" reminder for users who added
 // their first host another way.

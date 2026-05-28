@@ -1,1 +1,1 @@
-PASS: no scannable changed files for semgrep
+PASS: semgrep completed successfully

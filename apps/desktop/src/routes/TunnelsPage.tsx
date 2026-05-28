@@ -1,6 +1,6 @@
 // Aggregated view of every active port-forward across all sessions. T14.
 //
-// Termius has a dedicated Tunnels surface; we previously hid port
+// Some clients have a dedicated Tunnels surface; we previously hid port
 // forwards inside the right rail of the session workspace, so users
 // couldn't see what was forwarded across the whole vault. This route
 // iterates the active sessions (via sessions-store) and asks the

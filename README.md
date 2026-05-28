@@ -1,6 +1,6 @@
 # Terminal Workspace
 
-A local-first macOS SSH client starter repo inspired by the usability patterns of Termius.
+A local-first macOS SSH client starter repo inspired by modern usability patterns.
 
 
 ## Current State

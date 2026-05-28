@@ -11,7 +11,7 @@
 //      seeded sample inventory appears (browser mode default; Tauri mode
 //      opt-in).
 //
-// Bundle: T01 / T02 / T03 / T04 from the Termius-parity 20.
+// Bundle: T01 / T02 / T03 / T04 from the feature-parity 20.
 
 import { useNavigate } from "react-router-dom";
 import { launchHostSession } from "../../lib/launch-host-session";

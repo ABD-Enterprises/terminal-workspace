@@ -3,7 +3,7 @@
 // persists `sawFirstRunTour: true` in app-store on dismiss and never
 // renders again unless the user clears app state.
 //
-// T05 from the Termius-parity 20. The chicken-and-egg problem this
+// T05 from the feature-parity 20. The chicken-and-egg problem this
 // solves: the keyboard cheatsheet is comprehensive, but a user who
 // doesn't know it exists can't discover ? to open it.
 

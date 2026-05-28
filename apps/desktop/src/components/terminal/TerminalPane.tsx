@@ -883,7 +883,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     });
 
     // Copy-on-select: when the user finishes selecting text in the terminal,
-    // copy it to the clipboard automatically. Mirrors the behaviour Termius
+    // copy it to the clipboard automatically. Mirrors the behaviour other clients
     // / iTerm2 / native macOS Terminal users expect — see parity-and-hardening
     // review §4.4. We swallow clipboard errors so a denied permission does
     // not break terminal interaction.
@@ -898,7 +898,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       navigator.clipboard.writeText(selection).catch(() => {});
     });
 
-    // Right-click paste: matches the macOS / Termius idiom. We prevent the
+    // Right-click paste: matches the macOS / default shell idiom. We prevent the
     // default browser context menu (which would offer Inspect Element etc.
     // in dev) and inject the clipboard contents into the terminal as if the
     // user typed them. xterm's paste() goes through onData, so the SSH

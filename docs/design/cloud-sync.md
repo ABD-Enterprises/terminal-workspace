@@ -6,7 +6,7 @@ Tracking issue: #26
 
 This document takes a position on every open question that issue #26 lists, so an implementation phase can start without re-litigating direction. Where a "we may want X later" alternative exists, it's noted, but the recommended path is the one the implementation tickets will be scoped against.
 
-The whole point of cloud sync for term-snip is to give power users **a Termius-style sync experience without giving up local-first control or trusting a server with cleartext.** Anything that does not serve that goal is out of scope here.
+The whole point of cloud sync for term-snip is to give power users **a competitor-style sync experience without giving up local-first control or trusting a server with cleartext.** Anything that does not serve that goal is out of scope here.
 
 ## Existing groundwork
 
@@ -65,14 +65,14 @@ This UI is the single biggest implementation risk in the whole project. It needs
 - **Why Supabase:** Postgres + Storage + Row-Level Security in a single managed service, generous free tier (500 MB DB, 1 GB storage), official client libraries, and predictable pricing past free.
 - **Why not a bespoke service:** running a Postgres + S3 + auth stack costs us either a person's time (we don't have it) or a SaaS bill that is larger than Supabase's all-in.
 - **Self-hosting:** the server schema is portable Postgres + a small handler service (one Node or Rust process). We document the schema and the four endpoints (push, pull, list-snapshots, delete-snapshot) so an operator can run their own. This is a credibility move for a security-sensitive product, not a v1 feature ship.
-- **Pricing (GA, not v1):** free for one device, $4/month for sync across devices. Termius is $10/month; undercutting them by half while keeping E2E encryption is a defensible position. Annual discount likely. **This is a placeholder for the GA conversation, not a commitment.**
+- **Pricing (GA, not v1):** free for one device, $4/month for sync across devices. competitor is $10/month; undercutting them by half while keeping E2E encryption is a defensible position. Annual discount likely. **This is a placeholder for the GA conversation, not a commitment.**
 
 ### 5. Recovery model
 
 **Position: no server-side recovery (E2E means we *can't* recover); printed recovery key at setup. No social recovery in v1.**
 
 - At first vault setup, the user is shown a one-time recovery key (BIP39 word list, 12 words). The app insists they print it or save it to a password manager before continuing.
-- If the user forgets the passphrase and loses the recovery key, their vault is unrecoverable. This is the only honest answer for an E2E-encrypted product. Termius does the same.
+- If the user forgets the passphrase and loses the recovery key, their vault is unrecoverable. This is the only honest answer for an E2E-encrypted product. competitor does the same.
 - The server will refuse to mass-delete a vault on a "I lost my password" claim. That's the user's recovery key responsibility.
 
 **No social recovery in v1.** Threshold-key sharding ("any 2 of these 3 trusted contacts can recover") is an enterprise feature and adds enough complexity to delay GA. Defer.
@@ -107,7 +107,7 @@ Threats out of scope:
 
 - A user enables sync from Settings. The first sync uploads their existing local vault as the initial snapshot. No local data is deleted.
 - A user disables sync from Settings. The vault stays in their local store. The server-side data is wiped after a 30-day grace period (the user can re-enable in that window without re-uploading).
-- Migration from another tool (Termius export, etc.) is **not** a sync concern — it goes through the existing JSON import path (`docs/operations.md`), which then becomes the seed for the first cloud sync if enabled.
+- Migration from another tool (competitor export, etc.) is **not** a sync concern — it goes through the existing JSON import path (`docs/operations.md`), which then becomes the seed for the first cloud sync if enabled.
 - Existing local vaults already have a `vaultId`. On first sync enable, that vaultId is used as the cloud-side identifier — no renumbering, no migration UX.
 
 ## Phased rollout
