@@ -47,7 +47,10 @@ if [[ ${#validation_workflows[@]} -gt 1 ]]; then
   fail "keep one CI validation entrypoint to avoid duplicate GitHub Actions spend."
 fi
 
-if git ls-files --error-unmatch artifacts/e2e playwright-report test-results >/dev/null 2>&1; then
+tracked_browser_artifacts="$(git ls-files -- artifacts/e2e playwright-report test-results)"
+if [[ -n "$tracked_browser_artifacts" ]]; then
+  printf '[effort-guard] tracked generated browser artifacts:\n' >&2
+  printf '%s\n' "$tracked_browser_artifacts" | sed 's/^/  /' >&2
   fail "generated browser artifacts are tracked; keep validation outputs local or uploaded from CI only."
 fi
 

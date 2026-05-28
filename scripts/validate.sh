@@ -7,6 +7,11 @@ cd "$ROOT"
 echo "[validate] effort guard"
 bash ./scripts/effort-guard.sh
 
+if [[ ! -x "./node_modules/.bin/eslint" || ! -x "./node_modules/.bin/vitest" || ! -x "./node_modules/.bin/playwright" ]]; then
+  echo "[validate] dependencies are missing; run npm run setup before validation." >&2
+  exit 1
+fi
+
 echo "[validate] lint"
 ./node_modules/.bin/eslint .
 

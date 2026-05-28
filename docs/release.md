@@ -33,7 +33,7 @@
 - `MACOS_NOTARY_PROFILE=<profile> npm run native:notarize`
 - `npm run native:promote`
 - `npm run native:publish:dry-run`
-- `TERMSNIP_RUN_E2E=1 npm run validate`
+- `npm run validate:full`
 - Native bundle build, notarization, stapling, and promotion verification
 
 ## Release Artifacts

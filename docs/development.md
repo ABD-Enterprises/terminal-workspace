@@ -19,7 +19,11 @@
 - `npm run native:fixtures`: macOS localhost transport fixture test
 - `npm run native:notary:auth:test`: portable notarization auth dry run
 - `npm run native:publish:dry-run`: promoted GitHub release publish dry run
-- `TERMSNIP_RUN_E2E=1 npm run validate`: full lint/test/build/e2e pass
+- `npm run validate`: fast local effort guard, lint, unit/integration, build, and changed-file
+  Semgrep when Docker is available
+- `npm run validate:ci`: CI-equivalent validation with browser e2e enabled
+- `npm run validate:full`: strongest local validation with browser e2e and macOS native trust
+  tooling when available
 
 
 ## Environment Files
@@ -76,6 +80,6 @@ The Playwright suite exercises the seeded workspace and captures route screensho
 
 ## Milestone Choice
 
-Web demo quality remains the default screenshot and review path. The current hardening branch is
-closing release credential portability, multi-surface regression coverage, and localhost fixture
-preflight; the next product phase is vault and sync architecture.
+Web demo quality remains the default screenshot and review path. Release credential portability,
+multi-surface regression coverage, and localhost fixture preflight are in place; the next product
+phase is vault and sync architecture.

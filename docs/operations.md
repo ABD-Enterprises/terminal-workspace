@@ -11,7 +11,9 @@
 - Native notarization gate: `MACOS_NOTARY_PROFILE=<profile> npm run native:notarize`
 - Native stable promotion gate: `npm run native:promote`
 - Native GitHub release publish dry run: `npm run native:publish:dry-run`
-- Full browser validation: `TERMSNIP_RUN_E2E=1 npm run validate`
+- Fast local validation: `npm run validate`
+- CI-equivalent browser validation: `npm run validate:ci`
+- Strongest local validation: `npm run validate:full`
 
 ## Operational Expectations
 
@@ -60,7 +62,7 @@ The Include directive is resolved by the renderer's preprocessor calling
 
 ## Incident Handling
 
-- If browser screens regress, start with `npm run validate`.
+- If browser screens regress, start with `npm run validate:ci`.
 - If native trust or secrets regress, start with `npm run native:trust` and the macOS workflow in
   `.github/workflows/validate.yml`.
 - If the broader localhost transport path regresses, start with `npm run native:fixtures`; the
