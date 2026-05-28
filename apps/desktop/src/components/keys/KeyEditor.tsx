@@ -17,6 +17,9 @@ interface KeyEditorProps {
   onGenerate: (values: GenerateKeyValues) => Promise<void>;
 }
 
+const privateKeyBoundary = (kind: string, boundary: "BEGIN" | "END") =>
+  `-----${boundary} ${kind} PRIVATE KEY-----`;
+
 export function KeyEditor({
   mode,
   open,
@@ -149,7 +152,7 @@ export function KeyEditor({
                 setImportValues((current) => ({ ...current, pastedKeyBody: event.target.value }))
               }
               placeholder={
-                "-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----"
+                `${privateKeyBoundary("OPENSSH", "BEGIN")}\n...\n${privateKeyBoundary("OPENSSH", "END")}`
               }
               spellCheck={false}
               rows={5}

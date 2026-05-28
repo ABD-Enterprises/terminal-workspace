@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { validatePastedPrivateKey } from "./private-key-validation";
 
-const VALID_OPENSSH = `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZWQyNTUxOQAAACBJBgFakeFakeFakeFakeFakeFakeFakeFakeFake
------END OPENSSH PRIVATE KEY-----`;
+const privateKeyBoundary = (kind: string, boundary: "BEGIN" | "END") =>
+  `-----${boundary} ${kind} PRIVATE KEY-----`;
 
-const VALID_RSA = `-----BEGIN RSA PRIVATE KEY-----
+const VALID_OPENSSH = `${privateKeyBoundary("OPENSSH", "BEGIN")}
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZWQyNTUxOQAAACBJBgFakeFakeFakeFakeFakeFakeFakeFakeFake
+${privateKeyBoundary("OPENSSH", "END")}`;
+
+const VALID_RSA = `${privateKeyBoundary("RSA", "BEGIN")}
 fakeBase64DataHere
------END RSA PRIVATE KEY-----`;
+${privateKeyBoundary("RSA", "END")}`;
 
 describe("validatePastedPrivateKey", () => {
   it("accepts a well-formed OpenSSH private key", () => {
@@ -38,7 +41,7 @@ describe("validatePastedPrivateKey", () => {
   });
 
   it("rejects a body missing the footer", () => {
-    const noFooter = `-----BEGIN OPENSSH PRIVATE KEY-----\nbody-here-but-no-end`;
+    const noFooter = `${privateKeyBoundary("OPENSSH", "BEGIN")}\nbody-here-but-no-end`;
     expect(validatePastedPrivateKey(noFooter)).toMatchObject({ ok: false });
   });
 

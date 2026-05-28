@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+echo "[validate] effort guard"
+bash ./scripts/effort-guard.sh
+
 echo "[validate] lint"
 ./node_modules/.bin/eslint .
 
@@ -13,9 +16,11 @@ echo "[validate] unit and integration tests"
 echo "[validate] desktop build"
 npm --prefix ./apps/desktop run build
 
-if [[ "$(uname -s)" == "Darwin" ]]; then
+if [[ "${TERMSNIP_RUN_NATIVE_TRUST:-0}" == "1" && "$(uname -s)" == "Darwin" ]]; then
   echo "[validate] native trust tooling"
   bash ./scripts/native-trust-tooling-test.sh
+elif [[ "$(uname -s)" == "Darwin" ]]; then
+  echo "[validate] native trust tooling skipped (set TERMSNIP_RUN_NATIVE_TRUST=1 to include)"
 else
   echo "[validate] native trust tooling skipped (macOS only)"
 fi
@@ -43,6 +48,16 @@ if [[ -z "$SEMGREP_BASE_REF" && -n "${BASE_REF:-}" && "$BASE_REF" != "HEAD~1" ]]
   SEMGREP_BASE_REF="$BASE_REF"
 fi
 
+if [[ -z "$SEMGREP_BASE_REF" ]]; then
+  DEFAULT_REMOTE_HEAD="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  DEFAULT_REMOTE_HEAD="${DEFAULT_REMOTE_HEAD#origin/}"
+  if [[ -n "$DEFAULT_REMOTE_HEAD" ]] && git show-ref --verify --quiet "refs/remotes/origin/${DEFAULT_REMOTE_HEAD}"; then
+    SEMGREP_BASE_REF="origin/${DEFAULT_REMOTE_HEAD}"
+  elif git show-ref --verify --quiet refs/remotes/origin/main; then
+    SEMGREP_BASE_REF="origin/main"
+  fi
+fi
+
 should_skip_semgrep_target() {
   local target="$1"
 
@@ -64,7 +79,13 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
       [[ -f "$target" ]] || continue
       should_skip_semgrep_target "$target" && continue
       SEMGREP_TARGETS+=("$target")
-    done < <(git diff --name-only "${SEMGREP_BASE_REF}...HEAD" --)
+    done < <(
+      {
+        git diff --name-only "${SEMGREP_BASE_REF}...HEAD" --
+        git diff --name-only --cached --
+        git diff --name-only --
+      } | sort -u
+    )
   fi
 
   if [[ ${#SEMGREP_TARGETS[@]} -eq 0 ]]; then

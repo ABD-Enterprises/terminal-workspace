@@ -1,8 +1,8 @@
 use super::*;
 use sha2::{Digest, Sha256};
-use std::path::Path;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 
 /// Reject any private-key path the renderer hands us that escapes the user's
 /// home directory (or the small set of test/system roots we explicitly allow).
@@ -696,10 +696,7 @@ pub(crate) fn build_native_ssh_config(
         match connection.auth_method.as_str() {
             "privateKey" => {
                 let identity_path = prepare_native_identity_file(connection, session_dir, &alias)?;
-                lines.push(format!(
-                    "  IdentityFile {}",
-                    identity_path
-                ));
+                lines.push(format!("  IdentityFile {}", identity_path));
                 lines.push("  IdentitiesOnly yes".to_string());
                 lines.push("  PreferredAuthentications publickey".to_string());
             }
@@ -900,7 +897,12 @@ pub(crate) fn run_sftp_batch_commands(
         .map_err(|error| error.to_string())?;
     let master = pair.master;
     let (output_sender, output_receiver) = std::sync::mpsc::channel();
-    spawn_jump_session_reader(reader, writer.clone(), build_prompt_responses(host), output_sender);
+    spawn_jump_session_reader(
+        reader,
+        writer.clone(),
+        build_prompt_responses(host),
+        output_sender,
+    );
 
     let result = (|| -> Result<String, String> {
         let mut session_output = wait_for_sftp_prompt(&mut child, &output_receiver, "")?;

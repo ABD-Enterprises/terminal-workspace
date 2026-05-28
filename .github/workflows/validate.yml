@@ -3,6 +3,10 @@ name: Validate
 on:
   pull_request:
 
+concurrency:
+  group: validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -34,6 +38,14 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
       - name: Bootstrap repo
         run: npm run setup
 
@@ -41,7 +53,7 @@ jobs:
         run: node ./scripts/pnpmw.mjs exec playwright install --with-deps chromium
 
       - name: Run validate
-        run: TERMSNIP_RUN_E2E=1 npm run validate
+        run: npm run validate:ci
 
       - name: Upload browser artifacts
         if: always()

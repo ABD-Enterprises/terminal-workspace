@@ -6,6 +6,10 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+concurrency:
+  group: eas-risk-label-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: write
