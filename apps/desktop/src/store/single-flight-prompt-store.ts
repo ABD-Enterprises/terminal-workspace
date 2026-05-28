@@ -18,6 +18,7 @@ export function createSingleFlightPromptStore<TRequest, TResult>({
 }: SingleFlightPromptOptions<TRequest, TResult>) {
   let activePromptKey: string | undefined;
   let activePromptPromise: Promise<TResult> | undefined;
+  let activePromptToken: symbol | undefined;
 
   return create<SingleFlightPromptState<TRequest, TResult>>((set, get) => ({
     pendingRequest: undefined,
@@ -34,6 +35,8 @@ export function createSingleFlightPromptStore<TRequest, TResult>({
       }
 
       activePromptKey = promptKey;
+      const promptToken = Symbol(promptKey);
+      activePromptToken = promptToken;
       activePromptPromise = new Promise<TResult>((resolve) => {
         set({
           pendingRequest: request,
@@ -44,16 +47,23 @@ export function createSingleFlightPromptStore<TRequest, TResult>({
       });
 
       const result = await activePromptPromise;
-      activePromptKey = undefined;
-      activePromptPromise = undefined;
+      if (activePromptToken === promptToken) {
+        activePromptKey = undefined;
+        activePromptPromise = undefined;
+        activePromptToken = undefined;
+      }
       return result;
     },
     clearPrompt: (accepted) => {
-      get().resolveRequest?.(accepted);
+      const resolveRequest = get().resolveRequest;
+      activePromptKey = undefined;
+      activePromptPromise = undefined;
+      activePromptToken = undefined;
       set({
         pendingRequest: undefined,
         resolveRequest: undefined,
       });
+      resolveRequest?.(accepted);
     },
   }));
 }

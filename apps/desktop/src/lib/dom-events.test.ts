@@ -26,6 +26,12 @@ describe("dom event helpers", () => {
     expect(isTypingTarget(null)).toBe(false);
   });
 
+  it("returns false without a DOM HTMLElement global", () => {
+    vi.stubGlobal("HTMLElement", undefined);
+
+    expect(isTypingTarget({ tagName: "INPUT" } as unknown as EventTarget)).toBe(false);
+  });
+
   it("detects command modifiers without shift", () => {
     expect(hasCommandModifier({ altKey: false, ctrlKey: false, metaKey: false })).toBe(false);
     expect(hasCommandModifier({ altKey: true, ctrlKey: false, metaKey: false })).toBe(true);

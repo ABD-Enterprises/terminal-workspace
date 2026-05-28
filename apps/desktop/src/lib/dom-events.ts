@@ -1,4 +1,8 @@
 export function isTypingTarget(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined") {
+    return false;
+  }
+
   if (!(target instanceof HTMLElement)) {
     return false;
   }
