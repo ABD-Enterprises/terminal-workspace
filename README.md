@@ -3,13 +3,11 @@
 A local-first macOS SSH client starter repo inspired by the usability patterns of Termius.
 
 
-## Current Focus
+## Current State
 
-The active hardening branch closes the remaining medium-risk gaps around browser/native regression
-coverage, localhost native fixture execution, and portable release automation. The native macOS
-shell already owns sessions, SFTP, snippets, forwards, trust, and key tooling; this branch adds a
-portable notarization contract, GitHub release publishing workflow, fixture preflight, and sync-ready
-vault snapshot metadata.
+The native macOS shell owns sessions, SFTP, snippets, forwards, trust, and key tooling. The repo
+also includes portable notarization contracts, GitHub release publishing workflow support, fixture
+preflight, and sync-ready vault snapshot metadata.
 
 ## Quick Start
 
@@ -40,8 +38,11 @@ release contract, and `.env` remains the local override file.
   `artifacts/release/promoted/stable/`.
 - `npm run native:publish:dry-run` validates the promoted GitHub release asset set without
   creating or uploading a release.
-- `TERMSNIP_RUN_E2E=1 npm run validate` runs lint, unit/integration tests, build, macOS native
-  trust tooling when available, and browser e2e.
+- `npm run validate` runs the fast local gate: effort guard, lint, unit/integration tests, desktop
+  build, and changed-file Semgrep when Docker is available.
+- `npm run validate:ci` runs the CI-equivalent gate with browser e2e enabled.
+- `npm run validate:full` runs the strongest local gate with browser e2e plus macOS native trust
+  tooling when available.
 
 ## Demo Mode
 
