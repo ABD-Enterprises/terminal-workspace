@@ -11,7 +11,7 @@
 //      seeded sample inventory appears (browser mode default; Tauri mode
 //      opt-in).
 //
-// Bundle: T01 / T02 / T03 / T04 from the Termius-parity 20.
+// Bundle: T01 / T02 / T03 / T04 from the feature-parity 20.
 
 import { useNavigate } from "react-router-dom";
 import { launchHostSession } from "../../lib/launch-host-session";
@@ -34,7 +34,6 @@ export function WelcomePanel({ onAddHost, onImportSshConfig }: WelcomePanelProps
     const result = await launchHostSession(localShell);
     if (!result.ok || !result.tabId) {
       if (result.errorMessage) {
-        // eslint-disable-next-line no-console
         console.warn(`[welcome] ${result.errorMessage}`);
       }
       return;

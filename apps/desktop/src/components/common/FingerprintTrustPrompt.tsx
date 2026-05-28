@@ -1,6 +1,6 @@
 // Modal that surfaces the host-key fingerprint inline during the connect
 // flow (P2-FP). Replaces the "navigate to /keys, scan, trust, navigate
-// back" dance the review (§3.S-1, §6.1) called out as Termius's worst
+// back" dance the review (§3.S-1, §6.1) called out as alternative clients' worst
 // onboarding cliff.
 //
 // Multiple key candidates (one per algorithm — ed25519 / rsa / ecdsa) are

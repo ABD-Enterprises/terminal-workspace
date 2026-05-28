@@ -1032,7 +1032,7 @@ export function SettingsPage() {
         <p className="text-sm leading-6 text-slate-400">
           Cloud sync, shared vaults, and team features are still intentionally outside the 90%
           local-first target. The immediate focus is making a single Mac fully replace daily
-          Termius usage.
+          alternative client usage.
         </p>
         <div className="mt-4 space-y-4 text-sm leading-6 text-slate-300">
           <p>

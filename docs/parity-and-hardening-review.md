@@ -1,13 +1,13 @@
 # term-snip — Parity & Hardening Review
 
 Author: independent review
-Reviewer perspective: modern macOS developer / cloud engineer who currently uses Termius daily
+Reviewer perspective: modern macOS developer / cloud engineer who currently uses competitor daily
 Reviewed: 2026-04-27
 Repo SHA at review: `main` (HEAD)
 
 ## Executive verdict
 
-**term-snip is not a functional Termius replacement today. The internal "96% parity" number is materially wrong** — once you score the things a daily-use cloud engineer actually depends on, parity is closer to **65–75%**, with one critical security default that should block any "ready" claim until fixed. The codebase is well-organized and the hard pieces (real SSH transport, SFTP, port forwarding, jump hosts) work. What's missing is identity modeling, keyboard-first interaction, terminal polish, secure defaults, and Mac-native chrome — the things that cause a switcher to bounce inside the first hour.
+**term-snip is not a functional competitor replacement today. The internal "96% parity" number is materially wrong** — once you score the things a daily-use cloud engineer actually depends on, parity is closer to **65–75%**, with one critical security default that should block any "ready" claim until fixed. The codebase is well-organized and the hard pieces (real SSH transport, SFTP, port forwarding, jump hosts) work. What's missing is identity modeling, keyboard-first interaction, terminal polish, secure defaults, and Mac-native chrome — the things that cause a switcher to bounce inside the first hour.
 
 If the bar is "could I move my 100-host fleet here on Monday and not regret it by Wednesday," the answer today is no. The gap is closeable, but not by tightening the existing matrix — it requires re-questioning two design decisions documented below.
 
@@ -45,7 +45,7 @@ If the bar is "could I move my 100-host fleet here on Monday and not regret it b
 
 ### 2.1 Conceptual: the missing **Identity** entity
 
-This is the single most important gap. **Termius's "Identity" (a reusable bundle of username + key/password + passphrase) does not exist in term-snip.** Auth is decomposed across three places:
+This is the single most important gap. **competitor's "Identity" (a reusable bundle of username + key/password + passphrase) does not exist in term-snip.** Auth is decomposed across three places:
 
 - `HostRecord.privateKeyPath` — a string path on the host record itself (`types/host.ts:16`)
 - `KeyRecord.assignedHostIds[]` — a parallel mapping on the key (per architecture audit)
@@ -54,11 +54,11 @@ This is the single most important gap. **Termius's "Identity" (a reusable bundle
 That means:
 
 1. **No reuse without duplication.** If 50 hosts share the same `deploy_key`, the path string is duplicated across 50 host records. Rotate the key path → 50 edits, or stale references.
-2. **Identity changes are invisible.** Updating the username on one identity used by 50 hosts requires touching 50 hosts. Termius lets you change the identity once.
+2. **Identity changes are invisible.** Updating the username on one identity used by 50 hosts requires touching 50 hosts. competitor lets you change the identity once.
 3. **Passphrase cache is host-scoped, not key-scoped.** Type the passphrase once for `prod-bastion` and you'll be re-prompted for every other host that uses the same key. `connection-secrets-store.ts` keys by `hostId`, not by key fingerprint.
 4. **Linking is by string, not by ID.** Hosts → Keys link is a path-string match. Rename the file, the link silently breaks.
 
-**Without an Identity entity, "we replace Termius" is structurally false at the data-model layer.** Everything downstream — keychain integration, sync, team vaults — inherits this.
+**Without an Identity entity, "we replace competitor" is structurally false at the data-model layer.** Everything downstream — keychain integration, sync, team vaults — inherits this.
 
 ### 2.2 Logical: groups vs. tags vs. environments — pick one, not three
 
@@ -130,9 +130,9 @@ Concretely, the question "show me all production hosts in us-east-1" has at leas
 
 ## 4. Workflow & usability — counted, not guessed
 
-### 4.1 Click-count vs. Termius for the six daily flows
+### 4.1 Click-count vs. competitor for the six daily flows
 
-| Flow | term-snip | Termius (typical) | Verdict |
+| Flow | term-snip | competitor (typical) | Verdict |
 |---|---|---|---|
 | A. Add host + first connect (with trust) | **8 clicks + ~5 keystrokes** spread across `HostsPage` → `HostEditor` → save → `KeysPage` (manage trust, separate page) → back to Hosts → connect | ~6 clicks, fingerprint confirm inline | Worse |
 | B. Reconnect to a favorite | **2 clicks** (sidebar nav → Hosts → click) | 1 click (sidebar pin) | Worse |
@@ -189,7 +189,7 @@ A power user opens term-snip, can't pick a font, can't search a 4000-line build 
 
 ### 4.6 Onboarding cliff
 
-Cold start → empty Hosts list → "Add host" button → modal asks for hostname/user/key/etc. with no example values. Demo mode exists (`Settings`) but is off by default in the native shell, and there's no "import sample hosts" or "try a local shell first" path. A first-run user has to *already* know what to type. Termius ships with a sample server you can immediately SSH into.
+Cold start → empty Hosts list → "Add host" button → modal asks for hostname/user/key/etc. with no example values. Demo mode exists (`Settings`) but is off by default in the native shell, and there's no "import sample hosts" or "try a local shell first" path. A first-run user has to *already* know what to type. competitor ships with a sample server you can immediately SSH into.
 
 ### 4.7 Mac-native gap
 
@@ -197,7 +197,7 @@ Cold start → empty Hosts list → "Add host" button → modal asks for hostnam
 
 - No `File / Edit / View / Window / Help` menu (no `Cmd+,` for Preferences, no `Cmd+N` for new tab, no `Cmd+W` for close — all the things a Mac user expects)
 - No dock badge (no unread/error indicator)
-- No system notifications (Termius shows "session disconnected" / "command finished")
+- No system notifications (competitor shows "session disconnected" / "command finished")
 - No `prefers-color-scheme` respect
 - No Touch Bar / Stage Manager affordances
 - Window title is the static "Terminal Workspace" — doesn't reflect active host
@@ -219,7 +219,7 @@ This is a Tauri webview without a Mac shell on it. A Mac user notices in the fir
 
 ---
 
-## 6. Ship-or-stop — what has to land before "Termius replacement" is honest
+## 6. Ship-or-stop — what has to land before "competitor replacement" is honest
 
 If the bar is "I can move to this and not regret it," in priority order:
 
@@ -253,9 +253,9 @@ If the bar is "I can move to this and not regret it," in priority order:
 
 ## 7. Bottom line for the go/no-go decision
 
-The codebase is *not* lost — it's solid bones with a thin and slightly misleading polish layer. The two things that would change my answer from "I'd switch back to Termius after one day" to "I'd live in this":
+The codebase is *not* lost — it's solid bones with a thin and slightly misleading polish layer. The two things that would change my answer from "I'd switch back to competitor after one day" to "I'd live in this":
 
 1. **Solving the Identity gap (§2.1)** — without it, you cannot ever credibly add team/sync features, and even single-user feels nagged for passphrases.
 2. **Closing the keyboard-first + favorites gap (§4.1, §4.2)** — without it, every reconnect costs three clicks and the app feels like a webpage, not a Mac client.
 
-Everything else on the must-fix list (§6.1) is achievable in a focused 4–6 week sprint. Items 6 and 8 are bigger. If those two land, "functional Termius replacement" becomes an honest claim. Until then, it isn't, regardless of what the parity matrix says.
+Everything else on the must-fix list (§6.1) is achievable in a focused 4–6 week sprint. Items 6 and 8 are bigger. If those two land, "functional competitor replacement" becomes an honest claim. Until then, it isn't, regardless of what the parity matrix says.

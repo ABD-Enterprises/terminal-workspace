@@ -1,6 +1,6 @@
 // Fuzzy match scorer for the command palette. T09.
 //
-// Termius's palette accepts acronym queries ("pg" matches "Production
+// Standard palette accepts acronym queries ("pg" matches "Production
 // Gateway") and substring matches anywhere in the candidate. The
 // previous filter was case-insensitive substring only, which made the
 // palette feel sluggish for users with long host labels.

@@ -61,7 +61,6 @@ export async function fireNotification(args: NotifyArgs): Promise<boolean> {
     }
   }
   try {
-    // eslint-disable-next-line no-new
     new Notification(args.title, { body: args.body, tag: args.kind });
     return true;
   } catch {
