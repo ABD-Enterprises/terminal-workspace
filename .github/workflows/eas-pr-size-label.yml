@@ -31,8 +31,13 @@ permissions:
 
 jobs:
   size-label:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, local-build]
     if: github.event.pull_request != null
+    env:
+      BASH_ENV: ""
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
     steps:
       - name: Compute size and decide labels
         id: size

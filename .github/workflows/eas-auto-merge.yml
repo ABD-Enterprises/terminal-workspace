@@ -18,10 +18,6 @@ on:
   pull_request_review:
     types: [submitted, dismissed]
 
-concurrency:
-  group: eas-auto-merge-${{ github.event.pull_request.number || github.event.check_suite.head_sha || github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: write
   pull-requests: write
@@ -36,8 +32,15 @@ env:
 
 jobs:
   evaluate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, local-build]
     if: github.event.pull_request != null || github.event.check_suite != null
+    # Skip rc files + clear $BASH_ENV so workflows don't depend on the
+    # runner user's shell init (PR #214 / #334 in ABD-Enterprises/brew-sync).
+    env:
+      BASH_ENV: ""
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
     steps:
       - name: Validate inputs
         shell: bash

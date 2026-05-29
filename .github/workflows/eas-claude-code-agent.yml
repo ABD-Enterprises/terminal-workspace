@@ -77,8 +77,14 @@ jobs:
       vars.CLOUD_AGENT_ENABLED == 'true' &&
       (github.event_name == 'workflow_dispatch' ||
        (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'ai/ready-for-work'))
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, local-build]
     timeout-minutes: 60
+    env:
+      # Skip the runner user's shell init (PR #214 / #334 in brew-sync).
+      BASH_ENV: ""
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
 
     steps:
       - name: Resolve issue number
@@ -100,10 +106,14 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.PRS_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Setup Node (for repos that need it)
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 20
+      # actions/setup-node hardcodes /Users/runner/... for its tool
+      # cache and ignores RUNNER_TOOL_CACHE — fails on this self-hosted
+      # runner where the runner user is `deffenda`. Use the
+      # Homebrew-installed Node on the runner host instead.
+      - name: Verify Node from Homebrew
+        run: |
+          node --version
+          npm --version
 
       - name: Fetch issue details
         id: ticket

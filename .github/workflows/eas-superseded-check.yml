@@ -28,8 +28,13 @@ permissions:
 
 jobs:
   remind:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, local-build]
     if: github.event.pull_request != null && github.event.pull_request.merged == false
+    env:
+      BASH_ENV: ""
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
     steps:
       - name: Wait for closing comment
         # Operators frequently close-then-comment within a few seconds. A short
