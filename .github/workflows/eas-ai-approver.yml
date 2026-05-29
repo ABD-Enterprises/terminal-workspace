@@ -10,7 +10,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
   issues: write
 
 env:
@@ -20,7 +20,15 @@ env:
 
 jobs:
   route:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, local-build]
+    # Skip rc files + clear $BASH_ENV so workflows don't depend on the
+    # runner user's shell init (failure mode documented in PR #214 /
+    # #334 of ABD-Enterprises/brew-sync).
+    env:
+      BASH_ENV: ""
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
     steps:
       - name: Route reviewer requests
         env:
