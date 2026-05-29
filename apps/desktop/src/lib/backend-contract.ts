@@ -6,12 +6,12 @@ import type { RemoteFileEntry } from "../types/transfer";
 export interface BackendStatusResponse {
   ok: boolean;
   backendBaseUrl?: string;
-  transport?: "browser" | "tauri-proxy";
+  transport?: "browser" | "tauri-native";
 }
 
 export interface BackendTransportInfo {
   backendBaseUrl: string;
-  sessionBridge: "browser" | "tauri-proxy";
+  sessionBridge: "browser" | "tauri-native";
 }
 
 export interface ProtocolRuntimeStatusResponse {

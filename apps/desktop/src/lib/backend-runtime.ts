@@ -18,7 +18,6 @@ declare global {
   }
 }
 
-const DEFAULT_NATIVE_BACKEND_BASE_URL = "http://127.0.0.1:8790";
 const SESSION_STREAM_EVENT_NAME = "termsnip://session-stream";
 
 let cachedTransportInfoPromise: Promise<BackendTransportInfo> | undefined;
@@ -70,18 +69,6 @@ interface SessionStreamSendRequest extends SessionStreamRequest {
   data: string;
 }
 
-interface BackendProxyRequest {
-  body?: unknown;
-  method: string;
-  path: string;
-}
-
-interface BackendBinaryProxyResponse {
-  base64Body: string;
-  contentDisposition?: string;
-  contentType?: string;
-}
-
 export interface SessionSocketLike {
   readyState: number;
   addEventListener<TEventName extends SessionSocketEventName>(
@@ -106,6 +93,10 @@ function getTauriInternals() {
 }
 
 function buildAbsoluteBackendUrl(backendBaseUrl: string, path: string) {
+  if (!backendBaseUrl) {
+    return path;
+  }
+
   return new URL(path, `${backendBaseUrl.replace(/\/+$/, "")}/`).toString();
 }
 
@@ -146,29 +137,6 @@ export function buildBrowserSessionSocketUrl(
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function decodeBase64ToBytes(value: string) {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  return bytes;
-}
-
-function parseProxyRequestBody(body?: BodyInit | null) {
-  if (!body) {
-    return undefined;
-  }
-
-  if (typeof body === "string") {
-    return body ? JSON.parse(body) : undefined;
-  }
-
-  throw new Error("Native backend proxy only supports JSON string bodies.");
 }
 
 async function openBrowserSessionSocket(sessionId: string) {
@@ -393,57 +361,14 @@ async function browserFetchJson<T>(path: string, init?: RequestInit) {
   return (await response.json()) as T;
 }
 
-/**
- * @deprecated P2-NET — kept for backward compatibility but no longer used
- * in real flows. Every API call in `lib/api.ts` either invokes a first-
- * class `termsnip_*` Tauri command or falls through to the browser-mode
- * `fetch()` path; nothing routes through `proxyBackendJson` anymore.
- * Slated for removal in 0.2.0 alongside the matching
- * `termsnip_proxy_backend_json` Rust command and the `BackendBridge`
- * HTTP client.
- */
-export async function proxyBackendJson<T>(path: string, init?: RequestInit) {
-  return invokeTauriCommand<T>("termsnip_proxy_backend_json", {
-    request: {
-      body: parseProxyRequestBody(init?.body),
-      method: init?.method ?? "GET",
-      path,
-    } satisfies BackendProxyRequest,
-  });
-}
-
-/** @deprecated P2-NET — see {@link proxyBackendJson} for the removal contract. */
-export async function proxyBackendBinary(path: string, init?: RequestInit) {
-  const response = await invokeTauriCommand<BackendBinaryProxyResponse>(
-    "termsnip_proxy_backend_binary",
-    {
-      request: {
-        body: parseProxyRequestBody(init?.body),
-        method: init?.method ?? "GET",
-        path,
-      } satisfies BackendProxyRequest,
-    }
-  );
-
-  return new Response(decodeBase64ToBytes(response.base64Body), {
-    headers: {
-      ...(response.contentDisposition
-        ? { "content-disposition": response.contentDisposition }
-        : undefined),
-      ...(response.contentType ? { "content-type": response.contentType } : undefined),
-    },
-    status: 200,
-  });
-}
-
 export async function resolveBackendHttpUrl(path: string) {
   if (!isTauriRuntime()) {
     return path;
   }
 
   const transportInfo = await getNativeTransportInfo().catch(() => ({
-    backendBaseUrl: DEFAULT_NATIVE_BACKEND_BASE_URL,
-    sessionBridge: "tauri-proxy" as const,
+    backendBaseUrl: "",
+    sessionBridge: "tauri-native" as const,
   }));
 
   return buildAbsoluteBackendUrl(transportInfo.backendBaseUrl, path);

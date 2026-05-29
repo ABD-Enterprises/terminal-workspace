@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { createTermsnipStorage } from "../lib/persistence";
 import {
   createSnippetRecord,
   sampleSnippets,
@@ -7,12 +8,6 @@ import {
   type SnippetRecord,
 } from "../types/snippet";
 import { useVaultSyncStore } from "./vault-sync-store";
-
-const fallbackStorage: StateStorage = {
-  getItem: () => null,
-  setItem: () => undefined,
-  removeItem: () => undefined,
-};
 
 function sortSnippets(snippets: SnippetRecord[]) {
   return [...snippets].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -101,9 +96,7 @@ export const useSnippetsStore = create<SnippetsState>()(
     }),
     {
       name: "termsnip-snippets",
-      storage: createJSONStorage(() =>
-        typeof window === "undefined" ? fallbackStorage : window.localStorage
-      ),
+      storage: createJSONStorage(() => createTermsnipStorage("termsnip-snippets")),
     }
   )
 );

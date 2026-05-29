@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { createTermsnipStorage } from "../lib/persistence";
 import { buildHostSearchText, parseEnvironmentVariables, splitCommaList } from "../lib/utils";
 import {
   createLocalShellHostRecord,
@@ -241,12 +242,6 @@ export function sortHostCollection(hosts: HostRecord[]) {
   });
 }
 
-const fallbackStorage: StateStorage = {
-  getItem: () => null,
-  setItem: () => undefined,
-  removeItem: () => undefined,
-};
-
 interface HostsState {
   hosts: HostRecord[];
   createHost: (values: HostFormValues) => string;
@@ -432,9 +427,7 @@ export const useHostsStore = create<HostsState>()(
     {
       name: "termsnip-hosts",
       version: 2,
-      storage: createJSONStorage(() =>
-        typeof window === "undefined" ? fallbackStorage : window.localStorage
-      ),
+      storage: createJSONStorage(() => createTermsnipStorage("termsnip-hosts")),
       migrate: (persistedState) => {
         const state = persistedState as Partial<HostsState> | undefined;
 

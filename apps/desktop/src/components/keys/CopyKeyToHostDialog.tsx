@@ -32,9 +32,10 @@ export function CopyKeyToHostDialog({
   onConfirm,
 }: CopyKeyToHostDialogProps) {
   const sshHosts = hosts.filter((host) => host.protocol === "ssh");
-  const [selectedHostId, setSelectedHostId] = useState<string>(
-    () => sshHosts[0]?.id ?? "",
-  );
+  const [selectedHostIdDraft, setSelectedHostId] = useState<string>("");
+  const selectedHostId = sshHosts.some((host) => host.id === selectedHostIdDraft)
+    ? selectedHostIdDraft
+    : sshHosts[0]?.id ?? "";
 
   // Reset the selection to the first SSH host whenever the dialog transitions
   // from closed -> open. Uses the "Adjusting state during render" pattern from

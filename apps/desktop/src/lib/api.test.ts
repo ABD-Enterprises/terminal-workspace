@@ -16,8 +16,6 @@ vi.mock("./backend-runtime", () => ({
   invokeTauriCommand,
   isTauriRuntime,
   openSessionSocket: vi.fn(),
-  proxyBackendBinary: vi.fn(),
-  proxyBackendJson: vi.fn(),
   resizeSession: vi.fn(),
 }));
 
