@@ -595,11 +595,16 @@ export function buildLocalConfigBundle(): LocalConfigBundle {
   // Note: Identity records (P2-DM1 batch 1) are NOT in the v3 export bundle
   // yet — this is deliberate. The auto-migration in identities-store
   // re-derives identities from hosts on import, so a v3 round-trip still
-  // produces an equivalent identity set. User-edited identity labels and
-  // comments are not yet preserved across import; that lands in batch 2
-  // alongside the Settings UI for managing identities, which is when
-  // version 4 of this bundle will be introduced with full merge-plan
-  // semantics for the new collection.
+  // produces an equivalent identity set. User-edited identity labels are
+  // not yet preserved across import; full identity collection support
+  // lands when bundle version 4 ships with merge-plan semantics for
+  // the new collection. See issue #95 (M13).
+  //
+  // KeyRecord.comment IS preserved through export/import — it's a
+  // field on the type that the keys array carries verbatim. The
+  // original M14 audit pickup referenced an earlier draft where the
+  // field was a separate sidecar; it ships as part of KeyRecord
+  // today. No action needed for M14 (#96).
   return {
     app: "TermSnip",
     version: 3,

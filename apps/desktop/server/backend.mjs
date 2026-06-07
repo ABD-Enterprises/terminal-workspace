@@ -1552,6 +1552,16 @@ server.on("upgrade", (request, socket, head) => {
     }
 
     ws.on("message", (raw) => {
+      // M06 / #88: defense-in-depth size guard. The per-launch token
+      // gate already filters unauthenticated frames, but post-XSS or
+      // a buggy client could still ship a multi-megabyte payload that
+      // exhausts memory on JSON.parse. 64KB is more than enough for
+      // input or resize messages. Drop oversized frames silently —
+      // we don't want a buggy client to lose its session, just its
+      // bad frame.
+      if (raw.length > 65536) {
+        return;
+      }
       try {
         const message = JSON.parse(raw.toString("utf8"));
         if (message.type === "input" && session.stream) {
