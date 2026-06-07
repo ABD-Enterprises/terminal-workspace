@@ -455,16 +455,25 @@ async function createSshSession(host) {
         });
       });
 
-      stream.on("close", () => {
+      stream.on("close", async () => {
+        // M09 / #91: closeForwardsForSession used to run concurrently
+        // with sessions.delete(session.id), which let forward
+        // onConnection handlers reference a deleted sessionId and
+        // error out. Await the forward cleanup BEFORE removing the
+        // session from the map. The client.end() + jumpClient.end()
+        // calls are idempotent; they can run regardless of state.
         session.state = "disconnected";
         broadcast(session, {
           type: "status",
           state: "disconnected",
         });
-        void closeForwardsForSession(session.id);
-        sessions.delete(session.id);
-        session.client.end();
-        session.jumpClient?.end();
+        try {
+          await closeForwardsForSession(session.id);
+        } finally {
+          sessions.delete(session.id);
+          session.client.end();
+          session.jumpClient?.end();
+        }
       });
     };
 

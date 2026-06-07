@@ -185,10 +185,18 @@ export function AppShell() {
           navigate("/hosts");
           break;
         case "menu:help":
-          // No bundled docs yet; leave a console crumb so the menu item is
-          // discoverable but does not silently no-op without explanation.
-          // P2 ticket: ship offline help bundle.
-          console.info("[termsnip] menu:help — docs site not yet wired");
+          // M10 / #92: open the project README in the user's default
+          // browser. window.open works in both Tauri 2 webviews and
+          // the browser preview — Tauri 2 routes external URLs through
+          // the OS handler by default. Offline help bundle is the
+          // future surface but this stops being a dead menu item.
+          if (typeof window !== "undefined") {
+            window.open(
+              "https://github.com/ABD-Enterprises/term-snip#readme",
+              "_blank",
+              "noopener,noreferrer"
+            );
+          }
           break;
         default:
           // Unknown ids should be a no-op (forwards-compat for new menu
