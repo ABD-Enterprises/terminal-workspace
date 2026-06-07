@@ -332,10 +332,15 @@ export function FileBrowser({ host }: FileBrowserProps) {
   };
 
   const draftCopy = draftAction ? promptLabels(draftAction.mode) : undefined;
-  // T15: drag-from-Finder upload via HTML5 drag-and-drop. Browser
-  // path reads DataTransfer.files; Tauri path will eventually bind
-  // tauri://file-drop to read native paths (follow-up; same handler
-  // shape).
+  // T15 / M12: drag-from-Finder upload via HTML5 drag-and-drop. The
+  // same handler covers both runtimes:
+  //   - Browser preview: standard onDrop with DataTransfer.files.
+  //   - Tauri ship: tauri.conf.json windows[0].dragDropEnabled is set
+  //     to false so the webview receives standard HTML5 events
+  //     instead of Tauri's intercepted-path events. This is the
+  //     simpler shape — no Rust-side file reader, no synthetic File
+  //     construction — and it works because the webview's DataTransfer
+  //     surfaces the actual files when Tauri's interception is off.
   const [dragActive, setDragActive] = useState(false);
 
   return (
