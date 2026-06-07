@@ -274,6 +274,47 @@ pub(crate) fn parse_ssh_keygen_summary(
     })
 }
 
+/// M01 / #83: write a pasted private key body to disk with 0600 perms,
+/// then run the same inspect path generate_key_pair uses on success.
+///
+/// Refuses to overwrite an existing file (caller must delete first).
+/// Normalizes line endings + ensures the body ends with a single LF
+/// — some clipboards strip the trailing newline and ssh-keygen
+/// rejects keys without it.
+pub(crate) fn import_private_key_from_body(
+    path: &str,
+    body: &str,
+) -> Result<KeyMetadata, String> {
+    if path.trim().is_empty() {
+        return Err("A destination path is required".to_string());
+    }
+    if body.trim().is_empty() {
+        return Err("A key body is required".to_string());
+    }
+    let resolved_path = expand_home(path);
+    validate_user_owned_key_path(&resolved_path)?;
+    if let Some(parent) = resolved_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    if resolved_path.exists() {
+        return Err("Target private key path already exists".to_string());
+    }
+
+    let mut normalized = body.replace("\r\n", "\n").replace('\r', "\n");
+    while normalized.ends_with('\n') {
+        normalized.pop();
+    }
+    normalized.push('\n');
+
+    fs::write(&resolved_path, normalized.as_bytes()).map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    fs::set_permissions(&resolved_path, fs::Permissions::from_mode(0o600))
+        .map_err(|error| error.to_string())?;
+
+    let path_string = resolved_path.to_string_lossy().into_owned();
+    inspect_private_key(&path_string)
+}
+
 pub(crate) fn inspect_private_key(pathname: &str) -> Result<KeyMetadata, String> {
     let resolved_path = expand_home(pathname);
     validate_user_owned_key_path(&resolved_path)?;
@@ -628,7 +669,7 @@ pub(crate) fn prepare_native_identity_file(
 /// Single-quote a string for safe inclusion in a POSIX shell script.
 /// Single-quoted strings have no escapes except for `'` itself, which we
 /// handle by closing the quote, inserting `\'`, and reopening.
-fn shell_single_quote(value: &str) -> String {
+pub(crate) fn shell_single_quote(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
     out.push('\'');
     for ch in value.chars() {

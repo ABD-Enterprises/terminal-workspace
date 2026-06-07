@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use ssh2::{Channel, Session};
 use tauri::menu::{AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tokio::sync::mpsc::{
     error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender,
@@ -2086,6 +2086,289 @@ async fn termsnip_generate_private_key(request: GenerateKeyRequest) -> Result<Ke
         .map_err(|error| error.to_string())?
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportPrivateKeyFromBodyRequest {
+    path: String,
+    body: String,
+}
+
+/// M01 / #83: paste-from-clipboard private key import. Writes the
+/// pasted body to disk with 0600 perms, then runs inspect to surface
+/// the same KeyMetadata shape as the path-only import.
+#[tauri::command]
+async fn termsnip_import_private_key_from_body(
+    request: ImportPrivateKeyFromBodyRequest,
+) -> Result<KeyMetadata, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        import_private_key_from_body(&request.path, &request.body)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+// BackendHostConnection (the existing renderer-side struct) doesn't
+// derive Debug — adding it here directly would touch a lot of unrelated
+// fields. Just drop the Debug derive on this request struct.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CopyKeyToHostRequest {
+    private_key_path: String,
+    host: BackendHostConnection,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CopyKeyToHostResponse {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+fn copy_key_to_host_blocking(
+    request: &CopyKeyToHostRequest,
+) -> Result<CopyKeyToHostResponse, String> {
+    if request.private_key_path.trim().is_empty() {
+        return Ok(CopyKeyToHostResponse {
+            ok: false,
+            reason: Some("A private key path is required".to_string()),
+        });
+    }
+    if request.host.hostname.is_empty() {
+        return Ok(CopyKeyToHostResponse {
+            ok: false,
+            reason: Some("A target host is required".to_string()),
+        });
+    }
+
+    // Read <privateKeyPath>.pub through the same allowlist gate the
+    // inspect path uses.
+    let pub_path_string = format!("{}.pub", request.private_key_path);
+    let pub_path = expand_home(&pub_path_string);
+    validate_user_owned_key_path(&pub_path)?;
+    let pub_body = match std::fs::read_to_string(&pub_path) {
+        Ok(body) => body.trim().to_string(),
+        Err(error) => {
+            return Ok(CopyKeyToHostResponse {
+                ok: false,
+                reason: Some(format!(
+                    "Could not read public key at {}: {}",
+                    pub_path.display(),
+                    error
+                )),
+            });
+        }
+    };
+    if pub_body.is_empty() {
+        return Ok(CopyKeyToHostResponse {
+            ok: false,
+            reason: Some(format!("Public key at {} is empty", pub_path.display())),
+        });
+    }
+
+    // Open a one-shot SSH session. Mirrors connect_native_session but
+    // skips the shell-channel open at the end — we want a fresh channel
+    // for exec.
+    let port = match u16::try_from(request.host.port) {
+        Ok(p) => p,
+        Err(_) => {
+            return Ok(CopyKeyToHostResponse {
+                ok: false,
+                reason: Some("SSH port must be between 1 and 65535".to_string()),
+            });
+        }
+    };
+    let tcp_stream = match TcpStream::connect((request.host.hostname.as_str(), port)) {
+        Ok(stream) => stream,
+        Err(error) => {
+            return Ok(CopyKeyToHostResponse {
+                ok: false,
+                reason: Some(format!("TCP connect failed: {}", error)),
+            });
+        }
+    };
+    let _ = tcp_stream.set_nodelay(true);
+
+    let mut session = match Session::new() {
+        Ok(s) => s,
+        Err(error) => {
+            return Ok(CopyKeyToHostResponse {
+                ok: false,
+                reason: Some(format!("ssh2 session new: {}", error)),
+            });
+        }
+    };
+    session.set_tcp_stream(tcp_stream);
+    if let Err(error) = session.handshake() {
+        return Ok(CopyKeyToHostResponse {
+            ok: false,
+            reason: Some(format!("SSH handshake failed: {}", error)),
+        });
+    }
+
+    // Honor known_host_public_key the same way connect_native_session
+    // does. requireTrusted defaults are enforced by the renderer +
+    // launch-host-session gate; we still re-check here.
+    if let Some(expected_key) = request.host.known_host_public_key.as_ref() {
+        let (actual_key, _) = match session.host_key() {
+            Some(pair) => pair,
+            None => {
+                return Ok(CopyKeyToHostResponse {
+                    ok: false,
+                    reason: Some("SSH server did not present a host key".to_string()),
+                });
+            }
+        };
+        if BASE64_STANDARD.encode(actual_key) != *expected_key {
+            return Ok(CopyKeyToHostResponse {
+                ok: false,
+                reason: Some(format!(
+                    "Trusted host key mismatch for {}:{}",
+                    request.host.hostname, request.host.port
+                )),
+            });
+        }
+    }
+
+    if let Err(error) = authenticate_native_session(&mut session, &request.host) {
+        return Ok(CopyKeyToHostResponse {
+            ok: false,
+            reason: Some(format!("Authentication failed: {}", error)),
+        });
+    }
+
+    let mut channel = match session.channel_session() {
+        Ok(c) => c,
+        Err(error) => {
+            return Ok(CopyKeyToHostResponse {
+                ok: false,
+                reason: Some(format!("Channel open failed: {}", error)),
+            });
+        }
+    };
+
+    // Public key body is single-quote-escaped so a comment with shell
+    // special chars can't break out. We trail "echo OK" so we can
+    // confirm the chained append + chmod actually completed.
+    let quoted = shell_single_quote(&pub_body);
+    let command = format!(
+        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '%s\\n' {} >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && echo OK",
+        quoted
+    );
+    if let Err(error) = channel.exec(&command) {
+        return Ok(CopyKeyToHostResponse {
+            ok: false,
+            reason: Some(format!("exec failed: {}", error)),
+        });
+    }
+
+    let mut stdout = String::new();
+    if let Err(error) = std::io::Read::read_to_string(&mut channel, &mut stdout) {
+        return Ok(CopyKeyToHostResponse {
+            ok: false,
+            reason: Some(format!("Read stdout failed: {}", error)),
+        });
+    }
+    let _ = channel.wait_close();
+    let exit_status = channel.exit_status().unwrap_or(-1);
+
+    if exit_status == 0 && stdout.trim().ends_with("OK") {
+        Ok(CopyKeyToHostResponse {
+            ok: true,
+            reason: None,
+        })
+    } else {
+        Ok(CopyKeyToHostResponse {
+            ok: false,
+            reason: Some(format!(
+                "Remote command exited with status {} (stdout: {})",
+                exit_status,
+                stdout.trim()
+            )),
+        })
+    }
+}
+
+/// M02 / #84: ssh-copy-id equivalent. Reads `<private_key_path>.pub`,
+/// opens a one-shot SSH session using the same host config the
+/// runtime would, and appends the public key to ~/.ssh/authorized_keys
+/// with the canonical permission tighten-down.
+#[tauri::command]
+async fn termsnip_copy_key_to_host(
+    request: CopyKeyToHostRequest,
+) -> Result<CopyKeyToHostResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || copy_key_to_host_blocking(&request))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetDockBadgeRequest {
+    count: i64,
+}
+
+/// M03 / #85: macOS dock badge for the active session count. Tauri 2
+/// surfaces this as `WebviewWindow::set_badge_count(Option<i64>)`. A
+/// `count` of 0 (or negative) clears the badge.
+#[tauri::command]
+async fn termsnip_set_dock_badge(
+    request: SetDockBadgeRequest,
+    app: AppHandle,
+) -> Result<(), String> {
+    let count_opt = if request.count > 0 {
+        Some(request.count)
+    } else {
+        None
+    };
+    if let Some(window) = app.get_webview_window("main") {
+        window
+            .set_badge_count(count_opt)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheckRequest {}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheckResult {
+    available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notes: Option<String>,
+}
+
+/// M04 / #86: stub for tauri-plugin-updater. The plugin is not yet in
+/// the Cargo offline cache, so until it lands we return
+/// `{ available: false }` so the renderer's UpdateAvailableBanner
+/// stays quiet and the Settings "Check for updates" button surfaces
+/// "You're on the latest version" rather than throwing.
+#[tauri::command]
+async fn termsnip_check_for_updates(
+    _request: UpdateCheckRequest,
+) -> Result<UpdateCheckResult, String> {
+    Ok(UpdateCheckResult {
+        available: false,
+        version: None,
+        notes: None,
+    })
+}
+
+/// M04 / #86: stub. Returns an explicit error so a bug that calls
+/// install without a successful check first is surfaced cleanly. Real
+/// implementation lands when tauri-plugin-updater is wired.
+#[tauri::command]
+async fn termsnip_install_update_and_restart(
+    _request: UpdateCheckRequest,
+) -> Result<(), String> {
+    Err("Auto-updater not yet wired. Download the latest release from GitHub.".to_string())
+}
+
 #[tauri::command]
 async fn termsnip_scan_known_host(
     request: KnownHostScanRequest,
@@ -2968,7 +3251,12 @@ fn main() {
             termsnip_resize_backend_session,
             termsnip_open_backend_session_stream,
             termsnip_send_backend_session_stream,
-            termsnip_close_backend_session_stream
+            termsnip_close_backend_session_stream,
+            termsnip_import_private_key_from_body,
+            termsnip_copy_key_to_host,
+            termsnip_set_dock_badge,
+            termsnip_check_for_updates,
+            termsnip_install_update_and_restart
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
