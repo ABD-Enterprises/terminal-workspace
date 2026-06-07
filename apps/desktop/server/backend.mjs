@@ -412,7 +412,14 @@ async function createSshSession(host) {
     state: "connecting",
     buffer: [],
   };
-  const connectConfig = await createConnectConfig(host);
+  // M05 / #87: connectClient (the short-lived path) properly destructures
+  // both fields and runs scrub() in finally. createSshSession (the
+  // long-lived path) previously discarded the scrub callback entirely —
+  // password / passphrase / private-key bytes sat on the heap for the
+  // session's whole lifetime. Capture both, scrub right after connect()
+  // returns synchronously (ssh2 has consumed the secrets by then per the
+  // contract documented in connectClient's finally block).
+  const { config: connectConfig, scrub: scrubConfig } = await createConnectConfig(host);
   const jumpConnection = host.jumpHost ? await openJumpSocket(host) : undefined;
 
   if (jumpConnection?.socket) {
@@ -491,7 +498,14 @@ async function createSshSession(host) {
     session.jumpClient?.end();
   });
 
-  session.client.connect(connectConfig);
+  try {
+    session.client.connect(connectConfig);
+  } finally {
+    // ssh2 reads password / passphrase / privateKey synchronously inside
+    // client.connect() (same contract connectClient relies on). Wipe our
+    // copies so they do not sit on the heap for the session lifetime.
+    scrubConfig();
+  }
   sessions.set(session.id, session);
   return session;
 }

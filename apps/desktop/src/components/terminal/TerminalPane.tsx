@@ -431,6 +431,14 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       ) {
         return;
       }
+      // M08 / #90: prevent timer pile-up. A brief network flap used
+      // to spawn 3-4 reconnect attempts in parallel because socket
+      // close + socket error + connect-catch all called this. Skip
+      // when a reconnect is already pending OR a connect is mid-flight
+      // (the connect path will schedule its own retry on failure).
+      if (reconnectTimeoutRef.current !== null || connectingRef.current) {
+        return;
+      }
 
       clearReconnectTimer();
       reconnectAttemptRef.current += 1;

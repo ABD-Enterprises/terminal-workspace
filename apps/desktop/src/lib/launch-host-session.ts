@@ -24,7 +24,27 @@ export interface LaunchHostSessionResult {
   errorMessage?: string;
 }
 
+// M07 / #89: per-host mutex. Double-tapping Open used to kick off two
+// parallel trust-key scans + two trust prompts, each of which could
+// write a duplicate entry to the known-hosts store. The mutex
+// dedupes by host id — concurrent calls receive the same Promise as
+// the first-in-flight call, and the map entry is cleared in finally
+// so the next legitimate connect attempt isn't blocked.
+const inFlight = new Map<string, Promise<LaunchHostSessionResult>>();
+
 export async function launchHostSession(host: HostRecord): Promise<LaunchHostSessionResult> {
+  const existing = inFlight.get(host.id);
+  if (existing) {
+    return existing;
+  }
+  const promise = launchHostSessionInner(host).finally(() => {
+    inFlight.delete(host.id);
+  });
+  inFlight.set(host.id, promise);
+  return promise;
+}
+
+async function launchHostSessionInner(host: HostRecord): Promise<LaunchHostSessionResult> {
   const trustResult = await ensureTrustedHostKey(host);
   if (!trustResult.ok) {
     if (trustResult.reason === "user-rejected") {
