@@ -6,13 +6,13 @@ This repo uses ORC: a ticket-driven coding loop that runs low-friction by defaul
 
 Posture — vibe (default) and hardened (the switch):
 
-- ORC has two postures. **vibe** (O0 R0 C0) is the default and is genuinely low-friction: the scope, design, and capture gates do not block (capture still RECORDS metrics — it warns instead of blocking), validation runs on the host, and there is no claim-lease ceremony. **hardened** (O0 R1 C1) is the opt-in switch — `orc posture hardened` — that turns governance on: scope/design/capture enforced (rigor), validation in the network-denied container, and strict claim-leases (containment). Switch anytime with `orc posture <vibe|hardened>`; `.ai/config.json#governance.overrides` (the O/R/C axes) persists it.
+- ORC has two postures. **vibe** (O0 R0 C0) is the default and is genuinely low-friction: the scope, design, and capture gates do not block (capture still RECORDS metrics — it warns instead of blocking), validation runs on the host by default, and there is no claim-lease ceremony. **hardened** (O0 R1 C1) is the opt-in switch — `orc posture hardened` — that turns governance on: scope/design/capture enforced (rigor) and strict claim-leases (containment). Validation still runs on the host by default; the network-denied container is an explicit opt-in via `validation.isolation: "container"` and is required for untrusted PR authors. Switch anytime with `orc posture <vibe|hardened>`; `.ai/config.json#governance.overrides` (the O/R/C axes) persists it.
 - The O/R/C dials GOVERN this friction. They never change who authors the diff, and they never lower GitHub's gates — branch protection, required checks, CodeQL/secret-scanning/push-protection, and org-floor policy stay in force at every posture.
 
 Division of labor (Capability + Router, not a dial):
 
 - Which agent authors the diff is a Capability — the configured coding backend (`.ai/config.json#continuity.model_provider`). The orchestrating/planning agent plans, grooms, reviews, and drives the board; the router delegates implementation to the backend through the loop. Hand-author trivial or mechanical changes directly when spinning up the backend is not worth the overhead.
-- O = who merges / how unattended; R = how hard the work is verified (the scope/design/capture gates); C = how contained the coder is (validation sandbox + claim-leases).
+- O = who merges / how unattended; R = how hard the work is verified (the scope/design/capture gates); C = how contained the coder is (strict claim-leases and related containment policy).
 - Metrics are always recorded — `orc metrics` (cost/effort/routing) is a primary product — but the capture check is warn-only at vibe and enforced at hardened.
 
 Source of truth:
