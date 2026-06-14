@@ -247,161 +247,159 @@ export function HostsPage() {
                 (tag) => tag.trim().toLowerCase() !== "favorite"
               );
 
+              // #105: progressive disclosure. The expansion groups every
+              // host detail into three calm sections — Connection, Trust &
+              // activity, Environment & notes — instead of nine bordered
+              // cards. The outer wrapper (HostList) owns the only border, so
+              // sections here use light top-rules, not nested card chrome.
               return (
-                <>
-                  {visibleTags.length ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-[11px] text-emerald-100">
-                        {formatHostProtocol(host.protocol)}
-                      </span>
-                      {visibleTags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="rounded-full border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-300"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  <dl className={`${visibleTags.length ? "mt-3" : ""} grid gap-2.5 lg:grid-cols-3`}>
-                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
-                      <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        Identity
-                      </dt>
-                      <dd className="mt-1 text-sm text-slate-100">
-                        {host.protocol === "ssh" ? host.keyLabel || "Not assigned yet" : formatHostAddress(host)}
-                      </dd>
-                      <p className="mt-1 text-[11px] text-slate-500">
-                        {describeHostRuntime(
-                          host,
-                          host.jumpHostId && hostsById[host.jumpHostId]
-                            ? hostsById[host.jumpHostId].label
-                            : undefined
-                        )}
-                      </p>
-                    </div>
-                    {hostSupportsSftp(host.protocol) ? (
-                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
-                      <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        SFTP root
-                      </dt>
-                      <dd className="mt-1 text-sm text-slate-100">{host.sftpRoot}</dd>
-                    </div>
-                    ) : null}
-                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
-                      <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        Runtime
-                      </dt>
-                      <dd className="mt-1 text-sm text-slate-100">
-                        {host.protocol === "ssh"
-                          ? hostSupportsPortForwarding(host.protocol)
-                            ? `${host.forwardingCount} forwards configured`
-                            : formatHostProtocol(host.protocol)
-                          : "Native shell bridge"}
-                      </dd>
-                      <p className="mt-1 text-[11px] text-slate-500">
-                        {environmentLines.length ? `${environmentLines.length} env vars` : "No env overrides"}
-                      </p>
-                    </div>
-                    {hostSupportsJumpHosts(host.protocol) ? (
-                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
-                      <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        Jump host
-                      </dt>
-                      <dd className="mt-1 text-sm text-slate-100">
-                        {host.jumpHostId && hostsById[host.jumpHostId]
-                          ? hostsById[host.jumpHostId].label
-                          : "Direct"}
-                      </dd>
-                    </div>
-                    ) : null}
-                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
-                      <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        Last used
-                      </dt>
-                      <dd className="mt-1 text-sm text-slate-100">
-                        {formatRelativeTime(host.lastConnectedAt)}
-                      </dd>
-                    </div>
-                    {hostSupportsTrustedKeys(host.protocol) ? (
-                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
-                      <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        Known host
-                      </dt>
-                      <dd className="mt-1 text-sm text-slate-100">
-                        {trustedKnownHost ? `${trustedKnownHost.algorithm} · trusted` : "Unverified"}
-                      </dd>
-                      {trustedKnownHost ? (
-                        <p className="mt-1 text-[11px] text-slate-500">{trustedKnownHost.fingerprint}</p>
+                <div className="space-y-3 text-[13px]">
+                  <section>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                      Connection
+                    </p>
+                    <dl className="mt-2 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+                      <div className="flex gap-3">
+                        <dt className="w-24 shrink-0 text-[11px] leading-5 text-slate-500">Identity</dt>
+                        <dd className="min-w-0 text-slate-200">
+                          {host.protocol === "ssh"
+                            ? host.keyLabel || "Not assigned yet"
+                            : formatHostAddress(host)}
+                        </dd>
+                      </div>
+                      <div className="flex gap-3">
+                        <dt className="w-24 shrink-0 text-[11px] leading-5 text-slate-500">Runtime</dt>
+                        <dd className="min-w-0 text-slate-200">
+                          {host.protocol === "ssh"
+                            ? hostSupportsPortForwarding(host.protocol)
+                              ? `${host.forwardingCount} forwards · ${environmentLines.length} env`
+                              : formatHostProtocol(host.protocol)
+                            : `Native shell bridge · ${environmentLines.length} env`}
+                        </dd>
+                      </div>
+                      <div className="flex gap-3 sm:col-span-2">
+                        <dt className="w-24 shrink-0 text-[11px] leading-5 text-slate-500">Path</dt>
+                        <dd className="min-w-0 text-slate-400">
+                          {describeHostRuntime(
+                            host,
+                            host.jumpHostId && hostsById[host.jumpHostId]
+                              ? hostsById[host.jumpHostId].label
+                              : undefined
+                          )}
+                        </dd>
+                      </div>
+                      {hostSupportsJumpHosts(host.protocol) ? (
+                        <div className="flex gap-3">
+                          <dt className="w-24 shrink-0 text-[11px] leading-5 text-slate-500">Jump host</dt>
+                          <dd className="min-w-0 text-slate-200">
+                            {host.jumpHostId && hostsById[host.jumpHostId]
+                              ? hostsById[host.jumpHostId].label
+                              : "Direct"}
+                          </dd>
+                        </div>
                       ) : null}
-                      <p className="mt-1 text-[11px] text-slate-500">
-                        Policy:{" "}
-                        {host.hostKeyPolicy === "requireTrusted"
-                          ? "Trusted key required"
-                          : "Unknown keys allowed"}
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            navigate(`/keys?scanHost=${encodeURIComponent(host.id)}&autoScan=1`)
-                          }
-                          className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-white"
-                        >
-                          Manage trust
-                        </button>
-                        {trustedKnownHost ? (
-                          <button
-                            type="button"
-                            onClick={() => removeKnownHost(trustedKnownHost.id)}
-                            className="rounded-lg border border-rose-500/40 px-2.5 py-1 text-[11px] text-rose-200 transition hover:border-rose-400 hover:text-white"
-                          >
-                            Revoke trust
-                          </button>
-                        ) : null}
+                      {hostSupportsSftp(host.protocol) ? (
+                        <div className="flex gap-3">
+                          <dt className="w-24 shrink-0 text-[11px] leading-5 text-slate-500">SFTP root</dt>
+                          <dd className="min-w-0 text-slate-200">{host.sftpRoot}</dd>
+                        </div>
+                      ) : null}
+                      {visibleTags.length ? (
+                        <div className="flex gap-3 sm:col-span-2">
+                          <dt className="w-24 shrink-0 text-[11px] leading-5 text-slate-500">Tags</dt>
+                          <dd className="min-w-0 text-slate-400">{visibleTags.join(" · ")}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </section>
+
+                  <section className="border-t border-slate-800/60 pt-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                      Trust &amp; activity
+                    </p>
+                    <dl className="mt-2 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+                      {hostSupportsTrustedKeys(host.protocol) ? (
+                        <div className="flex gap-3 sm:col-span-2">
+                          <dt className="w-24 shrink-0 text-[11px] leading-5 text-slate-500">Known host</dt>
+                          <dd className="min-w-0 space-y-1">
+                            <p className="text-slate-200">
+                              {trustedKnownHost ? `${trustedKnownHost.algorithm} · trusted` : "Unverified"}
+                            </p>
+                            {trustedKnownHost ? (
+                              <p className="break-all text-[11px] text-slate-500">{trustedKnownHost.fingerprint}</p>
+                            ) : null}
+                            <p className="text-[11px] text-slate-500">
+                              Policy:{" "}
+                              {host.hostKeyPolicy === "requireTrusted"
+                                ? "Trusted key required"
+                                : "Unknown keys allowed"}
+                            </p>
+                            <div className="flex flex-wrap gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  navigate(`/keys?scanHost=${encodeURIComponent(host.id)}&autoScan=1`)
+                                }
+                                className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-white"
+                              >
+                                Manage trust
+                              </button>
+                              {trustedKnownHost ? (
+                                <button
+                                  type="button"
+                                  onClick={() => removeKnownHost(trustedKnownHost.id)}
+                                  className="rounded-lg border border-rose-500/40 px-2.5 py-1 text-[11px] text-rose-200 transition hover:border-rose-400 hover:text-white"
+                                >
+                                  Revoke trust
+                                </button>
+                              ) : null}
+                            </div>
+                          </dd>
+                        </div>
+                      ) : (
+                        <div className="flex gap-3 sm:col-span-2">
+                          <dt className="w-24 shrink-0 text-[11px] leading-5 text-slate-500">Trust</dt>
+                          <dd className="min-w-0 space-y-1">
+                            <p className="text-slate-200">No network trust required</p>
+                            <p className="text-[11px] text-slate-500">
+                              {host.protocol === "localShell"
+                                ? "Local shell sessions stay on this workstation."
+                                : host.protocol === "telnet"
+                                  ? "Telnet sessions use the native PTY bridge and do not rely on SSH trust metadata."
+                                  : host.protocol === "serial"
+                                    ? "Serial sessions connect to a local device path and do not use network trust."
+                                    : `${formatHostProtocol(host.protocol)} sessions use the native bridge without separate SSH trust metadata.`}
+                            </p>
+                          </dd>
+                        </div>
+                      )}
+                      <div className="flex gap-3">
+                        <dt className="w-24 shrink-0 text-[11px] leading-5 text-slate-500">Last used</dt>
+                        <dd className="min-w-0 text-slate-200">{formatRelativeTime(host.lastConnectedAt)}</dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  <section className="border-t border-slate-800/60 pt-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                      Environment &amp; notes
+                    </p>
+                    <div className="mt-2 grid gap-x-6 gap-y-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
+                      <div>
+                        <p className="text-[11px] leading-5 text-slate-500">Session environment</p>
+                        <pre className="mt-1 whitespace-pre-wrap break-all rounded-xl bg-slate-950/70 px-3 py-2 text-[11px] leading-5 text-cyan-100">
+                          {environmentLines.length ? environmentLines.join("\n") : "No env overrides"}
+                        </pre>
+                      </div>
+                      <div>
+                        <p className="text-[11px] leading-5 text-slate-500">Operator note</p>
+                        <p className="mt-1 leading-6 text-slate-300">
+                          {host.note || "No note recorded for this host yet."}
+                        </p>
                       </div>
                     </div>
-                    ) : (
-                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
-                      <dt className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        Trust
-                      </dt>
-                      <dd className="mt-1 text-sm text-slate-100">No network trust required</dd>
-                      <p className="mt-1 text-[11px] text-slate-500">
-                        {host.protocol === "localShell"
-                          ? "Local shell sessions stay on this workstation."
-                          : host.protocol === "telnet"
-                            ? "Telnet sessions use the native PTY bridge and do not rely on SSH trust metadata."
-                            : host.protocol === "serial"
-                              ? "Serial sessions connect to a local device path and do not use network trust."
-                              : `${formatHostProtocol(host.protocol)} sessions use the native bridge without separate SSH trust metadata.`}
-                      </p>
-                    </div>
-                    )}
-                  </dl>
-
-                  <div className="mt-3 grid gap-2.5 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
-                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                        Session environment
-                      </p>
-                      <pre className="mt-2 whitespace-pre-wrap break-all rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-[11px] leading-5 text-cyan-100">
-                        {environmentLines.length ? environmentLines.join("\n") : "No env overrides"}
-                      </pre>
-                    </div>
-
-                    <div className="rounded-[16px] border border-slate-800 bg-slate-900/50 p-2.5">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300">
-                        Operator note
-                      </p>
-                      <p className="mt-2 text-sm leading-6 text-slate-300">
-                        {host.note || "No note recorded for this host yet."}
-                      </p>
-                    </div>
-                  </div>
-                </>
+                  </section>
+                </div>
               );
             }}
               />
