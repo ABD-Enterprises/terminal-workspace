@@ -26,12 +26,55 @@ import { parseSshConfig, toHostFormValues } from "../lib/ssh-config";
 import { resolveSshIncludes } from "../lib/ssh-config-include";
 import { readSshConfigFile } from "../lib/ssh-config-fs";
 
+// #113: quick-connect parser. Accepts the shapes a user actually types —
+// `ssh user@host -p 2222`, `user@host:2222`, `user@host`, `host:22`, `host`
+// — and returns the SSH fields, or null when there is no hostname. Kept a
+// pure module function so the connect handler stays declarative.
+export function parseQuickConnect(
+  raw: string
+): { username: string; hostname: string; port: string } | null {
+  let rest = raw.trim().replace(/^ssh\s+/i, "");
+  if (!rest) {
+    return null;
+  }
+  let port = "";
+  const portFlag = rest.match(/\s-p\s+(\d+)/i);
+  if (portFlag) {
+    port = portFlag[1];
+    rest = rest.replace(portFlag[0], "");
+  }
+  const token = rest.trim().split(/\s+/)[0] ?? "";
+  if (!token) {
+    return null;
+  }
+  let username = "";
+  let hostPart = token;
+  const at = token.lastIndexOf("@");
+  if (at >= 0) {
+    username = token.slice(0, at);
+    hostPart = token.slice(at + 1);
+  }
+  if (!port) {
+    const colon = hostPart.lastIndexOf(":");
+    if (colon >= 0 && /^\d+$/.test(hostPart.slice(colon + 1))) {
+      port = hostPart.slice(colon + 1);
+      hostPart = hostPart.slice(0, colon);
+    }
+  }
+  const hostname = hostPart.trim();
+  if (!hostname) {
+    return null;
+  }
+  return { username: username || "root", hostname, port: port || "22" };
+}
+
 export function HostsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeGroup, setActiveGroup] = useState("all");
   const [activeTag, setActiveTag] = useState("all");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [quickConnect, setQuickConnect] = useState("");
   const [hostPendingDelete, setHostPendingDelete] = useState<string | null>(null);
   const [importReport, setImportReport] = useState<
     | {
@@ -109,6 +152,39 @@ export function HostsPage() {
     updateParams({ focus: null });
   };
 
+  // #113: quick-connect. Parse the typed target, persist it as an SSH host
+  // (so it joins the inventory + Recent like any other), then launch through
+  // the shared connect flow that handles the first-connect trust prompt.
+  const quickConnectTarget = parseQuickConnect(quickConnect);
+  const handleQuickConnect = async () => {
+    if (!quickConnectTarget) {
+      return;
+    }
+    const hostId = createHost({
+      ...emptyHostFormValues,
+      protocol: "ssh",
+      label: quickConnectTarget.username
+        ? `${quickConnectTarget.username}@${quickConnectTarget.hostname}`
+        : quickConnectTarget.hostname,
+      hostname: quickConnectTarget.hostname,
+      username: quickConnectTarget.username,
+      port: quickConnectTarget.port,
+    });
+    const host = useHostsStore.getState().hosts.find((entry) => entry.id === hostId);
+    if (!host) {
+      return;
+    }
+    setQuickConnect("");
+    const result = await launchHostSession(host);
+    if (!result.ok || !result.tabId) {
+      if (result.errorMessage) {
+        console.warn(`[quick-connect] ${result.errorMessage}`);
+      }
+      return;
+    }
+    navigate(`/sessions?tabId=${result.tabId}`);
+  };
+
   // Single source of truth for the SSH-config import flow. Used by the
   // toolbar button, the cold-start WelcomePanel, and the ImportSshCallout
   // banner — all three should pop the same file picker.
@@ -168,6 +244,36 @@ export function HostsPage() {
   return (
     <>
       <section className="flex h-full min-h-0 flex-col gap-2.5">
+        {/* #113: first-class quick-connect at the top of the Hosts view. */}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleQuickConnect();
+          }}
+          className="flex items-center gap-2 rounded-surface border border-slate-800/80 bg-slate-950/45 px-3 py-2"
+        >
+          <span aria-hidden="true" className="shrink-0 font-mono text-[13px] text-slate-500">
+            ssh
+          </span>
+          <input
+            value={quickConnect}
+            onChange={(event) => setQuickConnect(event.target.value)}
+            placeholder="user@host -p 22"
+            aria-label="Quick connect"
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-slate-100 outline-none placeholder:text-slate-500"
+          />
+          <button
+            type="submit"
+            disabled={!quickConnectTarget}
+            className="shrink-0 rounded-control bg-emerald-400 px-3 py-1.5 text-sm font-medium text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+          >
+            Connect
+          </button>
+        </form>
+
         {allHosts.length === 0 ? (
           // Cold-start: skip the filter bar + list entirely. WelcomePanel
           // has the three first-action CTAs the user needs.
