@@ -42,7 +42,6 @@ export function HostsPage() {
       }
     | null
   >(null);
-  const query = useAppStore((state) => state.sidebarSearch);
   const setQuery = useAppStore((state) => state.setSidebarSearch);
   const commandPaletteOpen = useAppStore((state) => state.commandPaletteOpen);
   const cheatsheetOpen = useAppStore((state) => state.cheatsheetOpen);
@@ -100,6 +99,14 @@ export function HostsPage() {
       return;
     }
     navigate(`/sessions?tabId=${result.tabId}`);
+  };
+
+  const resetFilters = () => {
+    setActiveGroup("all");
+    setActiveTag("all");
+    setFavoritesOnly(false);
+    setQuery("");
+    updateParams({ focus: null });
   };
 
   // Single source of truth for the SSH-config import flow. Used by the
@@ -161,43 +168,6 @@ export function HostsPage() {
   return (
     <>
       <section className="flex h-full min-h-0 flex-col gap-2.5">
-        <div className="rounded-[20px] border border-slate-800/80 bg-slate-950/45 px-3.5 py-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-slate-400">
-              {allHosts.length} hosts • {allHosts.filter((host) => host.favorite).length} favorites • {groups.length} groups • {tags.length} tags
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={openImportSshConfig}
-                className="rounded-xl border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
-              >
-                Import SSH config
-              </button>
-              <button
-                type="button"
-                onClick={() => updateParams({ new: "1", edit: null })}
-                className="rounded-xl bg-emerald-400 px-3 py-1.5 text-sm font-medium text-slate-950 transition hover:bg-emerald-300"
-              >
-                Add host
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveGroup("all");
-                  setActiveTag("all");
-                  setFavoritesOnly(false);
-                  setQuery("");
-                  updateParams({ focus: null });
-                }}
-                className="rounded-xl border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition hover:border-slate-500 hover:text-white"
-              >
-                Reset filters
-              </button>
-            </div>
-          </div>
-        </div>
-
         {allHosts.length === 0 ? (
           // Cold-start: skip the filter bar + list entirely. WelcomePanel
           // has the three first-action CTAs the user needs.
@@ -209,19 +179,22 @@ export function HostsPage() {
           </div>
         ) : (
           <>
-            <ImportSshCallout onImport={openImportSshConfig} />
             <HostFilterBar
-              query={query}
               groups={groups}
               tags={tags}
               activeGroup={activeGroup}
               activeTag={activeTag}
               favoritesOnly={favoritesOnly}
-              onQueryChange={setQuery}
+              total={allHosts.length}
+              shown={filteredHosts.length}
               onGroupChange={setActiveGroup}
               onTagChange={setActiveTag}
               onFavoritesToggle={() => setFavoritesOnly((current) => !current)}
+              onAddHost={() => updateParams({ new: "1", edit: null })}
+              onImportSshConfig={openImportSshConfig}
+              onResetFilters={resetFilters}
             />
+            <ImportSshCallout onImport={openImportSshConfig} />
 
             <div className="min-h-0 flex-1">
               <HostList
