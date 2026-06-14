@@ -41,7 +41,7 @@ export function KeyEditor({
       title={isImport ? "Import private key" : "Generate private key"}
       description={
         isImport
-          ? "Add an existing local private key to the TermSnip inventory."
+          ? "Add an existing local private key to the Terminal Workspace inventory."
           : "Generate a new SSH keypair locally with ssh-keygen."
       }
       onClose={onClose}

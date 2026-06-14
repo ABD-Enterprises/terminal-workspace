@@ -90,7 +90,7 @@ export function Sidebar() {
         )}
       >
         <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-emerald-300">
-          TermSnip
+          Terminal Workspace
         </p>
         <h1 className="mt-0.5 text-base font-semibold text-slate-50">Local Vault</h1>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-400">

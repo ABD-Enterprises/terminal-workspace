@@ -12,7 +12,7 @@ test.describe("sidebar", () => {
     // sample fixture has at least one of each.
     await expect(page.getByText(/hosts/i).first()).toBeVisible();
     // Sidebar shows the workspace title and dense byline.
-    await expect(page.getByText("TermSnip", { exact: false })).toBeVisible();
+    await expect(page.getByText("Terminal Workspace", { exact: false })).toBeVisible();
     await expect(page.getByText("Local Vault")).toBeVisible();
   });
 

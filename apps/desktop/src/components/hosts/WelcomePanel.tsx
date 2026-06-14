@@ -54,12 +54,12 @@ export function WelcomePanel({ onAddHost, onImportSshConfig }: WelcomePanelProps
   return (
     <div
       role="region"
-      aria-label="Welcome to TermSnip"
+      aria-label="Welcome to Terminal Workspace"
       className="flex h-full min-h-0 flex-col items-center justify-center gap-6 rounded-[24px] border border-dashed border-emerald-400/30 bg-slate-950/50 px-8 py-10 text-center"
     >
       <div className="max-w-xl space-y-2">
         <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-emerald-300">
-          Welcome to TermSnip
+          Welcome to Terminal Workspace
         </p>
         <h2 className="text-2xl font-semibold text-slate-50">
           Your inventory is empty
@@ -111,7 +111,7 @@ export function WelcomePanel({ onAddHost, onImportSshConfig }: WelcomePanelProps
           </span>
           <span className="text-sm font-semibold text-slate-50">Open a local terminal</span>
           <span className="text-xs leading-5 text-slate-400">
-            Spawns your macOS login shell in a tab so you can use TermSnip even before adding any remote hosts.
+            Spawns your macOS login shell in a tab so you can use Terminal Workspace even before adding any remote hosts.
           </span>
         </button>
 

@@ -74,7 +74,7 @@ test.describe("T01: sidebar Local terminal quick-launch", () => {
 test.describe("T02: cold-start WelcomePanel", () => {
   test("renders the welcome region when inventory is empty", async ({ page }) => {
     await clearStateAndReload(page);
-    await expect(page.getByRole("region", { name: "Welcome to TermSnip" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Welcome to Terminal Workspace" })).toBeVisible();
     // All four CTAs are present.
     await expect(page.getByRole("button", { name: /Import ~\/.ssh\/config/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Add a host manually/ })).toBeVisible();
@@ -99,7 +99,7 @@ test.describe("T04: Load sample data flips demoModeEnabled and seeds hosts", () 
     // of the known seed labels should appear in the inventory.
     await expect(page.getByText("Production Gateway").first()).toBeVisible();
     // The welcome region should be gone (allHosts.length > 0 now).
-    await expect(page.getByRole("region", { name: "Welcome to TermSnip" })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Welcome to Terminal Workspace" })).toHaveCount(0);
   });
 });
 
