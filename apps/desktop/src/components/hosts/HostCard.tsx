@@ -52,16 +52,10 @@ export function HostCard({
         </button>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        {host.tags.map((tag) => (
-          <span
-            key={tag}
-            className="rounded-full border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-300"
-          >
-            {tag}
-          </span>
-        ))}
-      </div>
+      {/* #109: tags are quiet inline text, not a row of bordered pills. */}
+      {host.tags.length ? (
+        <p className="mt-4 truncate text-sm text-slate-400">{host.tags.join(" · ")}</p>
+      ) : null}
 
       <p className="mt-4 line-clamp-2 text-sm leading-6 text-slate-400">{host.note}</p>
 
