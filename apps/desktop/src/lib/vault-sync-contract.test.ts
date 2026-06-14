@@ -10,7 +10,8 @@ import {
 
 const baseBundle: LocalConfigBundle = {
   app: "TermSnip",
-  version: 3,
+  version: 4,
+  identities: [],
   exportedAt: "2026-04-04T16:30:00.000Z",
   vault: {
     schema: "local-first-vault",
