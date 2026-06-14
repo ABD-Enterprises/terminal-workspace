@@ -120,4 +120,19 @@ test.describe("hosts page", () => {
     // Close the summary modal so it doesn't bleed into other tests.
     await page.getByRole("button", { name: "Close" }).click();
   });
+
+  test("quick-connect bar enables Connect only for a parseable target", async ({ page }) => {
+    await page.goto("/hosts");
+    const quickConnect = page.getByLabel("Quick connect");
+    await expect(quickConnect).toBeVisible();
+    // Empty input → Connect is disabled.
+    const connect = page.getByRole("button", { name: "Connect" });
+    await expect(connect).toBeDisabled();
+    // A typed `[user@]host[:port]` / `ssh ... -p` target enables Connect.
+    await quickConnect.fill("deploy@quick.example.com -p 2200");
+    await expect(connect).toBeEnabled();
+    // Clearing it disables Connect again.
+    await quickConnect.fill("   ");
+    await expect(connect).toBeDisabled();
+  });
 });
