@@ -97,3 +97,14 @@ textarea,
 select {
   font: inherit;
 }
+
+/*
+ * #114: a visible keyboard-focus ring on every interactive element. Uses
+ * :focus-visible so it shows for keyboard/AT users without ringing on
+ * mouse clicks. :where() keeps specificity at 0 so components that opt
+ * into their own ring (outline-none + focus ring) still win.
+ */
+:where(a[href], button, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--shell-accent);
+  outline-offset: 2px;
+}

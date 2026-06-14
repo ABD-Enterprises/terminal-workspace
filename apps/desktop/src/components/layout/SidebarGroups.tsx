@@ -176,7 +176,7 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
   return (
     <SidebarSection title="Groups" count={groups.length}>
       {filteredGroups.length === 0 ? (
-        <p className="px-2 py-1 text-footnote text-slate-500">
+        <p className="px-2 py-1 text-footnote text-slate-400">
           {hosts.length === 0
             ? "No hosts yet — add one from the Hosts page."
             : "No groups match the current search."}
@@ -212,7 +212,7 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
                   onClick={() => toggleGroup(groupKey)}
                   className="flex min-w-0 flex-1 items-center gap-2 text-left"
                 >
-                  <span className="text-caption text-slate-500 w-3 text-center">
+                  <span className="text-caption text-slate-400 w-3 text-center">
                     {isExpanded ? "▼" : "▶"}
                   </span>
                   {isRenaming ? (
@@ -238,7 +238,7 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
                     <span
                       className={cn(
                         "truncate text-body font-medium",
-                        isUngrouped ? "text-slate-500 italic" : "text-slate-200"
+                        isUngrouped ? "text-slate-400 italic" : "text-slate-200"
                       )}
                     >
                       {displayName}
@@ -256,7 +256,7 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
                         }}
                         title="Rename group (updates every host)"
                         aria-label={`Rename group ${displayName}`}
-                        className="text-caption text-slate-400 transition hover:text-emerald-400"
+                        className="flex h-7 w-7 items-center justify-center rounded-control text-caption text-slate-400 transition hover:bg-slate-800/60 hover:text-emerald-400"
                       >
                         ✎
                       </button>
@@ -274,13 +274,13 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
                         }}
                         title="Detach all hosts from this group"
                         aria-label={`Remove group ${displayName}`}
-                        className="text-caption text-slate-400 transition hover:text-rose-400"
+                        className="flex h-7 w-7 items-center justify-center rounded-control text-caption text-slate-400 transition hover:bg-slate-800/60 hover:text-rose-400"
                       >
                         ×
                       </button>
                     </div>
                   ) : null}
-                  <span className="text-caption text-slate-500">
+                  <span className="text-caption text-slate-400">
                     {groupHosts.length} host{groupHosts.length === 1 ? "" : "s"}
                   </span>
                   {connectedCount > 0 ? (
@@ -300,7 +300,7 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
                         key={host.id}
                         draggable
                         onDragStart={(event) => onDragStart(event, host.id)}
-                        className="flex items-center justify-between rounded-control px-2 py-1 hover:bg-slate-800/40 cursor-grab active:cursor-grabbing"
+                        className="flex items-center justify-between rounded-control px-2 py-1.5 hover:bg-slate-800/40 cursor-grab active:cursor-grabbing"
                       >
                         <span className="truncate text-footnote text-slate-300">{host.label}</span>
                         {isConnected ? (

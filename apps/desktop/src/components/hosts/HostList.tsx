@@ -62,7 +62,7 @@ export function HostList({
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[22px] border border-slate-800/80 bg-slate-950/50">
-      <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_116px_104px_100px_180px] gap-3 border-b border-slate-800/80 bg-slate-950/95 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+      <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_116px_104px_100px_180px] gap-3 border-b border-slate-800/80 bg-slate-950/95 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
         <span>Host</span>
         <span>Address</span>
         <span>Identity</span>
@@ -100,7 +100,7 @@ export function HostList({
                       "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm transition",
                       host.favorite
                         ? "text-amber-300 hover:text-amber-200"
-                        : "text-slate-600 hover:text-slate-300"
+                        : "text-slate-500 hover:text-slate-300"
                     )}
                   >
                     {host.favorite ? "★" : "☆"}
@@ -119,7 +119,7 @@ export function HostList({
                       />
                       <span className="block truncate font-medium text-slate-100">{host.label}</span>
                     </span>
-                    <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                    <p className="mt-0.5 truncate text-[11px] text-slate-400">
                       {[formatHostProtocol(host.protocol), ...visibleTags].slice(0, 3).join(" · ") || "No tags"}
                     </p>
                   </button>
@@ -127,7 +127,7 @@ export function HostList({
 
                 <button type="button" onClick={() => onSelect(host.id)} className="min-w-0 text-left">
                   <p className="truncate text-sm text-slate-200">{formatHostAddress(host)}</p>
-                  <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                  <p className="mt-0.5 truncate text-[11px] text-slate-400">
                     {describeHostRuntime(
                       host,
                       host.jumpHostId && hostsById[host.jumpHostId]
@@ -139,7 +139,7 @@ export function HostList({
 
                 <button type="button" onClick={() => onSelect(host.id)} className="min-w-0 text-left">
                   <p className="truncate text-sm text-slate-200">{host.keyLabel || "Unassigned"}</p>
-                  <p className="mt-0.5 text-[11px] text-slate-500">
+                  <p className="mt-0.5 text-[11px] text-slate-400">
                     {host.protocol === "ssh"
                       ? `${host.snippetCount} snips · ${host.forwardingCount} fwd · ${Object.keys(host.environment).length} env`
                       : `${Object.keys(host.environment).length} env · ${formatHostProtocol(host.protocol)}`}
@@ -182,7 +182,7 @@ export function HostList({
                     type="button"
                     onClick={() => onDelete(host.id)}
                     aria-label={`Delete ${host.label}`}
-                    className="ml-1 rounded-lg px-2.5 py-1.5 text-xs text-slate-500 transition hover:bg-rose-500/10 hover:text-rose-200"
+                    className="ml-1 rounded-lg px-2.5 py-1.5 text-xs text-slate-400 transition hover:bg-rose-500/10 hover:text-rose-200"
                   >
                     Delete
                   </button>

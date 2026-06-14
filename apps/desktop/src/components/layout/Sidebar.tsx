@@ -240,7 +240,7 @@ export function Sidebar() {
                     <span className="block truncate text-body font-medium text-slate-100">
                       {host.label}
                     </span>
-                    <span className="mt-0.5 block truncate text-caption text-slate-500">
+                    <span className="mt-0.5 block truncate text-footnote text-slate-400">
                       {host.hostname}
                       {host.port && host.port !== 22 ? `:${host.port}` : ""}
                     </span>
@@ -287,7 +287,7 @@ export function Sidebar() {
                     <span className="block truncate text-body font-medium text-slate-100">
                       {host.label}
                     </span>
-                    <span className="mt-0.5 block truncate text-caption text-slate-500">
+                    <span className="mt-0.5 block truncate text-footnote text-slate-400">
                       {host.hostname}
                       {host.port && host.port !== 22 ? `:${host.port}` : ""}
                     </span>
@@ -320,14 +320,14 @@ export function Sidebar() {
                 <span className="min-w-0 flex-1 truncate text-body font-medium text-slate-100">
                   {session.hostname}
                 </span>
-                <span className="shrink-0 text-caption text-slate-400">{session.status}</span>
-                <span className="shrink-0 text-caption tabular-nums text-slate-500">
+                <span className="shrink-0 text-footnote text-slate-400">{session.status}</span>
+                <span className="shrink-0 text-footnote tabular-nums text-slate-400">
                   {session.duration}
                 </span>
               </button>
             ))
           ) : (
-            <p className="px-2 py-1.5 text-footnote text-slate-500">
+            <p className="px-2 py-1.5 text-footnote text-slate-400">
               Open a host to pin its session here for quick switching.
             </p>
           )}
