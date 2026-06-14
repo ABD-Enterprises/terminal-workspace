@@ -106,8 +106,6 @@ export function Sidebar() {
     }
     navigate(`/sessions?tabId=${result.tabId}`);
   };
-  const favoriteCount = hosts.filter((host) => host.favorite).length;
-  const groupCount = new Set(hosts.map((host) => host.group).filter(Boolean)).size;
   const pinnedHosts = useMemo(
     () =>
       hosts
@@ -150,13 +148,6 @@ export function Sidebar() {
           Terminal Workspace
         </p>
         <h1 className="mt-0.5 text-base font-semibold text-slate-50">Local Vault</h1>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-400">
-          <span>{hosts.length} hosts</span>
-          <span aria-hidden="true">•</span>
-          <span>{favoriteCount} favorites</span>
-          <span aria-hidden="true">•</span>
-          <span>{groupCount} groups</span>
-        </div>
       </div>
 
       <div className="mt-2">
