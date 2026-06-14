@@ -54,6 +54,42 @@ body,
   margin: 0;
 }
 
+/*
+ * #112: native macOS chrome. Everything here is gated on the `data-tauri`
+ * attribute that AppShell sets only under the Tauri shell, so the browser
+ * build (and the e2e suite) renders exactly as before. tauri.conf.json gives
+ * the window the "sidebar" vibrancy material, an Overlay title bar, and a
+ * transparent webview; these rules let that material show through.
+ *
+ * The drag strip is full-width and zero-height in the browser; under Tauri it
+ * takes the title-bar height so the overlaid traffic lights have room and the
+ * window can be dragged from the top.
+ */
+.tw-titlebar {
+  height: 0;
+}
+
+html[data-tauri] body {
+  /* Transparent webview → the window's vibrancy material shows through. */
+  background: transparent;
+}
+
+html[data-tauri] .tw-shell {
+  padding-top: 1.75rem;
+}
+
+html[data-tauri] .tw-titlebar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 50;
+  height: 1.75rem;
+}
+
+html[data-tauri] aside {
+  /* Let the macOS sidebar material read through the source list. */
+  background-color: rgba(9, 19, 31, 0.45);
+}
+
 body {
   font-family: "Avenir Next", "SF Pro Display", "Segoe UI", sans-serif;
   color: var(--shell-text);

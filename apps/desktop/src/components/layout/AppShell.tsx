@@ -611,8 +611,25 @@ export function AppShell() {
     paletteRows[clampedSelectedIndex]?.run();
   };
 
+  // #112: mark the document for the native shell so macOS-only chrome
+  // (window vibrancy, traffic-light inset, translucent sidebar) is applied
+  // via CSS only under Tauri — the browser build stays visually identical.
+  useEffect(() => {
+    if (isTauriRuntime()) {
+      document.documentElement.setAttribute("data-tauri", "");
+    }
+  }, []);
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-transparent text-slate-100">
+    <div className="tw-shell flex h-screen w-screen overflow-hidden bg-transparent text-slate-100">
+      {/*
+        #112: native title bar. Zero-height in the browser build (so the
+        e2e/web layout is unchanged); on macOS the `data-tauri` marker gives
+        it the title-bar height, making a full-width drag region that clears
+        the overlaid traffic lights. `data-tauri-drag-region` lets the user
+        drag the window from this strip since titleBarStyle is Overlay.
+      */}
+      <div data-tauri-drag-region className="tw-titlebar" />
       <SessionRestoreManager />
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
