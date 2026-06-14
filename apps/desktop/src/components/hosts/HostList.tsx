@@ -62,7 +62,7 @@ export function HostList({
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[22px] border border-slate-800/80 bg-slate-950/50">
-      <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_116px_104px_100px_136px] gap-3 border-b border-slate-800/80 bg-slate-950/95 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+      <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_116px_104px_100px_180px] gap-3 border-b border-slate-800/80 bg-slate-950/95 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
         <span>Host</span>
         <span>Address</span>
         <span>Identity</span>
@@ -81,28 +81,49 @@ export function HostList({
             <Fragment key={host.id}>
               <div
                 className={cn(
-                  "grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_116px_104px_100px_136px] gap-3 border-b border-slate-900/80 px-3 py-2 text-[13px] transition",
+                  "grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_116px_104px_100px_180px] gap-3 border-b border-slate-900/80 px-3 py-2 text-[13px] transition",
                   selected ? "bg-emerald-400/10" : "bg-transparent hover:bg-slate-900/70"
                 )}
               >
-                <button type="button" onClick={() => onSelect(host.id)} className="min-w-0 text-left">
-                  <span className="flex items-center gap-2">
-                    <span
-                      aria-label={statusDotAriaLabel(status)}
-                      role="img"
-                      data-testid="host-status-dot"
-                      data-status={status}
-                      className={cn(
-                        "h-1.5 w-1.5 shrink-0 rounded-full",
-                        statusDotClass(status)
-                      )}
-                    />
-                    <span className="block truncate font-medium text-slate-100">{host.label}</span>
-                  </span>
-                  <p className="mt-0.5 truncate text-[11px] text-slate-500">
-                    {[formatHostProtocol(host.protocol), ...visibleTags].slice(0, 3).join(" · ") || "No tags"}
-                  </p>
-                </button>
+                {/*
+                  #104: favorite is a quiet LEADING affordance — a sibling of
+                  the select button, never inside the destructive action
+                  cluster. Ghost style (no border); amber only when active.
+                */}
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onToggleFavorite(host.id)}
+                    aria-label={host.favorite ? "Remove favorite" : "Add favorite"}
+                    aria-pressed={host.favorite}
+                    className={cn(
+                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm transition",
+                      host.favorite
+                        ? "text-amber-300 hover:text-amber-200"
+                        : "text-slate-600 hover:text-slate-300"
+                    )}
+                  >
+                    {host.favorite ? "★" : "☆"}
+                  </button>
+                  <button type="button" onClick={() => onSelect(host.id)} className="min-w-0 text-left">
+                    <span className="flex items-center gap-2">
+                      <span
+                        aria-label={statusDotAriaLabel(status)}
+                        role="img"
+                        data-testid="host-status-dot"
+                        data-status={status}
+                        className={cn(
+                          "h-1.5 w-1.5 shrink-0 rounded-full",
+                          statusDotClass(status)
+                        )}
+                      />
+                      <span className="block truncate font-medium text-slate-100">{host.label}</span>
+                    </span>
+                    <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                      {[formatHostProtocol(host.protocol), ...visibleTags].slice(0, 3).join(" · ") || "No tags"}
+                    </p>
+                  </button>
+                </div>
 
                 <button type="button" onClick={() => onSelect(host.id)} className="min-w-0 text-left">
                   <p className="truncate text-sm text-slate-200">{formatHostAddress(host)}</p>
@@ -135,38 +156,33 @@ export function HostList({
                   </p>
                 </button>
 
-                <div className="flex items-center justify-end gap-1">
-                  <button
-                    type="button"
-                    onClick={() => onToggleFavorite(host.id)}
-                    aria-label={host.favorite ? "Remove favorite" : "Add favorite"}
-                    className={cn(
-                      "rounded-lg border px-2 py-0.5 text-[11px] transition",
-                      host.favorite
-                        ? "border-amber-400/50 bg-amber-400/10 text-amber-200"
-                        : "border-slate-700 bg-slate-900/80 text-slate-400 hover:text-slate-100"
-                    )}
-                  >
-                    ★
-                  </button>
+                {/*
+                  #104: actions are Open / Edit / Delete only (favorite moved
+                  to the leading affordance above). 8px gaps, ~28px tall hit
+                  targets. Delete is de-emphasised (quiet ghost, brightens to
+                  rose only on hover) and pushed apart from the primary Open
+                  with an extra left margin so a misclick can't destroy a host.
+                */}
+                <div className="flex items-center justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => onConnect(host.id)}
-                    className="rounded-lg bg-emerald-400 px-2.5 py-0.5 text-[11px] font-medium text-slate-950 transition hover:bg-emerald-300"
+                    className="rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-medium text-slate-950 transition hover:bg-emerald-300"
                   >
                     Open
                   </button>
                   <button
                     type="button"
                     onClick={() => onEdit(host.id)}
-                    className="rounded-lg border border-slate-700 px-2.5 py-0.5 text-[11px] text-slate-200 transition hover:border-slate-500 hover:text-white"
+                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition hover:border-slate-500 hover:text-white"
                   >
                     Edit
                   </button>
                   <button
                     type="button"
                     onClick={() => onDelete(host.id)}
-                    className="rounded-lg border border-rose-500/40 px-2.5 py-0.5 text-[11px] text-rose-200 transition hover:border-rose-400 hover:text-white"
+                    aria-label={`Delete ${host.label}`}
+                    className="ml-1 rounded-lg px-2.5 py-1.5 text-xs text-slate-500 transition hover:bg-rose-500/10 hover:text-rose-200"
                   >
                     Delete
                   </button>
