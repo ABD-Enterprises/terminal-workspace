@@ -121,6 +121,29 @@ test.describe("hosts page", () => {
     await page.getByRole("button", { name: "Close" }).click();
   });
 
+  test("Import SSH config expands a glob Include into multiple hosts", async ({ page }) => {
+    await page.goto("/hosts");
+
+    // A config whose only directive is a glob Include. In demo mode the glob
+    // resolver returns two seeded fragments, so the import should bring in
+    // both — proving #93 glob expansion end to end.
+    const sshConfig = "Include conf.d/*\n";
+
+    const fileChooserPromise = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "Import SSH config" }).click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: "ssh-config-glob",
+      mimeType: "text/plain",
+      buffer: Buffer.from(sshConfig, "utf-8"),
+    });
+
+    await expect(page.getByRole("heading", { name: /SSH config import/i })).toBeVisible();
+    await expect(page.getByText("demo-staging").first()).toBeVisible();
+    await expect(page.getByText("demo-prod").first()).toBeVisible();
+    await page.getByRole("button", { name: "Close" }).click();
+  });
+
   test("quick-connect bar enables Connect only for a parseable target", async ({ page }) => {
     await page.goto("/hosts");
     const quickConnect = page.getByLabel("Quick connect");

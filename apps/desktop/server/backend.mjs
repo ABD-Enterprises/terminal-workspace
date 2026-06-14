@@ -2,9 +2,19 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { mkdir, mkdtemp, readFile, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rmdir,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { connect as connectNet, createServer as createNetServer } from "node:net";
-import { dirname, extname, join, normalize, posix as posixPath } from "node:path";
+import { basename, dirname, extname, join, normalize, posix as posixPath } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -77,6 +87,89 @@ function expandHome(pathname) {
   }
 
   return join(os.homedir(), pathname.slice(2));
+}
+
+// #93: SSH config Include glob expansion. SSH configs are text; cap each
+// matched file and the total match count so a pathological pattern can't
+// exhaust the import.
+const SSH_CONFIG_MAX_BYTES = 1024 * 1024;
+const SSH_CONFIG_GLOB_MAX_MATCHES = 256;
+
+function globToRegExp(pattern) {
+  let source = "^";
+  for (const char of pattern) {
+    if (char === "*") {
+      source += ".*";
+    } else if (char === "?") {
+      source += ".";
+    } else {
+      source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`${source}$`);
+}
+
+/**
+ * Expand an Include glob to the files it matches under ~/.ssh, each with its
+ * content. The directory and every match are resolved with realpath and must
+ * stay under the canonical ~/.ssh root — anything outside is refused/dropped.
+ * Only the final path component may be a glob.
+ */
+async function globSshConfigFiles(pattern) {
+  const sshRoot = await realpath(join(os.homedir(), ".ssh"));
+  const expanded = expandHome(pattern);
+  const parent = dirname(expanded);
+  const filePattern = basename(expanded);
+
+  if (/[*?[]/.test(parent)) {
+    throw new Error("glob in a directory component is not supported");
+  }
+
+  const parentReal = await realpath(parent);
+  const rootPrefix = sshRoot.endsWith("/") ? sshRoot : `${sshRoot}/`;
+  if (parentReal !== sshRoot && !parentReal.startsWith(rootPrefix)) {
+    throw new Error(`glob directory ${parentReal} is not under ${sshRoot}`);
+  }
+
+  const matcher = globToRegExp(filePattern);
+  const names = await readdir(parentReal);
+  const matches = [];
+  for (const name of names) {
+    if (!matcher.test(name)) {
+      continue;
+    }
+    let real;
+    try {
+      real = await realpath(join(parentReal, name));
+    } catch {
+      continue;
+    }
+    if (real !== sshRoot && !real.startsWith(rootPrefix)) {
+      continue;
+    }
+    let info;
+    try {
+      info = await stat(real);
+    } catch {
+      continue;
+    }
+    if (!info.isFile() || info.size > SSH_CONFIG_MAX_BYTES) {
+      continue;
+    }
+    let content;
+    try {
+      content = await readFile(real, "utf8");
+    } catch {
+      continue;
+    }
+    matches.push({ path: real, content });
+    if (matches.length >= SSH_CONFIG_GLOB_MAX_MATCHES) {
+      break;
+    }
+  }
+
+  matches.sort((left, right) => left.path.localeCompare(right.path));
+  return { matches };
 }
 
 function normalizeRemotePath(pathname) {
@@ -1274,6 +1367,18 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, result);
     } catch (error) {
       respondError(response, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/backend/ssh-config/glob") {
+    try {
+      const body = await readJson(request);
+      const result = await globSshConfigFiles(body.pattern);
+      sendJson(response, 200, result);
+    } catch (error) {
+      // A refused/outside-~/.ssh pattern is a 400, not a 500.
+      respondError(response, error, 400);
     }
     return;
   }

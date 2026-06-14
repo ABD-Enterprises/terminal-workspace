@@ -1,8 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveSshIncludes, type SshConfigFileReader } from "./ssh-config-include";
+import {
+  resolveSshIncludes,
+  type SshConfigFileReader,
+  type SshConfigGlobLister,
+} from "./ssh-config-include";
 
 function fileReaderFromMap(files: Record<string, string>): SshConfigFileReader {
   return async (path: string) => (path in files ? files[path] : null);
+}
+
+function globListerFromMap(matches: Record<string, string>): SshConfigGlobLister {
+  return async () =>
+    Object.entries(matches).map(([path, content]) => ({ path, content }));
 }
 
 describe("resolveSshIncludes", () => {
@@ -197,5 +206,72 @@ describe("resolveSshIncludes", () => {
     // to not eagerly fire readFile on a `#`-prefixed line. Verifying that.
     expect(readFile).not.toHaveBeenCalled();
     expect(text).toContain("# Include should-not-resolve");
+  });
+
+  it("skips a glob Include when no glob lister is supplied", async () => {
+    const readFile = vi.fn<SshConfigFileReader>(async () => null);
+
+    const { text, skipped } = await resolveSshIncludes("Include conf.d/*\n", {
+      readFile,
+    });
+
+    expect(text).not.toContain("Host");
+    expect(skipped).toContainEqual({
+      reason: "include-directive",
+      detail: expect.stringContaining("glob unsupported"),
+    });
+  });
+
+  it("expands a glob Include to its matches in lexical order", async () => {
+    const readFile = vi.fn<SshConfigFileReader>(async () => null);
+    const globFiles = globListerFromMap({
+      // Intentionally out of order to prove the resolver sorts by path.
+      "~/.ssh/conf.d/20-prod": "Host prod\n  HostName prod.example.com\n",
+      "~/.ssh/conf.d/10-staging": "Host staging\n  HostName staging.example.com\n",
+    });
+
+    const { text, skipped } = await resolveSshIncludes("Include conf.d/*\n", {
+      readFile,
+      globFiles,
+    });
+
+    expect(skipped).toEqual([]);
+    expect(text).toContain("Host staging");
+    expect(text).toContain("Host prod");
+    // 10-staging sorts before 20-prod.
+    expect(text.indexOf("Host staging")).toBeLessThan(text.indexOf("Host prod"));
+  });
+
+  it("logs a skip when a glob matches no files", async () => {
+    const readFile = vi.fn<SshConfigFileReader>(async () => null);
+    const globFiles: SshConfigGlobLister = async () => [];
+
+    const { skipped } = await resolveSshIncludes("Include conf.d/*\n", {
+      readFile,
+      globFiles,
+    });
+
+    expect(skipped).toContainEqual({
+      reason: "include-directive",
+      detail: expect.stringContaining("no matching files"),
+    });
+  });
+
+  it("recursively expands Includes found inside glob-matched files", async () => {
+    const readFile = fileReaderFromMap({
+      "~/.ssh/conf.d/base": "Host base\n  HostName base.example.com\n",
+    });
+    const globFiles = globListerFromMap({
+      "~/.ssh/conf.d/00-root": "Include base\nHost root\n  HostName root.example.com\n",
+    });
+
+    const { text, skipped } = await resolveSshIncludes("Include conf.d/*\n", {
+      readFile,
+      globFiles,
+    });
+
+    expect(skipped).toEqual([]);
+    expect(text).toContain("Host base");
+    expect(text).toContain("Host root");
   });
 });

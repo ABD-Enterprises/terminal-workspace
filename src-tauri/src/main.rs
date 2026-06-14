@@ -2820,6 +2820,184 @@ fn read_ssh_config_file_blocking(raw_path: &str) -> Result<ReadSshConfigFileResp
     Ok(ReadSshConfigFileResponse { content })
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GlobSshConfigFilesRequest {
+    pattern: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SshConfigGlobMatch {
+    path: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GlobSshConfigFilesResponse {
+    matches: Vec<SshConfigGlobMatch>,
+}
+
+/// Defensive cap on how many files one glob may expand to, so a pathological
+/// pattern over a huge directory can't pin the UI or balloon the import.
+const SSH_CONFIG_GLOB_MAX_MATCHES: usize = 256;
+
+/// Minimal shell-style matcher for the final path component of an `Include`
+/// glob. Supports `*` (any run) and `?` (any single char) — the shapes that
+/// cover real OpenSSH configs (`conf.d/*`, `*.conf`, `10-*`). `[` is treated
+/// literally; bracket classes in Include patterns are vanishingly rare.
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let text: Vec<char> = text.chars().collect();
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let mut star_pattern: Option<usize> = None;
+    let mut star_text = 0usize;
+    while ti < text.len() {
+        if pi < pattern.len() && (pattern[pi] == '?' || pattern[pi] == text[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < pattern.len() && pattern[pi] == '*' {
+            star_pattern = Some(pi);
+            star_text = ti;
+            pi += 1;
+        } else if let Some(start) = star_pattern {
+            pi = start + 1;
+            star_text += 1;
+            ti = star_text;
+        } else {
+            return false;
+        }
+    }
+    while pi < pattern.len() && pattern[pi] == '*' {
+        pi += 1;
+    }
+    pi == pattern.len()
+}
+
+/// Expand an `Include` glob (e.g. `~/.ssh/conf.d/*`) to the files it matches,
+/// each with its content. Security boundary mirrors the single-file reader:
+/// the glob's directory and every match are canonicalized and must live under
+/// `~/.ssh/`; matches outside it are dropped. Only the final component may be
+/// a glob — a glob in a directory component is refused.
+#[tauri::command]
+async fn termsnip_glob_ssh_config_files(
+    request: GlobSshConfigFilesRequest,
+) -> Result<GlobSshConfigFilesResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || glob_ssh_config_files_blocking(&request.pattern))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn glob_ssh_config_files_blocking(
+    raw_pattern: &str,
+) -> Result<GlobSshConfigFilesResponse, String> {
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "HOME env var is not set".to_string())?;
+    let ssh_root = home
+        .join(".ssh")
+        .canonicalize()
+        .map_err(|error| format!("cannot canonicalize ~/.ssh: {error}"))?;
+
+    let expanded = expand_home(raw_pattern);
+    let file_pattern = expanded
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("invalid glob pattern {raw_pattern}"))?
+        .to_string();
+    let parent = expanded
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // Only the final component may contain glob metacharacters.
+    let parent_text = parent.to_string_lossy();
+    if parent_text.contains('*') || parent_text.contains('?') || parent_text.contains('[') {
+        return Err("glob in a directory component is not supported".to_string());
+    }
+
+    let parent_canonical = parent
+        .canonicalize()
+        .map_err(|error| format!("cannot canonicalize {}: {error}", parent.display()))?;
+    if !parent_canonical.starts_with(&ssh_root) {
+        return Err(format!(
+            "glob directory {} is not under {}",
+            parent_canonical.display(),
+            ssh_root.display()
+        ));
+    }
+
+    let entries = std::fs::read_dir(&parent_canonical)
+        .map_err(|error| format!("cannot read {}: {error}", parent_canonical.display()))?;
+
+    let mut matches: Vec<SshConfigGlobMatch> = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let file_name = entry.file_name();
+        let name = match file_name.to_str() {
+            Some(name) => name,
+            None => continue,
+        };
+        if !glob_match(&file_pattern, name) {
+            continue;
+        }
+        let canonical = match entry.path().canonicalize() {
+            Ok(canonical) => canonical,
+            Err(_) => continue,
+        };
+        if !canonical.starts_with(&ssh_root) {
+            continue;
+        }
+        let metadata = match std::fs::metadata(&canonical) {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        if !metadata.is_file() || metadata.len() > SSH_CONFIG_MAX_BYTES {
+            continue;
+        }
+        let content = match std::fs::read_to_string(&canonical) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+        matches.push(SshConfigGlobMatch {
+            path: canonical.to_string_lossy().to_string(),
+            content,
+        });
+        if matches.len() >= SSH_CONFIG_GLOB_MAX_MATCHES {
+            break;
+        }
+    }
+
+    // OpenSSH applies glob matches in lexical order.
+    matches.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(GlobSshConfigFilesResponse { matches })
+}
+
+#[cfg(test)]
+mod ssh_config_glob_tests {
+    use super::{glob_match, glob_ssh_config_files_blocking};
+
+    #[test]
+    fn glob_match_supports_star_and_question() {
+        assert!(glob_match("*.conf", "app.conf"));
+        assert!(glob_match("10-*", "10-staging"));
+        assert!(glob_match("conf?", "conf1"));
+        assert!(glob_match("*", "anything"));
+        assert!(!glob_match("*.conf", "app.cfg"));
+        assert!(!glob_match("conf?", "conf12"));
+        assert!(!glob_match("10-*", "20-prod"));
+    }
+
+    #[test]
+    fn glob_refuses_directory_outside_ssh() {
+        // A pattern that resolves outside ~/.ssh must be rejected (either
+        // because the directory is not under ~/.ssh, or because ~/.ssh itself
+        // cannot be canonicalized in this environment — both are errors).
+        assert!(glob_ssh_config_files_blocking("/etc/*.conf").is_err());
+    }
+}
+
 #[tauri::command]
 async fn termsnip_create_backend_session(
     native_sessions: State<'_, NativeSessionRegistry>,
@@ -3246,6 +3424,7 @@ fn main() {
             termsnip_store_identity_passphrase,
             termsnip_clear_identity_passphrase,
             termsnip_read_ssh_config_file,
+            termsnip_glob_ssh_config_files,
             termsnip_create_backend_session,
             termsnip_close_backend_session,
             termsnip_resize_backend_session,

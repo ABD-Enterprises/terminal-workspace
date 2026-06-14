@@ -2,6 +2,7 @@ import type { BackendHostConnection, KnownHostScanResult, SnippetExecutionResult
 import type { PortForwardRecord } from "../types/forward";
 import type { KeyGenerationType, KeyMetadata } from "../types/key";
 import type { RemoteFileEntry, RemoteEntryKind } from "../types/transfer";
+import type { SshConfigGlobMatch } from "./ssh-config-include";
 
 interface DemoDirectoryResponse {
   entries: RemoteFileEntry[];
@@ -502,6 +503,24 @@ export async function copyDemoKeyToHost(payload: {
     return { ok: false, reason: "A target host is required." };
   }
   return { ok: true };
+}
+
+// #93: demo glob expansion. Demo mode ships sample data, so an Include glob
+// resolves to two seeded fragments — enough to demonstrate (and e2e-cover)
+// multi-file expansion without a real ~/.ssh tree. Paths derive from the
+// requested glob's directory so they read naturally.
+export async function globDemoSshConfigFiles(pattern: string): Promise<SshConfigGlobMatch[]> {
+  const dir = pattern.replace(/[*?[].*$/, "").replace(/\/+$/, "") || "~/.ssh/conf.d";
+  return [
+    {
+      path: `${dir}/10-staging`,
+      content: "Host demo-staging\n  HostName staging.demo.internal\n  User deploy\n",
+    },
+    {
+      path: `${dir}/20-prod`,
+      content: "Host demo-prod\n  HostName prod.demo.internal\n  User deploy\n",
+    },
+  ];
 }
 
 export async function scanDemoKnownHost(

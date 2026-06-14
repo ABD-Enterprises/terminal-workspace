@@ -28,8 +28,31 @@ export interface ResolveSshIncludesResult {
  */
 export type SshConfigFileReader = (resolvedPath: string) => Promise<string | null>;
 
+/** A single file matched by a glob Include, with its already-read content. */
+export interface SshConfigGlobMatch {
+  /** Canonical path of the matched file (used for cycle detection + base dir). */
+  path: string;
+  content: string;
+}
+
+/**
+ * Expand an OpenSSH glob Include pattern (e.g. `~/.ssh/conf.d/*`) into the
+ * concrete files it matches, returning each file's content. Implementations
+ * MUST refuse any pattern or match that resolves outside `~/.ssh/` and should
+ * return the matches in a stable order (OpenSSH applies matches lexically).
+ * Returning `[]` means "no matches / not available" — the caller logs a skip.
+ *
+ * #93: the native binding wraps `termsnip_glob_ssh_config_files`; the HTTP
+ * backend exposes `/api/backend/ssh-config/glob`; demo mode returns a seeded
+ * fixture. When no lister is supplied, glob Includes fall back to the previous
+ * "log and skip" behavior.
+ */
+export type SshConfigGlobLister = (pattern: string) => Promise<SshConfigGlobMatch[]>;
+
 export interface ResolveSshIncludesOptions {
   readFile: SshConfigFileReader;
+  /** Optional glob expander; when omitted, glob Includes are skipped. */
+  globFiles?: SshConfigGlobLister;
   /**
    * Directory used to resolve relative Include paths. OpenSSH resolves
    * relative includes against the directory of the file containing them.
@@ -46,6 +69,14 @@ export interface ResolveSshIncludesOptions {
    * (tens of thousands of files referenced from a top-level glob, etc).
    */
   maxDepth?: number;
+}
+
+/** Options after defaults are applied; `globFiles` stays optional. */
+interface ResolvedSshIncludesOptions {
+  readFile: SshConfigFileReader;
+  globFiles?: SshConfigGlobLister;
+  baseDir: string;
+  maxDepth: number;
 }
 
 const DEFAULT_BASE_DIR = "~/.ssh";
@@ -77,7 +108,7 @@ function hasGlobChar(value: string): boolean {
 
 async function expandText(
   text: string,
-  options: Required<ResolveSshIncludesOptions>,
+  options: ResolvedSshIncludesOptions,
   currentBaseDir: string,
   visited: Set<string>,
   depth: number,
@@ -125,13 +156,57 @@ async function expandText(
     const entries = rawValue.split(/\s+/).filter(Boolean);
     for (const entry of entries) {
       if (hasGlobChar(entry)) {
-        // Globs are valid OpenSSH but require directory listing in the
-        // backend. Deferring glob expansion to a follow-up; log explicitly
-        // so the user sees that part of their config was not imported.
-        skipped.push({
-          reason: "include-directive",
-          detail: `Include ${entry} (glob unsupported)`,
-        });
+        // #93: globs are valid OpenSSH. When a glob lister is available we
+        // ask the backend (native / HTTP / demo) to expand the pattern —
+        // refusing anything outside ~/.ssh — and inline each match in
+        // lexical order, exactly as OpenSSH does. Without a lister we keep
+        // the old "log and skip" behavior.
+        if (!options.globFiles) {
+          skipped.push({
+            reason: "include-directive",
+            detail: `Include ${entry} (glob unsupported)`,
+          });
+          continue;
+        }
+        const pattern = normalizePath(entry, currentBaseDir);
+        let matches: SshConfigGlobMatch[];
+        try {
+          matches = await options.globFiles(pattern);
+        } catch (error) {
+          skipped.push({
+            reason: "include-directive",
+            detail: `Include ${entry} (glob error: ${(error as Error).message})`,
+          });
+          continue;
+        }
+        if (matches.length === 0) {
+          skipped.push({
+            reason: "include-directive",
+            detail: `Include ${entry} (no matching files)`,
+          });
+          continue;
+        }
+        const ordered = [...matches].sort((left, right) => left.path.localeCompare(right.path));
+        for (const matchEntry of ordered) {
+          if (visited.has(matchEntry.path)) {
+            skipped.push({
+              reason: "include-directive",
+              detail: `Include ${matchEntry.path} (cycle)`,
+            });
+            continue;
+          }
+          const nextVisited = new Set(visited);
+          nextVisited.add(matchEntry.path);
+          const expanded = await expandText(
+            matchEntry.content,
+            options,
+            dirnamePath(matchEntry.path),
+            nextVisited,
+            depth + 1,
+            skipped
+          );
+          out.push(expanded);
+        }
         continue;
       }
       const normalized = normalizePath(entry, currentBaseDir);
@@ -193,8 +268,9 @@ export async function resolveSshIncludes(
   options: ResolveSshIncludesOptions
 ): Promise<ResolveSshIncludesResult> {
   const skipped: SshConfigImportSkip[] = [];
-  const filled: Required<ResolveSshIncludesOptions> = {
+  const filled: ResolvedSshIncludesOptions = {
     readFile: options.readFile,
+    globFiles: options.globFiles,
     baseDir: options.baseDir ?? DEFAULT_BASE_DIR,
     maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
   };

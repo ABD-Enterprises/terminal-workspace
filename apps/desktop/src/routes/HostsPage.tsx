@@ -24,7 +24,7 @@ import {
 import { launchHostSession } from "../lib/launch-host-session";
 import { parseSshConfig, toHostFormValues } from "../lib/ssh-config";
 import { resolveSshIncludes } from "../lib/ssh-config-include";
-import { readSshConfigFile } from "../lib/ssh-config-fs";
+import { globSshConfigFiles, readSshConfigFile } from "../lib/ssh-config-fs";
 
 // #113: quick-connect parser. Accepts the shapes a user actually types —
 // `ssh user@host -p 2222`, `user@host:2222`, `user@host`, `host:22`, `host`
@@ -202,6 +202,7 @@ export function HostsPage() {
           // where readSshConfigFile returns null.
           const expanded = await resolveSshIncludes(content, {
             readFile: readSshConfigFile,
+            globFiles: globSshConfigFiles,
           });
           const result = parseSshConfig(expanded.text);
           const skipped = [...result.skipped, ...expanded.skipped];
