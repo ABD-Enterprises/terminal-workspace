@@ -1,5 +1,6 @@
 import { sortHostCollection, useHostsStore } from "../store/hosts-store";
 import { useAppStore } from "../store/app-store";
+import { useIdentitiesStore } from "../store/identities-store";
 import { useKeysStore } from "../store/keys-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useSessionsStore } from "../store/sessions-store";
@@ -12,6 +13,7 @@ import {
   type VaultDeletionMap,
 } from "../store/vault-sync-store";
 import type { HostRecord } from "../types/host";
+import type { IdentityRecord } from "../types/identity";
 import type { KeyRecord } from "../types/key";
 import type { KnownHostRecord } from "../types/known-host";
 import type { SnippetRecord } from "../types/snippet";
@@ -25,6 +27,25 @@ export interface LocalVaultMetadata {
 }
 
 export interface LocalConfigBundle {
+  app: "TermSnip";
+  version: 4;
+  exportedAt: string;
+  vault: LocalVaultMetadata;
+  hosts: HostRecord[];
+  keys: KeyRecord[];
+  snippets: SnippetRecord[];
+  knownHosts: KnownHostRecord[];
+  /**
+   * M13 (#95): reusable identities now travel in the bundle so a
+   * cross-machine export → import preserves the host↔identity bindings.
+   * Older bundles (v1–v3) have no identities array; they import as [].
+   */
+  identities: IdentityRecord[];
+  deletions: VaultDeletionMap;
+}
+
+/** The pre-#95 bundle shape — vault + deletions, no identity records. */
+interface Version3LocalConfigBundle {
   app: "TermSnip";
   version: 3;
   exportedAt: string;
@@ -70,6 +91,7 @@ export interface LocalConfigImportAnalysis {
   keyCount: number;
   snippetCount: number;
   knownHostCount: number;
+  identityCount: number;
   currentVaultId: string;
   currentDeviceId: string;
   currentSnapshotId: string | null;
@@ -81,7 +103,7 @@ export interface LocalConfigImportAnalysis {
 }
 
 export interface PreparedLocalConfigImport {
-  bundle: LocalConfigBundle | Version2LocalConfigBundle | LegacyLocalConfigBundle;
+  bundle: ImportedLocalConfigBundle;
   analysis: LocalConfigImportAnalysis;
 }
 
@@ -102,6 +124,7 @@ export interface LocalConfigMergePlan {
   keys: LocalConfigMergeSection;
   snippets: LocalConfigMergeSection;
   knownHosts: LocalConfigMergeSection;
+  identities: LocalConfigMergeSection;
 }
 
 interface PreparedLocalConfigCollections {
@@ -109,6 +132,7 @@ interface PreparedLocalConfigCollections {
   keys: KeyRecord[];
   snippets: SnippetRecord[];
   knownHosts: KnownHostRecord[];
+  identities: IdentityRecord[];
 }
 
 interface PreparedLocalConfigDeletions {
@@ -126,7 +150,11 @@ interface MergeResult<T> {
   section: LocalConfigMergeSection;
 }
 
-type ImportedLocalConfigBundle = LocalConfigBundle | Version2LocalConfigBundle | LegacyLocalConfigBundle;
+type ImportedLocalConfigBundle =
+  | LocalConfigBundle
+  | Version3LocalConfigBundle
+  | Version2LocalConfigBundle
+  | LegacyLocalConfigBundle;
 
 export interface ApplyLocalConfigOptions {
   mode?: "replace" | "merge";
@@ -143,6 +171,10 @@ function sortSnippets(snippets: SnippetRecord[]) {
 
 function sortKnownHosts(knownHosts: KnownHostRecord[]) {
   return [...knownHosts].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function sortIdentities(identities: IdentityRecord[]) {
+  return [...identities].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 function createEmptyMergeSection(): LocalConfigMergeSection {
@@ -191,6 +223,10 @@ function isSnippetArray(value: unknown): value is SnippetRecord[] {
 }
 
 function isKnownHostArray(value: unknown): value is KnownHostRecord[] {
+  return Array.isArray(value);
+}
+
+function isIdentityArray(value: unknown): value is IdentityRecord[] {
   return Array.isArray(value);
 }
 
@@ -270,19 +306,31 @@ function prepareImportedCollections(
     }))
   );
   const importedKnownHosts = sortKnownHosts(importedBundle.knownHosts);
+  // M13 (#95): identity records only exist in v4+ bundles. Older bundles
+  // import as an empty set — the identities store's own migration still
+  // re-derives identities from the imported hosts, so nothing is lost
+  // beyond user-edited labels (which is exactly what v4 now preserves).
+  const importedIdentities =
+    importedBundle.version === 4 && isIdentityArray(importedBundle.identities)
+      ? sortIdentities(importedBundle.identities)
+      : [];
 
   return {
     hosts: importedHosts,
     keys: importedKeys,
     snippets: importedSnippets,
     knownHosts: importedKnownHosts,
+    identities: importedIdentities,
   };
 }
 
 function prepareImportedDeletions(
   importedBundle: ImportedLocalConfigBundle
 ): PreparedLocalConfigDeletions {
-  if (importedBundle.version !== 3 || !("deletions" in importedBundle)) {
+  if (
+    (importedBundle.version !== 3 && importedBundle.version !== 4) ||
+    !("deletions" in importedBundle)
+  ) {
     return normalizeDeletions();
   }
 
@@ -291,7 +339,9 @@ function prepareImportedDeletions(
 
 function getImportedVaultMetadata(importedBundle: ImportedLocalConfigBundle): LocalVaultMetadata | null {
   if (
-    (importedBundle.version === 2 || importedBundle.version === 3) &&
+    (importedBundle.version === 2 ||
+      importedBundle.version === 3 ||
+      importedBundle.version === 4) &&
     importedBundle.vault?.schema === "local-first-vault"
   ) {
     return importedBundle.vault;
@@ -335,6 +385,7 @@ function buildAppliedDeletionMap(
   const survivingKeyIds = new Set(appliedCollections.keys.map((record) => record.id));
   const survivingSnippetIds = new Set(appliedCollections.snippets.map((record) => record.id));
   const survivingKnownHostIds = new Set(appliedCollections.knownHosts.map((record) => record.id));
+  const survivingIdentityIds = new Set(appliedCollections.identities.map((record) => record.id));
 
   return {
     hosts: mergeDeletionEntries(localDeletions.hosts, importedDeletions.hosts, survivingHostIds),
@@ -345,14 +396,14 @@ function buildAppliedDeletionMap(
       importedDeletions.knownHosts,
       survivingKnownHostIds
     ),
-    // P2-DM1 batch 1: identities are not yet shipped in the bundle, but the
-    // map shape requires the field. Defer all local entries unconditionally
-    // (no surviving-id filter — identities don't yet have a corresponding
-    // applied collection in this bundle version).
+    // M13 (#95): identities now ship in the v4 bundle and have a real
+    // applied collection, so a deletion is only retained when the id
+    // didn't survive the merge — same surviving-id filter as every
+    // other collection.
     identities: mergeDeletionEntries(
       localDeletions.identities,
       importedDeletions.identities,
-      new Set<string>()
+      survivingIdentityIds
     ),
   };
 }
@@ -509,11 +560,18 @@ function buildMergePlan(
     sortKnownHosts,
     importedDeletions.knownHosts
   );
+  const mergedIdentities = mergeCollection(
+    localCollections.identities,
+    importedCollections.identities,
+    sortIdentities,
+    importedDeletions.identities
+  );
   const hasConflicts =
     mergedHosts.section.conflicts > 0 ||
     mergedKeys.section.conflicts > 0 ||
     mergedSnippets.section.conflicts > 0 ||
-    mergedKnownHosts.section.conflicts > 0;
+    mergedKnownHosts.section.conflicts > 0 ||
+    mergedIdentities.section.conflicts > 0;
 
   return {
     applicable: true,
@@ -522,6 +580,7 @@ function buildMergePlan(
     keys: mergedKeys.section,
     snippets: mergedSnippets.section,
     knownHosts: mergedKnownHosts.section,
+    identities: mergedIdentities.section,
   };
 }
 
@@ -580,34 +639,39 @@ function mergePreparedCollections(
     importedDeletions.knownHosts,
     conflictResolution
   );
+  const mergedIdentities = mergeCollection(
+    localCollections.identities,
+    importedCollections.identities,
+    sortIdentities,
+    importedDeletions.identities,
+    conflictResolution
+  );
 
   return {
     hosts: mergedHosts,
     keys: mergedKeys,
     snippets: mergedSnippets,
     knownHosts: mergedKnownHosts,
+    identities: mergedIdentities,
   };
 }
 
 export function buildLocalConfigBundle(): LocalConfigBundle {
   const appState = useAppStore.getState();
 
-  // Note: Identity records (P2-DM1 batch 1) are NOT in the v3 export bundle
-  // yet — this is deliberate. The auto-migration in identities-store
-  // re-derives identities from hosts on import, so a v3 round-trip still
-  // produces an equivalent identity set. User-edited identity labels are
-  // not yet preserved across import; full identity collection support
-  // lands when bundle version 4 ships with merge-plan semantics for
-  // the new collection. See issue #95 (M13).
+  // M13 (#95): the v4 bundle carries reusable identity records so a
+  // cross-machine export → import preserves user-edited identity labels
+  // and the host↔identity bindings. Prior versions relied on the
+  // identities-store migration re-deriving identities from hosts, which
+  // lost any manual edits. Older bundles still import cleanly (identities
+  // default to []).
   //
-  // KeyRecord.comment IS preserved through export/import — it's a
-  // field on the type that the keys array carries verbatim. The
-  // original M14 audit pickup referenced an earlier draft where the
-  // field was a separate sidecar; it ships as part of KeyRecord
-  // today. No action needed for M14 (#96).
+  // KeyRecord.comment IS preserved through export/import — it's a field on
+  // the type that the keys array carries verbatim (M14 / #96 needs no
+  // separate handling).
   return {
     app: "TermSnip",
-    version: 3,
+    version: 4,
     exportedAt: new Date().toISOString(),
     vault: {
       schema: "local-first-vault",
@@ -620,6 +684,7 @@ export function buildLocalConfigBundle(): LocalConfigBundle {
     keys: useKeysStore.getState().keys,
     snippets: useSnippetsStore.getState().snippets,
     knownHosts: useKnownHostsStore.getState().knownHosts,
+    identities: useIdentitiesStore.getState().identities,
     deletions: compactDeletionMap(useVaultSyncStore.getState().deletions),
   };
 }
@@ -631,7 +696,10 @@ function parseImportedLocalConfigBundle(bundle: unknown): PreparedLocalConfigImp
 
   if (
     bundle.app !== "TermSnip" ||
-    (bundle.version !== 1 && bundle.version !== 2 && bundle.version !== 3)
+    (bundle.version !== 1 &&
+      bundle.version !== 2 &&
+      bundle.version !== 3 &&
+      bundle.version !== 4)
   ) {
     throw new Error("Config import failed: unsupported TermSnip config version.");
   }
@@ -650,6 +718,13 @@ function parseImportedLocalConfigBundle(bundle: unknown): PreparedLocalConfigImp
 
   if (!isKnownHostArray(bundle.knownHosts)) {
     throw new Error("Config import failed: known hosts are missing or invalid.");
+  }
+
+  // v4 introduced the identities collection. When present it must be an
+  // array; when absent (v1–v3) it imports as empty. We don't hard-fail a
+  // v4 bundle that omits the field — treat it as [] for resilience.
+  if (bundle.version === 4 && "identities" in bundle && !isIdentityArray(bundle.identities)) {
+    throw new Error("Config import failed: identities are invalid.");
   }
 
   const importedBundle = bundle as unknown as ImportedLocalConfigBundle;
@@ -682,6 +757,7 @@ function parseImportedLocalConfigBundle(bundle: unknown): PreparedLocalConfigImp
       keyCount: importedCollections.keys.length,
       snippetCount: importedCollections.snippets.length,
       knownHostCount: importedCollections.knownHosts.length,
+      identityCount: importedCollections.identities.length,
       currentVaultId: appState.vaultId,
       currentDeviceId: appState.deviceId,
       currentSnapshotId: appState.lastAppliedSnapshotId,
@@ -697,6 +773,7 @@ function parseImportedLocalConfigBundle(bundle: unknown): PreparedLocalConfigImp
                 keys: useKeysStore.getState().keys,
                 snippets: useSnippetsStore.getState().snippets,
                 knownHosts: useKnownHostsStore.getState().knownHosts,
+                identities: useIdentitiesStore.getState().identities,
               },
               importedCollections,
               importedDeletions
@@ -726,6 +803,7 @@ export function applyImportedLocalConfigBundle(bundle: unknown, options: ApplyLo
     keys: useKeysStore.getState().keys,
     snippets: useSnippetsStore.getState().snippets,
     knownHosts: useKnownHostsStore.getState().knownHosts,
+    identities: useIdentitiesStore.getState().identities,
   };
   const importedCollections = prepareImportedCollections(importedBundle);
   const importedDeletions = prepareImportedDeletions(importedBundle);
@@ -743,7 +821,8 @@ export function applyImportedLocalConfigBundle(bundle: unknown, options: ApplyLo
     (mergedCollections.hosts.section.conflicts > 0 ||
       mergedCollections.keys.section.conflicts > 0 ||
       mergedCollections.snippets.section.conflicts > 0 ||
-      mergedCollections.knownHosts.section.conflicts > 0);
+      mergedCollections.knownHosts.section.conflicts > 0 ||
+      mergedCollections.identities.section.conflicts > 0);
 
   if (mode === "merge" && preparedImport.analysis.strategy !== "fast_forward" && preparedImport.analysis.strategy !== "divergent" && preparedImport.analysis.strategy !== "same_snapshot") {
     throw new Error("Config import merge is only available for imports from the current vault lineage.");
@@ -759,17 +838,21 @@ export function applyImportedLocalConfigBundle(bundle: unknown, options: ApplyLo
     mode === "merge" ? mergedCollections?.snippets.records ?? [] : importedCollections.snippets;
   const appliedKnownHosts =
     mode === "merge" ? mergedCollections?.knownHosts.records ?? [] : importedCollections.knownHosts;
+  const appliedIdentities =
+    mode === "merge" ? mergedCollections?.identities.records ?? [] : importedCollections.identities;
   const nextDeletions = buildAppliedDeletionMap(mode, importedDeletions, {
     hosts: appliedHosts,
     keys: appliedKeys,
     snippets: appliedSnippets,
     knownHosts: appliedKnownHosts,
+    identities: appliedIdentities,
   });
 
   useHostsStore.setState((state) => ({ ...state, hosts: appliedHosts }));
   useKeysStore.setState((state) => ({ ...state, keys: appliedKeys }));
   useSnippetsStore.setState((state) => ({ ...state, snippets: appliedSnippets }));
   useKnownHostsStore.setState((state) => ({ ...state, knownHosts: appliedKnownHosts }));
+  useIdentitiesStore.setState((state) => ({ ...state, identities: appliedIdentities }));
   useVaultSyncStore.getState().replaceDeletions(nextDeletions);
   const importedVault = getImportedVaultMetadata(importedBundle);
   if (importedVault?.vaultId) {
@@ -802,6 +885,7 @@ export function applyImportedLocalConfigBundle(bundle: unknown, options: ApplyLo
     keyCount: appliedKeys.length,
     snippetCount: appliedSnippets.length,
     knownHostCount: appliedKnownHosts.length,
+    identityCount: appliedIdentities.length,
     importStrategy: preparedImport.analysis.strategy,
     mode,
     mergePlan: preparedImport.analysis.mergePlan,
