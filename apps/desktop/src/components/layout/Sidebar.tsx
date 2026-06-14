@@ -137,17 +137,15 @@ export function Sidebar() {
 
   return (
     <aside
-      className={cn(
-        "flex shrink-0 flex-col border-r border-slate-800/80 bg-slate-950/85 backdrop-blur-xl",
-        workspaceDensity === "compact" ? "w-[226px] px-2 py-2" : "w-[244px] px-2.5 py-2.5"
-      )}
+      data-density={workspaceDensity}
+      className="flex w-[var(--sidebar-w)] shrink-0 flex-col border-r border-slate-800/80 bg-slate-950/85 px-[var(--space-shell)] py-[var(--space-shell)] backdrop-blur-xl"
     >
       {/* Header — pinned above the single scroll region. */}
       <div className="px-1.5">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-emerald-300">
+        <p className="text-caption font-semibold uppercase tracking-brand text-emerald-300">
           Terminal Workspace
         </p>
-        <h1 className="mt-0.5 text-base font-semibold text-slate-50">Local Vault</h1>
+        <h1 className="mt-0.5 text-title font-semibold text-slate-50">Local Vault</h1>
       </div>
 
       <div className="mt-2">
@@ -162,12 +160,9 @@ export function Sidebar() {
         type="button"
         onClick={openLocalTerminal}
         aria-label="Open local terminal"
-        className={cn(
-          "mt-2 flex items-center justify-between rounded-[12px] border border-emerald-400/40 bg-emerald-400/10 text-left transition hover:border-emerald-400/70 hover:bg-emerald-400/15",
-          workspaceDensity === "compact" ? "px-2.5 py-1.5" : "px-3 py-2"
-        )}
+        className="mt-2 flex items-center justify-between rounded-control border border-emerald-400/40 bg-emerald-400/10 px-3 py-[var(--space-row-y)] text-left transition hover:border-emerald-400/70 hover:bg-emerald-400/15"
       >
-        <span className="text-[13px] font-medium text-emerald-100">Local terminal</span>
+        <span className="text-callout font-medium text-emerald-100">Local terminal</span>
         <span aria-hidden="true" className="text-emerald-300">
           ⌘
         </span>
@@ -184,8 +179,7 @@ export function Sidebar() {
               aria-label={`${item.label} — ${item.description}`}
               className={({ isActive }) =>
                 cn(
-                  "flex items-center gap-2.5 rounded-lg px-2.5 text-[13px] transition",
-                  workspaceDensity === "compact" ? "py-1.5" : "py-2",
+                  "flex items-center gap-2.5 rounded-control px-2.5 py-[var(--space-row-y)] text-callout transition",
                   isActive
                     ? "bg-emerald-400/15 font-medium text-emerald-100"
                     : "text-slate-300 hover:bg-slate-800/60 hover:text-slate-100"
@@ -231,7 +225,7 @@ export function Sidebar() {
                     navigate(`/sessions?tabId=${result.tabId}`);
                   }}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition",
+                    "flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition",
                     active ? "bg-emerald-400/10" : "hover:bg-slate-800/60"
                   )}
                 >
@@ -243,10 +237,10 @@ export function Sidebar() {
                     )}
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12px] font-medium text-slate-100">
+                    <span className="block truncate text-body font-medium text-slate-100">
                       {host.label}
                     </span>
-                    <span className="mt-0.5 block truncate text-[10px] text-slate-500">
+                    <span className="mt-0.5 block truncate text-caption text-slate-500">
                       {host.hostname}
                       {host.port && host.port !== 22 ? `:${host.port}` : ""}
                     </span>
@@ -278,7 +272,7 @@ export function Sidebar() {
                     navigate(`/sessions?tabId=${result.tabId}`);
                   }}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition",
+                    "flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition",
                     active ? "bg-emerald-400/10" : "hover:bg-slate-800/60"
                   )}
                 >
@@ -290,10 +284,10 @@ export function Sidebar() {
                     )}
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12px] font-medium text-slate-100">
+                    <span className="block truncate text-body font-medium text-slate-100">
                       {host.label}
                     </span>
-                    <span className="mt-0.5 block truncate text-[10px] text-slate-500">
+                    <span className="mt-0.5 block truncate text-caption text-slate-500">
                       {host.hostname}
                       {host.port && host.port !== 22 ? `:${host.port}` : ""}
                     </span>
@@ -319,21 +313,21 @@ export function Sidebar() {
                   }
                 }}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition",
+                  "flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition",
                   session.active ? "bg-emerald-400/10" : "hover:bg-slate-800/60"
                 )}
               >
-                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-slate-100">
+                <span className="min-w-0 flex-1 truncate text-body font-medium text-slate-100">
                   {session.hostname}
                 </span>
-                <span className="shrink-0 text-[10px] text-slate-400">{session.status}</span>
-                <span className="shrink-0 text-[10px] tabular-nums text-slate-500">
+                <span className="shrink-0 text-caption text-slate-400">{session.status}</span>
+                <span className="shrink-0 text-caption tabular-nums text-slate-500">
                   {session.duration}
                 </span>
               </button>
             ))
           ) : (
-            <p className="px-2 py-1.5 text-[11px] text-slate-500">
+            <p className="px-2 py-1.5 text-footnote text-slate-500">
               Open a host to pin its session here for quick switching.
             </p>
           )}

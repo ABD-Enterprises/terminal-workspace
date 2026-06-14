@@ -176,7 +176,7 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
   return (
     <SidebarSection title="Groups" count={groups.length}>
       {filteredGroups.length === 0 ? (
-        <p className="px-2 py-1 text-[11px] text-slate-500">
+        <p className="px-2 py-1 text-footnote text-slate-500">
           {hosts.length === 0
             ? "No hosts yet — add one from the Hosts page."
             : "No groups match the current search."}
@@ -199,20 +199,20 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
             <div
               key={groupKey}
               className={cn(
-                "mb-1 rounded-[14px]",
+                "mb-1 rounded-surface",
                 isDragOver && "bg-emerald-400/10 border border-emerald-400/50"
               )}
               onDragOver={(event) => onDragOver(event, groupKey)}
               onDragLeave={onDragLeave}
               onDrop={(event) => onDrop(event, groupKey)}
             >
-              <div className="group flex w-full items-center justify-between rounded-[14px] px-2 py-1.5 hover:bg-slate-800/50 transition">
+              <div className="group flex w-full items-center justify-between rounded-surface px-2 py-1.5 hover:bg-slate-800/50 transition">
                 <button
                   type="button"
                   onClick={() => toggleGroup(groupKey)}
                   className="flex min-w-0 flex-1 items-center gap-2 text-left"
                 >
-                  <span className="text-[10px] text-slate-500 w-3 text-center">
+                  <span className="text-caption text-slate-500 w-3 text-center">
                     {isExpanded ? "▼" : "▶"}
                   </span>
                   {isRenaming ? (
@@ -232,12 +232,12 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
                         }
                       }}
                       onBlur={commitRename}
-                      className="flex-1 rounded bg-slate-950/80 px-1.5 py-0.5 text-[12px] text-slate-100 outline-none ring-1 ring-emerald-400/40 focus:ring-emerald-400"
+                      className="flex-1 rounded bg-slate-950/80 px-1.5 py-0.5 text-body text-slate-100 outline-none ring-1 ring-emerald-400/40 focus:ring-emerald-400"
                     />
                   ) : (
                     <span
                       className={cn(
-                        "truncate text-[12px] font-medium",
+                        "truncate text-body font-medium",
                         isUngrouped ? "text-slate-500 italic" : "text-slate-200"
                       )}
                     >
@@ -256,7 +256,7 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
                         }}
                         title="Rename group (updates every host)"
                         aria-label={`Rename group ${displayName}`}
-                        className="text-[10px] text-slate-400 transition hover:text-emerald-400"
+                        className="text-caption text-slate-400 transition hover:text-emerald-400"
                       >
                         ✎
                       </button>
@@ -274,17 +274,17 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
                         }}
                         title="Detach all hosts from this group"
                         aria-label={`Remove group ${displayName}`}
-                        className="text-[10px] text-slate-400 transition hover:text-rose-400"
+                        className="text-caption text-slate-400 transition hover:text-rose-400"
                       >
                         ×
                       </button>
                     </div>
                   ) : null}
-                  <span className="text-[10px] text-slate-500">
+                  <span className="text-caption text-slate-500">
                     {groupHosts.length} host{groupHosts.length === 1 ? "" : "s"}
                   </span>
                   {connectedCount > 0 ? (
-                    <span className="text-[10px] text-emerald-400">
+                    <span className="text-caption text-emerald-400">
                       {connectedCount} conn
                     </span>
                   ) : null}
@@ -300,9 +300,9 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
                         key={host.id}
                         draggable
                         onDragStart={(event) => onDragStart(event, host.id)}
-                        className="flex items-center justify-between rounded-lg px-2 py-1 hover:bg-slate-800/40 cursor-grab active:cursor-grabbing"
+                        className="flex items-center justify-between rounded-control px-2 py-1 hover:bg-slate-800/40 cursor-grab active:cursor-grabbing"
                       >
-                        <span className="truncate text-[11px] text-slate-300">{host.label}</span>
+                        <span className="truncate text-footnote text-slate-300">{host.label}</span>
                         {isConnected ? (
                           <div className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                         ) : null}
