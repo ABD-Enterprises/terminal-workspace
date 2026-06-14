@@ -12,6 +12,38 @@ import {
 } from "./backend-runtime";
 import type { BackendHostConnection } from "./backend-contract";
 
+// #101 native-path coverage: the native session socket consumes Tauri
+// `termsnip://session-stream` events. Capture the registered listener so
+// tests can drive the event sequence the Rust session loop emits. This is
+// the renderer half of every native terminal session and was previously
+// untested — all session tests ran in browser/mock mode.
+const eventBus = vi.hoisted(() => {
+  const handlers: Array<(event: { payload: unknown }) => void> = [];
+  return {
+    handlers,
+    emit(payload: unknown) {
+      for (const handler of handlers) {
+        handler({ payload });
+      }
+    },
+    reset() {
+      handlers.length = 0;
+    },
+  };
+});
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (_name: string, handler: (event: { payload: unknown }) => void) => {
+    eventBus.handlers.push(handler);
+    return () => {
+      const index = eventBus.handlers.indexOf(handler);
+      if (index >= 0) {
+        eventBus.handlers.splice(index, 1);
+      }
+    };
+  }),
+}));
+
 const originalWindow = globalThis.window;
 const originalFetch = globalThis.fetch;
 const originalWebSocket = globalThis.WebSocket;
@@ -39,6 +71,7 @@ function setWindowStub(windowStub: unknown) {
 
 afterEach(() => {
   resetBackendRuntimeCacheForTests();
+  eventBus.reset();
   vi.restoreAllMocks();
 
   if (originalWindow) {
@@ -200,5 +233,128 @@ describe("backend runtime bridge", () => {
     await openSessionSocket("session-123");
 
     expect(sockets[0]?.url).toBe(["ws", "://workspace.local:5173/ws/sessions/session-123"].join(""));
+  });
+
+  // ---- Native session socket lifecycle (#101) ---------------------------
+  // The path the real Tauri app uses for every terminal session. Drives the
+  // full handshake: open stream -> deliver matching-stream messages -> drop
+  // foreign-stream events -> close. Previously zero coverage, which is how
+  // "all tests green" coexisted with "the terminal does not work" in the
+  // shipped native build.
+
+  it("native socket opens a stream via the tauri invoke bridge", async () => {
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "termsnip_open_backend_session_stream") {
+        return { ok: true, streamId: "stream-1" };
+      }
+      return { ok: true };
+    });
+    setWindowStub({ __TAURI_INTERNALS__: { invoke } });
+
+    const socket = await openSessionSocket("sess-1");
+
+    expect(invoke).toHaveBeenCalledWith("termsnip_open_backend_session_stream", {
+      request: { sessionId: "sess-1" },
+    });
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it("native socket delivers messages tagged with its own streamId", async () => {
+    const invoke = vi.fn(async (command: string) =>
+      command === "termsnip_open_backend_session_stream"
+        ? { ok: true, streamId: "stream-1" }
+        : { ok: true }
+    );
+    setWindowStub({ __TAURI_INTERNALS__: { invoke } });
+
+    const socket = await openSessionSocket("sess-1");
+    const messages: string[] = [];
+    socket.addEventListener("message", (event) => messages.push(event.data));
+
+    eventBus.emit({
+      sessionId: "sess-1",
+      streamId: "stream-1",
+      kind: "message",
+      data: "hello from pty",
+    });
+
+    expect(messages).toEqual(["hello from pty"]);
+  });
+
+  it("native socket ignores events for a different session or stream", async () => {
+    const invoke = vi.fn(async (command: string) =>
+      command === "termsnip_open_backend_session_stream"
+        ? { ok: true, streamId: "stream-1" }
+        : { ok: true }
+    );
+    setWindowStub({ __TAURI_INTERNALS__: { invoke } });
+
+    const socket = await openSessionSocket("sess-1");
+    const messages: string[] = [];
+    socket.addEventListener("message", (event) => messages.push(event.data));
+
+    // Wrong session id, and wrong stream id — both must be dropped.
+    eventBus.emit({ sessionId: "other", streamId: "stream-1", kind: "message", data: "x" });
+    eventBus.emit({ sessionId: "sess-1", streamId: "stream-9", kind: "message", data: "y" });
+
+    expect(messages).toEqual([]);
+  });
+
+  it("native socket send() forwards input through the tauri bridge", async () => {
+    const invoke = vi.fn(async (command: string) =>
+      command === "termsnip_open_backend_session_stream"
+        ? { ok: true, streamId: "stream-1" }
+        : { ok: true }
+    );
+    setWindowStub({ __TAURI_INTERNALS__: { invoke } });
+
+    const socket = await openSessionSocket("sess-1");
+    socket.send("ls -la\n");
+
+    expect(invoke).toHaveBeenCalledWith("termsnip_send_backend_session_stream", {
+      request: { data: "ls -la\n", sessionId: "sess-1", streamId: "stream-1" },
+    });
+  });
+
+  it("native socket finishes on a close event", async () => {
+    const invoke = vi.fn(async (command: string) =>
+      command === "termsnip_open_backend_session_stream"
+        ? { ok: true, streamId: "stream-1" }
+        : { ok: true }
+    );
+    setWindowStub({ __TAURI_INTERNALS__: { invoke } });
+
+    const socket = await openSessionSocket("sess-1");
+    let closed = false;
+    socket.addEventListener("close", () => {
+      closed = true;
+    });
+
+    eventBus.emit({ sessionId: "sess-1", streamId: "stream-1", kind: "close" });
+
+    expect(closed).toBe(true);
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
+  });
+
+  it("native socket surfaces error events to error listeners", async () => {
+    const invoke = vi.fn(async (command: string) =>
+      command === "termsnip_open_backend_session_stream"
+        ? { ok: true, streamId: "stream-1" }
+        : { ok: true }
+    );
+    setWindowStub({ __TAURI_INTERNALS__: { invoke } });
+
+    const socket = await openSessionSocket("sess-1");
+    const errors: (string | undefined)[] = [];
+    socket.addEventListener("error", (event) => errors.push(event.message));
+
+    eventBus.emit({
+      sessionId: "sess-1",
+      streamId: "stream-1",
+      kind: "error",
+      message: "ssh channel closed unexpectedly",
+    });
+
+    expect(errors).toEqual(["ssh channel closed unexpectedly"]);
   });
 });
