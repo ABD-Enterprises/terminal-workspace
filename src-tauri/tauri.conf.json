@@ -7,12 +7,20 @@
     "frontendDist": "../apps/desktop/dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Terminal Workspace",
         "width": 1400,
         "height": 900,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "transparent": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "windowEffects": {
+          "effects": ["sidebar"],
+          "state": "followsWindowActiveState"
+        }
       }
     ],
     "security": {
