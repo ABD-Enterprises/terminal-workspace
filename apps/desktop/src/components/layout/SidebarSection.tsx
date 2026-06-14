@@ -22,7 +22,7 @@ interface SidebarSectionProps {
 export function SidebarSection({
   title,
   count,
-  accentClass = "text-slate-500",
+  accentClass = "text-slate-400",
   regionLabel,
   defaultOpen = true,
   children,
@@ -36,12 +36,12 @@ export function SidebarSection({
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 rounded-control px-1.5 py-1 text-left transition hover:bg-slate-800/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/40"
+        className="flex min-h-7 w-full items-center gap-1.5 rounded-control px-1.5 py-1 text-left transition hover:bg-slate-800/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/40"
       >
         <span
           aria-hidden="true"
           className={cn(
-            "inline-block text-[8px] leading-none text-slate-500 transition-transform",
+            "inline-block text-[8px] leading-none text-slate-400 transition-transform",
             open ? "" : "-rotate-90"
           )}
         >
@@ -51,7 +51,7 @@ export function SidebarSection({
           {title}
         </span>
         {typeof count === "number" ? (
-          <span className="ml-auto text-caption tabular-nums text-slate-600">{count}</span>
+          <span className="ml-auto text-caption tabular-nums text-slate-400">{count}</span>
         ) : null}
       </button>
       {open ? (
