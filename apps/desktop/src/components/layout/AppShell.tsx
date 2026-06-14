@@ -745,7 +745,7 @@ export function AppShell() {
                         className={cn(
                           "rounded-xl border px-3 py-2 text-left transition",
                           isRowSelected(command.key)
-                            ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                            ? "border-emerald-400/45 bg-emerald-400/10"
                             : "border-slate-800 bg-slate-900/80 hover:border-emerald-400/50 hover:bg-slate-900"
                         )}
                       >
@@ -776,7 +776,7 @@ export function AppShell() {
                         className={cn(
                           "rounded-xl border px-3 py-2 text-left transition",
                           isRowSelected(command.key)
-                            ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                            ? "border-emerald-400/45 bg-emerald-400/10"
                             : "border-slate-800 bg-slate-900/80 hover:border-slate-600 hover:bg-slate-900"
                         )}
                       >
@@ -811,7 +811,7 @@ export function AppShell() {
                         className={cn(
                           "flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition",
                           isRowSelected(`section:${item.path}`)
-                            ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                            ? "border-emerald-400/45 bg-emerald-400/10"
                             : location.pathname.startsWith(item.path)
                               ? "border-emerald-400/50 bg-emerald-400/10"
                               : "border-slate-800 bg-slate-900/80 hover:border-slate-600 hover:bg-slate-900"
@@ -855,7 +855,7 @@ export function AppShell() {
                           className={cn(
                             "flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition",
                             isRowSelected(`session:${tab.id}`)
-                              ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                              ? "border-emerald-400/45 bg-emerald-400/10"
                               : activeSessionTabId === tab.id
                                 ? "border-emerald-400/50 bg-emerald-400/10"
                                 : "border-slate-800 bg-slate-900/80 hover:border-slate-600 hover:bg-slate-900"
@@ -906,7 +906,7 @@ export function AppShell() {
                         className={cn(
                           "rounded-xl border px-3 py-2.5",
                           isRowSelected(`host:${host.id}`)
-                            ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                            ? "border-emerald-400/45 bg-emerald-400/10"
                             : "border-slate-800 bg-slate-900/80"
                         )}
                       >
@@ -990,7 +990,7 @@ export function AppShell() {
                         className={cn(
                           "rounded-xl border px-3 py-2.5",
                           isRowSelected(`snippet:${snippet.id}`)
-                            ? "border-emerald-400 bg-emerald-400/15 ring-1 ring-emerald-400/40"
+                            ? "border-emerald-400/45 bg-emerald-400/10"
                             : "border-slate-800 bg-slate-900/80"
                         )}
                       >

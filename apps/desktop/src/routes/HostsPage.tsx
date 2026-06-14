@@ -468,10 +468,12 @@ export function HostsPage() {
               </div>
             ) : null}
             <div className="mt-4 flex justify-end">
+              {/* #111: dismiss is a neutral action — accent is reserved for
+                  the single primary action per view. */}
               <button
                 type="button"
                 onClick={() => setImportReport(null)}
-                className="rounded-xl bg-emerald-400 px-3 py-1.5 text-sm font-medium text-slate-950 transition hover:bg-emerald-300"
+                className="rounded-xl border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
               >
                 Close
               </button>
