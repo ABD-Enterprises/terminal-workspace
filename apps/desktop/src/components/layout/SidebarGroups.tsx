@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import { cn } from "../../lib/utils";
 import { useHostsStore } from "../../store/hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
+import { SidebarSection } from "./SidebarSection";
 
 interface DerivedGroup {
   name: string;
@@ -173,24 +174,15 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
   };
 
   return (
-    <div className="mt-2 min-h-0 flex-1 overflow-hidden rounded-[18px] border border-slate-800/90 bg-slate-900/60 flex flex-col">
-      <div className="flex items-center justify-between border-b border-slate-800/80 px-3 py-2 shrink-0">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
-          Groups
+    <SidebarSection title="Groups" count={groups.length}>
+      {filteredGroups.length === 0 ? (
+        <p className="px-2 py-1 text-[11px] text-slate-500">
+          {hosts.length === 0
+            ? "No hosts yet — add one from the Hosts page."
+            : "No groups match the current search."}
         </p>
-        <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
-          {groups.length}
-        </span>
-      </div>
-      <div className="max-h-full overflow-y-auto overflow-x-hidden p-2 flex-1">
-        {filteredGroups.length === 0 ? (
-          <p className="px-2.5 py-2 text-[11px] text-slate-500">
-            {hosts.length === 0
-              ? "No hosts yet — add one from the Hosts page."
-              : "No groups match the current search."}
-          </p>
-        ) : null}
-        {filteredGroups.map((group) => {
+      ) : null}
+      {filteredGroups.map((group) => {
           const isUngrouped = group.name === UNGROUPED_KEY;
           const displayName = isUngrouped ? "Ungrouped" : group.name;
           const groupKey = group.name;
@@ -322,8 +314,7 @@ export function SidebarGroups({ searchQuery }: SidebarGroupsProps) {
             </div>
           );
         })}
-      </div>
-    </div>
+    </SidebarSection>
   );
 }
 
