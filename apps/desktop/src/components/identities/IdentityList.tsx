@@ -71,12 +71,16 @@ export function IdentityList({
                   <p className="truncate text-sm font-medium text-slate-100">
                     {identity.label}
                   </p>
+                  {/*
+                    #109: provenance is quiet inline text, not a coloured pill.
+                    Colour is reserved for genuine state (connected / error /
+                    trust); imported vs derived is metadata, so it reads as a
+                    tonal slate difference with the detail in the tooltip.
+                  */}
                   <span
                     className={cn(
-                      "rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em]",
-                      identity.source === "imported"
-                        ? "border-emerald-400/40 text-emerald-200"
-                        : "border-slate-600 text-slate-300"
+                      "shrink-0 text-[10px] uppercase tracking-[0.14em]",
+                      identity.source === "imported" ? "text-slate-300" : "text-slate-500"
                     )}
                     title={
                       identity.source === "imported"
@@ -106,13 +110,9 @@ export function IdentityList({
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {/* #109: usage count is quiet metadata, not a coloured pill. */}
                 <span
-                  className={cn(
-                    "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.14em]",
-                    usageCount === 0
-                      ? "border-slate-700 text-slate-500"
-                      : "border-sky-400/40 text-sky-200"
-                  )}
+                  className="text-[11px] tabular-nums text-slate-500"
                   title={
                     usageCount === 0
                       ? "No hosts use this identity yet."
