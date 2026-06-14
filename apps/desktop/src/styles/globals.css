@@ -28,6 +28,25 @@ html[data-app-theme="light"] {
   --shell-accent: #1a9474;
 }
 
+/*
+ * #110: density tokens. Compact vs comfortable is driven from ONE source —
+ * the `data-density` attribute set on the sidebar — instead of per-element
+ * compact/comfortable ternaries. Components read these variables (e.g.
+ * `py-[var(--space-row-y)]`). Values sit on the 8pt spacing grid.
+ */
+:root,
+[data-density="compact"] {
+  --sidebar-w: 226px;
+  --space-shell: 8px;
+  --space-row-y: 6px;
+}
+
+[data-density="comfortable"] {
+  --sidebar-w: 244px;
+  --space-shell: 12px;
+  --space-row-y: 8px;
+}
+
 html,
 body,
 #root {

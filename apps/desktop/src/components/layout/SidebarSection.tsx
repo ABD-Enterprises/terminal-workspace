@@ -36,7 +36,7 @@ export function SidebarSection({
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition hover:bg-slate-800/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/40"
+        className="flex w-full items-center gap-1.5 rounded-control px-1.5 py-1 text-left transition hover:bg-slate-800/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/40"
       >
         <span
           aria-hidden="true"
@@ -47,11 +47,11 @@ export function SidebarSection({
         >
           ▼
         </span>
-        <span className={cn("text-[10px] font-semibold uppercase tracking-[0.18em]", accentClass)}>
+        <span className={cn("text-caption font-semibold uppercase tracking-label", accentClass)}>
           {title}
         </span>
         {typeof count === "number" ? (
-          <span className="ml-auto text-[10px] tabular-nums text-slate-600">{count}</span>
+          <span className="ml-auto text-caption tabular-nums text-slate-600">{count}</span>
         ) : null}
       </button>
       {open ? (
