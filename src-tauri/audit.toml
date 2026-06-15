@@ -1,0 +1,17 @@
+# cargo-audit configuration documenting advisories consciously accepted for the
+# macOS-only ship. Verified clean (exit 0) with:
+#   cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2023-0071
+# (the installed cargo-audit doesn't auto-load this file's ignore table, so the
+# enforcing invocation passes --ignore explicitly; keep both in sync.)
+[advisories]
+ignore = [
+  # rsa — Marvin Attack timing side-channel (medium). Pulled in transitively
+  # via the RSA key path. No fixed upstream release exists yet; practical risk
+  # for a desktop SSH client is low (requires local timing observation).
+  # Re-evaluate when a patched `rsa` ships.
+  "RUSTSEC-2023-0071",
+]
+# Note: cargo audit also reports gtk-rs GTK3 bindings (atk/gdk/gtk/…) as
+# "unmaintained". Those are Linux-only deps Tauri links for its Linux target;
+# this app ships macOS-only, so they are not used at runtime. They are
+# informational warnings (non-failing) and are left visible intentionally.
