@@ -1,4 +1,4 @@
-title = "TermSnip gitleaks configuration"
+title = "Terminal Workspace gitleaks configuration"
 
 [extend]
 useDefault = true
@@ -10,4 +10,16 @@ paths = [
 ]
 regexes = [
   '''MACOS_NOTARY_KEY_BASE64'''
+]
+
+[[allowlists]]
+description = "verified test fixtures / PEM-header boundary strings — not real secrets"
+paths = [
+  # private-key VALIDATOR + its test contain only the literal
+  # `-----BEGIN/END ... PRIVATE KEY-----` boundary strings used to parse
+  # pasted keys (no key material).
+  '''^apps/desktop/src/lib/private-key-validation\.ts$''',
+  '''^apps/desktop/src/lib/private-key-validation\.test\.ts$''',
+  # fixed, obviously-fake bearer token used to test header token extraction.
+  '''^tests/integration/backend-auth\.integration\.test\.ts$'''
 ]
