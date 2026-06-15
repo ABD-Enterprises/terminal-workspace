@@ -107,3 +107,13 @@ jobs:
       # stays #[ignore] (needs an unsandboxed sshd — tracked in #101).
       - name: Compile + test the Rust crate
         run: npm run validate:rust
+
+      # #101: the localhost-sshd session fixture is #[ignore] by default (it
+      # needs an unsandboxed sshd, which sandboxed local/dev envs lack). This
+      # self-hosted macOS runner is a real machine, so run it explicitly to
+      # exercise the SSH session lifecycle (create -> open stream -> I/O ->
+      # close) end-to-end on every PR. A failure fails Validate. The
+      # localShell / external-protocol session lifecycle already runs in the
+      # validate:rust step above (those fixtures are not #[ignore]).
+      - name: Native SSH session lifecycle (sshd fixture)
+        run: cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture_flow -- --include-ignored
