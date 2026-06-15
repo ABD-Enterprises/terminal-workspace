@@ -65,3 +65,45 @@ jobs:
             artifacts/e2e
             playwright-report
             test-results
+
+  # #128: compile + test the Rust crate so a broken native build can no longer
+  # ship "green". Runs on the same self-hosted macOS runner release-macos.yml
+  # uses — the crate ships on macOS and the keychain-backed tests need a real
+  # login keychain. If that runner is offline, change this single `runs-on`
+  # line to `macos-latest` and re-run (no other step depends on the runner).
+  rust-validate:
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Bootstrap repo
+        run: npm run setup
+
+      # native:check generates icons + builds the frontend (tauri.conf's
+      # frontendDist must exist for generate_context!) + runs cargo check;
+      # validate:rust then adds cargo test. The localhost-sshd session fixture
+      # stays #[ignore] (needs an unsandboxed sshd — tracked in #101).
+      - name: Compile + test the Rust crate
+        run: npm run validate:rust
