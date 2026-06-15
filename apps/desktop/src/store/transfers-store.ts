@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { createMigratingLocalStorage } from "../lib/persistence";
 import { createTransferItem, type TransferDirection, type TransferItem } from "../types/transfer";
 
 const fallbackStorage: StateStorage = {
@@ -87,9 +88,9 @@ export const useTransfersStore = create<TransfersState>()(
         })),
     }),
     {
-      name: "termsnip-transfers",
+      name: "terminal-workspace-transfers",
       storage: createJSONStorage(() =>
-        typeof window === "undefined" ? fallbackStorage : window.localStorage
+        typeof window === "undefined" ? fallbackStorage : createMigratingLocalStorage()
       ),
     }
   )

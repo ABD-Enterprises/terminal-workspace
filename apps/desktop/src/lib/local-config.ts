@@ -27,8 +27,11 @@ export interface LocalVaultMetadata {
 }
 
 export interface LocalConfigBundle {
-  app: "TermSnip";
-  version: 4;
+  // #115: the app identifier moved from "TermSnip" to "Terminal Workspace"
+  // with a version bump to 5. Legacy "TermSnip" bundles (v1–v4) still import
+  // — the field is migrated forward on read.
+  app: "Terminal Workspace";
+  version: 5;
   exportedAt: string;
   vault: LocalVaultMetadata;
   hosts: HostRecord[];
@@ -40,6 +43,24 @@ export interface LocalConfigBundle {
    * cross-machine export → import preserves the host↔identity bindings.
    * Older bundles (v1–v3) have no identities array; they import as [].
    */
+  identities: IdentityRecord[];
+  deletions: VaultDeletionMap;
+}
+
+/**
+ * #115: the v4 bundle — structurally identical to v5 except the legacy
+ * `app: "TermSnip"` field and version number. Imported as-is and migrated
+ * forward; no data transformation is needed.
+ */
+interface Version4LocalConfigBundle {
+  app: "TermSnip";
+  version: 4;
+  exportedAt: string;
+  vault: LocalVaultMetadata;
+  hosts: HostRecord[];
+  keys: KeyRecord[];
+  snippets: SnippetRecord[];
+  knownHosts: KnownHostRecord[];
   identities: IdentityRecord[];
   deletions: VaultDeletionMap;
 }
@@ -152,6 +173,7 @@ interface MergeResult<T> {
 
 type ImportedLocalConfigBundle =
   | LocalConfigBundle
+  | Version4LocalConfigBundle
   | Version3LocalConfigBundle
   | Version2LocalConfigBundle
   | LegacyLocalConfigBundle;
@@ -311,7 +333,8 @@ function prepareImportedCollections(
   // re-derives identities from the imported hosts, so nothing is lost
   // beyond user-edited labels (which is exactly what v4 now preserves).
   const importedIdentities =
-    importedBundle.version === 4 && isIdentityArray(importedBundle.identities)
+    (importedBundle.version === 4 || importedBundle.version === 5) &&
+    isIdentityArray(importedBundle.identities)
       ? sortIdentities(importedBundle.identities)
       : [];
 
@@ -328,7 +351,9 @@ function prepareImportedDeletions(
   importedBundle: ImportedLocalConfigBundle
 ): PreparedLocalConfigDeletions {
   if (
-    (importedBundle.version !== 3 && importedBundle.version !== 4) ||
+    (importedBundle.version !== 3 &&
+      importedBundle.version !== 4 &&
+      importedBundle.version !== 5) ||
     !("deletions" in importedBundle)
   ) {
     return normalizeDeletions();
@@ -341,7 +366,8 @@ function getImportedVaultMetadata(importedBundle: ImportedLocalConfigBundle): Lo
   if (
     (importedBundle.version === 2 ||
       importedBundle.version === 3 ||
-      importedBundle.version === 4) &&
+      importedBundle.version === 4 ||
+      importedBundle.version === 5) &&
     importedBundle.vault?.schema === "local-first-vault"
   ) {
     return importedBundle.vault;
@@ -670,8 +696,8 @@ export function buildLocalConfigBundle(): LocalConfigBundle {
   // the type that the keys array carries verbatim (M14 / #96 needs no
   // separate handling).
   return {
-    app: "TermSnip",
-    version: 4,
+    app: "Terminal Workspace",
+    version: 5,
     exportedAt: new Date().toISOString(),
     vault: {
       schema: "local-first-vault",
@@ -694,14 +720,17 @@ function parseImportedLocalConfigBundle(bundle: unknown): PreparedLocalConfigImp
     throw new Error("Config import failed: file does not contain a JSON object.");
   }
 
+  // #115: accept both the new "Terminal Workspace" app field (v5) and the
+  // legacy "TermSnip" field (v1–v4) so older exports import without loss.
   if (
-    bundle.app !== "TermSnip" ||
+    (bundle.app !== "TermSnip" && bundle.app !== "Terminal Workspace") ||
     (bundle.version !== 1 &&
       bundle.version !== 2 &&
       bundle.version !== 3 &&
-      bundle.version !== 4)
+      bundle.version !== 4 &&
+      bundle.version !== 5)
   ) {
-    throw new Error("Config import failed: unsupported TermSnip config version.");
+    throw new Error("Config import failed: unsupported config version.");
   }
 
   if (!isHostArray(bundle.hosts)) {
@@ -720,10 +749,15 @@ function parseImportedLocalConfigBundle(bundle: unknown): PreparedLocalConfigImp
     throw new Error("Config import failed: known hosts are missing or invalid.");
   }
 
-  // v4 introduced the identities collection. When present it must be an
-  // array; when absent (v1–v3) it imports as empty. We don't hard-fail a
-  // v4 bundle that omits the field — treat it as [] for resilience.
-  if (bundle.version === 4 && "identities" in bundle && !isIdentityArray(bundle.identities)) {
+  // v4 introduced the identities collection (carried unchanged in v5). When
+  // present it must be an array; when absent (v1–v3) it imports as empty. We
+  // don't hard-fail a v4/v5 bundle that omits the field — treat it as [] for
+  // resilience.
+  if (
+    (bundle.version === 4 || bundle.version === 5) &&
+    "identities" in bundle &&
+    !isIdentityArray(bundle.identities)
+  ) {
     throw new Error("Config import failed: identities are invalid.");
   }
 

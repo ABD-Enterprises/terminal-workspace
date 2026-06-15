@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { createMigratingLocalStorage } from "../lib/persistence";
 import { isTauriRuntime } from "../lib/backend-runtime";
 import {
   DEFAULT_TERMINAL_THEME,
@@ -213,10 +214,10 @@ export const useAppStore = create<AppState>()(
         set({ autoUpdateCheckOnLaunch }),
     }),
     {
-      name: "termsnip-app",
+      name: "terminal-workspace-app",
       version: 6,
       storage: createJSONStorage(() =>
-        typeof window === "undefined" ? fallbackStorage : window.localStorage
+        typeof window === "undefined" ? fallbackStorage : createMigratingLocalStorage()
       ),
       partialize: (state): PersistedAppState => ({
         workspaceDensity: state.workspaceDensity,

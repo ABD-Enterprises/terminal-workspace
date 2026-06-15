@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { createMigratingLocalStorage } from "../lib/persistence";
 import type { VaultSyncTrustPolicy, VaultSyncTrustedKey } from "../lib/vault-sync-contract";
 
 const fallbackStorage: StateStorage = {
@@ -89,10 +90,10 @@ export const useVaultSyncTrustStore = create<VaultSyncTrustState>()(
         }),
     }),
     {
-      name: "termsnip-vault-sync-trust",
+      name: "terminal-workspace-vault-sync-trust",
       version: 1,
       storage: createJSONStorage(() =>
-        typeof window === "undefined" ? fallbackStorage : window.localStorage
+        typeof window === "undefined" ? fallbackStorage : createMigratingLocalStorage()
       ),
       partialize: (state) => ({
         policy: state.policy,

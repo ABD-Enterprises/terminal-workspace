@@ -9,8 +9,8 @@ const baseAppState = useAppStore.getState();
 const baseTrustState = useVaultSyncTrustStore.getState();
 
 const baseBundle: LocalConfigBundle = {
-  app: "TermSnip",
-  version: 4,
+  app: "Terminal Workspace",
+  version: 5,
   identities: [],
   exportedAt: "2026-04-04T18:00:00.000Z",
   vault: {

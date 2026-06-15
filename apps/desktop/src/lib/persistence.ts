@@ -3,15 +3,34 @@ import type { StateStorage } from "zustand/middleware";
 import { isTauriRuntime } from "./backend-runtime";
 import type { VaultDeletionMap } from "../store/vault-sync-store";
 
+// #115: the SQLite database file name is deliberately left as-is (renaming
+// it needs a native file migration, which is out of scope for this data-only
+// pass). Only the localStorage key namespace moves to `terminal-workspace-*`.
 const DATABASE_URL = "sqlite:termsnip.db";
 
+// #115: persisted-store localStorage keys moved from the legacy `termsnip-*`
+// namespace to `terminal-workspace-*`. `getLocalStorageItem` forward-migrates
+// each legacy value to the new key on first read and keeps the legacy key for
+// one release so a rollback still finds the data. The SQLite table names below
+// are unchanged — native data lives there and is unaffected by the key rename.
 const STORE_TABLES = {
-  "termsnip-hosts": "hosts_store",
-  "termsnip-keys": "keys_store",
-  "termsnip-known-hosts": "known_hosts_store",
-  "termsnip-identities": "identities_store",
-  "termsnip-snippets": "snippets_store",
+  "terminal-workspace-hosts": "hosts_store",
+  "terminal-workspace-keys": "keys_store",
+  "terminal-workspace-known-hosts": "known_hosts_store",
+  "terminal-workspace-identities": "identities_store",
+  "terminal-workspace-snippets": "snippets_store",
 } as const;
+
+const LEGACY_STORAGE_PREFIX = "termsnip-";
+const STORAGE_PREFIX = "terminal-workspace-";
+
+/** Map a current `terminal-workspace-*` key back to its legacy `termsnip-*`
+ *  counterpart, or null when the key isn't in the migrated namespace. */
+function legacyStorageKeyFor(name: string): string | null {
+  return name.startsWith(STORAGE_PREFIX)
+    ? `${LEGACY_STORAGE_PREFIX}${name.slice(STORAGE_PREFIX.length)}`
+    : null;
+}
 
 const DELETION_KINDS = ["hosts", "keys", "snippets", "knownHosts", "identities"] as const;
 
@@ -35,7 +54,24 @@ function getLocalStorageItem(name: string) {
     return null;
   }
 
-  return window.localStorage.getItem(name);
+  const current = window.localStorage.getItem(name);
+  if (current !== null) {
+    return current;
+  }
+
+  // #115: one-time forward-migration from the legacy `termsnip-*` namespace.
+  // Copy the legacy value to the new key on first read and leave the legacy
+  // key in place for one release so a rollback still finds the data.
+  const legacyKey = legacyStorageKeyFor(name);
+  if (legacyKey) {
+    const legacyValue = window.localStorage.getItem(legacyKey);
+    if (legacyValue !== null) {
+      window.localStorage.setItem(name, legacyValue);
+      return legacyValue;
+    }
+  }
+
+  return null;
 }
 
 function setLocalStorageItem(name: string, value: string) {
@@ -181,6 +217,21 @@ async function removeNativeDeletionItem() {
 function logPersistenceFallback(action: string, name: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   console.warn(`[termsnip] SQLite persistence ${action} failed for ${name}: ${message}`);
+}
+
+/**
+ * #115: localStorage-backed storage that forward-migrates legacy `termsnip-*`
+ * keys (see `getLocalStorageItem`). Used by the persisted stores that don't
+ * have a native SQLite table (app, sessions, transfers, vault-sync-trust) so
+ * their data survives the key-namespace rename without an ordering-sensitive
+ * boot migration.
+ */
+export function createMigratingLocalStorage(): StateStorage {
+  return {
+    getItem: (name) => getLocalStorageItem(name),
+    setItem: (name, value) => setLocalStorageItem(name, value),
+    removeItem: (name) => removeLocalStorageItem(name),
+  };
 }
 
 export function createTermsnipStorage(name: PersistedStoreName): StateStorage {
