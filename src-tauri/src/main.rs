@@ -3664,6 +3664,11 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
 
     #[cfg(target_os = "macos")]
     #[test]
+    // #101: keychain round-trips hit the real macOS login keychain, which is
+    // unreliable on a headless CI runner (the login keychain may be locked).
+    // Ignored so routine PR validation is deterministic; run them on an
+    // interactive machine with `cargo test -- --include-ignored`.
+    #[ignore = "requires an interactive/unlocked macOS login keychain; flaky on headless CI"]
     fn keychain_secret_round_trip() {
         let unique_suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -3687,6 +3692,7 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "requires an interactive/unlocked macOS login keychain; flaky on headless CI"]
     fn keychain_key_passphrase_round_trip() {
         // Same shape as the per-host round-trip but exercises the new
         // fingerprint-keyed service so a regression in the constant or in
@@ -3714,6 +3720,7 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "requires an interactive/unlocked macOS login keychain; flaky on headless CI"]
     fn keychain_identity_passphrase_round_trip() {
         // Same shape as the per-host and per-fingerprint round-trips,
         // exercising the new per-identity service introduced by P2-DM1
