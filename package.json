@@ -34,7 +34,8 @@
     "setup:browsers": "playwright install chromium",
     "validate": "bash ./scripts/validate.sh",
     "validate:ci": "TERMSNIP_RUN_E2E=1 bash ./scripts/validate.sh",
-    "validate:full": "TERMSNIP_RUN_E2E=1 TERMSNIP_RUN_NATIVE_TRUST=1 bash ./scripts/validate.sh"
+    "validate:full": "TERMSNIP_RUN_E2E=1 TERMSNIP_RUN_NATIVE_TRUST=1 bash ./scripts/validate.sh",
+    "validate:rust": "npm run native:check && cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "devDependencies": {
     "@playwright/test": "^1.53.0",
