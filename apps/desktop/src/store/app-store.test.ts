@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_TERMINAL_THEME } from "../lib/terminal-themes";
-import { buildBaselineDefaults, migrateAppState, useAppStore } from "./app-store";
+import {
+  buildBaselineDefaults,
+  migrateAppState,
+  shouldShowUpdateBanner,
+  useAppStore,
+} from "./app-store";
 
 const initialState = useAppStore.getState();
 
@@ -126,5 +131,41 @@ describe("migrateAppState", () => {
   it("handles null persistedState gracefully", () => {
     const result = migrateAppState(null, 0);
     expect(result.workspaceDensity).toBe("compact");
+  });
+
+  it("defaults dismissedUpdateVersion to null and carries it over when present", () => {
+    expect(buildBaselineDefaults({}).dismissedUpdateVersion).toBeNull();
+    expect(
+      buildBaselineDefaults({ dismissedUpdateVersion: "1.2.3" }).dismissedUpdateVersion
+    ).toBe("1.2.3");
+  });
+});
+
+describe("#97 update banner state", () => {
+  it("setUpdateResult stores the result; updateResult is null by default", () => {
+    expect(useAppStore.getState().updateResult).toBeNull();
+    useAppStore.getState().setUpdateResult({ available: true, version: "9.9.9" });
+    expect(useAppStore.getState().updateResult).toEqual({ available: true, version: "9.9.9" });
+  });
+
+  it("dismissUpdate records the current update's version (persisted), no-op without one", () => {
+    // No update → dismiss is a no-op.
+    useAppStore.getState().setUpdateResult(null);
+    useAppStore.getState().dismissUpdate();
+    expect(useAppStore.getState().dismissedUpdateVersion).toBeNull();
+
+    // With an available, versioned update → records the version.
+    useAppStore.getState().setUpdateResult({ available: true, version: "9.9.9" });
+    useAppStore.getState().dismissUpdate();
+    expect(useAppStore.getState().dismissedUpdateVersion).toBe("9.9.9");
+  });
+
+  it("shouldShowUpdateBanner gates on available + version + not-dismissed", () => {
+    expect(shouldShowUpdateBanner(null, null)).toBe(false);
+    expect(shouldShowUpdateBanner({ available: false }, null)).toBe(false);
+    expect(shouldShowUpdateBanner({ available: true }, null)).toBe(false); // no version
+    expect(shouldShowUpdateBanner({ available: true, version: "9.9.9" }, null)).toBe(true);
+    expect(shouldShowUpdateBanner({ available: true, version: "9.9.9" }, "9.9.9")).toBe(false);
+    expect(shouldShowUpdateBanner({ available: true, version: "9.9.9" }, "1.0.0")).toBe(true);
   });
 });

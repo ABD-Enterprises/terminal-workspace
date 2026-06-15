@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import { createMigratingLocalStorage } from "../lib/persistence";
 import { isTauriRuntime } from "../lib/backend-runtime";
+import type { UpdateCheckResult } from "../lib/auto-update";
 import {
   DEFAULT_TERMINAL_THEME,
   isKnownTheme,
@@ -44,6 +45,13 @@ interface AppState {
   notificationsEnabled: boolean;
   dockBadgeEnabled: boolean;
   autoUpdateCheckOnLaunch: boolean;
+  /**
+   * #97: result of the most-recent update check (transient — re-derived each
+   * launch, not persisted) and the version the user has dismissed (persisted
+   * per-version so the banner doesn't nag between releases).
+   */
+  updateResult: UpdateCheckResult | null;
+  dismissedUpdateVersion: string | null;
   setSidebarSearch: (search: string) => void;
   openCommandPalette: () => void;
   closeCommandPalette: () => void;
@@ -61,6 +69,8 @@ interface AppState {
   setNotificationsEnabled: (enabled: boolean) => void;
   setDockBadgeEnabled: (enabled: boolean) => void;
   setAutoUpdateCheckOnLaunch: (enabled: boolean) => void;
+  setUpdateResult: (result: UpdateCheckResult | null) => void;
+  dismissUpdate: () => void;
 }
 
 const fallbackStorage: StateStorage = {
@@ -87,6 +97,7 @@ interface PersistedAppState {
   notificationsEnabled: boolean;
   dockBadgeEnabled: boolean;
   autoUpdateCheckOnLaunch: boolean;
+  dismissedUpdateVersion: string | null;
 }
 
 function createPersistentId() {
@@ -124,6 +135,7 @@ export function buildBaselineDefaults(state: Partial<PersistedAppState>): Persis
     notificationsEnabled: state.notificationsEnabled ?? isTauriRuntime(),
     dockBadgeEnabled: state.dockBadgeEnabled ?? isTauriRuntime(),
     autoUpdateCheckOnLaunch: state.autoUpdateCheckOnLaunch ?? isTauriRuntime(),
+    dismissedUpdateVersion: state.dismissedUpdateVersion ?? null,
   };
 }
 
@@ -191,6 +203,8 @@ export const useAppStore = create<AppState>()(
       notificationsEnabled: false,
       dockBadgeEnabled: false,
       autoUpdateCheckOnLaunch: false,
+      updateResult: null,
+      dismissedUpdateVersion: null,
       setSidebarSearch: (sidebarSearch) => set({ sidebarSearch }),
       openCommandPalette: () => set({ commandPaletteOpen: true }),
       closeCommandPalette: () => set({ commandPaletteOpen: false }),
@@ -212,6 +226,13 @@ export const useAppStore = create<AppState>()(
       setDockBadgeEnabled: (dockBadgeEnabled) => set({ dockBadgeEnabled }),
       setAutoUpdateCheckOnLaunch: (autoUpdateCheckOnLaunch) =>
         set({ autoUpdateCheckOnLaunch }),
+      setUpdateResult: (updateResult) => set({ updateResult }),
+      dismissUpdate: () =>
+        set((state) =>
+          state.updateResult?.version
+            ? { dismissedUpdateVersion: state.updateResult.version }
+            : {}
+        ),
     }),
     {
       name: "terminal-workspace-app",
@@ -233,6 +254,7 @@ export const useAppStore = create<AppState>()(
         notificationsEnabled: state.notificationsEnabled,
         dockBadgeEnabled: state.dockBadgeEnabled,
         autoUpdateCheckOnLaunch: state.autoUpdateCheckOnLaunch,
+        dismissedUpdateVersion: state.dismissedUpdateVersion,
       }),
       migrate: migrateAppState,
     }
@@ -241,4 +263,20 @@ export const useAppStore = create<AppState>()(
 
 export function isDemoModeEnabled() {
   return useAppStore.getState().demoModeEnabled;
+}
+
+/**
+ * #97: the update banner shows only when the most-recent check found an
+ * available, versioned update that the user hasn't already dismissed. Pure so
+ * the visibility rule is unit-testable independent of any working updater.
+ */
+export function shouldShowUpdateBanner(
+  updateResult: UpdateCheckResult | null,
+  dismissedUpdateVersion: string | null
+): boolean {
+  return Boolean(
+    updateResult?.available &&
+      updateResult.version &&
+      updateResult.version !== dismissedUpdateVersion
+  );
 }
