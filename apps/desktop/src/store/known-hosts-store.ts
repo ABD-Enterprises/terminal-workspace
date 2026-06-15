@@ -48,8 +48,8 @@ export const useKnownHostsStore = create<KnownHostsState>()(
         }),
     }),
     {
-      name: "termsnip-known-hosts",
-      storage: createJSONStorage(() => createTermsnipStorage("termsnip-known-hosts")),
+      name: "terminal-workspace-known-hosts",
+      storage: createJSONStorage(() => createTermsnipStorage("terminal-workspace-known-hosts")),
     }
   )
 );

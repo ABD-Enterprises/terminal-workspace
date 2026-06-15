@@ -177,9 +177,9 @@ export const useIdentitiesStore = create<IdentitiesState>()(
       },
     }),
     {
-      name: "termsnip-identities",
+      name: "terminal-workspace-identities",
       version: 1,
-      storage: createJSONStorage(() => createTermsnipStorage("termsnip-identities")),
+      storage: createJSONStorage(() => createTermsnipStorage("terminal-workspace-identities")),
       partialize: (state): PersistedIdentitiesState => ({
         identities: state.identities,
       }),

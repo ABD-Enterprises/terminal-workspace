@@ -159,35 +159,48 @@ describe("Tauri SQLite persistence", () => {
   it("migrates localStorage payloads into SQLite and mirrors successful writes", async () => {
     const db = new FakeDatabase();
     const { localStorage, persistence } = await loadPersistence(db);
-    const storage = persistence.createTermsnipStorage("termsnip-hosts");
-    localStorage.setItem("termsnip-hosts", "local-payload");
+    const storage = persistence.createTermsnipStorage("terminal-workspace-hosts");
+    localStorage.setItem("terminal-workspace-hosts", "local-payload");
 
-    await expect(storage.getItem("termsnip-hosts")).resolves.toBe("local-payload");
+    await expect(storage.getItem("terminal-workspace-hosts")).resolves.toBe("local-payload");
     expect(db.stores.get("hosts_store")).toBe("local-payload");
 
-    await storage.setItem("termsnip-hosts", "sqlite-payload");
+    await storage.setItem("terminal-workspace-hosts", "sqlite-payload");
     expect(db.stores.get("hosts_store")).toBe("sqlite-payload");
-    expect(localStorage.getItem("termsnip-hosts")).toBe("sqlite-payload");
+    expect(localStorage.getItem("terminal-workspace-hosts")).toBe("sqlite-payload");
 
-    await storage.removeItem("termsnip-hosts");
+    await storage.removeItem("terminal-workspace-hosts");
     expect(db.stores.has("hosts_store")).toBe(false);
-    expect(localStorage.getItem("termsnip-hosts")).toBeNull();
+    expect(localStorage.getItem("terminal-workspace-hosts")).toBeNull();
+  });
+
+  it("#115: forward-migrates a legacy termsnip-* key, keeping the old key for rollback", async () => {
+    const { localStorage, persistence } = await loadPersistence(new FakeDatabase());
+    // Data exists only under the legacy namespace; the new key is absent.
+    localStorage.setItem("termsnip-app", "legacy-payload");
+    const storage = persistence.createMigratingLocalStorage();
+
+    // Reading the new key returns the legacy value, copies it forward, and
+    // leaves the legacy key in place so a rollback still finds the data.
+    expect(storage.getItem("terminal-workspace-app")).toBe("legacy-payload");
+    expect(localStorage.getItem("terminal-workspace-app")).toBe("legacy-payload");
+    expect(localStorage.getItem("termsnip-app")).toBe("legacy-payload");
   });
 
   it("falls back to localStorage when SQLite load, select, or execute fails", async () => {
     const selectDb = new FakeDatabase({ failSelect: true });
     const selectHarness = await loadPersistence(selectDb);
-    selectHarness.localStorage.setItem("termsnip-hosts", "fallback-payload");
+    selectHarness.localStorage.setItem("terminal-workspace-hosts", "fallback-payload");
     await expect(
-      selectHarness.persistence.createTermsnipStorage("termsnip-hosts").getItem("termsnip-hosts")
+      selectHarness.persistence.createTermsnipStorage("terminal-workspace-hosts").getItem("terminal-workspace-hosts")
     ).resolves.toBe("fallback-payload");
 
     vi.resetModules();
     vi.unstubAllGlobals();
     const loadHarness = await loadPersistence(new FakeDatabase(), { failLoad: true });
-    loadHarness.localStorage.setItem("termsnip-hosts", "load-fallback");
+    loadHarness.localStorage.setItem("terminal-workspace-hosts", "load-fallback");
     await expect(
-      loadHarness.persistence.createTermsnipStorage("termsnip-hosts").getItem("termsnip-hosts")
+      loadHarness.persistence.createTermsnipStorage("terminal-workspace-hosts").getItem("terminal-workspace-hosts")
     ).resolves.toBe("load-fallback");
 
     vi.resetModules();
@@ -195,9 +208,9 @@ describe("Tauri SQLite persistence", () => {
     const executeHarness = await loadPersistence(
       new FakeDatabase({ failExecuteOn: /INSERT INTO hosts_store/ })
     );
-    const executeStorage = executeHarness.persistence.createTermsnipStorage("termsnip-hosts");
-    await executeStorage.setItem("termsnip-hosts", "execute-fallback");
-    expect(executeHarness.localStorage.getItem("termsnip-hosts")).toBe("execute-fallback");
+    const executeStorage = executeHarness.persistence.createTermsnipStorage("terminal-workspace-hosts");
+    await executeStorage.setItem("terminal-workspace-hosts", "execute-fallback");
+    expect(executeHarness.localStorage.getItem("terminal-workspace-hosts")).toBe("execute-fallback");
   });
 
   it("updates deletion tombstones atomically and rolls back failed writes", async () => {
@@ -208,10 +221,10 @@ describe("Tauri SQLite persistence", () => {
       kind: "hosts",
     });
     const { localStorage, persistence } = await loadPersistence(db);
-    const storage = persistence.createTermsnipDeletionStorage("termsnip-vault-sync");
+    const storage = persistence.createTermsnipDeletionStorage("terminal-workspace-vault-sync");
 
     await storage.setItem(
-      "termsnip-vault-sync",
+      "terminal-workspace-vault-sync",
       serializeDeletions({
         hosts: [{ deletedAt: "2026-02-01T00:00:00.000Z", id: "new" }],
       })
@@ -224,6 +237,6 @@ describe("Tauri SQLite persistence", () => {
     });
     expect(db.executeCalls).toContain("BEGIN IMMEDIATE TRANSACTION");
     expect(db.executeCalls).toContain("ROLLBACK");
-    expect(localStorage.getItem("termsnip-vault-sync")).toContain('"id":"new"');
+    expect(localStorage.getItem("terminal-workspace-vault-sync")).toContain('"id":"new"');
   });
 });

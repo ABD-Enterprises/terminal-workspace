@@ -133,8 +133,8 @@ export const useKeysStore = create<KeysState>()(
         })),
     }),
     {
-      name: "termsnip-keys",
-      storage: createJSONStorage(() => createTermsnipStorage("termsnip-keys")),
+      name: "terminal-workspace-keys",
+      storage: createJSONStorage(() => createTermsnipStorage("terminal-workspace-keys")),
     }
   )
 );

@@ -125,9 +125,9 @@ export const useVaultSyncStore = create<VaultSyncState>()(
         }),
     }),
     {
-      name: "termsnip-vault-sync",
+      name: "terminal-workspace-vault-sync",
       version: 1,
-      storage: createJSONStorage(() => createTermsnipDeletionStorage("termsnip-vault-sync")),
+      storage: createJSONStorage(() => createTermsnipDeletionStorage("terminal-workspace-vault-sync")),
       partialize: (state) => ({
         deletions: compactDeletionMap(state.deletions),
       }),

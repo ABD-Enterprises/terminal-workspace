@@ -86,8 +86,8 @@ describe("local config", () => {
     });
 
     const bundle = buildLocalConfigBundle();
-    expect(bundle.app).toBe("TermSnip");
-    expect(bundle.version).toBe(4);
+    expect(bundle.app).toBe("Terminal Workspace");
+    expect(bundle.version).toBe(5);
     expect(bundle.vault.schema).toBe("local-first-vault");
     expect(bundle.vault.vaultId).toBe(baseAppState.vaultId);
     expect(bundle.vault.sourceDeviceId).toBe(baseAppState.deviceId);
@@ -168,8 +168,8 @@ describe("local config", () => {
     });
 
     const bundle: LocalConfigBundle = {
-      app: "TermSnip",
-      version: 4,
+      app: "Terminal Workspace",
+      version: 5,
       identities: [],
       exportedAt: "2026-03-29T10:00:00.000Z",
       vault: {
@@ -316,8 +316,8 @@ describe("local config", () => {
     });
 
     const bundle: LocalConfigBundle = {
-      app: "TermSnip",
-      version: 4,
+      app: "Terminal Workspace",
+      version: 5,
       identities: [],
       exportedAt: "2026-03-29T11:00:00.000Z",
       vault: {
@@ -423,8 +423,8 @@ describe("local config", () => {
     });
 
     const bundle: LocalConfigBundle = {
-      app: "TermSnip",
-      version: 4,
+      app: "Terminal Workspace",
+      version: 5,
       identities: [],
       exportedAt: "2026-03-29T11:30:00.000Z",
       vault: {
@@ -555,8 +555,8 @@ describe("local config", () => {
     });
 
     const bundle: LocalConfigBundle = {
-      app: "TermSnip",
-      version: 4,
+      app: "Terminal Workspace",
+      version: 5,
       identities: [],
       exportedAt: "2026-03-29T11:30:00.000Z",
       vault: {
@@ -642,7 +642,7 @@ describe("local config", () => {
     });
 
     const bundle = buildLocalConfigBundle();
-    expect(bundle.version).toBe(4);
+    expect(bundle.version).toBe(5);
     expect(bundle.identities).toHaveLength(1);
     expect(bundle.identities[0]?.id).toBe("id-deploy");
     expect(bundle.identities[0]?.comment).toBe("edited label survives export");
@@ -695,5 +695,32 @@ describe("local config", () => {
 
     expect(() => applyImportedLocalConfigBundle(v3Bundle)).not.toThrow();
     expect(useIdentitiesStore.getState().identities).toEqual([]);
+  });
+
+  it("#115: imports a legacy v4 'TermSnip' bundle, migrating the app field forward", () => {
+    // The pre-rename export used app: "TermSnip", version: 4. After the
+    // rename to app: "Terminal Workspace", version 5, that legacy bundle must
+    // still inspect + apply without error.
+    const legacyV4Bundle = {
+      app: "TermSnip",
+      version: 4,
+      exportedAt: "2026-03-29T10:00:00.000Z",
+      vault: {
+        schema: "local-first-vault",
+        vaultId: "vault-legacy-v4",
+        sourceDeviceId: "device-old",
+        snapshotId: "snapshot-legacy-v4",
+        baseSnapshotId: null,
+      },
+      hosts: [],
+      keys: [],
+      snippets: [],
+      knownHosts: [],
+      identities: [],
+      deletions: { hosts: [], keys: [], snippets: [], knownHosts: [], identities: [] },
+    };
+
+    expect(() => inspectImportedLocalConfigBundle(legacyV4Bundle)).not.toThrow();
+    expect(() => applyImportedLocalConfigBundle(legacyV4Bundle)).not.toThrow();
   });
 });

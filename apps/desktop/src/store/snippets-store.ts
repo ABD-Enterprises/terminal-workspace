@@ -95,8 +95,8 @@ export const useSnippetsStore = create<SnippetsState>()(
         })),
     }),
     {
-      name: "termsnip-snippets",
-      storage: createJSONStorage(() => createTermsnipStorage("termsnip-snippets")),
+      name: "terminal-workspace-snippets",
+      storage: createJSONStorage(() => createTermsnipStorage("terminal-workspace-snippets")),
     }
   )
 );

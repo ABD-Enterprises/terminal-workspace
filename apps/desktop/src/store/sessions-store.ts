@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { createMigratingLocalStorage } from "../lib/persistence";
 import type { HostRecord } from "../types/host";
 import {
   createSessionPane,
@@ -743,9 +744,9 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => reorderSessionTabs(state, fromIndex, toIndex)),
     }),
     {
-      name: "termsnip-sessions",
+      name: "terminal-workspace-sessions",
       storage: createJSONStorage(() =>
-        typeof window === "undefined" ? fallbackStorage : window.localStorage
+        typeof window === "undefined" ? fallbackStorage : createMigratingLocalStorage()
       ),
       partialize: (state) => {
         const persistedWorkspace = sanitizePersistedWorkspace({

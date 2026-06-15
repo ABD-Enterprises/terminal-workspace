@@ -425,9 +425,9 @@ export const useHostsStore = create<HostsState>()(
       },
     }),
     {
-      name: "termsnip-hosts",
+      name: "terminal-workspace-hosts",
       version: 2,
-      storage: createJSONStorage(() => createTermsnipStorage("termsnip-hosts")),
+      storage: createJSONStorage(() => createTermsnipStorage("terminal-workspace-hosts")),
       migrate: (persistedState) => {
         const state = persistedState as Partial<HostsState> | undefined;
 
