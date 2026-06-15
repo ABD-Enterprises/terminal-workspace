@@ -25,6 +25,7 @@ import { useSnippetsStore } from "../../store/snippets-store";
 import { useTransfersStore } from "../../store/transfers-store";
 import { formatHostProtocol, hostSupportsSftp, hostSupportsTrustedKeys } from "../../types/host";
 import { PreviewBanner } from "../common/PreviewBanner";
+import { UpdateAvailableBanner } from "../common/UpdateAvailableBanner";
 import { SessionRestoreManager } from "../terminal/SessionRestoreManager";
 import { Sidebar } from "./Sidebar";
 
@@ -634,6 +635,7 @@ export function AppShell() {
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <PreviewBanner />
+        <UpdateAvailableBanner />
         <main
           className={cn(
             "min-h-0 flex-1",

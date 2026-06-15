@@ -2,10 +2,10 @@
 // (audit fix: the checkForUpdates helper shipped in Round 6 was
 // never wired).
 //
-// We don't expose the result here; the Settings page surfaces both
-// the manual button and the result banner. This hook exists to fire
-// the check once on app mount, after which the user can re-trigger
-// it from Settings or wait for the next launch.
+// #97: the result is now written into app-store so UpdateAvailableBanner can
+// surface it top-of-page (not just on the Settings page). Today the updater is
+// a stub returning available:false, so the banner stays hidden until the real
+// tauri-plugin-updater lands (#86).
 
 import { useEffect, useRef } from "react";
 import { checkForUpdates } from "../lib/auto-update";
@@ -13,6 +13,7 @@ import { useAppStore } from "../store/app-store";
 
 export function useAutoUpdateCheck() {
   const enabled = useAppStore((state) => state.autoUpdateCheckOnLaunch);
+  const setUpdateResult = useAppStore((state) => state.setUpdateResult);
   const fired = useRef(false);
 
   useEffect(() => {
@@ -20,6 +21,10 @@ export function useAutoUpdateCheck() {
       return;
     }
     fired.current = true;
-    void checkForUpdates();
-  }, [enabled]);
+    void checkForUpdates().then((result) => {
+      if (result) {
+        setUpdateResult(result);
+      }
+    });
+  }, [enabled, setUpdateResult]);
 }
