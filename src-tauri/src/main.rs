@@ -2380,30 +2380,54 @@ struct UpdateCheckResult {
     notes: Option<String>,
 }
 
-/// M04 / #86: stub for tauri-plugin-updater. The plugin is not yet in
-/// the Cargo offline cache, so until it lands we return
-/// `{ available: false }` so the renderer's UpdateAvailableBanner
-/// stays quiet and the Settings "Check for updates" button surfaces
-/// "You're on the latest version" rather than throwing.
+/// #86: auto-update check via tauri-plugin-updater. Queries the configured
+/// release endpoint (GitHub `latest.json`), verifies the update's signature
+/// against the embedded pubkey, and reports availability to the renderer's
+/// UpdateAvailableBanner (#97). A network/parse failure surfaces as `Err` so
+/// the Settings "Check for updates" button can show the reason; "no update"
+/// is the success case `{ available: false }`.
 #[tauri::command]
 async fn termsnip_check_for_updates(
+    app: tauri::AppHandle,
     _request: UpdateCheckRequest,
 ) -> Result<UpdateCheckResult, String> {
-    Ok(UpdateCheckResult {
-        available: false,
-        version: None,
-        notes: None,
-    })
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|error| error.to_string())?;
+    match updater.check().await.map_err(|error| error.to_string())? {
+        Some(update) => Ok(UpdateCheckResult {
+            available: true,
+            version: Some(update.version.clone()),
+            notes: update.body.clone(),
+        }),
+        None => Ok(UpdateCheckResult {
+            available: false,
+            version: None,
+            notes: None,
+        }),
+    }
 }
 
-/// M04 / #86: stub. Returns an explicit error so a bug that calls
-/// install without a successful check first is surfaced cleanly. Real
-/// implementation lands when tauri-plugin-updater is wired.
+/// #86: download + install the available update, then relaunch into it.
+/// Re-checks rather than caching the `Update` across IPC calls, so a stale
+/// renderer can't trigger an install of an update that no longer applies.
+/// `app.restart()` never returns (it relaunches the process).
 #[tauri::command]
 async fn termsnip_install_update_and_restart(
+    app: tauri::AppHandle,
     _request: UpdateCheckRequest,
 ) -> Result<(), String> {
-    Err("Auto-updater not yet wired. Download the latest release from GitHub.".to_string())
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|error| error.to_string())?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "No update is available to install".to_string())?;
+    update
+        .download_and_install(|_downloaded, _total| {}, || {})
+        .await
+        .map_err(|error| error.to_string())?;
+    app.restart();
 }
 
 #[tauri::command]
@@ -3415,6 +3439,9 @@ fn main() {
                 .add_migrations(TERMSNIP_DATABASE_URL, persistence_migrations())
                 .build(),
         )
+        // #86: auto-updater. Endpoints + signing pubkey come from
+        // tauri.conf.json#plugins.updater; the commands below drive it.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(NativeSessionRegistry::default())
         .manage(NativeForwardRegistry::default())
         .setup(|app| {

@@ -1,9 +1,8 @@
 // In-app update check + install. T19.
 //
-// Tauri ship: routes through `termsnip_check_for_updates` which wraps
-// tauri-plugin-updater against the GitHub Releases endpoint (not yet
-// implemented — follow-up). Browser preview: returns null (no updates
-// to check for in dev).
+// Tauri ship: routes through `termsnip_check_for_updates`, which wraps
+// tauri-plugin-updater against the GitHub Releases `latest.json` endpoint
+// (#86). Browser preview: returns null (no updates to check for in dev).
 //
 // Caller pattern:
 //   const update = await checkForUpdates();
