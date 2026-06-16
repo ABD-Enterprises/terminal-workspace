@@ -2,6 +2,16 @@
   "name": "terminal-workspace",
   "private": true,
   "version": "0.1.0",
+  "description": "A local-first macOS SSH client — hosts, sessions, SFTP, keys, snippets, and forwarding in a native macOS shell.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ABD-Enterprises/terminal-workspace.git"
+  },
+  "homepage": "https://github.com/ABD-Enterprises/terminal-workspace#readme",
+  "bugs": {
+    "url": "https://github.com/ABD-Enterprises/terminal-workspace/issues"
+  },
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "setup": "node ./scripts/pnpmw.mjs install --frozen-lockfile",
