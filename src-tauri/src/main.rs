@@ -794,6 +794,18 @@ fn build_protocol_runtime_status(protocol: &str) -> ProtocolRuntimeStatusRespons
     }
 }
 
+/// Reject control characters (newline, CR, NUL, …) in any field that flows into
+/// the generated ssh_config or a spawned client's argv. Without this a
+/// renderer-XSS could put a newline in a hostname/username and inject arbitrary
+/// OpenSSH directives (ProxyCommand / LocalCommand → local code execution); see
+/// build_native_ssh_config, which writes `HostName`/`User` lines verbatim.
+fn reject_control_chars(field: &str, value: &str) -> Result<(), String> {
+    if value.chars().any(char::is_control) {
+        return Err(format!("{field} contains illegal control characters"));
+    }
+    Ok(())
+}
+
 fn validate_network_host(
     host: &BackendHostConnection,
     require_username: bool,
@@ -804,6 +816,11 @@ fn validate_network_host(
 
     if require_username && host.username.trim().is_empty() {
         return Err("Missing host connection fields".to_string());
+    }
+
+    reject_control_chars("Hostname", &host.hostname)?;
+    if require_username {
+        reject_control_chars("Username", &host.username)?;
     }
 
     Ok(())
@@ -818,6 +835,20 @@ fn validate_mosh_host(host: &BackendHostConnection) -> Result<(), String> {
 
     if host.auth_method == "privateKey" && host.private_key_path.trim().is_empty() {
         return Err("Private key auth selected but no key path provided".to_string());
+    }
+
+    if !host.private_key_path.trim().is_empty() {
+        reject_control_chars("Private key path", &host.private_key_path)?;
+    }
+
+    // Defense-in-depth: mirror validate_ssh_host — a mosh host that requires a
+    // trusted key must not fall through to the accept-new TOFU branch in
+    // build_mosh_ssh_command when no key has been pinned.
+    if host_requires_trusted_key(host) && host.known_host_public_key.is_none() {
+        return Err(format!(
+            "Trusted host key required for {}:{} but none was provided. Scan and trust the host first.",
+            host.hostname, host.port
+        ));
     }
 
     Ok(())
@@ -1189,6 +1220,12 @@ fn validate_ssh_host(host: &BackendHostConnection) -> Result<(), String> {
 
     if host.hostname.trim().is_empty() || host.username.trim().is_empty() || host.port == 0 {
         return Err("Missing host connection fields".to_string());
+    }
+
+    reject_control_chars("Hostname", &host.hostname)?;
+    reject_control_chars("Username", &host.username)?;
+    if !host.private_key_path.trim().is_empty() {
+        reject_control_chars("Private key path", &host.private_key_path)?;
     }
 
     if host.port > u32::from(u16::MAX) {
@@ -3491,6 +3528,64 @@ mod tests {
         }
     }
 
+    fn minimal_ssh_host() -> BackendHostConnection {
+        BackendHostConnection {
+            agent_forwarding: false,
+            auth_method: "password".to_string(),
+            environment: None,
+            host_key_policy: None,
+            hostname: "host.internal".to_string(),
+            jump_host: None,
+            known_host_algorithm: Some("ssh-ed25519".to_string()),
+            known_host_public_key: Some("AAAATEST".to_string()),
+            password: "pw".to_string(),
+            passphrase: "".to_string(),
+            port: 22,
+            private_key_path: "".to_string(),
+            protocol: "ssh".to_string(),
+            sftp_root: None,
+            username: "deploy".to_string(),
+        }
+    }
+
+    #[test]
+    fn validate_ssh_host_rejects_control_chars_blocking_config_injection() {
+        // A newline in hostname/username would inject OpenSSH directives
+        // (ProxyCommand/LocalCommand → local RCE) into the generated ssh_config.
+        let mut host = minimal_ssh_host();
+        host.hostname = "evil.com\n  ProxyCommand sh -c 'id'".to_string();
+        assert!(validate_ssh_host(&host).is_err());
+
+        let mut host = minimal_ssh_host();
+        host.username = "deploy\n  LocalCommand id".to_string();
+        assert!(validate_ssh_host(&host).is_err());
+
+        // A clean host still validates.
+        assert!(validate_ssh_host(&minimal_ssh_host()).is_ok());
+    }
+
+    #[test]
+    fn validate_mosh_host_requires_trusted_key_by_default() {
+        let mut host = minimal_ssh_host();
+        host.protocol = "mosh".to_string();
+
+        // requireTrusted (default) + no pinned key → rejected (no accept-new TOFU).
+        host.known_host_public_key = None;
+        host.known_host_algorithm = None;
+        assert!(validate_mosh_host(&host).is_err());
+
+        // With a pinned key → ok.
+        host.known_host_public_key = Some("AAAATEST".to_string());
+        host.known_host_algorithm = Some("ssh-ed25519".to_string());
+        assert!(validate_mosh_host(&host).is_ok());
+
+        // Explicit allowUnknown opts the host out → ok without a key.
+        host.known_host_public_key = None;
+        host.known_host_algorithm = None;
+        host.host_key_policy = Some("allowUnknown".to_string());
+        assert!(validate_mosh_host(&host).is_ok());
+    }
+
     #[test]
     fn builds_prompt_responses_in_jump_chain_order() {
         let responses = build_prompt_responses(&build_test_host_chain());
@@ -3570,6 +3665,10 @@ mod tests {
             private_key_path: "~/.ssh/id_ops".to_string(),
             protocol: "mosh".to_string(),
             username: "ops".to_string(),
+            // Mosh shares SSH's host-key trust gate: a trusted-by-default host
+            // needs a pinned key to validate (no accept-new TOFU at connect).
+            known_host_algorithm: Some("ssh-ed25519".to_string()),
+            known_host_public_key: Some("AAAATESTOPS".to_string()),
             ..telnet_host.clone()
         };
 

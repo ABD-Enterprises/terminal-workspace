@@ -11,6 +11,25 @@ use std::path::Path;
 /// `termsnip_inspect_private_key` with `/etc/passwd` (or another user's home)
 /// to probe file existence and leak metadata via ssh-keygen error messages.
 /// See docs/parity-and-hardening-review.md §3.S-6.
+/// Lexically collapse `.` and `..` components without touching the filesystem.
+/// Used to neutralize `..` traversal in key paths whose leaf (or directory) may
+/// not exist yet, so the allowlist check below can't be bypassed via a literal,
+/// un-normalized path like `/tmp/../etc/x`.
+fn lexically_normalize_absolute(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 pub(crate) fn validate_user_owned_key_path(path: &Path) -> Result<(), String> {
     if path.as_os_str().is_empty() {
         return Err("Key path is required".to_string());
@@ -23,10 +42,15 @@ pub(crate) fn validate_user_owned_key_path(path: &Path) -> Result<(), String> {
         ));
     }
 
-    // Canonicalize where possible to defeat symlink trickery. If the file does
-    // not exist yet (the generate-new-key path), fall back to the literal path
-    // — the parent directory must still pass the allowlist check below.
-    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    // Defeat `..` traversal and symlink trickery before the allowlist check.
+    // First collapse `.`/`..` lexically so a literal path like `/tmp/../etc/x`
+    // cannot escape the allowlist even when its leaf/dir does not exist yet
+    // (the generate-new-key flow stages into a not-yet-created directory).
+    // Then resolve symlinks when the path actually exists; otherwise fall back
+    // to the normalized (already `..`-free) path, which is matched against both
+    // the literal and canonical allowlist roots below.
+    let normalized = lexically_normalize_absolute(path);
+    let canonical = fs::canonicalize(&normalized).unwrap_or(normalized);
 
     let mut allowed_roots: Vec<PathBuf> = Vec::new();
     let mut push_with_canonical = |path: PathBuf| {
@@ -59,12 +83,10 @@ pub(crate) fn validate_user_owned_key_path(path: &Path) -> Result<(), String> {
     }
     // System SSH config dirs: read-only system keys are sometimes referenced.
     push_with_canonical(PathBuf::from("/etc/ssh"));
-    // World-writable /tmp is accepted as a last resort for cross-platform
-    // bootstrap flows. /tmp is world-readable, so this guard does not protect
-    // against same-host attackers staging a file here — but the threat model
-    // for this allowlist is renderer-side XSS reading arbitrary user paths.
-    push_with_canonical(PathBuf::from("/tmp"));
-    push_with_canonical(PathBuf::from("/private/tmp"));
+    // Security: world-writable /tmp is intentionally NOT allowlisted — it would
+    // let a renderer-XSS read or stage keys that a same-uid attacker can plant.
+    // The per-user TMPDIR (0700) pushed above covers legitimate staging and
+    // fixture flows.
 
     if allowed_roots.iter().any(|root| canonical.starts_with(root)) {
         return Ok(());
@@ -726,7 +748,11 @@ pub(crate) fn build_native_ssh_config(
         if connection.known_host_public_key.is_some() && connection.known_host_algorithm.is_some() {
             lines.push("  StrictHostKeyChecking yes".to_string());
         } else {
-            lines.push("  StrictHostKeyChecking no".to_string());
+            // Security: never `no` (which silently accepts CHANGED keys too).
+            // `accept-new` trusts an unknown key on first use but still fails on
+            // a changed key. requireTrusted hops are gated earlier in
+            // validate_ssh_host and take the `yes` branch above.
+            lines.push("  StrictHostKeyChecking accept-new".to_string());
         }
 
         if connection.agent_forwarding {
