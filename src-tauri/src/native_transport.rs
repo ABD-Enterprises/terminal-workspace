@@ -8,7 +8,7 @@ use std::path::Path;
 /// Reject any private-key path the renderer hands us that escapes the user's
 /// home directory (or the small set of test/system roots we explicitly allow).
 /// Without this guard, a renderer-side XSS could call
-/// `termsnip_inspect_private_key` with `/etc/passwd` (or another user's home)
+/// `terminal_workspace_inspect_private_key` with `/etc/passwd` (or another user's home)
 /// to probe file existence and leak metadata via ssh-keygen error messages.
 /// See docs/parity-and-hardening-review.md §3.S-6.
 /// Lexically collapse `.` and `..` components without touching the filesystem.

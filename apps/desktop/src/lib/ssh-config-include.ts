@@ -21,7 +21,7 @@ export interface ResolveSshIncludesResult {
  * - canonicalize the path (resolve symlinks)
  * - reject any canonical path that is not under `~/.ssh/`
  *
- * The renderer's native binding wraps the `termsnip_read_ssh_config_file`
+ * The renderer's native binding wraps the `terminal_workspace_read_ssh_config_file`
  * Tauri command. In dev/web mode the importer passes a no-op reader that
  * returns `null` for every path, so Include lines fall back to the existing
  * "log and skip" behavior.
@@ -42,7 +42,7 @@ export interface SshConfigGlobMatch {
  * return the matches in a stable order (OpenSSH applies matches lexically).
  * Returning `[]` means "no matches / not available" — the caller logs a skip.
  *
- * #93: the native binding wraps `termsnip_glob_ssh_config_files`; the HTTP
+ * #93: the native binding wraps `terminal_workspace_glob_ssh_config_files`; the HTTP
  * backend exposes `/api/backend/ssh-config/glob`; demo mode returns a seeded
  * fixture. When no lister is supplied, glob Includes fall back to the previous
  * "log and skip" behavior.

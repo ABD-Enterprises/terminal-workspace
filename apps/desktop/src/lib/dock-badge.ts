@@ -1,6 +1,6 @@
 // macOS dock badge for active session count. T18.
 //
-// Tauri ship: invokes a `termsnip_set_dock_badge` command that calls
+// Tauri ship: invokes a `terminal_workspace_set_dock_badge` command that calls
 // the platform-specific Window::set_badge_count Tauri 2 API (currently
 // behind a feature flag on macOS — follow-up to wire the Rust side).
 // Browser preview: no-op.
@@ -15,7 +15,7 @@ export async function setDockBadge(count: number): Promise<void> {
     return;
   }
   try {
-    await invokeTauriCommand<void>("termsnip_set_dock_badge", {
+    await invokeTauriCommand<void>("terminal_workspace_set_dock_badge", {
       request: { count: Math.max(0, Math.floor(count)) },
     });
   } catch {

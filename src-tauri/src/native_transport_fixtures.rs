@@ -581,7 +581,7 @@ fn assert_native_trust_tooling(fixture: &NativeTransportFixture) {
     let generated_key_path = fixture
         ._root
         .join("generated")
-        .join("termsnip_fixture_id_ed25519");
+        .join("terminal_workspace_fixture_id_ed25519");
     let generated_key_metadata = generate_key_pair(&GenerateKeyRequest {
         comment: "termsnip-generated".to_string(),
         passphrase: "generated-passphrase".to_string(),
@@ -750,7 +750,7 @@ fn localhost_ssh_transport_fixture_flow() {
     .expect("jump-host native exec should succeed");
     assert!(String::from_utf8_lossy(&jump_output.stdout).contains("JUMP_NATIVE_OK"));
 
-    let listed_directory = termsnip_sftp_list_directory(SftpPathRequest {
+    let listed_directory = terminal_workspace_sftp_list_directory(SftpPathRequest {
         host: fixture.jump_target_host.clone(),
         path: String::new(),
     })
@@ -768,14 +768,14 @@ fn localhost_ssh_transport_fixture_flow() {
             .collect::<Vec<_>>()
     );
 
-    let created_directory = termsnip_sftp_create_directory(SftpPathRequest {
+    let created_directory = terminal_workspace_sftp_create_directory(SftpPathRequest {
         host: fixture.jump_target_host.clone(),
         path: "nested".to_string(),
     })
     .expect("native sftp mkdir should succeed");
     assert!(created_directory.ok);
 
-    let renamed_directory = termsnip_sftp_rename_entry(SftpRenameRequest {
+    let renamed_directory = terminal_workspace_sftp_rename_entry(SftpRenameRequest {
         current_path: "nested".to_string(),
         host: fixture.jump_target_host.clone(),
         next_path: "nested-renamed".to_string(),
@@ -783,7 +783,7 @@ fn localhost_ssh_transport_fixture_flow() {
     .expect("native sftp rename should succeed");
     assert!(renamed_directory.path.ends_with("nested-renamed"));
 
-    let uploaded_file = termsnip_sftp_upload_file(SftpUploadRequest {
+    let uploaded_file = terminal_workspace_sftp_upload_file(SftpUploadRequest {
         contents_base64: BASE64_STANDARD.encode("fixture-upload"),
         filename: "upload.txt".to_string(),
         host: fixture.jump_target_host.clone(),
@@ -792,7 +792,7 @@ fn localhost_ssh_transport_fixture_flow() {
     .expect("native sftp upload should succeed");
     assert!(uploaded_file.ok);
 
-    let downloaded_file = termsnip_sftp_download_file(SftpPathRequest {
+    let downloaded_file = terminal_workspace_sftp_download_file(SftpPathRequest {
         host: fixture.jump_target_host.clone(),
         path: "upload.txt".to_string(),
     })
@@ -804,14 +804,14 @@ fn localhost_ssh_transport_fixture_flow() {
         b"fixture-upload"
     );
 
-    let deleted_file = termsnip_sftp_delete_entry(SftpDeleteRequest {
+    let deleted_file = terminal_workspace_sftp_delete_entry(SftpDeleteRequest {
         host: fixture.jump_target_host.clone(),
         is_directory: false,
         path: "upload.txt".to_string(),
     })
     .expect("native sftp file delete should succeed");
     assert!(deleted_file.ok);
-    let deleted_directory = termsnip_sftp_delete_entry(SftpDeleteRequest {
+    let deleted_directory = terminal_workspace_sftp_delete_entry(SftpDeleteRequest {
         host: fixture.jump_target_host.clone(),
         is_directory: true,
         path: "nested-renamed".to_string(),
@@ -915,7 +915,7 @@ fn localhost_ssh_transport_fixture_flow() {
 fn native_key_tooling_fixture_flow() {
     let root = make_fixture_root("key-tooling");
     let imported_key_path = root.join("fixture_imported_key");
-    let generated_key_path = root.join("generated").join("termsnip_fixture_id_ed25519");
+    let generated_key_path = root.join("generated").join("terminal_workspace_fixture_id_ed25519");
 
     generate_keypair(&imported_key_path, "ed25519", Some("fixture-passphrase"));
 
