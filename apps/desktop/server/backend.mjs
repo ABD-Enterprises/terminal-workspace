@@ -1689,5 +1689,5 @@ server.on("upgrade", (request, socket, head) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  console.log(`TermSnip backend listening on http://127.0.0.1:${port}`);
+  console.log(`Terminal Workspace backend listening on http://127.0.0.1:${port}`);
 });

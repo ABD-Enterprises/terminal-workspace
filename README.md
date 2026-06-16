@@ -1,7 +1,16 @@
 # Terminal Workspace
 
-A local-first macOS SSH client starter repo inspired by modern usability patterns.
+A local-first macOS SSH client — hosts, SSH sessions, SFTP, keys, snippets, and
+port forwarding in a native macOS shell.
 
+## Install
+
+Download the latest signed, notarized build from the
+[Releases](https://github.com/ABD-Enterprises/terminal-workspace/releases) page,
+then move **Terminal Workspace.app** into `/Applications`.
+
+The app checks for updates automatically and installs them in place — watch for
+the in-app update banner, or use **Settings → Check for updates**.
 
 ## Current State
 
@@ -119,3 +128,14 @@ future sync architecture has stable identifiers without exporting runtime secret
 - `npm run native:build` regenerates icons and runs `cargo build --manifest-path src-tauri/Cargo.toml`
 
 More setup and milestone detail lives in [docs/development.md](docs/development.md) and [docs/roadmap/roadmap.md](docs/roadmap/roadmap.md).
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the
+local validation gate, and pull-request guidelines. Please report security
+issues privately via [SECURITY.md](SECURITY.md) rather than a public issue.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE). Copyright 2026 ABD Enterprises.
+See [NOTICE](NOTICE) for attribution.

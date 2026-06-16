@@ -1949,7 +1949,7 @@ fn run_native_session_loop(
 
     let _ = channel.close();
     let _ = channel.wait_close();
-    let _ = session.disconnect(None, "TermSnip session closed", None);
+    let _ = session.disconnect(None, "Terminal Workspace session closed", None);
     close_native_forwards_for_session(&forward_registry, &session_id);
     remove_native_session(&registry, &session_id);
     set_native_session_connection_state(&app, &session_id, &state, "disconnected");
