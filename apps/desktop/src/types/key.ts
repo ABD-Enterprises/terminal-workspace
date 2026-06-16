@@ -57,7 +57,7 @@ export const emptyImportKeyValues: ImportKeyValues = {
 
 export const emptyGenerateKeyValues: GenerateKeyValues = {
   label: "",
-  privateKeyPath: "~/.ssh/termsnip_ed25519",
+  privateKeyPath: "~/.ssh/terminal_workspace_ed25519",
   passphrase: "",
   comment: "termsnip@local",
   type: "ed25519",

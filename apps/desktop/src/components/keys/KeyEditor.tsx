@@ -189,7 +189,7 @@ export function KeyEditor({
               onChange={(event) =>
                 setGenerateValues((current) => ({ ...current, privateKeyPath: event.target.value }))
               }
-              placeholder="~/.ssh/termsnip_ed25519"
+              placeholder="~/.ssh/terminal_workspace_ed25519"
               className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
             />
           </label>

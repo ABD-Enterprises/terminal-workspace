@@ -45,7 +45,7 @@ export async function loadNativeHostSecrets(hostId: string): Promise<NativeHostS
     return emptySecrets;
   }
 
-  return invokeTauriCommand<NativeHostSecrets>("termsnip_load_host_secrets", {
+  return invokeTauriCommand<NativeHostSecrets>("terminal_workspace_load_host_secrets", {
     request: {
       hostId,
     } satisfies HostSecretsRequest,
@@ -57,7 +57,7 @@ export async function storeNativeHostSecrets(hostId: string, secrets: NativeHost
     return;
   }
 
-  await invokeTauriCommand("termsnip_store_host_secrets", {
+  await invokeTauriCommand("terminal_workspace_store_host_secrets", {
     request: {
       hostId,
       passphrase: secrets.passphrase,
@@ -71,7 +71,7 @@ export async function clearNativeHostSecrets(hostId: string) {
     return;
   }
 
-  await invokeTauriCommand("termsnip_clear_host_secrets", {
+  await invokeTauriCommand("terminal_workspace_clear_host_secrets", {
     request: {
       hostId,
     } satisfies HostSecretsRequest,
@@ -91,7 +91,7 @@ export async function loadNativeKeyPassphrase(fingerprint: string): Promise<stri
   }
 
   const response = await invokeTauriCommand<KeyPassphraseResponse>(
-    "termsnip_load_key_passphrase",
+    "terminal_workspace_load_key_passphrase",
     {
       request: { fingerprint } satisfies KeyPassphraseRequest,
     }
@@ -104,7 +104,7 @@ export async function storeNativeKeyPassphrase(fingerprint: string, passphrase: 
     return;
   }
 
-  await invokeTauriCommand("termsnip_store_key_passphrase", {
+  await invokeTauriCommand("terminal_workspace_store_key_passphrase", {
     request: { fingerprint, passphrase } satisfies StoreKeyPassphraseRequest,
   });
 }
@@ -114,7 +114,7 @@ export async function clearNativeKeyPassphrase(fingerprint: string) {
     return;
   }
 
-  await invokeTauriCommand("termsnip_clear_key_passphrase", {
+  await invokeTauriCommand("terminal_workspace_clear_key_passphrase", {
     request: { fingerprint } satisfies KeyPassphraseRequest,
   });
 }
@@ -134,7 +134,7 @@ export async function loadNativeIdentityPassphrase(identityId: string): Promise<
   }
 
   const response = await invokeTauriCommand<IdentityPassphraseResponse>(
-    "termsnip_load_identity_passphrase",
+    "terminal_workspace_load_identity_passphrase",
     {
       request: { identityId } satisfies IdentityPassphraseRequest,
     }
@@ -147,7 +147,7 @@ export async function storeNativeIdentityPassphrase(identityId: string, passphra
     return;
   }
 
-  await invokeTauriCommand("termsnip_store_identity_passphrase", {
+  await invokeTauriCommand("terminal_workspace_store_identity_passphrase", {
     request: { identityId, passphrase } satisfies StoreIdentityPassphraseRequest,
   });
 }
@@ -157,7 +157,7 @@ export async function clearNativeIdentityPassphrase(identityId: string) {
     return;
   }
 
-  await invokeTauriCommand("termsnip_clear_identity_passphrase", {
+  await invokeTauriCommand("terminal_workspace_clear_identity_passphrase", {
     request: { identityId } satisfies IdentityPassphraseRequest,
   });
 }

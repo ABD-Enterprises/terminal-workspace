@@ -99,7 +99,7 @@ export function AppShell() {
   }, [paletteQuery]);
 
   // ---- Native menu wiring -------------------------------------------------
-  // The macOS application menu emits `termsnip://menu-event` with a string
+  // The macOS application menu emits `terminal_workspace://menu-event` with a string
   // payload like "menu:nav-hosts". We translate each id into the same actions
   // that the in-app keyboard / palette already wire up. Browser preview has
   // no native menu, so this listener simply does not fire.
@@ -209,7 +209,7 @@ export function AppShell() {
 
     void import("@tauri-apps/api/event")
       .then(({ listen }) =>
-        listen<string>("termsnip://menu-event", (event) => {
+        listen<string>("terminal_workspace://menu-event", (event) => {
           dispatchMenu(event.payload);
         })
       )

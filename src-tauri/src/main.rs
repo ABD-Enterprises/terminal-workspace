@@ -34,7 +34,7 @@ mod native_transport;
 use keychain_support::*;
 use native_transport::*;
 
-const SESSION_STREAM_EVENT_NAME: &str = "termsnip://session-stream";
+const SESSION_STREAM_EVENT_NAME: &str = "terminal_workspace://session-stream";
 const KEYCHAIN_PASSWORD_SERVICE: &str = "com.termsnip.runtime.password";
 /// Per-host passphrase entry. Retained for backward compatibility (older
 /// builds wrote here) and as the migration source. New writes go to
@@ -44,7 +44,7 @@ const KEYCHAIN_PASSWORD_SERVICE: &str = "com.termsnip.runtime.password";
 const KEYCHAIN_PASSPHRASE_SERVICE: &str = "com.termsnip.runtime.passphrase";
 /// Per-key-fingerprint passphrase entry. Account is the SSH public-key
 /// fingerprint (`SHA256:<base64>` form). When a key is deleted from the
-/// keys store, the renderer calls `termsnip_clear_key_passphrase` to GC
+/// keys store, the renderer calls `terminal_workspace_clear_key_passphrase` to GC
 /// the orphaned entry.
 const KEYCHAIN_KEY_PASSPHRASE_SERVICE: &str = "com.termsnip.runtime.key-passphrase";
 /// Per-identity passphrase entry (P2-DM1 batch 3). Account is the
@@ -2084,7 +2084,7 @@ fn close_native_session_stream(
 }
 
 #[tauri::command]
-fn termsnip_transport_info() -> BackendTransportInfo {
+fn terminal_workspace_transport_info() -> BackendTransportInfo {
     BackendTransportInfo {
         backend_base_url: String::new(),
         session_bridge: "tauri-native",
@@ -2092,7 +2092,7 @@ fn termsnip_transport_info() -> BackendTransportInfo {
 }
 
 #[tauri::command]
-fn termsnip_protocol_runtime_status(
+fn terminal_workspace_protocol_runtime_status(
     request: ProtocolRuntimeStatusRequest,
 ) -> ProtocolRuntimeStatusResponse {
     build_protocol_runtime_status(&request.protocol)
@@ -2101,7 +2101,7 @@ fn termsnip_protocol_runtime_status(
 /// Backend status check. P2-NET: the native shell owns SSH/SFTP/forwarding,
 /// snippets, key tooling, and persistence, so no Node backend is contacted.
 #[tauri::command]
-async fn termsnip_backend_status() -> Result<BackendStatusResponse, String> {
+async fn terminal_workspace_backend_status() -> Result<BackendStatusResponse, String> {
     Ok(BackendStatusResponse {
         ok: true,
         backend_base_url: String::new(),
@@ -2110,14 +2110,14 @@ async fn termsnip_backend_status() -> Result<BackendStatusResponse, String> {
 }
 
 #[tauri::command]
-async fn termsnip_inspect_private_key(request: KeyPathRequest) -> Result<KeyMetadata, String> {
+async fn terminal_workspace_inspect_private_key(request: KeyPathRequest) -> Result<KeyMetadata, String> {
     tauri::async_runtime::spawn_blocking(move || inspect_private_key(&request.path))
         .await
         .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-async fn termsnip_generate_private_key(request: GenerateKeyRequest) -> Result<KeyMetadata, String> {
+async fn terminal_workspace_generate_private_key(request: GenerateKeyRequest) -> Result<KeyMetadata, String> {
     tauri::async_runtime::spawn_blocking(move || generate_key_pair(&request))
         .await
         .map_err(|error| error.to_string())?
@@ -2134,7 +2134,7 @@ struct ImportPrivateKeyFromBodyRequest {
 /// pasted body to disk with 0600 perms, then runs inspect to surface
 /// the same KeyMetadata shape as the path-only import.
 #[tauri::command]
-async fn termsnip_import_private_key_from_body(
+async fn terminal_workspace_import_private_key_from_body(
     request: ImportPrivateKeyFromBodyRequest,
 ) -> Result<KeyMetadata, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -2331,7 +2331,7 @@ fn copy_key_to_host_blocking(
 /// runtime would, and appends the public key to ~/.ssh/authorized_keys
 /// with the canonical permission tighten-down.
 #[tauri::command]
-async fn termsnip_copy_key_to_host(
+async fn terminal_workspace_copy_key_to_host(
     request: CopyKeyToHostRequest,
 ) -> Result<CopyKeyToHostResponse, String> {
     tauri::async_runtime::spawn_blocking(move || copy_key_to_host_blocking(&request))
@@ -2349,7 +2349,7 @@ struct SetDockBadgeRequest {
 /// surfaces this as `WebviewWindow::set_badge_count(Option<i64>)`. A
 /// `count` of 0 (or negative) clears the badge.
 #[tauri::command]
-async fn termsnip_set_dock_badge(
+async fn terminal_workspace_set_dock_badge(
     request: SetDockBadgeRequest,
     app: AppHandle,
 ) -> Result<(), String> {
@@ -2387,7 +2387,7 @@ struct UpdateCheckResult {
 /// the Settings "Check for updates" button can show the reason; "no update"
 /// is the success case `{ available: false }`.
 #[tauri::command]
-async fn termsnip_check_for_updates(
+async fn terminal_workspace_check_for_updates(
     app: tauri::AppHandle,
     _request: UpdateCheckRequest,
 ) -> Result<UpdateCheckResult, String> {
@@ -2412,7 +2412,7 @@ async fn termsnip_check_for_updates(
 /// renderer can't trigger an install of an update that no longer applies.
 /// `app.restart()` never returns (it relaunches the process).
 #[tauri::command]
-async fn termsnip_install_update_and_restart(
+async fn terminal_workspace_install_update_and_restart(
     app: tauri::AppHandle,
     _request: UpdateCheckRequest,
 ) -> Result<(), String> {
@@ -2431,7 +2431,7 @@ async fn termsnip_install_update_and_restart(
 }
 
 #[tauri::command]
-async fn termsnip_scan_known_host(
+async fn terminal_workspace_scan_known_host(
     request: KnownHostScanRequest,
 ) -> Result<KnownHostScanResponse, String> {
     tauri::async_runtime::spawn_blocking(move || scan_known_host(&request))
@@ -2440,7 +2440,7 @@ async fn termsnip_scan_known_host(
 }
 
 #[tauri::command]
-fn termsnip_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirectoryResponse, String> {
+fn terminal_workspace_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirectoryResponse, String> {
     validate_ssh_host(&request.host)?;
     let target_path = resolve_remote_path(
         request.host.sftp_root.as_deref().unwrap_or("/"),
@@ -2462,7 +2462,7 @@ fn termsnip_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirector
 }
 
 #[tauri::command]
-fn termsnip_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPathResponse, String> {
+fn terminal_workspace_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPathResponse, String> {
     validate_ssh_host(&request.host)?;
     let target_path = resolve_remote_path(
         request.host.sftp_root.as_deref().unwrap_or("/"),
@@ -2482,7 +2482,7 @@ fn termsnip_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPat
 }
 
 #[tauri::command]
-fn termsnip_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathResponse, String> {
+fn terminal_workspace_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathResponse, String> {
     validate_ssh_host(&request.host)?;
     let source_path = resolve_remote_path(
         request.host.sftp_root.as_deref().unwrap_or("/"),
@@ -2510,7 +2510,7 @@ fn termsnip_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathR
 }
 
 #[tauri::command]
-fn termsnip_sftp_delete_entry(
+fn terminal_workspace_sftp_delete_entry(
     request: SftpDeleteRequest,
 ) -> Result<BackendBooleanResponse, String> {
     validate_ssh_host(&request.host)?;
@@ -2536,7 +2536,7 @@ fn termsnip_sftp_delete_entry(
 }
 
 #[tauri::command]
-fn termsnip_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathResponse, String> {
+fn terminal_workspace_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathResponse, String> {
     validate_ssh_host(&request.host)?;
     let target_path = resolve_remote_path(
         request.host.sftp_root.as_deref().unwrap_or("/"),
@@ -2567,7 +2567,7 @@ fn termsnip_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathRe
 }
 
 #[tauri::command]
-fn termsnip_sftp_download_file(
+fn terminal_workspace_sftp_download_file(
     request: SftpPathRequest,
 ) -> Result<BackendBinaryResponse, String> {
     validate_ssh_host(&request.host)?;
@@ -2602,7 +2602,7 @@ fn termsnip_sftp_download_file(
 }
 
 #[tauri::command]
-fn termsnip_list_session_forwards(
+fn terminal_workspace_list_session_forwards(
     native_forwards: State<'_, NativeForwardRegistry>,
     request: SessionIdRequest,
 ) -> ListForwardsResponse {
@@ -2610,7 +2610,7 @@ fn termsnip_list_session_forwards(
 }
 
 #[tauri::command]
-fn termsnip_create_forward(
+fn terminal_workspace_create_forward(
     native_sessions: State<'_, NativeSessionRegistry>,
     native_forwards: State<'_, NativeForwardRegistry>,
     request: CreateForwardPayload,
@@ -2619,7 +2619,7 @@ fn termsnip_create_forward(
 }
 
 #[tauri::command]
-fn termsnip_delete_forward(
+fn terminal_workspace_delete_forward(
     native_forwards: State<'_, NativeForwardRegistry>,
     request: ForwardIdRequest,
 ) -> BackendBooleanResponse {
@@ -2627,7 +2627,7 @@ fn termsnip_delete_forward(
 }
 
 #[tauri::command]
-async fn termsnip_execute_snippet_on_hosts(
+async fn terminal_workspace_execute_snippet_on_hosts(
     request: SnippetExecutionRequest,
 ) -> Result<SnippetExecutionResponse, String> {
     tauri::async_runtime::spawn_blocking(move || execute_native_snippet_request(request))
@@ -2636,7 +2636,7 @@ async fn termsnip_execute_snippet_on_hosts(
 }
 
 #[tauri::command]
-async fn termsnip_load_host_secrets(
+async fn terminal_workspace_load_host_secrets(
     request: HostSecretsRequest,
 ) -> Result<HostSecretsResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -2652,7 +2652,7 @@ async fn termsnip_load_host_secrets(
 }
 
 #[tauri::command]
-async fn termsnip_store_host_secrets(
+async fn terminal_workspace_store_host_secrets(
     request: StoreHostSecretsRequest,
 ) -> Result<BackendBooleanResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -2677,7 +2677,7 @@ async fn termsnip_store_host_secrets(
 }
 
 #[tauri::command]
-async fn termsnip_clear_host_secrets(
+async fn terminal_workspace_clear_host_secrets(
     request: HostSecretsRequest,
 ) -> Result<BackendBooleanResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -2698,7 +2698,7 @@ async fn termsnip_clear_host_secrets(
 /// the passphrase once per key. Returns an empty string when no entry
 /// exists. See parity-and-hardening-plan.md P1-S5.
 #[tauri::command]
-async fn termsnip_load_key_passphrase(
+async fn terminal_workspace_load_key_passphrase(
     request: KeyPassphraseRequest,
 ) -> Result<KeyPassphraseResponse, String> {
     validate_key_fingerprint(&request.fingerprint)?;
@@ -2716,7 +2716,7 @@ async fn termsnip_load_key_passphrase(
 }
 
 #[tauri::command]
-async fn termsnip_store_key_passphrase(
+async fn terminal_workspace_store_key_passphrase(
     request: StoreKeyPassphraseRequest,
 ) -> Result<BackendBooleanResponse, String> {
     validate_key_fingerprint(&request.fingerprint)?;
@@ -2736,7 +2736,7 @@ async fn termsnip_store_key_passphrase(
 }
 
 #[tauri::command]
-async fn termsnip_clear_key_passphrase(
+async fn terminal_workspace_clear_key_passphrase(
     request: KeyPassphraseRequest,
 ) -> Result<BackendBooleanResponse, String> {
     validate_key_fingerprint(&request.fingerprint)?;
@@ -2756,7 +2756,7 @@ async fn termsnip_clear_key_passphrase(
 /// the same identity already share its (username, key) pair, so this is a
 /// strict generalisation. Returns an empty string when no entry exists.
 #[tauri::command]
-async fn termsnip_load_identity_passphrase(
+async fn terminal_workspace_load_identity_passphrase(
     request: IdentityPassphraseRequest,
 ) -> Result<IdentityPassphraseResponse, String> {
     validate_identity_id(&request.identity_id)?;
@@ -2774,7 +2774,7 @@ async fn termsnip_load_identity_passphrase(
 }
 
 #[tauri::command]
-async fn termsnip_store_identity_passphrase(
+async fn terminal_workspace_store_identity_passphrase(
     request: StoreIdentityPassphraseRequest,
 ) -> Result<BackendBooleanResponse, String> {
     validate_identity_id(&request.identity_id)?;
@@ -2794,7 +2794,7 @@ async fn termsnip_store_identity_passphrase(
 }
 
 #[tauri::command]
-async fn termsnip_clear_identity_passphrase(
+async fn terminal_workspace_clear_identity_passphrase(
     request: IdentityPassphraseRequest,
 ) -> Result<BackendBooleanResponse, String> {
     validate_identity_id(&request.identity_id)?;
@@ -2831,7 +2831,7 @@ struct ReadSshConfigFileResponse {
 /// File size is capped because SSH configs are text and a 100 MB attacker-
 /// supplied file would otherwise pin a UI thread.
 #[tauri::command]
-async fn termsnip_read_ssh_config_file(
+async fn terminal_workspace_read_ssh_config_file(
     request: ReadSshConfigFileRequest,
 ) -> Result<ReadSshConfigFileResponse, String> {
     tauri::async_runtime::spawn_blocking(move || read_ssh_config_file_blocking(&request.path))
@@ -2942,7 +2942,7 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 /// `~/.ssh/`; matches outside it are dropped. Only the final component may be
 /// a glob — a glob in a directory component is refused.
 #[tauri::command]
-async fn termsnip_glob_ssh_config_files(
+async fn terminal_workspace_glob_ssh_config_files(
     request: GlobSshConfigFilesRequest,
 ) -> Result<GlobSshConfigFilesResponse, String> {
     tauri::async_runtime::spawn_blocking(move || glob_ssh_config_files_blocking(&request.pattern))
@@ -3060,7 +3060,7 @@ mod ssh_config_glob_tests {
 }
 
 #[tauri::command]
-async fn termsnip_create_backend_session(
+async fn terminal_workspace_create_backend_session(
     native_sessions: State<'_, NativeSessionRegistry>,
     native_forwards: State<'_, NativeForwardRegistry>,
     app: AppHandle,
@@ -3178,7 +3178,7 @@ async fn termsnip_create_backend_session(
 }
 
 #[tauri::command]
-async fn termsnip_close_backend_session(
+async fn terminal_workspace_close_backend_session(
     native_sessions: State<'_, NativeSessionRegistry>,
     native_forwards: State<'_, NativeForwardRegistry>,
     request: SessionIdRequest,
@@ -3196,7 +3196,7 @@ async fn termsnip_close_backend_session(
 }
 
 #[tauri::command]
-async fn termsnip_resize_backend_session(
+async fn terminal_workspace_resize_backend_session(
     native_sessions: State<'_, NativeSessionRegistry>,
     request: ResizeBackendSessionRequest,
 ) -> Result<BackendBooleanResponse, String> {
@@ -3219,7 +3219,7 @@ async fn termsnip_resize_backend_session(
 }
 
 #[tauri::command]
-async fn termsnip_open_backend_session_stream(
+async fn terminal_workspace_open_backend_session_stream(
     app: AppHandle,
     native_sessions: State<'_, NativeSessionRegistry>,
     request: SessionStreamRequest,
@@ -3228,7 +3228,7 @@ async fn termsnip_open_backend_session_stream(
 }
 
 #[tauri::command]
-fn termsnip_send_backend_session_stream(
+fn terminal_workspace_send_backend_session_stream(
     native_sessions: State<'_, NativeSessionRegistry>,
     request: SessionStreamSendRequest,
 ) -> Result<BackendBooleanResponse, String> {
@@ -3236,7 +3236,7 @@ fn termsnip_send_backend_session_stream(
 }
 
 #[tauri::command]
-fn termsnip_close_backend_session_stream(
+fn terminal_workspace_close_backend_session_stream(
     native_sessions: State<'_, NativeSessionRegistry>,
     request: SessionStreamRequest,
 ) -> Result<BackendBooleanResponse, String> {
@@ -3252,7 +3252,7 @@ fn termsnip_close_backend_session_stream(
 
 /// Channel name the renderer subscribes to for native menu activations.
 /// Payload is the menu-item id string (e.g. "menu:nav-hosts").
-const MENU_EVENT_NAME: &str = "termsnip://menu-event";
+const MENU_EVENT_NAME: &str = "terminal_workspace://menu-event";
 
 /// Build the macOS application menu. Each non-system item carries a stable
 /// string id (`menu:*`) that the renderer maps to an action via the
@@ -3392,7 +3392,7 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 fn persistence_migrations() -> Vec<Migration> {
     vec![Migration {
         version: 1,
-        description: "create_termsnip_persistence_tables",
+        description: "create_terminal_workspace_persistence_tables",
         sql: r#"
             CREATE TABLE IF NOT EXISTS hosts_store (
                 id TEXT PRIMARY KEY,
@@ -3462,44 +3462,44 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            termsnip_transport_info,
-            termsnip_protocol_runtime_status,
-            termsnip_backend_status,
-            termsnip_inspect_private_key,
-            termsnip_generate_private_key,
-            termsnip_scan_known_host,
-            termsnip_sftp_list_directory,
-            termsnip_sftp_create_directory,
-            termsnip_sftp_rename_entry,
-            termsnip_sftp_delete_entry,
-            termsnip_sftp_upload_file,
-            termsnip_sftp_download_file,
-            termsnip_list_session_forwards,
-            termsnip_create_forward,
-            termsnip_delete_forward,
-            termsnip_execute_snippet_on_hosts,
-            termsnip_load_host_secrets,
-            termsnip_store_host_secrets,
-            termsnip_clear_host_secrets,
-            termsnip_load_key_passphrase,
-            termsnip_store_key_passphrase,
-            termsnip_clear_key_passphrase,
-            termsnip_load_identity_passphrase,
-            termsnip_store_identity_passphrase,
-            termsnip_clear_identity_passphrase,
-            termsnip_read_ssh_config_file,
-            termsnip_glob_ssh_config_files,
-            termsnip_create_backend_session,
-            termsnip_close_backend_session,
-            termsnip_resize_backend_session,
-            termsnip_open_backend_session_stream,
-            termsnip_send_backend_session_stream,
-            termsnip_close_backend_session_stream,
-            termsnip_import_private_key_from_body,
-            termsnip_copy_key_to_host,
-            termsnip_set_dock_badge,
-            termsnip_check_for_updates,
-            termsnip_install_update_and_restart
+            terminal_workspace_transport_info,
+            terminal_workspace_protocol_runtime_status,
+            terminal_workspace_backend_status,
+            terminal_workspace_inspect_private_key,
+            terminal_workspace_generate_private_key,
+            terminal_workspace_scan_known_host,
+            terminal_workspace_sftp_list_directory,
+            terminal_workspace_sftp_create_directory,
+            terminal_workspace_sftp_rename_entry,
+            terminal_workspace_sftp_delete_entry,
+            terminal_workspace_sftp_upload_file,
+            terminal_workspace_sftp_download_file,
+            terminal_workspace_list_session_forwards,
+            terminal_workspace_create_forward,
+            terminal_workspace_delete_forward,
+            terminal_workspace_execute_snippet_on_hosts,
+            terminal_workspace_load_host_secrets,
+            terminal_workspace_store_host_secrets,
+            terminal_workspace_clear_host_secrets,
+            terminal_workspace_load_key_passphrase,
+            terminal_workspace_store_key_passphrase,
+            terminal_workspace_clear_key_passphrase,
+            terminal_workspace_load_identity_passphrase,
+            terminal_workspace_store_identity_passphrase,
+            terminal_workspace_clear_identity_passphrase,
+            terminal_workspace_read_ssh_config_file,
+            terminal_workspace_glob_ssh_config_files,
+            terminal_workspace_create_backend_session,
+            terminal_workspace_close_backend_session,
+            terminal_workspace_resize_backend_session,
+            terminal_workspace_open_backend_session_stream,
+            terminal_workspace_send_backend_session_stream,
+            terminal_workspace_close_backend_session_stream,
+            terminal_workspace_import_private_key_from_body,
+            terminal_workspace_copy_key_to_host,
+            terminal_workspace_set_dock_badge,
+            terminal_workspace_check_for_updates,
+            terminal_workspace_install_update_and_restart
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

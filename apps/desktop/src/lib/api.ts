@@ -61,7 +61,7 @@ export type { SessionSocketLike } from "./backend-runtime";
 
 /**
  * Fetch JSON from the Node backend. Browser-mode fallback only — every
- * native (Tauri) caller short-circuits to a `termsnip_*` invokeTauriCommand
+ * native (Tauri) caller short-circuits to a `terminal_workspace_*` invokeTauriCommand
  * before reaching here. P2-NET removed the now-dead native proxy path; the Tauri shell
  * is the source of truth in native and never needs to hit the Node
  * backend's HTTP surface anymore.
@@ -127,7 +127,7 @@ export async function getProtocolRuntimeStatus(protocol: HostProtocol) {
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<ProtocolRuntimeStatusResponse>("termsnip_protocol_runtime_status", {
+    return invokeTauriCommand<ProtocolRuntimeStatusResponse>("terminal_workspace_protocol_runtime_status", {
       request: { protocol },
     });
   }
@@ -164,7 +164,7 @@ export async function listRemoteDirectory(host: BackendHostConnection, path: str
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<SftpDirectoryResponse>("termsnip_sftp_list_directory", {
+    return invokeTauriCommand<SftpDirectoryResponse>("terminal_workspace_sftp_list_directory", {
       request: { host, path },
     });
   }
@@ -181,7 +181,7 @@ export async function createRemoteDirectory(host: BackendHostConnection, path: s
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<{ ok: boolean; path: string }>("termsnip_sftp_create_directory", {
+    return invokeTauriCommand<{ ok: boolean; path: string }>("terminal_workspace_sftp_create_directory", {
       request: { host, path },
     });
   }
@@ -202,7 +202,7 @@ export async function renameRemoteEntry(
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<{ ok: boolean; path: string }>("termsnip_sftp_rename_entry", {
+    return invokeTauriCommand<{ ok: boolean; path: string }>("terminal_workspace_sftp_rename_entry", {
       request: { host, currentPath, nextPath },
     });
   }
@@ -223,7 +223,7 @@ export async function deleteRemoteEntry(
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<{ ok: boolean }>("termsnip_sftp_delete_entry", {
+    return invokeTauriCommand<{ ok: boolean }>("terminal_workspace_sftp_delete_entry", {
       request: { host, path, isDirectory },
     });
   }
@@ -244,7 +244,7 @@ export async function uploadRemoteFile(
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<{ ok: boolean; path: string }>("termsnip_sftp_upload_file", {
+    return invokeTauriCommand<{ ok: boolean; path: string }>("terminal_workspace_sftp_upload_file", {
       request: {
         host,
         path: remotePath,
@@ -275,7 +275,7 @@ export async function downloadRemoteFile(host: BackendHostConnection, path: stri
       base64Body: string;
       contentDisposition?: string;
       contentType?: string;
-    }>("termsnip_sftp_download_file", {
+    }>("terminal_workspace_sftp_download_file", {
       request: { host, path },
     });
     const blob = new Blob([decodeBase64ToBytes(response.base64Body)], {
@@ -324,7 +324,7 @@ export async function inspectPrivateKey(path: string) {
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<KeyMetadata>("termsnip_inspect_private_key", {
+    return invokeTauriCommand<KeyMetadata>("terminal_workspace_inspect_private_key", {
       request: { path },
     });
   }
@@ -341,7 +341,7 @@ export async function generatePrivateKey(payload: GenerateKeyPayload) {
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<KeyMetadata>("termsnip_generate_private_key", {
+    return invokeTauriCommand<KeyMetadata>("terminal_workspace_generate_private_key", {
       request: payload,
     });
   }
@@ -363,7 +363,7 @@ export async function importPrivateKeyFromBody(payload: ImportPrivateKeyFromBody
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<KeyMetadata>("termsnip_import_private_key_from_body", {
+    return invokeTauriCommand<KeyMetadata>("terminal_workspace_import_private_key_from_body", {
       request: payload,
     });
   }
@@ -386,7 +386,7 @@ export async function copyKeyToHost(payload: CopyKeyToHostPayload) {
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<CopyKeyToHostResponse>("termsnip_copy_key_to_host", {
+    return invokeTauriCommand<CopyKeyToHostResponse>("terminal_workspace_copy_key_to_host", {
       request: payload,
     });
   }
@@ -403,7 +403,7 @@ export async function scanKnownHost(hostname: string, port: number) {
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<{ entries: KnownHostScanResult[] }>("termsnip_scan_known_host", {
+    return invokeTauriCommand<{ entries: KnownHostScanResult[] }>("terminal_workspace_scan_known_host", {
       request: { hostname, port },
     });
   }
@@ -420,7 +420,7 @@ export async function listLocalForwards(sessionId: string) {
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<ListForwardsResponse>("termsnip_list_session_forwards", {
+    return invokeTauriCommand<ListForwardsResponse>("terminal_workspace_list_session_forwards", {
       request: { sessionId },
     });
   }
@@ -436,7 +436,7 @@ export async function createLocalForward(payload: CreateForwardPayload) {
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<PortForwardRecord>("termsnip_create_forward", {
+    return invokeTauriCommand<PortForwardRecord>("terminal_workspace_create_forward", {
       request: payload,
     });
   }
@@ -453,7 +453,7 @@ export async function deleteLocalForward(forwardId: string) {
   }
 
   if (isTauriRuntime()) {
-    return invokeTauriCommand<BackendBooleanResponse>("termsnip_delete_forward", {
+    return invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_delete_forward", {
       request: { forwardId },
     });
   }
@@ -470,7 +470,7 @@ export async function executeSnippetOnHosts(command: string, targets: SnippetExe
 
   if (isTauriRuntime()) {
     return invokeTauriCommand<{ results: SnippetExecutionResult[] }>(
-      "termsnip_execute_snippet_on_hosts",
+      "terminal_workspace_execute_snippet_on_hosts",
       {
         request: { command, targets },
       }

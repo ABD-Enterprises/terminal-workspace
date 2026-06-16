@@ -34,7 +34,7 @@ export const readSshConfigFile: SshConfigFileReader = async (path: string) => {
   }
   try {
     const response = await invokeTauriCommand<ReadSshConfigFileResponse>(
-      "termsnip_read_ssh_config_file",
+      "terminal_workspace_read_ssh_config_file",
       {
         request: { path } satisfies ReadSshConfigFileRequest,
       }
@@ -55,7 +55,7 @@ export const readSshConfigFile: SshConfigFileReader = async (path: string) => {
  * Three transports, mirroring the rest of the backend surface:
  * - demo mode → seeded fixture (so the importer demonstrates multi-file
  *   expansion without a real ~/.ssh tree);
- * - native (Tauri) → `termsnip_glob_ssh_config_files`, which refuses any
+ * - native (Tauri) → `terminal_workspace_glob_ssh_config_files`, which refuses any
  *   match outside `~/.ssh/`;
  * - browser/HTTP → `/api/backend/ssh-config/glob`, same refusal server-side.
  *
@@ -69,7 +69,7 @@ export const globSshConfigFiles: SshConfigGlobLister = async (pattern: string) =
   if (isTauriRuntime()) {
     try {
       const response = await invokeTauriCommand<GlobSshConfigFilesResponse>(
-        "termsnip_glob_ssh_config_files",
+        "terminal_workspace_glob_ssh_config_files",
         { request: { pattern } }
       );
       return response.matches;

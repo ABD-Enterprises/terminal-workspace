@@ -13,7 +13,7 @@ import {
 import type { BackendHostConnection } from "./backend-contract";
 
 // #101 native-path coverage: the native session socket consumes Tauri
-// `termsnip://session-stream` events. Capture the registered listener so
+// `terminal_workspace://session-stream` events. Capture the registered listener so
 // tests can drive the event sequence the Rust session loop emits. This is
 // the renderer half of every native terminal session and was previously
 // untested — all session tests ran in browser/mock mode.
@@ -192,14 +192,14 @@ describe("backend runtime bridge", () => {
     await closeSession("native-session");
     await resizeSession("native-session", { cols: 80, rows: 24 });
 
-    expect(invoke).toHaveBeenNthCalledWith(1, "termsnip_backend_status", undefined);
-    expect(invoke).toHaveBeenNthCalledWith(2, "termsnip_create_backend_session", {
+    expect(invoke).toHaveBeenNthCalledWith(1, "terminal_workspace_backend_status", undefined);
+    expect(invoke).toHaveBeenNthCalledWith(2, "terminal_workspace_create_backend_session", {
       request: { host: hostFixture },
     });
-    expect(invoke).toHaveBeenNthCalledWith(3, "termsnip_close_backend_session", {
+    expect(invoke).toHaveBeenNthCalledWith(3, "terminal_workspace_close_backend_session", {
       request: { sessionId: "native-session" },
     });
-    expect(invoke).toHaveBeenNthCalledWith(4, "termsnip_resize_backend_session", {
+    expect(invoke).toHaveBeenNthCalledWith(4, "terminal_workspace_resize_backend_session", {
       request: { payload: { cols: 80, rows: 24 }, sessionId: "native-session" },
     });
   });
@@ -244,7 +244,7 @@ describe("backend runtime bridge", () => {
 
   it("native socket opens a stream via the tauri invoke bridge", async () => {
     const invoke = vi.fn(async (command: string) => {
-      if (command === "termsnip_open_backend_session_stream") {
+      if (command === "terminal_workspace_open_backend_session_stream") {
         return { ok: true, streamId: "stream-1" };
       }
       return { ok: true };
@@ -253,7 +253,7 @@ describe("backend runtime bridge", () => {
 
     const socket = await openSessionSocket("sess-1");
 
-    expect(invoke).toHaveBeenCalledWith("termsnip_open_backend_session_stream", {
+    expect(invoke).toHaveBeenCalledWith("terminal_workspace_open_backend_session_stream", {
       request: { sessionId: "sess-1" },
     });
     expect(socket.readyState).toBe(WebSocket.OPEN);
@@ -261,7 +261,7 @@ describe("backend runtime bridge", () => {
 
   it("native socket delivers messages tagged with its own streamId", async () => {
     const invoke = vi.fn(async (command: string) =>
-      command === "termsnip_open_backend_session_stream"
+      command === "terminal_workspace_open_backend_session_stream"
         ? { ok: true, streamId: "stream-1" }
         : { ok: true }
     );
@@ -283,7 +283,7 @@ describe("backend runtime bridge", () => {
 
   it("native socket ignores events for a different session or stream", async () => {
     const invoke = vi.fn(async (command: string) =>
-      command === "termsnip_open_backend_session_stream"
+      command === "terminal_workspace_open_backend_session_stream"
         ? { ok: true, streamId: "stream-1" }
         : { ok: true }
     );
@@ -302,7 +302,7 @@ describe("backend runtime bridge", () => {
 
   it("native socket send() forwards input through the tauri bridge", async () => {
     const invoke = vi.fn(async (command: string) =>
-      command === "termsnip_open_backend_session_stream"
+      command === "terminal_workspace_open_backend_session_stream"
         ? { ok: true, streamId: "stream-1" }
         : { ok: true }
     );
@@ -311,14 +311,14 @@ describe("backend runtime bridge", () => {
     const socket = await openSessionSocket("sess-1");
     socket.send("ls -la\n");
 
-    expect(invoke).toHaveBeenCalledWith("termsnip_send_backend_session_stream", {
+    expect(invoke).toHaveBeenCalledWith("terminal_workspace_send_backend_session_stream", {
       request: { data: "ls -la\n", sessionId: "sess-1", streamId: "stream-1" },
     });
   });
 
   it("native socket finishes on a close event", async () => {
     const invoke = vi.fn(async (command: string) =>
-      command === "termsnip_open_backend_session_stream"
+      command === "terminal_workspace_open_backend_session_stream"
         ? { ok: true, streamId: "stream-1" }
         : { ok: true }
     );
@@ -338,7 +338,7 @@ describe("backend runtime bridge", () => {
 
   it("native socket surfaces error events to error listeners", async () => {
     const invoke = vi.fn(async (command: string) =>
-      command === "termsnip_open_backend_session_stream"
+      command === "terminal_workspace_open_backend_session_stream"
         ? { ok: true, streamId: "stream-1" }
         : { ok: true }
     );

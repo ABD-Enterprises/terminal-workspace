@@ -85,7 +85,7 @@ describe("native trust and key tooling API", () => {
 
     await inspectPrivateKey("~/.ssh/id_ed25519");
 
-    expect(invokeTauriCommand).toHaveBeenCalledWith("termsnip_inspect_private_key", {
+    expect(invokeTauriCommand).toHaveBeenCalledWith("terminal_workspace_inspect_private_key", {
       request: { path: "~/.ssh/id_ed25519" },
     });
   });
@@ -96,15 +96,15 @@ describe("native trust and key tooling API", () => {
     await generatePrivateKey({
       comment: "termsnip@local",
       passphrase: "secret",
-      path: "~/.ssh/termsnip_ed25519",
+      path: "~/.ssh/terminal_workspace_ed25519",
       type: "ed25519",
     });
 
-    expect(invokeTauriCommand).toHaveBeenCalledWith("termsnip_generate_private_key", {
+    expect(invokeTauriCommand).toHaveBeenCalledWith("terminal_workspace_generate_private_key", {
       request: {
         comment: "termsnip@local",
         passphrase: "secret",
-        path: "~/.ssh/termsnip_ed25519",
+        path: "~/.ssh/terminal_workspace_ed25519",
         type: "ed25519",
       },
     });
@@ -115,7 +115,7 @@ describe("native trust and key tooling API", () => {
 
     await scanKnownHost("bastion.internal", 2222);
 
-    expect(invokeTauriCommand).toHaveBeenCalledWith("termsnip_scan_known_host", {
+    expect(invokeTauriCommand).toHaveBeenCalledWith("terminal_workspace_scan_known_host", {
       request: { hostname: "bastion.internal", port: 2222 },
     });
   });
@@ -131,7 +131,7 @@ describe("native trust and key tooling API", () => {
 
     await getProtocolRuntimeStatus("mosh");
 
-    expect(invokeTauriCommand).toHaveBeenCalledWith("termsnip_protocol_runtime_status", {
+    expect(invokeTauriCommand).toHaveBeenCalledWith("terminal_workspace_protocol_runtime_status", {
       request: { protocol: "mosh" },
     });
   });
@@ -200,7 +200,7 @@ describe("native trust and key tooling API", () => {
       { host: hostFixture, id: "host-1", label: "Bastion" },
     ]);
 
-    expect(invokeTauriCommand).toHaveBeenNthCalledWith(1, "termsnip_create_forward", {
+    expect(invokeTauriCommand).toHaveBeenNthCalledWith(1, "terminal_workspace_create_forward", {
       request: {
         direction: "local",
         localHost: "127.0.0.1",
@@ -210,7 +210,7 @@ describe("native trust and key tooling API", () => {
         sessionId: "session-1",
       },
     });
-    expect(invokeTauriCommand).toHaveBeenNthCalledWith(2, "termsnip_execute_snippet_on_hosts", {
+    expect(invokeTauriCommand).toHaveBeenNthCalledWith(2, "terminal_workspace_execute_snippet_on_hosts", {
       request: {
         command: "echo ok",
         targets: [{ host: hostFixture, id: "host-1", label: "Bastion" }],
