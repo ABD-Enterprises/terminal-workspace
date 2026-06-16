@@ -104,6 +104,67 @@ for (const filePath of Object.values(logs)) {
 }
 NODE
 
+# --- #86: updater feed (signed .app.tar.gz + latest.json) -------------------
+# Runs only when the updater signing key is present. Without the secret this is
+# a no-op, so releases behave exactly as before until the key is configured.
+# The tarball is built from the NOTARIZED + STAPLED bundle re-verified above
+# ($APP_PATH_FROM_MANIFEST) so updated installs stay notarized + Gatekeeper-OK.
+# Both files land in $PROMOTION_ROOT, which native-publish-release.sh uploads
+# wholesale — so they attach to the GitHub release with no publish-side change.
+if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+  echo "Generating updater artifacts (signed tarball + latest.json)..."
+  UPDATER_REPO="${GITHUB_REPOSITORY:-ABD-Enterprises/terminal-workspace}"
+  UPDATER_TARBALL_NAME="$(basename "${ZIP_PATH%.zip}").app.tar.gz"
+  UPDATER_TARBALL_PATH="$PROMOTION_ROOT/$UPDATER_TARBALL_NAME"
+  APP_PARENT_DIR="$(dirname "$APP_PATH_FROM_MANIFEST")"
+  APP_BUNDLE_NAME="$(basename "$APP_PATH_FROM_MANIFEST")"
+
+  tar -C "$APP_PARENT_DIR" -czf "$UPDATER_TARBALL_PATH" "$APP_BUNDLE_NAME"
+
+  # Sign the tarball with the updater key (minisign via the Tauri CLI, which
+  # reads TAURI_SIGNING_PRIVATE_KEY / _PASSWORD from the env and writes
+  # <tarball>.sig). npx fetches the pinned CLI on first use; cached after.
+  npx --yes @tauri-apps/cli@^2 signer sign "$UPDATER_TARBALL_PATH"
+  UPDATER_SIG_PATH="$UPDATER_TARBALL_PATH.sig"
+  if [[ ! -f "$UPDATER_SIG_PATH" ]]; then
+    echo "Updater signature was not produced at $UPDATER_SIG_PATH" >&2
+    exit 1
+  fi
+
+  # darwin-aarch64 only: this ships an Apple-Silicon build (ARM64 runner,
+  # non-universal cargo build). The download URL uses the tag-agnostic
+  # releases/latest form so it always resolves to the newest stable release,
+  # matching the tauri.conf.json updater endpoint.
+  UPDATER_LATEST_JSON="$PROMOTION_ROOT/latest.json"
+  UPDATER_DOWNLOAD_URL="https://github.com/$UPDATER_REPO/releases/latest/download/$UPDATER_TARBALL_NAME"
+  VERSION="$VERSION" \
+  UPDATER_SIG_PATH="$UPDATER_SIG_PATH" \
+  UPDATER_DOWNLOAD_URL="$UPDATER_DOWNLOAD_URL" \
+  UPDATER_PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  UPDATER_LATEST_JSON="$UPDATER_LATEST_JSON" \
+  node <<'NODE'
+const fs = require("node:fs");
+const signature = fs.readFileSync(process.env.UPDATER_SIG_PATH, "utf8").trim();
+const feed = {
+  version: process.env.VERSION,
+  notes: `Update to version ${process.env.VERSION}. See the GitHub release page for full notes.`,
+  pub_date: process.env.UPDATER_PUB_DATE,
+  platforms: {
+    "darwin-aarch64": {
+      signature,
+      url: process.env.UPDATER_DOWNLOAD_URL,
+    },
+  },
+};
+fs.writeFileSync(process.env.UPDATER_LATEST_JSON, `${JSON.stringify(feed, null, 2)}\n`);
+NODE
+  echo "  updater tarball: $UPDATER_TARBALL_PATH"
+  echo "  updater latest.json: $UPDATER_LATEST_JSON"
+else
+  echo "Skipping updater artifacts (TAURI_SIGNING_PRIVATE_KEY not set)."
+fi
+# ---------------------------------------------------------------------------
+
 ARCHIVE_BASENAME="$(basename "$ZIP_PATH")"
 ARCHIVE_SHA256="$(shasum -a 256 "$ZIP_PATH" | awk '{print $1}')"
 printf "%s  %s\n" "$ARCHIVE_SHA256" "$ARCHIVE_BASENAME" >"$CHECKSUM_PATH"

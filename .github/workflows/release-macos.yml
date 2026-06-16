@@ -154,6 +154,12 @@ jobs:
       - name: Promote notarized release
         env:
           MACOS_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
+          # #86: updater feed signing. When these are set, native:promote emits
+          # a signed .app.tar.gz + latest.json into the promotion dir (uploaded
+          # by the publish step). Absent, promotion skips updater artifacts.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: npm run native:promote
 
       - name: Publish GitHub release
