@@ -16,7 +16,7 @@
 // that case (transitional behaviour until P2-DM1 batch 4 removes the
 // per-host duplicates).
 //
-// See docs/parity-and-hardening-plan.md P2-DM1.
+// See internal/parity-and-hardening-plan.md P2-DM1.
 
 import { useHostsStore } from "../store/hosts-store";
 import { useIdentitiesStore } from "../store/identities-store";

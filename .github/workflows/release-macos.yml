@@ -25,8 +25,8 @@ env:
 jobs:
   release-macos:
     # Self-hosted ABD-Enterprises org runner with Xcode 26.5 and
-    # Apple Silicon. Declared in deffenda/brew-sync
-    # manifests/github-runners.yaml. macos-latest hosted runners
+    # Apple Silicon, declared in the organization runner manifests.
+    # macos-latest hosted runners
     # carry a 10x minute multiplier and this job has a 90-minute
     # timeout — moving it to self-hosted is a material savings on
     # every release.

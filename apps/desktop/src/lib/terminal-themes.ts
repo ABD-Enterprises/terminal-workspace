@@ -7,7 +7,7 @@
 //   - `TerminalPane` consumes a palette and ANSI colour map by name.
 //   - The Settings page can offer a picker without coupling to xterm internals.
 //   - The "auto" mode tracks the OS `prefers-color-scheme` query.
-// See docs/parity-and-hardening-plan.md P1-UX7 and review §4.4.
+// See internal/parity-and-hardening-plan.md P1-UX7 and review §4.4.
 
 /**
  * The shape xterm.js expects on `terminal.options.theme`. We do not import the

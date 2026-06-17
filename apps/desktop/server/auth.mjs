@@ -1,7 +1,7 @@
 // Backend authentication helpers extracted into a separate module so they can
 // be unit-tested without standing up the full HTTP server. See:
-// docs/parity-and-hardening-review.md §3.S-4 / §3.S-8 and
-// docs/parity-and-hardening-plan.md P1-S4b.
+// internal/parity-and-hardening-review.md §3.S-4 / §3.S-8 and
+// internal/parity-and-hardening-plan.md P1-S4b.
 
 import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";

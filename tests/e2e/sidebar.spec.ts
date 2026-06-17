@@ -3,7 +3,7 @@ import { expect, test  } from "./helpers";
 // Sidebar surface is the navigation backbone — every page reaches it.
 // Test the search box, every nav item, the pinned-favorites panel, the
 // sessions panel, and the SidebarGroups widget (rename + remove + drag).
-// See docs/parity-and-hardening-review.md §4.1 for context.
+// See internal/parity-and-hardening-review.md §4.1 for context.
 
 test.describe("sidebar", () => {
   test("renders header counts derived from seeded hosts", async ({ page }) => {

@@ -8,7 +8,7 @@
 // will use a similar resolver but indexed by id (not by path); this helper
 // keeps a focused identity-id semantic so it doesn't have to change.
 //
-// See docs/parity-and-hardening-plan.md P2-DM1.
+// See internal/parity-and-hardening-plan.md P2-DM1.
 
 import type { HostRecord } from "../types/host";
 

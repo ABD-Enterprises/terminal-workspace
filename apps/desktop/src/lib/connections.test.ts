@@ -38,7 +38,7 @@ const baseHost = {
   privateKeyPath: "/tmp/test-key",
   protocol: "ssh" as const,
   sftpRoot: "/tmp",
-  username: "deffenda",
+  username: "demo-user",
 };
 
 describe("connection helpers", () => {

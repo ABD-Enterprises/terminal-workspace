@@ -159,7 +159,7 @@ struct BackendHostConnection {
     /// "requireTrusted" or "allowUnknown". Optional for backward compatibility
     /// with renderer builds that pre-date the contract change. When absent or
     /// "requireTrusted" we refuse to connect without a known_host_public_key.
-    /// See docs/parity-and-hardening-review.md §3.S-1.
+    /// See internal/parity-and-hardening-review.md §3.S-1.
     #[serde(default)]
     host_key_policy: Option<String>,
     hostname: String,

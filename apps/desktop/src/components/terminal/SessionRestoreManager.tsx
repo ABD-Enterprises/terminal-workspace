@@ -113,7 +113,7 @@ export function SessionRestoreManager() {
   // (set by the inactive-restore loop above when a passphrase was missing),
   // proactively open the secrets prompt instead of leaving the badge cyan and
   // silent. Closes the gap called out in
-  // docs/parity-and-hardening-review.md §4.3 — "the tab just sits there cyan
+  // internal/parity-and-hardening-review.md §4.3 — "the tab just sits there cyan
   // and frozen". The actual reconnect happens on the next inactive-restore
   // tick once the secrets store is hydrated.
   const promptedPaneIdsRef = useRef(new Set<string>());

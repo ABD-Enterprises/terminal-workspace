@@ -13,8 +13,8 @@
 - `apps/desktop/src/lib/api.ts`: frontend transport seam
 - `src-tauri/src/native_transport.rs`: native SSH, SFTP, forwarding, snippets, and trust tooling
 - `src-tauri/src/keychain_support.rs`: native runtime secret persistence
-- `docs/roadmap/roadmap.md`: product roadmap context and known risks
-- GitHub Issues through `ai-pipeline`: active AI task state
+- `docs/architecture.md`: tech stack and high-level structure
+- GitHub Issues: active work and known risks
 
 ## Safe Defaults
 

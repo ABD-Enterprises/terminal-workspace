@@ -10,7 +10,7 @@ use std::path::Path;
 /// Without this guard, a renderer-side XSS could call
 /// `terminal_workspace_inspect_private_key` with `/etc/passwd` (or another user's home)
 /// to probe file existence and leak metadata via ssh-keygen error messages.
-/// See docs/parity-and-hardening-review.md §3.S-6.
+/// See internal/parity-and-hardening-review.md §3.S-6.
 /// Lexically collapse `.` and `..` components without touching the filesystem.
 /// Used to neutralize `..` traversal in key paths whose leaf (or directory) may
 /// not exist yet, so the allowlist check below can't be bypassed via a literal,

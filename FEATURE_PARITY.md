@@ -8,9 +8,7 @@ Goal: build a local-first macOS replacement that reaches roughly 90% of the comp
 
 > **Honest-scoring overlay (last audited 2026-05-06)**
 >
-> The presence-based "Implemented" column below over-counts daily-use parity. Scoring the same matrix on quality, default-safety, and friction lands at **~80% practical parity** (up from ~70% in 2026-04-27), not 96%. See:
-> - `docs/parity-and-hardening-review.md` — independent review with file:line citations.
-> - `docs/parity-and-hardening-plan.md` — phased remediation plan.
+> The presence-based "Implemented" column below over-counts daily-use parity. Scoring the same matrix on quality, default-safety, and friction lands at **~80% practical parity** (up from ~70% in 2026-04-27), not 96%.
 >
 > Bullets below have been reverified on 2026-05-06; entries that turned out to be stale on the 04-27 pass have been rewritten with the current state.
 >
@@ -20,7 +18,7 @@ Goal: build a local-first macOS replacement that reaches roughly 90% of the comp
 > - **Import/export config** — SSH config import has the richer parser (`Host *` defaults, `ProxyJump`, multi-host lines) plus `Match host/originalhost/user/all` directives shipped 2026-05-06 (`apps/desktop/src/lib/ssh-config.ts:51-336`, PR #29). `Include` directive is the remaining gap and is split out to issue #28; it requires a backend filesystem primitive.
 > - **Local prefs** — terminal theme picker with `prefers-color-scheme` Auto mode is shipped (`apps/desktop/src/routes/SettingsPage.tsx:381-489`); the remaining gap is the **font picker** (font family + size). The 04-27 "no theme picker, no prefers-color-scheme" claim was stale.
 >
-> Phase 0 hardening landed 2026-04-27 and Phase 1 UX bonus round (tabs/splits/fingerprint/themes) landed before 2026-05-06. See `docs/parity-and-hardening-plan.md` for what's queued next.
+> Phase 0 hardening landed 2026-04-27 and Phase 1 UX bonus round (tabs/splits/fingerprint/themes) landed before 2026-05-06. Remaining parity work is tracked in GitHub Issues.
 
 Primary competitor evidence:
 - [Organizing data](https://competitor.com/documentation/organizing-data)

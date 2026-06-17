@@ -20,7 +20,7 @@
 //            identity, deprecating the per-host credential fields.
 //   Batch 4: remove the deprecated host fields.
 //
-// See docs/parity-and-hardening-plan.md P2-DM1 and review §2.1.
+// See internal/parity-and-hardening-plan.md P2-DM1 and review §2.1.
 
 import type { HostAuthMethod } from "./host";
 

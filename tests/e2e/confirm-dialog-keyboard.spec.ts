@@ -12,7 +12,7 @@ test.describe("ConfirmDialog keyboard handling", () => {
     await page.goto("/settings");
 
     // Locate any seeded identity row's Delete button. The seed contains
-    // at least one identity per docs/parity-and-hardening-plan.md P2-DM1.
+    // at least one identity per internal/parity-and-hardening-plan.md P2-DM1.
     const deleteButtons = page.getByRole("button", { name: /^Delete$/ });
     if ((await deleteButtons.count()) === 0) {
       // Seed empty — nothing to assert.

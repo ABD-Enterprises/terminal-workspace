@@ -12,7 +12,7 @@ import type { KnownHostScanResult } from "../lib/api";
 // single `<FingerprintTrustPrompt />` mounted high in the tree handle
 // every call site.
 //
-// See docs/parity-and-hardening-plan.md P2-FP and review §3.S-1 / §6.1.
+// See internal/parity-and-hardening-plan.md P2-FP and review §3.S-1 / §6.1.
 
 export interface FingerprintTrustPromptRequest {
   hostId: string;

@@ -3,8 +3,8 @@
 // a group's hosts. P2-DM2 collapse: this replaces the older
 // `SidebarEnvironments` component which kept a parallel `EnvironmentRecord`
 // store linked to hosts by string match — see
-// docs/parity-and-hardening-review.md §2.2 / §6.7 and
-// docs/parity-and-hardening-plan.md P2-DM2.
+// internal/parity-and-hardening-review.md §2.2 / §6.7 and
+// internal/parity-and-hardening-plan.md P2-DM2.
 //
 // Why we dropped the EnvironmentRecord entity:
 //   - The "link" between Environment and Host was `host.group === env.name`,

@@ -12,7 +12,7 @@
 // authMethod fields. Batch 3 of P2-DM1 will switch the runtime to read
 // from the resolved identity instead of the per-host fields.
 //
-// See docs/parity-and-hardening-plan.md P2-DM1.
+// See internal/parity-and-hardening-plan.md P2-DM1.
 
 import { sampleHosts, type HostRecord } from "../types/host";
 import {

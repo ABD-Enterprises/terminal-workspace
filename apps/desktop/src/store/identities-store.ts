@@ -1,5 +1,5 @@
 // Persisted catalogue of reusable connection identities. See
-// docs/parity-and-hardening-plan.md P2-DM1 (batch 1). The store is purely
+// internal/parity-and-hardening-plan.md P2-DM1 (batch 1). The store is purely
 // additive in this batch: nothing in the runtime reads an Identity yet,
 // but the records exist (and are kept in sync via auto-migration) so
 // batch 3 can flip the read path without a separate migration step.

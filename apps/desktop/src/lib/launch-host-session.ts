@@ -4,7 +4,7 @@
 // prompt (P2-FP) into the path so the user resolves trust BEFORE the
 // session tab is added — no orphaned cyan tabs when the user rejects.
 //
-// See docs/parity-and-hardening-plan.md P2-FP.
+// See internal/parity-and-hardening-plan.md P2-FP.
 
 import { useHostsStore } from "../store/hosts-store";
 import { useSessionsStore } from "../store/sessions-store";

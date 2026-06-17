@@ -467,7 +467,7 @@ export function AppShell() {
   // When a session tab is open, expose the commands a power user reaches for
   // most often (split, duplicate, files, close) directly in the palette so
   // they do not require a tab-bar visit. Closes the gap called out in
-  // docs/parity-and-hardening-review.md §4.2.
+  // internal/parity-and-hardening-review.md §4.2.
   type ActiveCommand = {
     key: string;
     label: string;

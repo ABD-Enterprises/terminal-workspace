@@ -4,8 +4,8 @@
 // opaque "Trusted host key required" error and being told to navigate
 // to the Keys page.
 //
-// See docs/parity-and-hardening-plan.md P2-FP and
-// docs/parity-and-hardening-review.md §3.S-1 / §6.1.
+// See internal/parity-and-hardening-plan.md P2-FP and
+// internal/parity-and-hardening-review.md §3.S-1 / §6.1.
 
 import { scanKnownHost, type KnownHostScanResult } from "./api";
 import { findKnownHostMatch } from "./connections";

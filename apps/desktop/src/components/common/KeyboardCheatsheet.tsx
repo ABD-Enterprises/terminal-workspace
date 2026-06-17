@@ -1,6 +1,6 @@
 // Floating overlay listing every keyboard shortcut the app exposes.
 // Triggered by `?` (handled in useKeyboardCheatsheet); also closeable
-// with Esc or by clicking outside. See docs/parity-and-hardening-review
+// with Esc or by clicking outside. See internal/parity-and-hardening-review
 // — the keyboard-first follow-through item from QWEN's review noted that
 // while ⌘K and ⌘1..6 worked, there was no discovery surface for the
 // keymap. This is that surface.

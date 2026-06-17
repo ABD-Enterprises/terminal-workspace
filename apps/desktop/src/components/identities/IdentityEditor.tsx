@@ -3,7 +3,7 @@
 // just the core fields that drive runtime auth. Renders as a card so the
 // list view can show it inline beside the entries it edits.
 //
-// See docs/parity-and-hardening-plan.md P2-DM1 (batch 2).
+// See internal/parity-and-hardening-plan.md P2-DM1 (batch 2).
 
 import { useState } from "react";
 import { cn } from "../../lib/utils";

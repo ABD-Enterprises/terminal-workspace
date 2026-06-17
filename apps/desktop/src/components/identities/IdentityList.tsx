@@ -8,7 +8,7 @@
 // just orphans the linkage). Batch 3 will harden this by requiring a
 // re-link before delete.
 //
-// See docs/parity-and-hardening-plan.md P2-DM1 (batch 2).
+// See internal/parity-and-hardening-plan.md P2-DM1 (batch 2).
 
 import { cn } from "../../lib/utils";
 import type { IdentityRecord } from "../../types/identity";

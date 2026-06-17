@@ -19,5 +19,9 @@ artifacts/release/
 # repo.
 .claude/
 
+# Operator-curated context and internal planning/audit notes. Kept on disk
+# for maintainers but not published in this repo.
+internal/
+
 # Pipeline state and retained evidence files must not be gitignored — they are required by the AI validator
 .worktrees/

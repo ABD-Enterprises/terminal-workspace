@@ -4,7 +4,7 @@
 // We do not depend on @xterm/addon-search because it is not in the local
 // pnpm offline cache and adding it would require network. The renderer
 // drives xterm's own buffer + selection APIs directly. See
-// docs/parity-and-hardening-plan.md P1-UX6.
+// internal/parity-and-hardening-plan.md P1-UX6.
 
 /** Subset of xterm's IBufferLine that we actually need for searching. */
 export interface SearchableBufferLine {

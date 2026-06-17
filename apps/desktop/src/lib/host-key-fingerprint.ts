@@ -2,7 +2,7 @@
 //
 // The host record links to its key by file path (`host.privateKeyPath`),
 // not by key id — this is a known data-model gap (see
-// docs/parity-and-hardening-review.md §2.1). Until the Identity refactor
+// internal/parity-and-hardening-review.md §2.1). Until the Identity refactor
 // (P2-DM1) lands we resolve at lookup time by matching paths in the
 // keys store. This helper is the single place that does that lookup so
 // Phase 2 can replace it with a real foreign key without changing every
