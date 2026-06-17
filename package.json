@@ -27,6 +27,7 @@
     "native:notarize": "bash ./scripts/native-notarize.sh",
     "native:notary:auth:test": "bash ./scripts/native-notary-auth-test.sh",
     "native:promote": "bash ./scripts/native-promote.sh",
+    "native:dmg": "bash ./scripts/native-dmg.sh",
     "native:publish": "bash ./scripts/native-publish-release.sh",
     "native:publish:dry-run": "RELEASE_DRY_RUN=1 bash ./scripts/native-publish-release.sh",
     "release:secrets:audit": "node ./scripts/github-release-secrets.mjs audit",

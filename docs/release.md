@@ -14,6 +14,9 @@
   for acceptance, staples the ticket, recreates the zip, and updates the manifest.
 - `npm run native:promote` is the local promotion gate. It copies the notarized release into the
   stable channel directory with the manifest, checksum file, and release notes.
+- `npm run native:dmg` builds the notarized + stapled `.dmg` installer from the stapled `.app` and
+  places it in the promotion directory so `native:publish` uploads it. Run it after
+  `native:promote`; it skips cleanly when no notary keychain profile is configured.
 - `npm run native:publish:dry-run` validates the promoted GitHub release asset set without
   publishing it.
 - `.github/workflows/release-macos.yml` is the CI-backed release path for signing, notarization,
@@ -32,6 +35,7 @@
 - `npm run native:notary:auth:test`
 - `MACOS_NOTARY_PROFILE=<profile> npm run native:notarize`
 - `npm run native:promote`
+- `MACOS_NOTARY_PROFILE=<profile> npm run native:dmg`
 - `npm run native:publish:dry-run`
 - `npm run validate:full`
 - Native bundle build, notarization, stapling, and promotion verification
@@ -46,6 +50,8 @@
 - `artifacts/release/*.notary-*.json`: Apple notarization submission and log output
 - `artifacts/release/*.stapler-*.txt`: stapling and ticket validation logs
 - `artifacts/release/promoted/stable/v0.1.0/`: promoted release zip, manifest, logs, and checksum
+- `artifacts/release/promoted/stable/v0.1.0/terminal-workspace-macos-v0.1.0.app.dmg`: notarized +
+  stapled DMG installer uploaded to the GitHub release
 - `artifacts/release/promoted/stable/latest-macos-release.json`: latest promoted stable manifest
 - `artifacts/release/promoted/stable/v0.1.0/RELEASE_NOTES.md`: promoted release notes used by the
   GitHub release publish step
