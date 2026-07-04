@@ -2110,14 +2110,18 @@ async fn terminal_workspace_backend_status() -> Result<BackendStatusResponse, St
 }
 
 #[tauri::command]
-async fn terminal_workspace_inspect_private_key(request: KeyPathRequest) -> Result<KeyMetadata, String> {
+async fn terminal_workspace_inspect_private_key(
+    request: KeyPathRequest,
+) -> Result<KeyMetadata, String> {
     tauri::async_runtime::spawn_blocking(move || inspect_private_key(&request.path))
         .await
         .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-async fn terminal_workspace_generate_private_key(request: GenerateKeyRequest) -> Result<KeyMetadata, String> {
+async fn terminal_workspace_generate_private_key(
+    request: GenerateKeyRequest,
+) -> Result<KeyMetadata, String> {
     tauri::async_runtime::spawn_blocking(move || generate_key_pair(&request))
         .await
         .map_err(|error| error.to_string())?
@@ -2440,165 +2444,197 @@ async fn terminal_workspace_scan_known_host(
 }
 
 #[tauri::command]
-fn terminal_workspace_sftp_list_directory(request: SftpPathRequest) -> Result<SftpDirectoryResponse, String> {
-    validate_ssh_host(&request.host)?;
-    let target_path = resolve_remote_path(
-        request.host.sftp_root.as_deref().unwrap_or("/"),
-        &request.path,
-    );
-    let output =
+async fn terminal_workspace_sftp_list_directory(
+    request: SftpPathRequest,
+) -> Result<SftpDirectoryResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        validate_ssh_host(&request.host)?;
+        let target_path = resolve_remote_path(
+            request.host.sftp_root.as_deref().unwrap_or("/"),
+            &request.path,
+        );
+        let output =
+            with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+                run_sftp_batch_commands(
+                    &request.host,
+                    context,
+                    &[format!("@ls -la {}", escape_sftp_argument(&target_path))],
+                )
+            })?;
+
+        Ok(SftpDirectoryResponse {
+            entries: parse_sftp_directory_listing(&target_path, &output),
+            path: target_path,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn terminal_workspace_sftp_create_directory(
+    request: SftpPathRequest,
+) -> Result<BackendPathResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        validate_ssh_host(&request.host)?;
+        let target_path = resolve_remote_path(
+            request.host.sftp_root.as_deref().unwrap_or("/"),
+            &request.path,
+        );
         with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
             run_sftp_batch_commands(
                 &request.host,
                 context,
-                &[format!("@ls -la {}", escape_sftp_argument(&target_path))],
+                &[format!("@mkdir {}", escape_sftp_argument(&target_path))],
             )
-        })?;
-
-    Ok(SftpDirectoryResponse {
-        entries: parse_sftp_directory_listing(&target_path, &output),
-        path: target_path,
-    })
-}
-
-#[tauri::command]
-fn terminal_workspace_sftp_create_directory(request: SftpPathRequest) -> Result<BackendPathResponse, String> {
-    validate_ssh_host(&request.host)?;
-    let target_path = resolve_remote_path(
-        request.host.sftp_root.as_deref().unwrap_or("/"),
-        &request.path,
-    );
-    with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-        run_sftp_batch_commands(
-            &request.host,
-            context,
-            &[format!("@mkdir {}", escape_sftp_argument(&target_path))],
-        )
-        .map(|_| BackendPathResponse {
-            ok: true,
-            path: target_path.clone(),
+            .map(|_| BackendPathResponse {
+                ok: true,
+                path: target_path.clone(),
+            })
         })
     })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn terminal_workspace_sftp_rename_entry(request: SftpRenameRequest) -> Result<BackendPathResponse, String> {
-    validate_ssh_host(&request.host)?;
-    let source_path = resolve_remote_path(
-        request.host.sftp_root.as_deref().unwrap_or("/"),
-        &request.current_path,
-    );
-    let target_path = resolve_remote_path(
-        request.host.sftp_root.as_deref().unwrap_or("/"),
-        &request.next_path,
-    );
-    with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-        run_sftp_batch_commands(
-            &request.host,
-            context,
-            &[format!(
-                "@rename {} {}",
-                escape_sftp_argument(&source_path),
-                escape_sftp_argument(&target_path)
-            )],
-        )
-        .map(|_| BackendPathResponse {
-            ok: true,
-            path: target_path.clone(),
+async fn terminal_workspace_sftp_rename_entry(
+    request: SftpRenameRequest,
+) -> Result<BackendPathResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        validate_ssh_host(&request.host)?;
+        let source_path = resolve_remote_path(
+            request.host.sftp_root.as_deref().unwrap_or("/"),
+            &request.current_path,
+        );
+        let target_path = resolve_remote_path(
+            request.host.sftp_root.as_deref().unwrap_or("/"),
+            &request.next_path,
+        );
+        with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+            run_sftp_batch_commands(
+                &request.host,
+                context,
+                &[format!(
+                    "@rename {} {}",
+                    escape_sftp_argument(&source_path),
+                    escape_sftp_argument(&target_path)
+                )],
+            )
+            .map(|_| BackendPathResponse {
+                ok: true,
+                path: target_path.clone(),
+            })
         })
     })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn terminal_workspace_sftp_delete_entry(
+async fn terminal_workspace_sftp_delete_entry(
     request: SftpDeleteRequest,
 ) -> Result<BackendBooleanResponse, String> {
-    validate_ssh_host(&request.host)?;
-    let target_path = resolve_remote_path(
-        request.host.sftp_root.as_deref().unwrap_or("/"),
-        &request.path,
-    );
-    with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-        run_sftp_batch_commands(
-            &request.host,
-            context,
-            &[format!(
-                "@{} {}",
-                if request.is_directory { "rmdir" } else { "rm" },
-                escape_sftp_argument(&target_path)
-            )],
-        )
-        .map(|_| BackendBooleanResponse {
-            ok: true,
-            pending: None,
+    tauri::async_runtime::spawn_blocking(move || {
+        validate_ssh_host(&request.host)?;
+        let target_path = resolve_remote_path(
+            request.host.sftp_root.as_deref().unwrap_or("/"),
+            &request.path,
+        );
+        with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+            run_sftp_batch_commands(
+                &request.host,
+                context,
+                &[format!(
+                    "@{} {}",
+                    if request.is_directory { "rmdir" } else { "rm" },
+                    escape_sftp_argument(&target_path)
+                )],
+            )
+            .map(|_| BackendBooleanResponse {
+                ok: true,
+                pending: None,
+            })
         })
     })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn terminal_workspace_sftp_upload_file(request: SftpUploadRequest) -> Result<BackendPathResponse, String> {
-    validate_ssh_host(&request.host)?;
-    let target_path = resolve_remote_path(
-        request.host.sftp_root.as_deref().unwrap_or("/"),
-        &request.path,
-    );
-    let contents = BASE64_STANDARD
-        .decode(request.contents_base64.as_bytes())
-        .map_err(|error| error.to_string())?;
-    with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-        let upload_path = context
-            .session_dir
-            .join(format!("upload-{}", sanitize_filename(&request.filename)));
-        fs::write(&upload_path, &contents).map_err(|error| error.to_string())?;
-        run_sftp_batch_commands(
-            &request.host,
-            context,
-            &[format!(
-                "@put {} {}",
-                escape_sftp_argument(&upload_path.to_string_lossy()),
-                escape_sftp_argument(&target_path)
-            )],
-        )
-        .map(|_| BackendPathResponse {
-            ok: true,
-            path: target_path.clone(),
+async fn terminal_workspace_sftp_upload_file(
+    request: SftpUploadRequest,
+) -> Result<BackendPathResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        validate_ssh_host(&request.host)?;
+        let target_path = resolve_remote_path(
+            request.host.sftp_root.as_deref().unwrap_or("/"),
+            &request.path,
+        );
+        let contents = BASE64_STANDARD
+            .decode(request.contents_base64.as_bytes())
+            .map_err(|error| error.to_string())?;
+        with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+            let upload_path = context
+                .session_dir
+                .join(format!("upload-{}", sanitize_filename(&request.filename)));
+            fs::write(&upload_path, &contents).map_err(|error| error.to_string())?;
+            run_sftp_batch_commands(
+                &request.host,
+                context,
+                &[format!(
+                    "@put {} {}",
+                    escape_sftp_argument(&upload_path.to_string_lossy()),
+                    escape_sftp_argument(&target_path)
+                )],
+            )
+            .map(|_| BackendPathResponse {
+                ok: true,
+                path: target_path.clone(),
+            })
         })
     })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn terminal_workspace_sftp_download_file(
+async fn terminal_workspace_sftp_download_file(
     request: SftpPathRequest,
 ) -> Result<BackendBinaryResponse, String> {
-    validate_ssh_host(&request.host)?;
-    let target_path = resolve_remote_path(
-        request.host.sftp_root.as_deref().unwrap_or("/"),
-        &request.path,
-    );
-    with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-        let filename = sanitize_filename(
-            target_path
-                .rsplit('/')
-                .find(|segment| !segment.is_empty())
-                .unwrap_or("download"),
+    tauri::async_runtime::spawn_blocking(move || {
+        validate_ssh_host(&request.host)?;
+        let target_path = resolve_remote_path(
+            request.host.sftp_root.as_deref().unwrap_or("/"),
+            &request.path,
         );
-        let download_path = context.session_dir.join(format!("download-{filename}"));
-        run_sftp_batch_commands(
-            &request.host,
-            context,
-            &[format!(
-                "@get {} {}",
-                escape_sftp_argument(&target_path),
-                escape_sftp_argument(&download_path.to_string_lossy())
-            )],
-        )?;
-        let bytes = fs::read(download_path).map_err(|error| error.to_string())?;
-        Ok(BackendBinaryResponse {
-            base64_body: BASE64_STANDARD.encode(bytes),
-            content_disposition: Some(format!("attachment; filename=\"{filename}\"")),
-            content_type: Some("application/octet-stream".to_string()),
+        with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
+            let filename = sanitize_filename(
+                target_path
+                    .rsplit('/')
+                    .find(|segment| !segment.is_empty())
+                    .unwrap_or("download"),
+            );
+            let download_path = context.session_dir.join(format!("download-{filename}"));
+            run_sftp_batch_commands(
+                &request.host,
+                context,
+                &[format!(
+                    "@get {} {}",
+                    escape_sftp_argument(&target_path),
+                    escape_sftp_argument(&download_path.to_string_lossy())
+                )],
+            )?;
+            let bytes = fs::read(download_path).map_err(|error| error.to_string())?;
+            Ok(BackendBinaryResponse {
+                base64_body: BASE64_STANDARD.encode(bytes),
+                content_disposition: Some(format!("attachment; filename=\"{filename}\"")),
+                content_type: Some("application/octet-stream".to_string()),
+            })
         })
     })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -2610,12 +2646,18 @@ fn terminal_workspace_list_session_forwards(
 }
 
 #[tauri::command]
-fn terminal_workspace_create_forward(
+async fn terminal_workspace_create_forward(
     native_sessions: State<'_, NativeSessionRegistry>,
     native_forwards: State<'_, NativeForwardRegistry>,
     request: CreateForwardPayload,
 ) -> Result<PortForwardRecord, String> {
-    create_native_forward(native_sessions.inner(), native_forwards.inner(), request)
+    let native_sessions = native_sessions.inner().clone();
+    let native_forwards = native_forwards.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        create_native_forward(&native_sessions, &native_forwards, request)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -2950,9 +2992,7 @@ async fn terminal_workspace_glob_ssh_config_files(
         .map_err(|error| error.to_string())?
 }
 
-fn glob_ssh_config_files_blocking(
-    raw_pattern: &str,
-) -> Result<GlobSshConfigFilesResponse, String> {
+fn glob_ssh_config_files_blocking(raw_pattern: &str) -> Result<GlobSshConfigFilesResponse, String> {
     let home = env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or_else(|| "HOME env var is not set".to_string())?;
@@ -3658,6 +3698,28 @@ mod tests {
         assert_eq!(resolve_remote_path("/srv", "releases/../logs"), "/srv/logs");
         assert_eq!(resolve_remote_path("/srv", "/var/tmp"), "/var/tmp");
         assert_eq!(resolve_remote_path("/", "../../etc"), "/etc");
+        assert_eq!(
+            resolve_remote_path("/srv/sftp", "uploads/../etc/passwd"),
+            "/srv/sftp/etc/passwd"
+        );
+    }
+
+    #[test]
+    fn async_sftp_command_rejects_non_ssh_host_before_sftp_work() {
+        let mut host = minimal_ssh_host();
+        host.protocol = "telnet".to_string();
+
+        let result = tauri::async_runtime::block_on(terminal_workspace_sftp_list_directory(
+            SftpPathRequest {
+                host,
+                path: "../../etc/passwd".to_string(),
+            },
+        ));
+
+        match result {
+            Ok(_) => panic!("non-SSH SFTP host should be rejected"),
+            Err(error) => assert_eq!(error, "Unsupported SSH transport protocol: telnet"),
+        }
     }
 
     #[test]
