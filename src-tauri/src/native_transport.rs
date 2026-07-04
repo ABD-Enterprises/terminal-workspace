@@ -617,6 +617,12 @@ fn native_ssh_session_root() -> Result<PathBuf, String> {
     Ok(env::temp_dir())
 }
 
+// Kept deliberately short: the session dir holds the ControlMaster socket
+// (control.sock), and a macOS AF_UNIX path must stay under 104 bytes. A long
+// prefix here plus the per-user TMPDIR root (/var/folders/.../T on macOS) and a
+// random suffix overflows that limit and breaks ssh multiplexing. See #150.
+pub(crate) const NATIVE_SSH_DIR_PREFIX: &str = "tw-ssh-";
+
 fn create_native_ssh_session_dir_with_suffixes(
     session_id: &str,
     suffixes: impl IntoIterator<Item = String>,
@@ -637,7 +643,7 @@ fn create_native_ssh_session_dir_in_root(
         let suffix = suffixes
             .next()
             .unwrap_or_else(|| random_session_suffix(session_id, attempt));
-        let directory = temp_root.join(format!("termsnip-native-ssh-{suffix}"));
+        let directory = temp_root.join(format!("{NATIVE_SSH_DIR_PREFIX}{suffix}"));
         let mut builder = fs::DirBuilder::new();
         #[cfg(unix)]
         builder.mode(0o700);
@@ -656,8 +662,12 @@ fn create_native_ssh_session_dir_in_root(
         .unwrap_or_else(|| "failed to create native SSH session directory".to_string()))
 }
 
+// 8 bytes (16 hex chars) of entropy: 2^64 is unguessable, and the real defense
+// against pre-planting is the exclusive 0700 create — this only needs to avoid
+// collision and prediction. Kept short so the control.sock path stays < 104
+// bytes (see NATIVE_SSH_DIR_PREFIX / #150).
 fn random_session_suffix(session_id: &str, attempt: usize) -> String {
-    let mut bytes = [0u8; 16];
+    let mut bytes = [0u8; 8];
     if fs::File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut bytes))
         .is_ok()
@@ -674,7 +684,7 @@ fn random_session_suffix(session_id: &str, attempt: usize) -> String {
     hasher.update(std::process::id().to_ne_bytes());
     hasher.update(timestamp.to_ne_bytes());
     hasher.update(attempt.to_ne_bytes());
-    hex_encode(&hasher.finalize()[..16])
+    hex_encode(&hasher.finalize()[..8])
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -1798,7 +1808,7 @@ mod tests {
         assert_ne!(dir, PathBuf::from("/tmp/termsnip-native-ssh-native-7"));
         assert_ne!(
             dir.file_name().and_then(|name| name.to_str()),
-            Some("termsnip-native-ssh-native-7")
+            Some(format!("{NATIVE_SSH_DIR_PREFIX}native-7").as_str())
         );
 
         let _ = fs::remove_dir_all(dir);
@@ -1813,15 +1823,33 @@ mod tests {
         assert_ne!(first, second);
         assert_ne!(
             first.file_name().and_then(|name| name.to_str()),
-            Some("termsnip-native-ssh-native-7")
+            Some(format!("{NATIVE_SSH_DIR_PREFIX}native-7").as_str())
         );
         assert_ne!(
             second.file_name().and_then(|name| name.to_str()),
-            Some("termsnip-native-ssh-native-7")
+            Some(format!("{NATIVE_SSH_DIR_PREFIX}native-7").as_str())
         );
 
         let _ = fs::remove_dir_all(first);
         let _ = fs::remove_dir_all(second);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_control_socket_path_within_unix_limit() {
+        // ssh ControlMaster binds session_dir/control.sock, and a macOS AF_UNIX
+        // path must stay under 104 bytes. Guard the total path length so the
+        // dir prefix + random suffix can never overflow it again (#150).
+        let dir =
+            create_native_ssh_session_dir("native-ctlpath").expect("session dir should be created");
+        let control_len = dir.join("control.sock").to_string_lossy().len();
+        assert!(
+            control_len < 104,
+            "control socket path is {control_len} bytes (must be < 104): {}",
+            dir.display()
+        );
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1847,7 +1875,7 @@ mod tests {
         let attacker_dir = test_root("attacker");
         let first_suffix = test_suffix("preplanted");
         let second_suffix = test_suffix("retry");
-        let planted_path = root.join(format!("termsnip-native-ssh-{first_suffix}"));
+        let planted_path = root.join(format!("{NATIVE_SSH_DIR_PREFIX}{first_suffix}"));
         symlink(&attacker_dir, &planted_path).expect("attacker symlink should be planted");
 
         let dir = create_native_ssh_session_dir_with_suffixes(
@@ -1858,7 +1886,7 @@ mod tests {
 
         assert_eq!(
             dir.file_name().and_then(|name| name.to_str()),
-            Some(format!("termsnip-native-ssh-{second_suffix}").as_str())
+            Some(format!("{NATIVE_SSH_DIR_PREFIX}{second_suffix}").as_str())
         );
         assert!(fs::read_dir(&attacker_dir)
             .expect("attacker dir should be readable")
@@ -1875,7 +1903,7 @@ mod tests {
         let root = native_ssh_session_root().expect("native SSH session root should resolve");
         let first_suffix = test_suffix("collision");
         let second_suffix = test_suffix("collision-retry");
-        let collision_path = root.join(format!("termsnip-native-ssh-{first_suffix}"));
+        let collision_path = root.join(format!("{NATIVE_SSH_DIR_PREFIX}{first_suffix}"));
         fs::create_dir(&collision_path).expect("collision dir should be created");
 
         let dir = create_native_ssh_session_dir_with_suffixes(
@@ -1886,7 +1914,7 @@ mod tests {
 
         assert_eq!(
             dir.file_name().and_then(|name| name.to_str()),
-            Some(format!("termsnip-native-ssh-{second_suffix}").as_str())
+            Some(format!("{NATIVE_SSH_DIR_PREFIX}{second_suffix}").as_str())
         );
 
         let _ = fs::remove_dir_all(collision_path);
