@@ -2,7 +2,7 @@ use super::*;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 #[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 /// Reject any private-key path the renderer hands us that escapes the user's
@@ -303,10 +303,7 @@ pub(crate) fn parse_ssh_keygen_summary(
 /// Normalizes line endings + ensures the body ends with a single LF
 /// — some clipboards strip the trailing newline and ssh-keygen
 /// rejects keys without it.
-pub(crate) fn import_private_key_from_body(
-    path: &str,
-    body: &str,
-) -> Result<KeyMetadata, String> {
+pub(crate) fn import_private_key_from_body(path: &str, body: &str) -> Result<KeyMetadata, String> {
     if path.trim().is_empty() {
         return Err("A destination path is required".to_string());
     }
@@ -572,13 +569,156 @@ pub(crate) fn take_prompt_response(
 }
 
 pub(crate) fn create_native_ssh_session_dir(session_id: &str) -> Result<PathBuf, String> {
-    let temp_root = PathBuf::from("/tmp");
-    let directory = temp_root.join(format!("termsnip-native-ssh-{session_id}"));
-    if directory.exists() {
-        fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
+    create_native_ssh_session_dir_with_suffixes(session_id, std::iter::empty::<String>())
+}
+
+#[cfg(unix)]
+fn native_ssh_session_root() -> Result<PathBuf, String> {
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "HOME env var is not set".to_string())?;
+    native_ssh_session_root_from(env::temp_dir(), home)
+}
+
+#[cfg(unix)]
+fn native_ssh_session_root_from(temp_root: PathBuf, home: PathBuf) -> Result<PathBuf, String> {
+    let home_metadata = fs::metadata(&home).map_err(|error| error.to_string())?;
+    let user_uid = home_metadata.uid();
+
+    if let Ok(metadata) = fs::metadata(&temp_root) {
+        if metadata.uid() == user_uid && metadata.mode() & 0o002 == 0 {
+            return Ok(temp_root);
+        }
     }
-    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-    Ok(directory)
+
+    let fallback_root = home.join(".terminal-workspace").join("tmp");
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    builder.mode(0o700);
+    builder
+        .create(&fallback_root)
+        .map_err(|error| error.to_string())?;
+    fs::set_permissions(&fallback_root, fs::Permissions::from_mode(0o700))
+        .map_err(|error| error.to_string())?;
+
+    let metadata = fs::metadata(&fallback_root).map_err(|error| error.to_string())?;
+    if metadata.uid() != user_uid || metadata.mode() & 0o002 != 0 {
+        return Err(format!(
+            "Refusing to stage SSH material in insecure temp root: {}",
+            fallback_root.display()
+        ));
+    }
+
+    Ok(fallback_root)
+}
+
+#[cfg(not(unix))]
+fn native_ssh_session_root() -> Result<PathBuf, String> {
+    Ok(env::temp_dir())
+}
+
+fn create_native_ssh_session_dir_with_suffixes(
+    session_id: &str,
+    suffixes: impl IntoIterator<Item = String>,
+) -> Result<PathBuf, String> {
+    let temp_root = native_ssh_session_root()?;
+    create_native_ssh_session_dir_in_root(&temp_root, session_id, suffixes)
+}
+
+fn create_native_ssh_session_dir_in_root(
+    temp_root: &Path,
+    session_id: &str,
+    suffixes: impl IntoIterator<Item = String>,
+) -> Result<PathBuf, String> {
+    let mut suffixes = suffixes.into_iter();
+    let mut last_error = None;
+
+    for attempt in 0..8 {
+        let suffix = suffixes
+            .next()
+            .unwrap_or_else(|| random_session_suffix(session_id, attempt));
+        let directory = temp_root.join(format!("termsnip-native-ssh-{suffix}"));
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        builder.mode(0o700);
+
+        match builder.create(&directory) {
+            Ok(()) => return Ok(directory),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                last_error = Some(error);
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+
+    Err(last_error
+        .map(|error| error.to_string())
+        .unwrap_or_else(|| "failed to create native SSH session directory".to_string()))
+}
+
+fn random_session_suffix(session_id: &str, attempt: usize) -> String {
+    let mut bytes = [0u8; 16];
+    if fs::File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut bytes))
+        .is_ok()
+    {
+        return hex_encode(&bytes);
+    }
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(session_id.as_bytes());
+    hasher.update(std::process::id().to_ne_bytes());
+    hasher.update(timestamp.to_ne_bytes());
+    hasher.update(attempt.to_ne_bytes());
+    hex_encode(&hasher.finalize()[..16])
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
+}
+
+fn sanitized_staging_stem(alias: &str) -> String {
+    let mut stem = alias
+        .chars()
+        .map(|ch| {
+            if ch == '/' || ch == '\\' || ch.is_control() {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect::<String>();
+
+    if stem.trim_matches('.').is_empty() {
+        stem = "identity".to_string();
+    }
+
+    stem
+}
+
+fn write_private_file(path: &Path, contents: impl AsRef<[u8]>, mode: u32) -> Result<(), String> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(mode);
+    #[cfg(not(unix))]
+    let _ = mode;
+    let mut file = options.open(path).map_err(|error| error.to_string())?;
+    file.write_all(contents.as_ref())
+        .map_err(|error| error.to_string())
+}
+
+fn scrub_passphrase_file(path: &Path, len: usize) {
+    let _ = fs::write(path, vec![0u8; len]);
+    let _ = fs::remove_file(path);
 }
 
 pub(crate) fn write_native_known_hosts(
@@ -602,7 +742,7 @@ pub(crate) fn write_native_known_hosts(
         }
     }
 
-    fs::write(&known_hosts_path, entries.join("\n")).map_err(|error| error.to_string())?;
+    write_private_file(&known_hosts_path, entries.join("\n"), 0o600)?;
     Ok(known_hosts_path)
 }
 
@@ -616,11 +756,17 @@ pub(crate) fn prepare_native_identity_file(
         return Ok(resolved_path.to_string_lossy().into_owned());
     }
 
-    let target_path = session_dir.join(format!("{alias}-identity"));
-    fs::copy(&resolved_path, &target_path).map_err(|error| error.to_string())?;
+    let staging_stem = sanitized_staging_stem(alias);
+    let target_path = session_dir.join(format!("{staging_stem}-identity"));
+    let mut source_file = fs::File::open(&resolved_path).map_err(|error| error.to_string())?;
+    let mut target_options = fs::OpenOptions::new();
+    target_options.write(true).create_new(true);
     #[cfg(unix)]
-    fs::set_permissions(&target_path, fs::Permissions::from_mode(0o600))
+    target_options.mode(0o600);
+    let mut target_file = target_options
+        .open(&target_path)
         .map_err(|error| error.to_string())?;
+    io::copy(&mut source_file, &mut target_file).map_err(|error| error.to_string())?;
 
     let target_path_string = target_path.to_string_lossy().into_owned();
 
@@ -628,14 +774,11 @@ pub(crate) fn prepare_native_identity_file(
     // write it to a 0600 sibling file in our session-private temp dir, then
     // hand ssh-keygen an SSH_ASKPASS script that prints the file. We scrub
     // both files before returning. See parity-and-hardening-review.md §3.S-2.
-    let pass_path = session_dir.join(format!("{alias}-pass"));
-    let askpass_path = session_dir.join(format!("{alias}-askpass.sh"));
+    let pass_path = session_dir.join(format!("{staging_stem}-pass"));
+    let askpass_path = session_dir.join(format!("{staging_stem}-askpass.sh"));
 
-    fs::write(&pass_path, connection.passphrase.as_bytes())
+    write_private_file(&pass_path, connection.passphrase.as_bytes(), 0o600)
         .map_err(|error| format!("failed to stage passphrase: {error}"))?;
-    #[cfg(unix)]
-    fs::set_permissions(&pass_path, fs::Permissions::from_mode(0o600))
-        .map_err(|error| error.to_string())?;
 
     // The askpass script must print the passphrase to stdout and nothing else.
     // We use `cat` rather than embedding the passphrase in the script body so
@@ -644,11 +787,10 @@ pub(crate) fn prepare_native_identity_file(
         "#!/bin/sh\nexec /bin/cat -- {}\n",
         shell_single_quote(&pass_path.to_string_lossy())
     );
-    fs::write(&askpass_path, askpass_body)
-        .map_err(|error| format!("failed to stage askpass: {error}"))?;
-    #[cfg(unix)]
-    fs::set_permissions(&askpass_path, fs::Permissions::from_mode(0o700))
-        .map_err(|error| error.to_string())?;
+    if let Err(error) = write_private_file(&askpass_path, askpass_body, 0o700) {
+        scrub_passphrase_file(&pass_path, connection.passphrase.len());
+        return Err(format!("failed to stage askpass: {error}"));
+    }
 
     let output_result = Command::new("/usr/bin/ssh-keygen")
         .args(["-p", "-N", "", "-f", &target_path_string])
@@ -665,8 +807,7 @@ pub(crate) fn prepare_native_identity_file(
 
     // Best-effort scrub: overwrite then unlink. We do this whether ssh-keygen
     // succeeded or failed, before returning either path.
-    let _ = fs::write(&pass_path, vec![0u8; connection.passphrase.len()]);
-    let _ = fs::remove_file(&pass_path);
+    scrub_passphrase_file(&pass_path, connection.passphrase.len());
     let _ = fs::remove_file(&askpass_path);
 
     let output = output_result.map_err(|error| error.to_string())?;
@@ -783,7 +924,7 @@ pub(crate) fn build_native_ssh_config(
         lines.push(String::new());
     }
 
-    fs::write(&config_path, lines.join("\n")).map_err(|error| error.to_string())?;
+    write_private_file(&config_path, lines.join("\n"), 0o600)?;
     Ok((config_path, target_alias))
 }
 
@@ -1567,4 +1708,411 @@ pub(crate) fn execute_native_snippet_request(
     }
 
     Ok(SnippetExecutionResponse { results })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::{
+        process,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn test_suffix(label: &str) -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        format!("{label}-{}-{nanos}", process::id())
+    }
+
+    fn test_root(label: &str) -> PathBuf {
+        let root = native_ssh_session_root()
+            .expect("native SSH session root should be available")
+            .join(format!("termsnip-native-test-{}", test_suffix(label)));
+        fs::create_dir_all(&root).expect("test root should be created");
+        root
+    }
+
+    fn ssh_keygen_available() -> bool {
+        PathBuf::from("/usr/bin/ssh-keygen").exists()
+    }
+
+    fn generate_test_key(path: &Path, passphrase: &str) {
+        if !ssh_keygen_available() {
+            eprintln!("skipping ssh-keygen-dependent assertion: /usr/bin/ssh-keygen missing");
+            return;
+        }
+
+        let output = Command::new("/usr/bin/ssh-keygen")
+            .args([
+                "-q",
+                "-t",
+                "ed25519",
+                "-C",
+                "termsnip-native-test",
+                "-N",
+                passphrase,
+                "-f",
+                &path.to_string_lossy(),
+            ])
+            .output()
+            .expect("ssh-keygen should run");
+        assert!(
+            output.status.success(),
+            "ssh-keygen failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn test_host(private_key_path: &Path, passphrase: &str) -> BackendHostConnection {
+        BackendHostConnection {
+            agent_forwarding: false,
+            auth_method: "privateKey".to_string(),
+            environment: None,
+            host_key_policy: None,
+            hostname: "host.internal".to_string(),
+            jump_host: None,
+            known_host_algorithm: Some("ssh-ed25519".to_string()),
+            known_host_public_key: Some("AAAATEST".to_string()),
+            password: String::new(),
+            passphrase: passphrase.to_string(),
+            port: 22,
+            private_key_path: private_key_path.to_string_lossy().into_owned(),
+            protocol: "ssh".to_string(),
+            sftp_root: None,
+            username: "deploy".to_string(),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_session_dir_root_is_per_user_tmpdir() {
+        let root = native_ssh_session_root().expect("native SSH session root should resolve");
+        let dir = create_native_ssh_session_dir("native-7")
+            .expect("session dir should be created under private root");
+
+        assert!(dir.starts_with(&root));
+        assert_ne!(dir, PathBuf::from("/tmp/termsnip-native-ssh-native-7"));
+        assert_ne!(
+            dir.file_name().and_then(|name| name.to_str()),
+            Some("termsnip-native-ssh-native-7")
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_session_dir_name_is_unpredictable() {
+        let first = create_native_ssh_session_dir("native-7").expect("first dir should be created");
+        let second =
+            create_native_ssh_session_dir("native-7").expect("second dir should be created");
+
+        assert_ne!(first, second);
+        assert_ne!(
+            first.file_name().and_then(|name| name.to_str()),
+            Some("termsnip-native-ssh-native-7")
+        );
+        assert_ne!(
+            second.file_name().and_then(|name| name.to_str()),
+            Some("termsnip-native-ssh-native-7")
+        );
+
+        let _ = fs::remove_dir_all(first);
+        let _ = fs::remove_dir_all(second);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_session_dir_is_0700() {
+        let dir =
+            create_native_ssh_session_dir("native-mode").expect("session dir should be created");
+        let mode = fs::metadata(&dir)
+            .expect("session dir metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777;
+
+        assert_eq!(mode, 0o700);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_session_dir_creation_is_exclusive_no_symlink_follow() {
+        let root = native_ssh_session_root().expect("native SSH session root should resolve");
+        let attacker_dir = test_root("attacker");
+        let first_suffix = test_suffix("preplanted");
+        let second_suffix = test_suffix("retry");
+        let planted_path = root.join(format!("termsnip-native-ssh-{first_suffix}"));
+        symlink(&attacker_dir, &planted_path).expect("attacker symlink should be planted");
+
+        let dir = create_native_ssh_session_dir_with_suffixes(
+            "native-7",
+            vec![first_suffix, second_suffix.clone()],
+        )
+        .expect("session dir creation should retry after symlink collision");
+
+        assert_eq!(
+            dir.file_name().and_then(|name| name.to_str()),
+            Some(format!("termsnip-native-ssh-{second_suffix}").as_str())
+        );
+        assert!(fs::read_dir(&attacker_dir)
+            .expect("attacker dir should be readable")
+            .next()
+            .is_none());
+
+        let _ = fs::remove_file(planted_path);
+        let _ = fs::remove_dir_all(attacker_dir);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_session_dir_collision_retries() {
+        let root = native_ssh_session_root().expect("native SSH session root should resolve");
+        let first_suffix = test_suffix("collision");
+        let second_suffix = test_suffix("collision-retry");
+        let collision_path = root.join(format!("termsnip-native-ssh-{first_suffix}"));
+        fs::create_dir(&collision_path).expect("collision dir should be created");
+
+        let dir = create_native_ssh_session_dir_with_suffixes(
+            "native-7",
+            vec![first_suffix, second_suffix.clone()],
+        )
+        .expect("session dir creation should retry after existing dir");
+
+        assert_eq!(
+            dir.file_name().and_then(|name| name.to_str()),
+            Some(format!("termsnip-native-ssh-{second_suffix}").as_str())
+        );
+
+        let _ = fs::remove_dir_all(collision_path);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_no_plaintext_key_at_predictable_path() {
+        if !ssh_keygen_available() {
+            eprintln!("skipping test: /usr/bin/ssh-keygen missing");
+            return;
+        }
+
+        let root = test_root("plaintext-key");
+        let key_path = root.join("id_ed25519");
+        let passphrase = "fixture-passphrase";
+        generate_test_key(&key_path, passphrase);
+        let session_id = format!("native-keytest-{}", test_suffix("predictable"));
+        let predictable_path = PathBuf::from(format!("/tmp/termsnip-native-ssh-{session_id}"));
+        let session_dir =
+            create_native_ssh_session_dir(&session_id).expect("session dir should be created");
+        let staged_path = prepare_native_identity_file(
+            &test_host(&key_path, passphrase),
+            &session_dir,
+            "native-0",
+        )
+        .expect("identity should be staged");
+
+        assert!(PathBuf::from(staged_path).exists());
+        assert!(!predictable_path.exists());
+
+        let _ = fs::remove_dir_all(session_dir);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_empty_passphrase_returns_original_path() {
+        let root = test_root("empty-passphrase");
+        let key_path = root.join("id_ed25519");
+        fs::write(&key_path, "not-used").expect("key placeholder should be written");
+        let session_dir =
+            create_native_ssh_session_dir("native-empty").expect("session dir should be created");
+
+        let returned =
+            prepare_native_identity_file(&test_host(&key_path, " \t\n"), &session_dir, "native-0")
+                .expect("empty passphrase should return original path");
+
+        assert_eq!(returned, key_path.to_string_lossy());
+        assert!(fs::read_dir(&session_dir)
+            .expect("session dir should be readable")
+            .next()
+            .is_none());
+
+        let _ = fs::remove_dir_all(session_dir);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_identity_alias_with_unicode() {
+        let root = test_root("unicode-alias");
+        let key_path = root.join("id_ed25519");
+        fs::write(&key_path, "not-a-real-key").expect("key placeholder should be written");
+        let session_dir =
+            create_native_ssh_session_dir("native-unicode").expect("session dir should be created");
+
+        let result = prepare_native_identity_file(
+            &test_host(&key_path, "passphrase"),
+            &session_dir,
+            "natïve/../☃\n",
+        );
+
+        assert!(result.is_err());
+        assert!(fs::read_dir(&session_dir)
+            .expect("session dir should be readable")
+            .any(|entry| {
+                entry
+                    .expect("dir entry should be readable")
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("natïve_.._☃_")
+            }));
+
+        let _ = fs::remove_dir_all(session_dir);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_concurrent_sessions_get_distinct_dirs() {
+        let handles = (0..8)
+            .map(|_| {
+                thread::spawn(|| {
+                    create_native_ssh_session_dir("native-7")
+                        .expect("session dir should be created")
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut dirs = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("thread should not panic"))
+            .collect::<Vec<_>>();
+        dirs.sort();
+        dirs.dedup();
+
+        assert_eq!(dirs.len(), 8);
+
+        for dir in dirs {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_tmpdir_unset_falls_back_safely() {
+        let home = test_root("home");
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700))
+            .expect("test home permissions should be set");
+
+        let root = native_ssh_session_root_from(PathBuf::from("/tmp"), home.clone())
+            .expect("native SSH session root should fall back from world-writable /tmp");
+        let dir = create_native_ssh_session_dir_in_root(
+            &root,
+            "native-unset-tmpdir",
+            std::iter::empty::<String>(),
+        )
+        .expect("session dir should be created with simulated TMPDIR unset");
+        let root_metadata = fs::metadata(&root).expect("root metadata should be readable");
+        let dir_mode = fs::metadata(&dir)
+            .expect("dir metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777;
+
+        assert!(dir.starts_with(&home));
+        assert_eq!(root_metadata.mode() & 0o002, 0);
+        assert_eq!(dir_mode, 0o700);
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn test_scrub_on_keygen_failure() {
+        if !ssh_keygen_available() {
+            eprintln!("skipping test: /usr/bin/ssh-keygen missing");
+            return;
+        }
+
+        let root = test_root("keygen-failure");
+        let key_path = root.join("invalid_key");
+        fs::write(&key_path, "not-a-private-key").expect("invalid key should be written");
+        let session_dir =
+            create_native_ssh_session_dir("native-failure").expect("session dir should be created");
+
+        let result =
+            prepare_native_identity_file(&test_host(&key_path, "passphrase"), &session_dir, "bad");
+
+        assert!(result.is_err());
+        assert!(!session_dir.join("bad-pass").exists());
+        assert!(!session_dir.join("bad-askpass.sh").exists());
+
+        let _ = fs::remove_dir_all(session_dir);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_staged_files_stay_inside_0700_dir() {
+        if !ssh_keygen_available() {
+            eprintln!("skipping test: /usr/bin/ssh-keygen missing");
+            return;
+        }
+
+        let root = test_root("staged-files");
+        let key_path = root.join("id_ed25519");
+        let passphrase = "fixture-passphrase";
+        generate_test_key(&key_path, passphrase);
+        let session_dir =
+            create_native_ssh_session_dir("native-staged").expect("session dir should be created");
+        let host = test_host(&key_path, passphrase);
+        let known_hosts_path =
+            write_native_known_hosts(&host, &session_dir).expect("known_hosts should be staged");
+        let identity_path = PathBuf::from(
+            prepare_native_identity_file(&host, &session_dir, "native-0")
+                .expect("identity should be staged"),
+        );
+        let mut config_host = host.clone();
+        config_host.auth_method = "password".to_string();
+        let (config_path, _) =
+            build_native_ssh_config(&config_host, &session_dir, &known_hosts_path, None)
+                .expect("ssh config should be staged");
+        let dir_mode = fs::metadata(&session_dir)
+            .expect("session dir metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777;
+
+        assert_eq!(dir_mode, 0o700);
+        assert!(known_hosts_path.starts_with(&session_dir));
+        assert!(identity_path.starts_with(&session_dir));
+        assert!(config_path.starts_with(&session_dir));
+        assert_eq!(
+            fs::metadata(&known_hosts_path)
+                .expect("known_hosts metadata should be readable")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(&identity_path)
+                .expect("identity metadata should be readable")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(&config_path)
+                .expect("config metadata should be readable")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+
+        let _ = fs::remove_dir_all(session_dir);
+        let _ = fs::remove_dir_all(root);
+    }
 }
