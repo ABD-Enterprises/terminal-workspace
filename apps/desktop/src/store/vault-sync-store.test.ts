@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   compactDeletionEntries,
   compactDeletionMap,
@@ -9,8 +9,18 @@ import {
 
 const baseVaultSyncState = useVaultSyncStore.getState();
 
+// Tombstone retention is measured against the wall clock, so freeze time to a
+// fixed instant just after the fixtures below. Without this the "host-live"
+// fixtures age past VAULT_TOMBSTONE_RETENTION_DAYS once real "now" advances ~90
+// days past their dates, and the compaction assertions rot. See #162.
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-04-05T00:00:00.000Z"));
+});
+
 afterEach(() => {
   useVaultSyncStore.setState(baseVaultSyncState);
+  vi.useRealTimers();
 });
 
 describe("vault sync tombstones", () => {

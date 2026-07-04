@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyImportedLocalConfigBundle,
   buildLocalConfigBundle,
@@ -28,6 +28,16 @@ const baseAppState = useAppStore.getState();
 const baseVaultSyncState = useVaultSyncStore.getState();
 const baseIdentitiesState = useIdentitiesStore.getState();
 
+// Tombstone retention and the exported bundle timestamp are measured against
+// the wall clock, so freeze time to a fixed instant just after the fixtures.
+// Without this the "host-live" fixtures age past VAULT_TOMBSTONE_RETENTION_DAYS
+// once real "now" advances ~90 days past their dates, and the assertions rot.
+// See #162.
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-04-05T00:00:00.000Z"));
+});
+
 afterEach(() => {
   useAppStore.setState(baseAppState);
   useHostsStore.setState(baseHostState);
@@ -38,6 +48,7 @@ afterEach(() => {
   useTransfersStore.setState(baseTransferState);
   useVaultSyncStore.setState(baseVaultSyncState);
   useIdentitiesStore.setState(baseIdentitiesState);
+  vi.useRealTimers();
 });
 
 describe("local config", () => {
