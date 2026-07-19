@@ -1,8 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sampleHosts } from "../types/host";
-import { formatSessionConnectionState, type SessionWorkspaceState } from "../types/session";
+import { formatSessionConnectionState, type SessionPane, type SessionWorkspaceState } from "../types/session";
+
+vi.mock("../lib/backend-runtime", () => ({
+  closeSession: vi.fn(() => Promise.resolve({ ok: true })),
+}));
+import { closeSession } from "../lib/backend-runtime";
+
 import {
   appendPaneCommandHistoryOutput,
+  closeBackendSessionsForPanes,
   cycleSessionTab,
   closeSessionTab,
   consumePaneCommand,
@@ -416,5 +423,32 @@ describe("sessions store helpers", () => {
       expect(reorderSessionTabs(workspace, -1, 0)).toBe(workspace);
       expect(reorderSessionTabs(workspace, 0, workspace.tabs.length)).toBe(workspace);
     });
+  });
+});
+
+describe("closeBackendSessionsForPanes", () => {
+  beforeEach(() => {
+    vi.mocked(closeSession).mockClear();
+  });
+
+  it("closes the backend session for each pane that has one, skipping those without", () => {
+    const panes: Record<string, SessionPane> = {
+      p1: { backendSessionId: "sess-1" } as SessionPane,
+      p2: { backendSessionId: undefined } as SessionPane,
+      p3: { backendSessionId: "sess-3" } as SessionPane,
+    };
+    closeBackendSessionsForPanes(panes, ["p1", "p2", "p3"]);
+    expect(closeSession).toHaveBeenCalledWith("sess-1");
+    expect(closeSession).toHaveBeenCalledWith("sess-3");
+    expect(closeSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not throw when a pane is missing or the backend close rejects", () => {
+    vi.mocked(closeSession).mockRejectedValueOnce(new Error("already gone"));
+    const panes: Record<string, SessionPane> = {
+      p1: { backendSessionId: "sess-1" } as SessionPane,
+    };
+    expect(() => closeBackendSessionsForPanes(panes, ["p1", "missing"])).not.toThrow();
+    expect(closeSession).toHaveBeenCalledTimes(1);
   });
 });
