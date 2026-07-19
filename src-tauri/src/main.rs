@@ -9,7 +9,7 @@ use std::{
     process::{Command, Output, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard,
     },
     thread,
     time::{Duration, Instant},
@@ -66,6 +66,32 @@ const TERMSNIP_DATABASE_URL: &str = "sqlite:termsnip.db";
 static SESSION_STREAM_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NATIVE_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NATIVE_FORWARD_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Acquire a lock, recovering from poisoning instead of propagating the
+/// panic. A panic in one session's or forward's thread poisons the shared
+/// registry/state mutex; without recovery, every subsequent IPC command that
+/// touches that mutex would panic on `.expect()` too — one bad session would
+/// brick *all* sessions until app restart. The guarded data here (session and
+/// forward `HashMap`s, per-session `NativeSessionState`, the input writer) is
+/// safe to continue from after a partial update, so we take the poisoned
+/// guard's inner value rather than cascade the failure.
+trait LockRecover<T> {
+    fn lock_recover(&self) -> MutexGuard<'_, T>;
+}
+
+impl<T> LockRecover<T> for Mutex<T> {
+    fn lock_recover(&self) -> MutexGuard<'_, T> {
+        self.lock().unwrap_or_else(|poisoned| {
+            // Only fires on the poisoned path, so the happy path is unchanged
+            // and this never spams. Surface it so the original panic that
+            // poisoned the lock stays observable instead of being swallowed.
+            eprintln!(
+                "warning: recovered from a poisoned session-registry lock; a prior panic left it poisoned — continuing with recovered state"
+            );
+            poisoned.into_inner()
+        })
+    }
+}
 
 #[derive(Clone, Default)]
 struct NativeSessionRegistry {
@@ -1026,8 +1052,7 @@ fn get_native_session(
 ) -> Option<NativeSessionHandle> {
     registry
         .sessions
-        .lock()
-        .expect("native session registry lock poisoned")
+        .lock_recover()
         .get(session_id)
         .cloned()
 }
@@ -1039,8 +1064,7 @@ fn insert_native_session(
 ) {
     registry
         .sessions
-        .lock()
-        .expect("native session registry lock poisoned")
+        .lock_recover()
         .insert(session_id.to_string(), handle);
 }
 
@@ -1050,8 +1074,7 @@ fn remove_native_session(
 ) -> Option<NativeSessionHandle> {
     registry
         .sessions
-        .lock()
-        .expect("native session registry lock poisoned")
+        .lock_recover()
         .remove(session_id)
 }
 
@@ -1062,8 +1085,7 @@ fn insert_native_forward(
 ) {
     registry
         .forwards
-        .lock()
-        .expect("native forward registry lock poisoned")
+        .lock_recover()
         .insert(forward_id.to_string(), handle);
 }
 
@@ -1073,8 +1095,7 @@ fn remove_native_forward(
 ) -> Option<NativeForwardHandle> {
     registry
         .forwards
-        .lock()
-        .expect("native forward registry lock poisoned")
+        .lock_recover()
         .remove(forward_id)
 }
 
@@ -1084,8 +1105,7 @@ fn list_native_forwards(
 ) -> Vec<PortForwardRecord> {
     registry
         .forwards
-        .lock()
-        .expect("native forward registry lock poisoned")
+        .lock_recover()
         .values()
         .filter(|handle| handle.record.session_id == session_id)
         .map(|handle| handle.record.clone())
@@ -1095,16 +1115,14 @@ fn list_native_forwards(
 fn close_native_forward_handle(handle: NativeForwardHandle) {
     let mut killer = handle
         .killer
-        .lock()
-        .expect("native forward killer lock poisoned");
+        .lock_recover();
     let _ = killer.kill();
 }
 
 fn close_native_forwards_for_session(registry: &NativeForwardRegistry, session_id: &str) {
     let forward_ids = registry
         .forwards
-        .lock()
-        .expect("native forward registry lock poisoned")
+        .lock_recover()
         .values()
         .filter(|handle| handle.record.session_id == session_id)
         .map(|handle| handle.record.id.clone())
@@ -1124,7 +1142,7 @@ fn emit_native_session_message(
     message: String,
 ) {
     let stream_id = {
-        let mut state = state.lock().expect("native session state lock poisoned");
+        let mut state = state.lock_recover();
         match state.stream_id.clone() {
             Some(stream_id) => Some(stream_id),
             None => {
@@ -1159,7 +1177,7 @@ fn set_native_session_connection_state(
     next_state: &str,
 ) {
     {
-        let mut state = state.lock().expect("native session state lock poisoned");
+        let mut state = state.lock_recover();
         state.connection_state = next_state.to_string();
     }
 
@@ -1371,7 +1389,14 @@ fn write_jump_session_input(
     writer: &Arc<Mutex<Box<dyn Write + Send>>>,
     input: &str,
 ) -> Result<(), String> {
-    let mut writer = writer.lock().expect("jump session writer lock poisoned");
+    // Unlike the registry/state locks, the writer wraps a live byte stream:
+    // recovering a lock poisoned mid-write and continuing would interleave
+    // this input with a half-written frame and desync the session. Fail this
+    // one write cleanly instead (the caller surfaces the Err); a poisoned
+    // writer does not cascade because each session owns its own writer.
+    let mut writer = writer
+        .lock()
+        .map_err(|_| "jump session writer lock poisoned".to_string())?;
     writer
         .write_all(input.as_bytes())
         .map_err(|error| error.to_string())?;
@@ -1629,7 +1654,7 @@ fn run_external_command_session_loop(
     }
 
     let stream_id = {
-        let mut state = state.lock().expect("native session state lock poisoned");
+        let mut state = state.lock_recover();
         state.stream_id.take()
     };
 
@@ -1811,7 +1836,7 @@ fn run_jump_host_session_loop(
     set_native_session_connection_state(&app, &session_id, &state, "disconnected");
 
     let stream_id = {
-        let mut state = state.lock().expect("native session state lock poisoned");
+        let mut state = state.lock_recover();
         state.stream_id.take()
     };
 
@@ -1955,7 +1980,7 @@ fn run_native_session_loop(
     set_native_session_connection_state(&app, &session_id, &state, "disconnected");
 
     let stream_id = {
-        let mut state = state.lock().expect("native session state lock poisoned");
+        let mut state = state.lock_recover();
         state.stream_id.take()
     };
 
@@ -1984,8 +2009,7 @@ fn open_native_session_stream(
     let (stream_id, connection_state, buffered_messages) = {
         let mut state = handle
             .state
-            .lock()
-            .expect("native session state lock poisoned");
+            .lock_recover();
         let stream_id = state
             .stream_id
             .clone()
@@ -2037,8 +2061,7 @@ fn send_native_session_stream(
 
     let active_stream_id = handle
         .state
-        .lock()
-        .expect("native session state lock poisoned")
+        .lock_recover()
         .stream_id
         .clone();
 
@@ -2064,8 +2087,7 @@ fn close_native_session_stream(
     let handle = get_native_session(registry, &request.session_id)?;
     let mut state = handle
         .state
-        .lock()
-        .expect("native session state lock poisoned");
+        .lock_recover();
 
     let should_detach = match (&request.stream_id, &state.stream_id) {
         (Some(request_stream_id), Some(active_stream_id)) => request_stream_id == active_stream_id,
@@ -3555,6 +3577,50 @@ mod tests {
         env, process,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn test_registry_survives_poisoned_lock() {
+        let registry = NativeSessionRegistry::default();
+
+        // Poison the shared registry mutex the way a real crash would: a
+        // thread panics while holding the lock. join() returns Err (the
+        // panic is contained to that thread, not the test process).
+        let poisoner = {
+            let sessions = registry.sessions.clone();
+            thread::spawn(move || {
+                let _guard = sessions.lock_recover();
+                panic!("intentional poison for test_registry_survives_poisoned_lock");
+            })
+        };
+        assert!(poisoner.join().is_err(), "poisoner thread should panic");
+        assert!(
+            registry.sessions.is_poisoned(),
+            "registry mutex should be poisoned after the panic"
+        );
+
+        // A normal registry operation must still succeed via lock_recover
+        // instead of cascading the panic — one bad session does not brick
+        // the rest.
+        assert!(
+            get_native_session(&registry, "missing").is_none(),
+            "registry read should recover from poisoning"
+        );
+
+        let (command_sender, _command_receiver) = unbounded_channel();
+        insert_native_session(
+            &registry,
+            "s1",
+            NativeSessionHandle {
+                command_sender,
+                host: minimal_ssh_host(),
+                state: Arc::new(Mutex::new(NativeSessionState::default())),
+            },
+        );
+        assert!(
+            get_native_session(&registry, "s1").is_some(),
+            "registry write/read should still work after poisoning"
+        );
+    }
 
     fn build_test_host_chain() -> BackendHostConnection {
         BackendHostConnection {
