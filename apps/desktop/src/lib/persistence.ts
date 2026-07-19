@@ -219,6 +219,17 @@ function logPersistenceFallback(action: string, name: string, error: unknown) {
   console.warn(`[termsnip] SQLite persistence ${action} failed for ${name}: ${message}`);
 }
 
+// #146: a write/remove that fails must fail LOUDLY and must NOT shadow-write
+// localStorage. SQLite is the single source of truth; a localStorage copy that
+// is newer than SQLite is exactly the split-brain that later resurrects stale
+// SQLite rows on read. Log at error level and let the caller re-throw.
+function logPersistenceError(action: string, name: string, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(
+    `[termsnip] SQLite persistence ${action} failed for ${name}; not shadow-writing localStorage (SQLite is the source of truth): ${message}`
+  );
+}
+
 /**
  * #115: localStorage-backed storage that forward-migrates legacy `termsnip-*`
  * keys (see `getLocalStorageItem`). Used by the persisted stores that don't
@@ -255,8 +266,8 @@ export function createTermsnipStorage(name: PersistedStoreName): StateStorage {
       try {
         await setNativeStoreItem(name, value);
       } catch (error) {
-        logPersistenceFallback("setItem", name, error);
-        setLocalStorageItem(name, value);
+        logPersistenceError("setItem", name, error);
+        throw error;
       }
     },
     removeItem: async () => {
@@ -267,8 +278,8 @@ export function createTermsnipStorage(name: PersistedStoreName): StateStorage {
       try {
         await removeNativeStoreItem(name);
       } catch (error) {
-        logPersistenceFallback("removeItem", name, error);
-        removeLocalStorageItem(name);
+        logPersistenceError("removeItem", name, error);
+        throw error;
       }
     },
   };
@@ -296,8 +307,8 @@ export function createTermsnipDeletionStorage(name: string): StateStorage {
         await setNativeDeletionItem(value);
         setLocalStorageItem(name, value);
       } catch (error) {
-        logPersistenceFallback("setItem", name, error);
-        setLocalStorageItem(name, value);
+        logPersistenceError("setItem", name, error);
+        throw error;
       }
     },
     removeItem: async () => {
@@ -309,8 +320,8 @@ export function createTermsnipDeletionStorage(name: string): StateStorage {
         await removeNativeDeletionItem();
         removeLocalStorageItem(name);
       } catch (error) {
-        logPersistenceFallback("removeItem", name, error);
-        removeLocalStorageItem(name);
+        logPersistenceError("removeItem", name, error);
+        throw error;
       }
     },
   };

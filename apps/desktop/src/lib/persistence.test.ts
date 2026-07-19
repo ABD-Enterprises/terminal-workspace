@@ -187,7 +187,7 @@ describe("Tauri SQLite persistence", () => {
     expect(localStorage.getItem("termsnip-app")).toBe("legacy-payload");
   });
 
-  it("falls back to localStorage when SQLite load, select, or execute fails", async () => {
+  it("falls back to localStorage when a SQLite READ (load or select) fails", async () => {
     const selectDb = new FakeDatabase({ failSelect: true });
     const selectHarness = await loadPersistence(selectDb);
     selectHarness.localStorage.setItem("terminal-workspace-hosts", "fallback-payload");
@@ -202,24 +202,40 @@ describe("Tauri SQLite persistence", () => {
     await expect(
       loadHarness.persistence.createTermsnipStorage("terminal-workspace-hosts").getItem("terminal-workspace-hosts")
     ).resolves.toBe("load-fallback");
-
-    vi.resetModules();
-    vi.unstubAllGlobals();
-    const executeHarness = await loadPersistence(
-      new FakeDatabase({ failExecuteOn: /INSERT INTO hosts_store/ })
-    );
-    const executeStorage = executeHarness.persistence.createTermsnipStorage("terminal-workspace-hosts");
-    await executeStorage.setItem("terminal-workspace-hosts", "execute-fallback");
-    expect(executeHarness.localStorage.getItem("terminal-workspace-hosts")).toBe("execute-fallback");
   });
 
-  it("updates deletion tombstones atomically and rolls back failed writes", async () => {
-    const db = new FakeDatabase({ failExecuteOn: /INSERT INTO deletions/ });
-    db.deletions.set("hosts:old", {
-      deleted_at: "2026-01-01T00:00:00.000Z",
-      id: "old",
-      kind: "hosts",
-    });
+  it("#146: a SQLite write failure rejects and does NOT shadow-write localStorage", async () => {
+    const harness = await loadPersistence(
+      new FakeDatabase({ failExecuteOn: /INSERT INTO hosts_store/ })
+    );
+    const storage = harness.persistence.createTermsnipStorage("terminal-workspace-hosts");
+    // localStorage already mirrors the last good SQLite value.
+    harness.localStorage.setItem("terminal-workspace-hosts", "old-value");
+
+    await expect(
+      storage.setItem("terminal-workspace-hosts", "new-value")
+    ).rejects.toThrow(/execute failed/);
+
+    // The failed write must NOT leave a localStorage copy newer than SQLite —
+    // that split-brain is exactly what later resurrects the stale SQLite row.
+    expect(harness.localStorage.getItem("terminal-workspace-hosts")).toBe("old-value");
+  });
+
+  it("#146: a SQLite delete failure rejects and does NOT shadow-remove localStorage", async () => {
+    const harness = await loadPersistence(
+      new FakeDatabase({ failExecuteOn: /DELETE FROM hosts_store/ })
+    );
+    const storage = harness.persistence.createTermsnipStorage("terminal-workspace-hosts");
+    harness.localStorage.setItem("terminal-workspace-hosts", "still-here");
+
+    await expect(
+      storage.removeItem("terminal-workspace-hosts")
+    ).rejects.toThrow(/execute failed/);
+    expect(harness.localStorage.getItem("terminal-workspace-hosts")).toBe("still-here");
+  });
+
+  it("mirrors a successful deletion write to localStorage", async () => {
+    const db = new FakeDatabase();
     const { localStorage, persistence } = await loadPersistence(db);
     const storage = persistence.createTermsnipDeletionStorage("terminal-workspace-vault-sync");
 
@@ -230,6 +246,30 @@ describe("Tauri SQLite persistence", () => {
       })
     );
 
+    expect(db.deletions.get("hosts:new")).toBeDefined();
+    expect(localStorage.getItem("terminal-workspace-vault-sync")).toContain('"id":"new"');
+  });
+
+  it("#146: a failed deletion write rolls back SQLite and does NOT shadow-write localStorage", async () => {
+    const db = new FakeDatabase({ failExecuteOn: /INSERT INTO deletions/ });
+    db.deletions.set("hosts:old", {
+      deleted_at: "2026-01-01T00:00:00.000Z",
+      id: "old",
+      kind: "hosts",
+    });
+    const { localStorage, persistence } = await loadPersistence(db);
+    const storage = persistence.createTermsnipDeletionStorage("terminal-workspace-vault-sync");
+
+    await expect(
+      storage.setItem(
+        "terminal-workspace-vault-sync",
+        serializeDeletions({
+          hosts: [{ deletedAt: "2026-02-01T00:00:00.000Z", id: "new" }],
+        })
+      )
+    ).rejects.toThrow(/execute failed/);
+
+    // SQLite rolled back to the prior tombstone set...
     expect(db.deletions.get("hosts:old")).toEqual({
       deleted_at: "2026-01-01T00:00:00.000Z",
       id: "old",
@@ -237,6 +277,7 @@ describe("Tauri SQLite persistence", () => {
     });
     expect(db.executeCalls).toContain("BEGIN IMMEDIATE TRANSACTION");
     expect(db.executeCalls).toContain("ROLLBACK");
-    expect(localStorage.getItem("terminal-workspace-vault-sync")).toContain('"id":"new"');
+    // ...and localStorage was NOT shadow-written with the un-committed tombstone.
+    expect(localStorage.getItem("terminal-workspace-vault-sync")).toBeNull();
   });
 });
