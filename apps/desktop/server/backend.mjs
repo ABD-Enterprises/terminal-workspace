@@ -31,6 +31,11 @@ import {
   shutdownBackend,
 } from "./backend-lifecycle.mjs";
 import { SecretBuffer } from "./secrets.mjs";
+import {
+  bufferDetachedOutput,
+  readJson,
+  SFTP_UPLOAD_MAX_BYTES,
+} from "./backend-buffers.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appRoot = normalize(join(__dirname, ".."));
@@ -63,7 +68,9 @@ function denyUnauthorized(response, decision) {
 // implicit and brittle (e.g. one site forgot the `error` key, would
 // be hard to notice). Use this helper instead.
 function respondError(response, error, status = 500) {
-  sendJson(response, status, { error: getErrorMessage(error) });
+  // Honor a status the error carries (e.g. PayloadTooLargeError => 413) so
+  // readJson's body-cap rejection surfaces as the right HTTP status.
+  sendJson(response, error?.statusCode ?? status, { error: getErrorMessage(error) });
 }
 
 const mimeTypes = {
@@ -314,20 +321,11 @@ function sendJson(response, statusCode, body) {
   response.end(JSON.stringify(body));
 }
 
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) {
-    chunks.push(chunk);
-  }
-
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-}
-
 function broadcast(session, message) {
   if (session.ws && session.ws.readyState === 1) {
     session.ws.send(JSON.stringify(message));
   } else if (message.type === "data") {
-    session.buffer.push(message.data);
+    bufferDetachedOutput(session, message.data);
   }
 }
 
@@ -513,6 +511,8 @@ async function createSshSession(host) {
     ws: null,
     state: "connecting",
     buffer: [],
+    bufferBytes: 0,
+    droppedBytes: 0,
   };
   // M05 / #87: connectClient (the short-lived path) properly destructures
   // both fields and runs scrub() in finally. createSshSession (the
@@ -1533,7 +1533,9 @@ const server = createServer(async (request, response) => {
 
   if (request.method === "POST" && url.pathname === "/api/backend/sftp/upload") {
     try {
-      const body = await readJson(request);
+      // The upload body carries base64 file contents, so it gets a much larger
+      // cap than the control-payload routes.
+      const body = await readJson(request, SFTP_UPLOAD_MAX_BYTES);
       const path = await uploadRemoteFile(body.host, body.path, body.contentsBase64);
       sendJson(response, 200, { ok: true, path });
     } catch (error) {
@@ -1666,14 +1668,17 @@ server.on("upgrade", (request, socket, head) => {
       })
     );
 
-    if (session.buffer.length) {
-      ws.send(
-        JSON.stringify({
-          type: "data",
-          data: session.buffer.join(""),
-        })
-      );
+    if (session.buffer.length || session.droppedBytes) {
+      let data = session.buffer.join("");
+      if (session.droppedBytes > 0) {
+        // Tell the reconnecting client that older output was dropped rather
+        // than silently presenting a gap in the scrollback.
+        data = `\r\n[terminal-workspace: ${session.droppedBytes} bytes of earlier output were dropped while disconnected]\r\n${data}`;
+      }
+      ws.send(JSON.stringify({ type: "data", data }));
       session.buffer = [];
+      session.bufferBytes = 0;
+      session.droppedBytes = 0;
     }
 
     ws.on("message", (raw) => {
