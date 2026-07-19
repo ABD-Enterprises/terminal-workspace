@@ -61,6 +61,70 @@ const NATIVE_SESSION_READ_CHUNK_SIZE: usize = 4096;
 const NATIVE_SESSION_PROMPT_WINDOW_SIZE: usize = 512;
 const NATIVE_SESSION_POLL_INTERVAL_MS: u64 = 10;
 const NATIVE_SESSION_BUFFER_LIMIT: usize = 128;
+/// Terminal-output coalescing bounds. Without these, a fast producer
+/// (`yes`, `cat huge.log`) makes the session loop emit one Tauri event per
+/// ~4KB read — thousands/sec — flooding the webview's event queue and xterm
+/// write buffer until it can OOM. Consecutive output is concatenated and
+/// emitted at most once per window, or once per accumulated MAX_BYTES,
+/// whichever comes first, so emit throughput is capped by time/size rather
+/// than by the producer's rate. Ordering and bytes are preserved (coalescing
+/// concatenates; it never drops).
+const NATIVE_OUTPUT_COALESCE_WINDOW_MS: u64 = 12;
+const NATIVE_OUTPUT_COALESCE_MAX_BYTES: usize = 64 * 1024;
+
+/// Accumulates terminal output and yields it in bounded, in-order flushes.
+/// Deterministic and side-effect-free (the caller supplies `now` and performs
+/// the emit) so the flush policy is unit-testable without a live session.
+struct OutputCoalescer {
+    pending: String,
+    pending_since: Option<Instant>,
+    window: Duration,
+    max_bytes: usize,
+}
+
+impl OutputCoalescer {
+    fn new(window: Duration, max_bytes: usize) -> Self {
+        Self {
+            pending: String::new(),
+            pending_since: None,
+            window,
+            max_bytes,
+        }
+    }
+
+    /// Append a chunk. Returns the coalesced buffer to emit immediately when
+    /// the size threshold is reached, else `None` (still accumulating).
+    fn push(&mut self, chunk: &str, now: Instant) -> Option<String> {
+        if self.pending.is_empty() {
+            self.pending_since = Some(now);
+        }
+        self.pending.push_str(chunk);
+        if self.pending.len() >= self.max_bytes {
+            self.take()
+        } else {
+            None
+        }
+    }
+
+    /// Flush if the time window has elapsed since the first buffered byte.
+    /// Caps latency for a producer that streams continuously without pausing.
+    fn poll_flush(&mut self, now: Instant) -> Option<String> {
+        match self.pending_since {
+            Some(since) if now.duration_since(since) >= self.window => self.take(),
+            _ => None,
+        }
+    }
+
+    /// Flush everything pending unconditionally (producer paused, or the
+    /// session is closing). Returns `None` when there is nothing buffered.
+    fn take(&mut self) -> Option<String> {
+        if self.pending.is_empty() {
+            return None;
+        }
+        self.pending_since = None;
+        Some(std::mem::take(&mut self.pending))
+    }
+}
 const NATIVE_SSH_CONTROL_READY_TIMEOUT_MS: u64 = 15_000;
 /// Bound the native ssh2 connect/handshake/blocking-IO phases. Without these a
 /// black-holed port (SYN dropped) or a server that completes TCP but stalls the
@@ -1579,6 +1643,12 @@ fn run_external_command_session_loop(
             .try_clone_reader()
             .map_err(|error| error.to_string())?;
         let mut master = pair.master;
+        // The loop drains this channel fully every iteration (cheap string
+        // moves) and coalesces before the expensive per-event emit, so the
+        // emit path — the actual flood vector — is bounded by OutputCoalescer.
+        // The reader→loop hop itself is still unbounded; converting it to a
+        // bounded sync_channel for true reader backpressure is tracked as a
+        // hardening follow-up (see the #143 comment thread).
         let (output_sender, output_receiver) = std::sync::mpsc::channel();
 
         if prompt_responses.is_empty() {
@@ -1588,6 +1658,10 @@ fn run_external_command_session_loop(
         }
         set_native_session_connection_state(&app, &session_id, &state, "connected");
 
+        let mut coalescer = OutputCoalescer::new(
+            Duration::from_millis(NATIVE_OUTPUT_COALESCE_WINDOW_MS),
+            NATIVE_OUTPUT_COALESCE_MAX_BYTES,
+        );
         let mut should_close = false;
         let mut reported_error = false;
 
@@ -1602,11 +1676,23 @@ fn run_external_command_session_loop(
                     }
                     Ok(NativeSessionCommand::Input(input)) => {
                         did_work = true;
-                        write_jump_session_input(&writer, &input)?;
+                        // Flush buffered output before propagating a write error
+                        // so the `?` early-return cannot drop pending bytes.
+                        if let Err(error) = write_jump_session_input(&writer, &input) {
+                            if let Some(flushed) = coalescer.take() {
+                                emit_native_session_output(&app, &session_id, &state, flushed);
+                            }
+                            return Err(error);
+                        }
                     }
                     Ok(NativeSessionCommand::Resize { cols, rows }) => {
                         did_work = true;
-                        resize_jump_session_pty(&mut master, cols, rows)?;
+                        if let Err(error) = resize_jump_session_pty(&mut master, cols, rows) {
+                            if let Some(flushed) = coalescer.take() {
+                                emit_native_session_output(&app, &session_id, &state, flushed);
+                            }
+                            return Err(error);
+                        }
                     }
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
@@ -1620,9 +1706,16 @@ fn run_external_command_session_loop(
                 match output_receiver.try_recv() {
                     Ok(JumpSessionEvent::Output(output)) => {
                         did_work = true;
-                        emit_native_session_output(&app, &session_id, &state, output);
+                        if let Some(flushed) = coalescer.push(&output, Instant::now()) {
+                            emit_native_session_output(&app, &session_id, &state, flushed);
+                        }
                     }
                     Ok(JumpSessionEvent::Error(error)) => {
+                        // Emit any output received before the error first, so the
+                        // terminal shows it in order ahead of the error notice.
+                        if let Some(flushed) = coalescer.take() {
+                            emit_native_session_output(&app, &session_id, &state, flushed);
+                        }
                         emit_native_session_error(&app, &session_id, &state, error);
                         set_native_session_connection_state(&app, &session_id, &state, "error");
                         reported_error = true;
@@ -1662,9 +1755,17 @@ fn run_external_command_session_loop(
                 }
             }
 
+            if let Some(flushed) = coalescer.poll_flush(Instant::now()) {
+                emit_native_session_output(&app, &session_id, &state, flushed);
+            }
+
             if !did_work && !should_close {
                 thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
             }
+        }
+
+        if let Some(flushed) = coalescer.take() {
+            emit_native_session_output(&app, &session_id, &state, flushed);
         }
 
         let _ = child.kill();
@@ -1764,6 +1865,12 @@ fn run_jump_host_session_loop(
             .try_clone_reader()
             .map_err(|error| error.to_string())?;
         let mut master = pair.master;
+        // The loop drains this channel fully every iteration (cheap string
+        // moves) and coalesces before the expensive per-event emit, so the
+        // emit path — the actual flood vector — is bounded by OutputCoalescer.
+        // The reader→loop hop itself is still unbounded; converting it to a
+        // bounded sync_channel for true reader backpressure is tracked as a
+        // hardening follow-up (see the #143 comment thread).
         let (output_sender, output_receiver) = std::sync::mpsc::channel();
 
         spawn_jump_session_reader(
@@ -1774,6 +1881,10 @@ fn run_jump_host_session_loop(
         );
         set_native_session_connection_state(&app, &session_id, &state, "connected");
 
+        let mut coalescer = OutputCoalescer::new(
+            Duration::from_millis(NATIVE_OUTPUT_COALESCE_WINDOW_MS),
+            NATIVE_OUTPUT_COALESCE_MAX_BYTES,
+        );
         let mut should_close = false;
         let mut reported_error = false;
 
@@ -1788,11 +1899,23 @@ fn run_jump_host_session_loop(
                     }
                     Ok(NativeSessionCommand::Input(input)) => {
                         did_work = true;
-                        write_jump_session_input(&writer, &input)?;
+                        // Flush buffered output before propagating a write error
+                        // so the `?` early-return cannot drop pending bytes.
+                        if let Err(error) = write_jump_session_input(&writer, &input) {
+                            if let Some(flushed) = coalescer.take() {
+                                emit_native_session_output(&app, &session_id, &state, flushed);
+                            }
+                            return Err(error);
+                        }
                     }
                     Ok(NativeSessionCommand::Resize { cols, rows }) => {
                         did_work = true;
-                        resize_jump_session_pty(&mut master, cols, rows)?;
+                        if let Err(error) = resize_jump_session_pty(&mut master, cols, rows) {
+                            if let Some(flushed) = coalescer.take() {
+                                emit_native_session_output(&app, &session_id, &state, flushed);
+                            }
+                            return Err(error);
+                        }
                     }
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
@@ -1806,9 +1929,16 @@ fn run_jump_host_session_loop(
                 match output_receiver.try_recv() {
                     Ok(JumpSessionEvent::Output(output)) => {
                         did_work = true;
-                        emit_native_session_output(&app, &session_id, &state, output);
+                        if let Some(flushed) = coalescer.push(&output, Instant::now()) {
+                            emit_native_session_output(&app, &session_id, &state, flushed);
+                        }
                     }
                     Ok(JumpSessionEvent::Error(error)) => {
+                        // Emit any output received before the error first, so the
+                        // terminal shows it in order ahead of the error notice.
+                        if let Some(flushed) = coalescer.take() {
+                            emit_native_session_output(&app, &session_id, &state, flushed);
+                        }
                         emit_native_session_error(&app, &session_id, &state, error);
                         set_native_session_connection_state(&app, &session_id, &state, "error");
                         reported_error = true;
@@ -1848,9 +1978,17 @@ fn run_jump_host_session_loop(
                 }
             }
 
+            if let Some(flushed) = coalescer.poll_flush(Instant::now()) {
+                emit_native_session_output(&app, &session_id, &state, flushed);
+            }
+
             if !did_work && !should_close {
                 thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
             }
+        }
+
+        if let Some(flushed) = coalescer.take() {
+            emit_native_session_output(&app, &session_id, &state, flushed);
         }
 
         let _ = child.kill();
@@ -1941,6 +2079,10 @@ fn run_native_session_loop(
     mut receiver: UnboundedReceiver<NativeSessionCommand>,
 ) {
     let mut buffer = [0u8; NATIVE_SESSION_READ_CHUNK_SIZE];
+    let mut coalescer = OutputCoalescer::new(
+        Duration::from_millis(NATIVE_OUTPUT_COALESCE_WINDOW_MS),
+        NATIVE_OUTPUT_COALESCE_MAX_BYTES,
+    );
 
     loop {
         let mut did_work = false;
@@ -1983,18 +2125,27 @@ fn run_native_session_loop(
             }
             Ok(count) => {
                 did_work = true;
-                emit_native_session_output(
-                    &app,
-                    &session_id,
-                    &state,
-                    String::from_utf8_lossy(&buffer[..count]).to_string(),
-                );
+                if let Some(flushed) =
+                    coalescer.push(&String::from_utf8_lossy(&buffer[..count]), Instant::now())
+                {
+                    emit_native_session_output(&app, &session_id, &state, flushed);
+                }
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
             Err(error) => {
+                if let Some(flushed) = coalescer.take() {
+                    emit_native_session_output(&app, &session_id, &state, flushed);
+                }
                 emit_native_session_error(&app, &session_id, &state, error.to_string());
                 break;
             }
+        }
+
+        // Cap latency for a producer that never pauses: flush once the window
+        // has elapsed. Bursts are otherwise coalesced by the size threshold in
+        // `push`, and anything still buffered at close is flushed post-loop.
+        if let Some(flushed) = coalescer.poll_flush(Instant::now()) {
+            emit_native_session_output(&app, &session_id, &state, flushed);
         }
 
         if channel.eof() {
@@ -2004,6 +2155,12 @@ fn run_native_session_loop(
         if !did_work {
             thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
         }
+    }
+
+    // Flush any remaining coalesced output before the session closes, on every
+    // break path (eof, close command, read error), so no bytes are lost.
+    if let Some(flushed) = coalescer.take() {
+        emit_native_session_output(&app, &session_id, &state, flushed);
     }
 
     let _ = channel.close();
@@ -3691,6 +3848,76 @@ mod tests {
             Duration::from_millis(300),
         );
         assert!(result.is_err(), "an unresolvable host must return Err");
+    }
+
+    #[test]
+    fn test_output_coalescing() {
+        // Many small chunks that all arrive within one window must coalesce
+        // into a single emitted message, not one emit per chunk.
+        let mut c = OutputCoalescer::new(Duration::from_millis(12), 64 * 1024);
+        let t0 = Instant::now();
+        let mut flushes: Vec<String> = Vec::new();
+        for i in 0..100 {
+            if let Some(flushed) = c.push(&format!("chunk{i};"), t0) {
+                flushes.push(flushed);
+            }
+        }
+        // Under the size threshold and within the window: nothing emitted yet.
+        assert!(flushes.is_empty(), "no emit before window/size threshold");
+
+        // Once the window elapses, the whole burst leaves as exactly one emit.
+        if let Some(flushed) = c.poll_flush(t0 + Duration::from_millis(12)) {
+            flushes.push(flushed);
+        }
+        assert_eq!(flushes.len(), 1, "100 chunks in one window => 1 emit");
+        let expected: String = (0..100).map(|i| format!("chunk{i};")).collect();
+        assert_eq!(flushes[0], expected);
+    }
+
+    #[test]
+    fn test_output_no_loss_or_reorder() {
+        // The concatenation of every flush (size-triggered plus the final
+        // take) must equal the exact input byte sequence, in order.
+        let mut c = OutputCoalescer::new(Duration::from_millis(12), 32);
+        let t0 = Instant::now();
+        let inputs = ["alpha", "-", "beta", "-", "gamma", "-", "delta", "-", "epsilon"];
+        let mut out = String::new();
+        for chunk in inputs {
+            if let Some(flushed) = c.push(chunk, t0) {
+                out.push_str(&flushed);
+            }
+        }
+        if let Some(flushed) = c.take() {
+            out.push_str(&flushed);
+        }
+        assert_eq!(out, inputs.concat());
+    }
+
+    #[test]
+    fn test_output_size_threshold_flushes_immediately() {
+        // A single chunk (or run) crossing the size threshold flushes on push,
+        // bounding memory for a producer that never pauses.
+        let mut c = OutputCoalescer::new(Duration::from_millis(10_000), 8);
+        let t0 = Instant::now();
+        assert!(c.push("1234567", t0).is_none(), "7 bytes < threshold");
+        assert_eq!(c.push("89", t0), Some("123456789".to_string()));
+        // Buffer is empty again after the size flush.
+        assert!(c.take().is_none());
+    }
+
+    #[test]
+    fn test_output_no_flush_before_window() {
+        let mut c = OutputCoalescer::new(Duration::from_millis(12), 64 * 1024);
+        let t0 = Instant::now();
+        c.push("hello", t0);
+        assert!(
+            c.poll_flush(t0 + Duration::from_millis(11)).is_none(),
+            "before the window elapses, nothing flushes"
+        );
+        assert_eq!(
+            c.poll_flush(t0 + Duration::from_millis(12)),
+            Some("hello".to_string())
+        );
     }
 
     fn build_test_host_chain() -> BackendHostConnection {
