@@ -258,7 +258,9 @@ pub(crate) fn parse_ssh_keygen_summary(
         return Err(format!("Unexpected ssh-keygen output: {trimmed}"));
     }
 
-    let bits = parts[0].parse::<u32>().unwrap_or(0);
+    let bits = parts[0]
+        .parse::<u32>()
+        .map_err(|_| format!("Unexpected ssh-keygen output (bit length): {trimmed}"))?;
     let fingerprint = parts[1].to_string();
     let (comment_prefix, algorithm_suffix) = trimmed
         .rsplit_once(" (")
@@ -325,10 +327,11 @@ pub(crate) fn import_private_key_from_body(path: &str, body: &str) -> Result<Key
     }
     normalized.push('\n');
 
-    fs::write(&resolved_path, normalized.as_bytes()).map_err(|error| error.to_string())?;
-    #[cfg(unix)]
-    fs::set_permissions(&resolved_path, fs::Permissions::from_mode(0o600))
-        .map_err(|error| error.to_string())?;
+    // Atomic create (O_EXCL, 0600) closes the check->write TOCTOU window above:
+    // a file or symlink planted between the exists() check and here makes the
+    // create fail rather than overwriting or following it. Mirrors
+    // write_private_file (which the write path already uses).
+    write_private_file(&resolved_path, normalized.as_bytes(), 0o600)?;
 
     let path_string = resolved_path.to_string_lossy().into_owned();
     inspect_private_key(&path_string)
@@ -727,8 +730,20 @@ fn write_private_file(path: &Path, contents: impl AsRef<[u8]>, mode: u32) -> Res
 }
 
 fn scrub_passphrase_file(path: &Path, len: usize) {
-    let _ = fs::write(path, vec![0u8; len]);
-    let _ = fs::remove_file(path);
+    // A passphrase file that fails to zero/unlink leaves plaintext key material
+    // on disk — surface it instead of swallowing, so the failure is diagnosable.
+    if let Err(error) = fs::write(path, vec![0u8; len]) {
+        eprintln!(
+            "warning: failed to overwrite passphrase file {}: {error}",
+            path.display()
+        );
+    }
+    if let Err(error) = fs::remove_file(path) {
+        eprintln!(
+            "warning: failed to remove passphrase file {}: {error}",
+            path.display()
+        );
+    }
 }
 
 pub(crate) fn write_native_known_hosts(
@@ -1612,7 +1627,22 @@ pub(crate) fn create_native_forward(
     let assigned_remote_port = match forward_output {
         Ok(output) => {
             if request.direction == "remote" && request.remote_port == 0 {
-                output.trim().parse::<u16>().ok().unwrap_or(0)
+                // A dynamically-assigned remote port that fails to parse means
+                // we cannot report the working forward's real port; surface it
+                // as an error rather than misreporting port 0.
+                match output.trim().parse::<u16>() {
+                    Ok(port) => port,
+                    Err(_) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        drop(master);
+                        let _ = fs::remove_dir_all(&context.session_dir);
+                        return Err(format!(
+                            "Could not parse the assigned remote-forward port from ssh output: {}",
+                            output.trim()
+                        ));
+                    }
+                }
             } else {
                 request.remote_port
             }
@@ -1744,6 +1774,51 @@ mod tests {
             .join(format!("termsnip-native-test-{}", test_suffix(label)));
         fs::create_dir_all(&root).expect("test root should be created");
         root
+    }
+
+    #[test]
+    fn parse_ssh_keygen_summary_rejects_non_numeric_bits() {
+        // A non-numeric bit length must error rather than silently become 0.
+        let bad = "notanumber SHA256:abcdef testkey (ED25519)";
+        assert!(parse_ssh_keygen_summary(bad, "/tmp/key").is_err());
+    }
+
+    #[test]
+    fn parse_ssh_keygen_summary_parses_valid_bits() {
+        let good = "256 SHA256:abcdef testkey (ED25519)";
+        let meta = parse_ssh_keygen_summary(good, "/tmp/key").expect("valid summary parses");
+        assert_eq!(meta.bits, 256);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_private_file_refuses_existing_path() {
+        // The O_EXCL (create_new) guarantee import_private_key_from_body now
+        // relies on: a second write to the same path must fail, not overwrite.
+        let root = test_root("write-private");
+        let path = root.join("key");
+        write_private_file(&path, b"first", 0o600).expect("first write should succeed");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "file should be created 0600"
+        );
+        assert!(
+            write_private_file(&path, b"second", 0o600).is_err(),
+            "writing over an existing path must fail"
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"first", "original content preserved");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scrub_passphrase_file_zeroes_and_removes() {
+        let root = test_root("scrub");
+        let path = root.join("passphrase");
+        fs::write(&path, b"super-secret").unwrap();
+        scrub_passphrase_file(&path, "super-secret".len());
+        assert!(!path.exists(), "passphrase file must be removed after scrub");
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn ssh_keygen_available() -> bool {
