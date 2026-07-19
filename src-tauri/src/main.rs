@@ -2390,6 +2390,20 @@ struct CopyKeyToHostResponse {
 fn copy_key_to_host_blocking(
     request: &CopyKeyToHostRequest,
 ) -> Result<CopyKeyToHostResponse, String> {
+    // Validate the target host BEFORE any connect or authentication. This was
+    // the one host-consuming command that skipped the gate, so an allowUnknown
+    // or requireTrusted-without-pinned-key host would have its auth password
+    // sent to an unverified server (host-key MITM); validate_ssh_host also
+    // rejects control-char injection into the generated ssh_config. Surface the
+    // rejection as a normal ok:false response so the renderer shows the reason
+    // consistently with this command's other failures.
+    if let Err(reason) = validate_ssh_host(&request.host) {
+        return Ok(CopyKeyToHostResponse {
+            ok: false,
+            reason: Some(reason),
+        });
+    }
+
     if request.private_key_path.trim().is_empty() {
         return Ok(CopyKeyToHostResponse {
             ok: false,
@@ -4015,6 +4029,37 @@ mod tests {
             sftp_root: None,
             username: "deploy".to_string(),
         }
+    }
+
+    #[test]
+    fn copy_key_to_host_refuses_untrusted_host_before_connect() {
+        // A requireTrusted host (the default policy) with no pinned key must be
+        // refused by the top-of-function validate_ssh_host gate — returning Err
+        // BEFORE any TCP connect or authentication, so the auth password never
+        // reaches an unverified server. No network or key file is touched.
+        let mut host = minimal_ssh_host();
+        host.host_key_policy = None; // default => requireTrusted
+        host.known_host_public_key = None; // no pinned key
+        let request = CopyKeyToHostRequest {
+            private_key_path: "~/.ssh/id_ed25519".to_string(),
+            host,
+        };
+        let response = copy_key_to_host_blocking(&request).expect("returns a structured response, not Err");
+        assert!(!response.ok, "the host must be refused");
+    }
+
+    #[test]
+    fn copy_key_to_host_refuses_control_char_hostname() {
+        // The same gate also blocks ssh_config injection via a newline in the
+        // hostname before any connect.
+        let mut host = minimal_ssh_host();
+        host.hostname = "evil.com\n  ProxyCommand sh -c 'id'".to_string();
+        let request = CopyKeyToHostRequest {
+            private_key_path: "~/.ssh/id_ed25519".to_string(),
+            host,
+        };
+        let response = copy_key_to_host_blocking(&request).expect("returns a structured response, not Err");
+        assert!(!response.ok, "the host must be refused");
     }
 
     #[test]
