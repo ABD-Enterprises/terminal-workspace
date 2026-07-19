@@ -896,6 +896,9 @@ pub(crate) fn build_native_ssh_config(
         lines.push("  BatchMode no".to_string());
         lines.push("  ServerAliveInterval 15".to_string());
         lines.push("  ServerAliveCountMax 3".to_string());
+        // #173: bound the TCP/handshake phase so a dead or filtered host fails
+        // fast instead of hanging on the OS default connect timeout (~2 min).
+        lines.push("  ConnectTimeout 15".to_string());
         lines.push("  GlobalKnownHostsFile /dev/null".to_string());
         lines.push(format!(
             "  UserKnownHostsFile {}",
@@ -1425,19 +1428,107 @@ where
     result
 }
 
+/// Wall-clock ceiling for a single snippet command. `run_native_ssh_command`
+/// used `Command::output()`, which reads to EOF with no timeout, so a target
+/// whose command never terminates (`tail -f`, a stuck pager, a wedged network
+/// after the TCP handshake) blocked the worker forever and — via the blind
+/// `join()` in `execute_native_snippet_request` — froze the whole fan-out
+/// uncancellably. The child is killed once this deadline passes (#173).
+const NATIVE_SNIPPET_COMMAND_TIMEOUT_MS: u64 = 60_000;
+
+/// Poll cadence while waiting for a snippet child to exit or time out.
+const NATIVE_SNIPPET_POLL_INTERVAL_MS: u64 = 50;
+
+/// Upper bound on concurrent snippet targets. Each in-flight target holds an
+/// OS thread, an ssh control-master process, and a private session dir; an
+/// unbounded fan-out over a large fleet risks fd/process exhaustion (#173).
+const NATIVE_SNIPPET_MAX_CONCURRENCY: usize = 8;
+
+/// Result of running a child under a wall-clock deadline.
+enum TimedCommand {
+    Completed(Output),
+    TimedOut,
+}
+
+/// Run `command`, capturing stdout/stderr, but kill the child if it has not
+/// exited within `timeout`. Dedicated reader threads drain the pipes so a
+/// child that produces more output than the pipe buffer holds cannot deadlock
+/// before the deadline fires.
+fn run_command_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+) -> Result<TimedCommand, String> {
+    use std::io::Read;
+
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
+    let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
+    let stdout_reader = thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = stdout_pipe.read_to_end(&mut buffer);
+        buffer
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = stderr_pipe.read_to_end(&mut buffer);
+        buffer
+    });
+
+    let deadline = Instant::now() + timeout;
+    let mut timed_out = false;
+    let status = loop {
+        match child.try_wait().map_err(|error| error.to_string())? {
+            Some(status) => break status,
+            None => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let status = child.wait().map_err(|error| error.to_string())?;
+                    timed_out = true;
+                    break status;
+                }
+                thread::sleep(Duration::from_millis(NATIVE_SNIPPET_POLL_INTERVAL_MS));
+            }
+        }
+    };
+
+    let stdout = stdout_reader.join().unwrap_or_default();
+    let stderr = stderr_reader.join().unwrap_or_default();
+    if timed_out {
+        Ok(TimedCommand::TimedOut)
+    } else {
+        Ok(TimedCommand::Completed(Output {
+            status,
+            stdout,
+            stderr,
+        }))
+    }
+}
+
 pub(crate) fn run_native_ssh_command(
     context: &NativeSshControlContext,
     command: &str,
 ) -> Result<Output, String> {
-    Command::new("/usr/bin/ssh")
-        .arg("-F")
+    let mut ssh = Command::new("/usr/bin/ssh");
+    ssh.arg("-F")
         .arg(&context.config_path)
         .arg("-o")
         .arg("RequestTTY=no")
         .arg(&context.target_alias)
-        .arg(format!("sh -lc {}", shell_single_quote(command)))
-        .output()
-        .map_err(|error| error.to_string())
+        .arg(format!("sh -lc {}", shell_single_quote(command)));
+    match run_command_with_timeout(
+        ssh,
+        Duration::from_millis(NATIVE_SNIPPET_COMMAND_TIMEOUT_MS),
+    )? {
+        TimedCommand::Completed(output) => Ok(output),
+        TimedCommand::TimedOut => Err(format!(
+            "Command did not finish within {}s and was terminated",
+            NATIVE_SNIPPET_COMMAND_TIMEOUT_MS / 1000
+        )),
+    }
 }
 
 pub(crate) fn run_native_ssh_control_command(
@@ -1700,6 +1791,73 @@ pub(crate) fn delete_native_forward(
     }
 }
 
+/// Run `worker` over `items` on at most `max_concurrency` OS threads and return
+/// the results in the original item order. This replaces the previous
+/// thread-per-item fan-out so a large fleet can no longer exhaust fds/processes
+/// (#173). `worker` must not panic: callers wrap panicky work and return a value
+/// that represents the failure (see `execute_native_snippet_request`).
+fn run_bounded<T, R>(
+    items: Vec<T>,
+    max_concurrency: usize,
+    worker: Arc<dyn Fn(T) -> R + Send + Sync>,
+) -> Vec<R>
+where
+    T: Send + 'static,
+    R: Send + 'static,
+{
+    use std::sync::mpsc;
+
+    let total = items.len();
+    if total == 0 {
+        return Vec::new();
+    }
+    let concurrency = max_concurrency.max(1).min(total);
+
+    let (task_tx, task_rx) = mpsc::channel::<(usize, T)>();
+    let task_rx = Arc::new(Mutex::new(task_rx));
+    let (result_tx, result_rx) = mpsc::channel::<(usize, R)>();
+
+    let mut handles = Vec::with_capacity(concurrency);
+    for _ in 0..concurrency {
+        let task_rx = Arc::clone(&task_rx);
+        let result_tx = result_tx.clone();
+        let worker = Arc::clone(&worker);
+        handles.push(thread::spawn(move || loop {
+            // Release the queue lock before running the (slow) worker so the
+            // other threads keep pulling — the lock only guards `recv`.
+            let next = {
+                let guard = task_rx.lock().expect("task queue mutex poisoned");
+                guard.recv()
+            };
+            match next {
+                Ok((index, item)) => {
+                    let _ = result_tx.send((index, worker(item)));
+                }
+                Err(_) => break,
+            }
+        }));
+    }
+
+    for (index, item) in items.into_iter().enumerate() {
+        let _ = task_tx.send((index, item));
+    }
+    drop(task_tx);
+    drop(result_tx);
+
+    let mut slots: Vec<Option<R>> = (0..total).map(|_| None).collect();
+    for (index, result) in result_rx {
+        slots[index] = Some(result);
+    }
+    for handle in handles {
+        let _ = handle.join();
+    }
+
+    slots
+        .into_iter()
+        .map(|slot| slot.expect("every task produced a result"))
+        .collect()
+}
+
 pub(crate) fn execute_native_snippet_request(
     request: SnippetExecutionRequest,
 ) -> Result<SnippetExecutionResponse, String> {
@@ -1712,26 +1870,19 @@ pub(crate) fn execute_native_snippet_request(
         return Err("At least one target host is required".to_string());
     }
 
-    let workers = request
-        .targets
-        .into_iter()
-        .map(|target| {
-            let fallback_id = target.id.clone();
-            let fallback_label = target.label.clone();
-            let next_command = command.clone();
-            (
-                fallback_id,
-                fallback_label,
-                thread::spawn(move || execute_native_snippet_target(target, next_command)),
-            )
-        })
-        .collect::<Vec<_>>();
-    let mut results = Vec::with_capacity(workers.len());
-
-    for (target_id, label, worker) in workers {
-        match worker.join() {
-            Ok(result) => results.push(result),
-            Err(_) => results.push(SnippetExecutionResult {
+    let command = Arc::new(command);
+    let worker: Arc<dyn Fn(SnippetExecutionTarget) -> SnippetExecutionResult + Send + Sync> = {
+        let command = Arc::clone(&command);
+        Arc::new(move |target: SnippetExecutionTarget| {
+            let target_id = target.id.clone();
+            let label = target.label.clone();
+            let next_command = (*command).clone();
+            // A panic in one target must not poison the shared worker thread or
+            // drop that target's result slot — turn it into a failed result.
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                execute_native_snippet_target(target, next_command)
+            }))
+            .unwrap_or_else(|_| SnippetExecutionResult {
                 target_id,
                 label,
                 ok: false,
@@ -1739,10 +1890,11 @@ pub(crate) fn execute_native_snippet_request(
                 stderr: String::new(),
                 exit_code: None,
                 error_message: Some("Snippet execution worker panicked".to_string()),
-            }),
-        }
-    }
+            })
+        })
+    };
 
+    let results = run_bounded(request.targets, NATIVE_SNIPPET_MAX_CONCURRENCY, worker);
     Ok(SnippetExecutionResponse { results })
 }
 
@@ -1926,6 +2078,87 @@ mod tests {
             sftp_root: None,
             username: "deploy".to_string(),
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn native_ssh_config_sets_connect_and_keepalive_timeouts() {
+        let session_dir = create_native_ssh_session_dir("native-connect-timeout")
+            .expect("session dir should be created");
+        let mut host = test_host(Path::new("/nonexistent/id_ed25519"), "");
+        // password auth avoids staging an identity file for a missing key.
+        host.auth_method = "password".to_string();
+        let known_hosts_path = session_dir.join("known_hosts");
+        let (config_path, _) =
+            build_native_ssh_config(&host, &session_dir, &known_hosts_path, None)
+                .expect("ssh config should be generated");
+        let config = fs::read_to_string(&config_path).expect("config should be readable");
+
+        assert!(
+            config.contains("ConnectTimeout 15"),
+            "generated config is missing ConnectTimeout:\n{config}"
+        );
+        assert!(config.contains("ServerAliveInterval 15"));
+
+        let _ = fs::remove_dir_all(session_dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn run_command_with_timeout_kills_a_hung_child() {
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg("sleep 30");
+        let started = Instant::now();
+        let outcome = run_command_with_timeout(command, Duration::from_millis(200))
+            .expect("spawning sleep should succeed");
+
+        assert!(matches!(outcome, TimedCommand::TimedOut));
+        // The watchdog must return promptly rather than waiting out the child.
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "run_command_with_timeout blocked past its deadline"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn run_command_with_timeout_captures_a_fast_command() {
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg("printf hello");
+        let outcome = run_command_with_timeout(command, Duration::from_secs(10))
+            .expect("spawning printf should succeed");
+
+        match outcome {
+            TimedCommand::Completed(output) => {
+                assert!(output.status.success());
+                assert_eq!(String::from_utf8_lossy(&output.stdout), "hello");
+            }
+            TimedCommand::TimedOut => panic!("a fast command must not time out"),
+        }
+    }
+
+    #[test]
+    fn run_bounded_preserves_order_and_caps_concurrency() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let max_seen = Arc::new(AtomicUsize::new(0));
+        let inflight_worker = Arc::clone(&inflight);
+        let max_seen_worker = Arc::clone(&max_seen);
+        let worker: Arc<dyn Fn(usize) -> usize + Send + Sync> = Arc::new(move |value: usize| {
+            let current = inflight_worker.fetch_add(1, Ordering::SeqCst) + 1;
+            max_seen_worker.fetch_max(current, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(20));
+            inflight_worker.fetch_sub(1, Ordering::SeqCst);
+            value * 2
+        });
+
+        let results = run_bounded((0..12).collect(), 3, worker);
+
+        assert_eq!(results, (0..12).map(|value| value * 2).collect::<Vec<_>>());
+        let peak = max_seen.load(Ordering::SeqCst);
+        assert!(peak <= 3, "concurrency {peak} exceeded the cap of 3");
+        assert!(peak >= 2, "expected the pool to run targets in parallel");
     }
 
     #[test]
