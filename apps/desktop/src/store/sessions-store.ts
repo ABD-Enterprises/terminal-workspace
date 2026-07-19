@@ -15,6 +15,27 @@ import {
   type SessionWorkspaceState,
   type SplitDirection,
 } from "../types/session";
+import { closeSession } from "../lib/backend-runtime";
+
+/**
+ * Tear down the live backend session behind every pane in `paneIds` (best
+ * effort — a failure must not block the store update). Closing a tab or pane
+ * used to only drop store state, leaving the SSH session, remote login, and any
+ * local ssh/mosh child running until app quit; this reaps them. See #142.
+ */
+export function closeBackendSessionsForPanes(
+  panes: Record<string, SessionPane>,
+  paneIds: readonly string[]
+): void {
+  for (const paneId of paneIds) {
+    const backendSessionId = panes[paneId]?.backendSessionId;
+    if (backendSessionId) {
+      void closeSession(backendSessionId).catch(() => {
+        // The session may already be gone; the store update proceeds regardless.
+      });
+    }
+  }
+}
 
 const fallbackStorage: StateStorage = {
   getItem: () => null,
@@ -677,9 +698,19 @@ export const useSessionsStore = create<SessionsState>()(
       },
       selectTab: (tabId) => set((state) => setActiveSessionTab(state, tabId)),
       cycleTab: (direction = 1) => set((state) => cycleSessionTab(state, direction)),
-      closeTab: (tabId) => set((state) => closeSessionTab(state, tabId)),
+      closeTab: (tabId) => {
+        const { tabs, panes } = get();
+        const tab = tabs.find((entry) => entry.id === tabId);
+        if (tab) {
+          closeBackendSessionsForPanes(panes, tab.paneIds);
+        }
+        set((state) => closeSessionTab(state, tabId));
+      },
       splitTab: (tabId, host) => set((state) => splitSessionPane(state, tabId, host)),
-      closePane: (tabId, paneId) => set((state) => removeSessionPane(state, tabId, paneId)),
+      closePane: (tabId, paneId) => {
+        closeBackendSessionsForPanes(get().panes, [paneId]);
+        set((state) => removeSessionPane(state, tabId, paneId));
+      },
       selectPane: (tabId, paneId) => set((state) => setActiveSessionPane(state, tabId, paneId)),
       setPaneState: (paneId, connectionState) =>
         set((state) => updatePaneConnectionState(state, paneId, connectionState)),
