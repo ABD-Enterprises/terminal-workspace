@@ -63,18 +63,6 @@ if [[ -z "$SEMGREP_BASE_REF" ]]; then
   fi
 fi
 
-should_skip_semgrep_target() {
-  local target="$1"
-
-  case "$target" in
-    tools/validators/*)
-      return 0
-      ;;
-  esac
-
-  return 1
-}
-
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   SEMGREP_TARGETS=()
 
@@ -82,7 +70,6 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     while IFS= read -r target; do
       [[ -n "$target" ]] || continue
       [[ -f "$target" ]] || continue
-      should_skip_semgrep_target "$target" && continue
       SEMGREP_TARGETS+=("$target")
     done < <(
       {
