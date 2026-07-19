@@ -7,6 +7,7 @@ import type {
   CreateSessionResponse,
   ResizeSessionPayload,
 } from "./backend-contract";
+import type { SessionConnectionState } from "../types/session";
 
 interface TauriInternals {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
@@ -77,6 +78,62 @@ export interface SessionSocketLike {
   ): void;
   close: () => void;
   send: (data: string) => void;
+}
+
+/**
+ * A validated frame delivered over a session socket. Each transport (native
+ * Tauri IPC and the browser WebSocket) hands consumers an opaque string per
+ * message; this discriminated union is the only shape the terminal pipe
+ * understands.
+ */
+export type SessionFrame =
+  | { type: "data"; data: string }
+  | { type: "status"; state: SessionConnectionState }
+  | { type: "error"; message: string };
+
+const SESSION_CONNECTION_STATES: readonly SessionConnectionState[] = [
+  "connecting",
+  "connected",
+  "disconnected",
+  "pendingSecrets",
+  "error",
+];
+
+/**
+ * Parse and validate a raw session-socket frame at the transport boundary.
+ * Returns the typed frame, or `null` for anything malformed — invalid JSON, a
+ * non-object payload, an unknown `type`, or a missing/mistyped field. Callers
+ * drop `null` frames so a single corrupt message can never throw out of the
+ * socket message listener and tear down the terminal data pipe.
+ */
+export function parseSessionFrame(raw: unknown): SessionFrame | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(typeof raw === "string" ? raw : String(raw));
+  } catch {
+    return null;
+  }
+
+  if (typeof parsed !== "object" || parsed === null) {
+    return null;
+  }
+
+  const frame = parsed as Record<string, unknown>;
+  switch (frame.type) {
+    case "data":
+      return typeof frame.data === "string" ? { type: "data", data: frame.data } : null;
+    case "status":
+      return typeof frame.state === "string" &&
+        (SESSION_CONNECTION_STATES as readonly string[]).includes(frame.state)
+        ? { type: "status", state: frame.state as SessionConnectionState }
+        : null;
+    case "error":
+      return typeof frame.message === "string"
+        ? { type: "error", message: frame.message }
+        : null;
+    default:
+      return null;
+  }
 }
 
 function getTauriInternals() {

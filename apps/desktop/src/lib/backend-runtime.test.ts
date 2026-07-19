@@ -6,6 +6,7 @@ import {
   getSessionBackendStatus,
   isTauriRuntime,
   openSessionSocket,
+  parseSessionFrame,
   resetBackendRuntimeCacheForTests,
   resizeSession,
   resolveBackendHttpUrl,
@@ -356,5 +357,62 @@ describe("backend runtime bridge", () => {
     });
 
     expect(errors).toEqual(["ssh channel closed unexpectedly"]);
+  });
+});
+
+describe("parseSessionFrame", () => {
+  it("parses each valid frame kind into a typed frame", () => {
+    expect(parseSessionFrame(JSON.stringify({ type: "data", data: "hello" }))).toEqual({
+      type: "data",
+      data: "hello",
+    });
+    expect(parseSessionFrame(JSON.stringify({ type: "status", state: "connected" }))).toEqual({
+      type: "status",
+      state: "connected",
+    });
+    expect(parseSessionFrame(JSON.stringify({ type: "error", message: "boom" }))).toEqual({
+      type: "error",
+      message: "boom",
+    });
+  });
+
+  it("keeps only the validated fields, dropping any extras", () => {
+    const frame = parseSessionFrame('{"type":"data","data":"ok","cursor":42,"trailing":"x"}');
+    expect(frame).toEqual({ type: "data", data: "ok" });
+  });
+
+  it("returns null for a malformed JSON frame instead of throwing", () => {
+    expect(() => parseSessionFrame("{not json")).not.toThrow();
+    expect(parseSessionFrame("{not json")).toBeNull();
+    expect(parseSessionFrame("")).toBeNull();
+  });
+
+  it("returns null for non-object JSON payloads", () => {
+    expect(parseSessionFrame("42")).toBeNull();
+    expect(parseSessionFrame("null")).toBeNull();
+    expect(parseSessionFrame('"just a string"')).toBeNull();
+    expect(parseSessionFrame("[1,2,3]")).toBeNull();
+  });
+
+  it("returns null for an unknown frame type", () => {
+    expect(parseSessionFrame(JSON.stringify({ type: "resize", cols: 80 }))).toBeNull();
+    expect(parseSessionFrame(JSON.stringify({ data: "no type field" }))).toBeNull();
+  });
+
+  it("returns null when a known frame is missing or mistypes its required field", () => {
+    expect(parseSessionFrame(JSON.stringify({ type: "data" }))).toBeNull();
+    expect(parseSessionFrame(JSON.stringify({ type: "data", data: 123 }))).toBeNull();
+    expect(parseSessionFrame(JSON.stringify({ type: "error" }))).toBeNull();
+    expect(parseSessionFrame(JSON.stringify({ type: "status" }))).toBeNull();
+  });
+
+  it("returns null for a status frame carrying an unknown connection state", () => {
+    expect(parseSessionFrame(JSON.stringify({ type: "status", state: "melted" }))).toBeNull();
+  });
+
+  it("tolerates non-string input without throwing", () => {
+    expect(parseSessionFrame(undefined)).toBeNull();
+    expect(parseSessionFrame(null)).toBeNull();
+    expect(parseSessionFrame({ type: "data", data: "x" })).toBeNull();
   });
 });
