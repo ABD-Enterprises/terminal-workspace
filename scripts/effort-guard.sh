@@ -47,11 +47,11 @@ if [[ ${#validation_workflows[@]} -gt 1 ]]; then
   fail "keep one CI validation entrypoint to avoid duplicate GitHub Actions spend."
 fi
 
-tracked_browser_artifacts="$(git ls-files -- artifacts/e2e playwright-report test-results)"
+tracked_browser_artifacts="$(git ls-files -- artifacts/e2e artifacts/validation playwright-report test-results)"
 if [[ -n "$tracked_browser_artifacts" ]]; then
-  printf '[effort-guard] tracked generated browser artifacts:\n' >&2
+  printf '[effort-guard] tracked generated validation/browser artifacts:\n' >&2
   printf '%s\n' "$tracked_browser_artifacts" | sed 's/^/  /' >&2
-  fail "generated browser artifacts are tracked; keep validation outputs local or uploaded from CI only."
+  fail "generated validation/browser artifacts are tracked; keep validation outputs local or uploaded from CI only."
 fi
 
 note "ok"
