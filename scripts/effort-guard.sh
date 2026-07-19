@@ -13,22 +13,10 @@ note() {
   printf '[effort-guard] %s\n' "$*"
 }
 
-if command -v ai-pipeline >/dev/null 2>&1 && [[ -f ".ai/config.json" ]]; then
-  stderr_file="$(mktemp)"
-  if ! ai-pipeline current --json >/dev/null 2>"$stderr_file"; then
-    if grep -q "Invalid config" "$stderr_file"; then
-      cat "$stderr_file" >&2
-      rm -f "$stderr_file"
-      fail "local .ai/config.json is incompatible with this ai-pipeline version; refresh it before starting work."
-    fi
-    note "no current ticket detected; run ai-pipeline next or ai-pipeline plan before new implementation work."
-  fi
-  rm -f "$stderr_file"
-elif [[ -f ".ai/config.json" ]]; then
-  note "ai-pipeline is not installed; skipping local adapter check."
-else
-  note "no local .ai/config.json; skipping local adapter check."
-fi
+# #189: the legacy `ai-pipeline` adapter check was removed. The repo now runs on
+# ORC, and a drifted `ai-pipeline` install could hard-fail on "Invalid config",
+# aborting `npm run validate` before any real check ran. This guard keeps only
+# the artifact-hygiene checks below.
 
 mapfile -t pull_request_workflows < <(
   grep -RslE '^[[:space:]]*pull_request:' .github/workflows 2>/dev/null || true
