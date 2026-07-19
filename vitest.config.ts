@@ -5,6 +5,7 @@ export default defineConfig({
     environment: "node",
     include: [
       "apps/desktop/src/**/*.test.ts",
+      "apps/desktop/src/**/*.test.tsx",
       "tests/integration/**/*.test.ts",
     ],
     exclude: [
