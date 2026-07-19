@@ -26,6 +26,10 @@ import {
   loadOrCreateBackendToken,
   parseAllowedOrigins,
 } from "./auth.mjs";
+import {
+  describeServerListenError,
+  shutdownBackend,
+} from "./backend-lifecycle.mjs";
 import { SecretBuffer } from "./secrets.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1643,6 +1647,17 @@ server.on("upgrade", (request, socket, head) => {
   }
 
   websocketServer.handleUpgrade(request, socket, head, (ws) => {
+    // Close any socket already attached to this session (a reconnect that
+    // raced the old socket's close, or a second tab) before replacing it —
+    // otherwise the previous ws is orphaned and only the last writer receives
+    // output.
+    if (session.ws && session.ws !== ws) {
+      try {
+        session.ws.close();
+      } catch {
+        // already closing
+      }
+    }
     session.ws = ws;
     ws.send(
       JSON.stringify({
@@ -1691,6 +1706,49 @@ server.on("upgrade", (request, socket, head) => {
       }
     });
   });
+});
+
+// A single unhandled rejection or thrown error in one of the many detached
+// async paths (ssh2 stream/forward handlers, ws message handlers) must not
+// terminate the whole process and drop *every* session at once. Log it and
+// keep serving the other sessions.
+process.on("unhandledRejection", (reason) => {
+  console.error("[termsnip] unhandled promise rejection:", reason);
+});
+process.on("uncaughtException", (error) => {
+  console.error("[termsnip] uncaught exception (continuing):", error);
+});
+
+let shuttingDown = false;
+function gracefulShutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  console.error(`[termsnip] received ${signal}; shutting down backend…`);
+  shutdownBackend({
+    server,
+    websocketServer,
+    sessions,
+    forwards,
+    sidecarPath: backendAuth.sidecarPath,
+  });
+  process.exit(0);
+}
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+
+// Registered before listen() so a port clash surfaces a clear message and a
+// clean exit instead of an unhandled 'error' event stack trace. A server
+// 'error' is a fatal bind failure, so ALWAYS exit(1) — rethrowing would be
+// caught by the uncaughtException handler above and leave a zombie process with
+// no bound port. EADDRINUSE gets a friendlier message than the fallback.
+server.on("error", (error) => {
+  const message =
+    describeServerListenError(error, port) ??
+    `backend server error: ${error?.message ?? error}`;
+  console.error(`[termsnip] ${message}`);
+  process.exit(1);
 });
 
 server.listen(port, "127.0.0.1", () => {
