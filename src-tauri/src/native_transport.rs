@@ -196,17 +196,13 @@ pub(crate) fn encode_session_message(message_type: &str, payload: Value) -> Stri
     Value::Object(object).to_string()
 }
 
-pub(crate) fn escape_shell_value(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r#"'\"'\"'"#))
-}
-
 pub(crate) fn build_environment_export_prefix(
     environment: &Option<HashMap<String, String>>,
 ) -> String {
     get_channel_environment(environment)
         .unwrap_or_default()
         .into_iter()
-        .map(|(key, value)| format!("export {key}={}", escape_shell_value(&value)))
+        .map(|(key, value)| format!("export {key}={}", shell_single_quote(&value)))
         .collect::<Vec<_>>()
         .join("; ")
 }
@@ -1424,7 +1420,7 @@ pub(crate) fn run_native_ssh_command(
         .arg("-o")
         .arg("RequestTTY=no")
         .arg(&context.target_alias)
-        .arg(format!("sh -lc {}", escape_shell_value(command)))
+        .arg(format!("sh -lc {}", shell_single_quote(command)))
         .output()
         .map_err(|error| error.to_string())
 }
@@ -1729,6 +1725,66 @@ mod tests {
         process,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    /// Run `/bin/sh -c <script>` and return trimmed-free stdout verbatim.
+    fn sh_stdout(script: &str) -> String {
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(script)
+            .output()
+            .expect("sh should execute");
+        assert!(
+            output.status.success(),
+            "sh exited non-zero for script {script:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("stdout should be utf8")
+    }
+
+    #[test]
+    fn shell_single_quote_wraps_and_escapes_embedded_quote() {
+        // POSIX form: a single quote becomes '\'' (close, escaped quote, reopen).
+        assert_eq!(shell_single_quote("abc"), "'abc'");
+        assert_eq!(shell_single_quote("a'b"), "'a'\\''b'");
+        assert_eq!(shell_single_quote(""), "''");
+    }
+
+    #[test]
+    fn shell_single_quote_round_trips_hostile_values_through_sh() {
+        // Every value must reach the shell as a single, literal word — no
+        // corruption on ordinary quotes and no breakout on metacharacters.
+        // This mirrors run_native_ssh_command's `sh -lc <quoted>` and
+        // build_environment_export_prefix's `export k=<quoted>`.
+        for value in [
+            "it's done",
+            "awk '{print $1}'",
+            "plain",
+            "x'; id #",
+            "`id`",
+            "$(id)",
+            "a\"b",
+            "line1\nline2",
+            "semi;colon && echo pwned",
+        ] {
+            let script = format!("printf '%s' {}", shell_single_quote(value));
+            assert_eq!(
+                sh_stdout(&script),
+                value,
+                "value {value:?} was corrupted or broke out of quoting"
+            );
+        }
+    }
+
+    #[test]
+    fn build_environment_export_prefix_quotes_injection_values() {
+        let mut env = HashMap::new();
+        env.insert("TOKEN".to_string(), "x'; id #".to_string());
+        let prefix = build_environment_export_prefix(&Some(env));
+        // The export line, when evaluated, must set TOKEN to the literal value
+        // rather than executing the injected `id`.
+        let script = format!("{prefix}; printf '%s' \"$TOKEN\"");
+        assert_eq!(sh_stdout(&script), "x'; id #");
+    }
 
     fn test_suffix(label: &str) -> String {
         let nanos = SystemTime::now()
