@@ -2078,6 +2078,14 @@ fn run_native_session_loop(
     mut channel: Channel,
     mut receiver: UnboundedReceiver<NativeSessionCommand>,
 ) {
+    // The direct-SSH connect already succeeded before this loop was spawned, so
+    // the session is connected the moment we start. Emit it here (like the
+    // external/jump loops) rather than from the spawning task: spawn_blocking
+    // returns as soon as this thread is spawned, so a caller-side "connected"
+    // could race — and lose to — an instant EOF that makes this loop emit
+    // "disconnected" first, leaving the UI stuck "connected" on a dead session.
+    set_native_session_connection_state(&app, &session_id, &state, "connected");
+
     let mut buffer = [0u8; NATIVE_SESSION_READ_CHUNK_SIZE];
     let mut coalescer = OutputCoalescer::new(
         Duration::from_millis(NATIVE_OUTPUT_COALESCE_WINDOW_MS),
@@ -3348,81 +3356,15 @@ async fn terminal_workspace_create_backend_session(
     let app_handle = app.clone();
     let session_id_for_thread = session_id.clone();
     let state_for_thread = state.clone();
-    let command_sender = if host.protocol == "localShell"
-        || host.protocol == "telnet"
-        || host.protocol == "serial"
-        || host.protocol == "mosh"
-    {
-        let (command_sender, command_receiver) = unbounded_channel();
-        let registry_for_thread = native_registry.clone();
-        let forward_registry_for_thread = forward_registry.clone();
-        let thread_app = app_handle.clone();
-        let thread_session_id = session_id_for_thread.clone();
-        let thread_state = state_for_thread.clone();
-
-        thread::spawn(move || {
-            run_external_command_session_loop(
-                thread_app,
-                registry_for_thread,
-                forward_registry_for_thread,
-                thread_session_id,
-                thread_state,
-                host,
-                command_receiver,
-            );
-        });
-
-        command_sender
-    } else if host.jump_host.is_some() {
-        let (command_sender, command_receiver) = unbounded_channel();
-        let registry_for_thread = native_registry.clone();
-        let forward_registry_for_thread = forward_registry.clone();
-        let thread_app = app_handle.clone();
-        let thread_session_id = session_id_for_thread.clone();
-        let thread_state = state_for_thread.clone();
-
-        thread::spawn(move || {
-            run_jump_host_session_loop(
-                thread_app,
-                registry_for_thread,
-                forward_registry_for_thread,
-                thread_session_id,
-                thread_state,
-                host,
-                command_receiver,
-            );
-        });
-
-        command_sender
-    } else {
-        tauri::async_runtime::spawn_blocking(move || {
-            let (session, channel) = connect_native_session(&host)?;
-            let (command_sender, command_receiver) = unbounded_channel();
-            let registry_for_thread = native_registry.clone();
-            let forward_registry_for_thread = forward_registry.clone();
-            let thread_app = app_handle.clone();
-            let thread_session_id = session_id_for_thread.clone();
-            let thread_state = state_for_thread.clone();
-
-            thread::spawn(move || {
-                run_native_session_loop(
-                    thread_app,
-                    registry_for_thread,
-                    forward_registry_for_thread,
-                    thread_session_id,
-                    thread_state,
-                    session,
-                    channel,
-                    command_receiver,
-                );
-            });
-
-            Ok::<UnboundedSender<NativeSessionCommand>, String>(command_sender)
-        })
-        .await
-        .map_err(|error| error.to_string())??
-    };
-
+    // Create the command channel and insert the session handle BEFORE spawning
+    // any loop thread. Previously the loop was spawned first and the handle
+    // inserted afterwards, so a loop that failed and exited immediately called
+    // remove_native_session for an id not yet in the registry (a no-op) and the
+    // late insert then left a permanently-orphaned dead handle; the blanket
+    // "connected" below could also overwrite the loop's terminal state on an
+    // instant failure. Inserting first makes the loop's remove-on-exit correct,
+    // and each loop now owns its own connected/disconnected transitions.
+    let (command_sender, command_receiver) = unbounded_channel();
     insert_native_session(
         native_sessions.inner(),
         &session_id,
@@ -3432,7 +3374,71 @@ async fn terminal_workspace_create_backend_session(
             state: state.clone(),
         },
     );
-    set_native_session_connection_state(&app, &session_id, &state, "connected");
+
+    let is_external = matches!(
+        host.protocol.as_str(),
+        "localShell" | "telnet" | "serial" | "mosh"
+    );
+    let has_jump_host = host.jump_host.is_some();
+
+    if is_external {
+        thread::spawn(move || {
+            run_external_command_session_loop(
+                app_handle,
+                native_registry,
+                forward_registry,
+                session_id_for_thread,
+                state_for_thread,
+                host,
+                command_receiver,
+            );
+        });
+        // Stays "connecting" until the loop emits "connected" once the process
+        // is actually up.
+    } else if has_jump_host {
+        thread::spawn(move || {
+            run_jump_host_session_loop(
+                app_handle,
+                native_registry,
+                forward_registry,
+                session_id_for_thread,
+                state_for_thread,
+                host,
+                command_receiver,
+            );
+        });
+        // Stays "connecting" until the loop establishes the jump chain.
+    } else {
+        // Direct SSH connects synchronously. On failure, remove the handle we
+        // pre-inserted so a failed connect leaves no orphan, then report it.
+        let connect_result = tauri::async_runtime::spawn_blocking(move || {
+            let (session, channel) = connect_native_session(&host)?;
+            thread::spawn(move || {
+                run_native_session_loop(
+                    app_handle,
+                    native_registry,
+                    forward_registry,
+                    session_id_for_thread,
+                    state_for_thread,
+                    session,
+                    channel,
+                    command_receiver,
+                );
+            });
+            Ok::<(), String>(())
+        })
+        .await
+        .map_err(|error| error.to_string())
+        .and_then(|inner| inner);
+
+        if let Err(error) = connect_result {
+            remove_native_session(native_sessions.inner(), &session_id);
+            return Err(error);
+        }
+        // Direct SSH is connected once connect_native_session returns; the
+        // spawned run_native_session_loop emits "connected" from its own thread
+        // so it cannot race (and lose to) an instant-EOF "disconnected".
+    }
 
     Ok(CreateSessionResponse { session_id })
 }
@@ -3918,6 +3924,38 @@ mod tests {
             c.poll_flush(t0 + Duration::from_millis(12)),
             Some("hello".to_string())
         );
+    }
+
+    #[test]
+    fn test_registry_insert_remove_leaves_no_orphan() {
+        // create_backend_session now inserts the handle BEFORE spawning the loop
+        // and removes it if a direct-SSH connect fails. Both that failure path
+        // and every loop's remove-on-exit rely on the registry ending empty with
+        // no orphaned handle, and on a racing double-remove being a harmless
+        // no-op. This pins that invariant.
+        let registry = NativeSessionRegistry::default();
+        let (command_sender, _command_receiver) = unbounded_channel();
+        insert_native_session(
+            &registry,
+            "s1",
+            NativeSessionHandle {
+                command_sender,
+                host: minimal_ssh_host(),
+                state: Arc::new(Mutex::new(NativeSessionState::default())),
+            },
+        );
+        assert!(get_native_session(&registry, "s1").is_some());
+
+        assert!(
+            remove_native_session(&registry, "s1").is_some(),
+            "the inserted handle should be removed"
+        );
+        assert!(
+            get_native_session(&registry, "s1").is_none(),
+            "no orphan should remain after remove"
+        );
+        // A second remove (a fast loop exit racing the failure cleanup) is safe.
+        assert!(remove_native_session(&registry, "s1").is_none());
     }
 
     fn build_test_host_chain() -> BackendHostConnection {
