@@ -19,7 +19,7 @@ echo "[validate] unit and integration tests"
 ./node_modules/.bin/vitest run --config vitest.config.ts
 
 echo "[validate] desktop build"
-npm --prefix ./apps/desktop run build
+node ./scripts/pnpmw.mjs --filter desktop build
 
 if [[ "${TERMSNIP_RUN_NATIVE_TRUST:-0}" == "1" && "$(uname -s)" == "Darwin" ]]; then
   echo "[validate] native trust tooling"
