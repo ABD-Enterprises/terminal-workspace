@@ -10,7 +10,7 @@ import {
   resizeBackendSession,
   type SessionSocketLike,
 } from "../../lib/api";
-import { isTauriRuntime } from "../../lib/backend-runtime";
+import { isTauriRuntime, parseSessionFrame } from "../../lib/backend-runtime";
 import { buildBackendConnectionFromKnownHost, findKnownHostMatch } from "../../lib/connections";
 import { canRestoreSessionWithoutPrompt, ensureRuntimeSecrets } from "../../lib/runtime-secrets";
 import { buildMockCommandResponse, buildTerminalIntro, formatPrompt } from "../../lib/terminal";
@@ -647,10 +647,14 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             return;
           }
 
-          const message = JSON.parse(String(event.data)) as
-            | { type: "data"; data: string }
-            | { type: "status"; state: SessionPane["connectionState"] }
-            | { type: "error"; message: string };
+          const message = parseSessionFrame(event.data);
+          if (!message) {
+            // A malformed or unrecognized frame must never throw out of this
+            // listener — that would tear down the terminal data pipe for the
+            // rest of the session. Drop it and keep streaming.
+            console.warn("Dropping malformed session frame");
+            return;
+          }
 
           if (message.type === "data") {
             terminal.write(message.data);
