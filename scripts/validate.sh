@@ -21,6 +21,26 @@ echo "[validate] unit and integration tests"
 echo "[validate] desktop build"
 node ./scripts/pnpmw.mjs --filter desktop build
 
+# #177: build + test the native (src-tauri) crate as part of the default local
+# gate so a broken native build can no longer pass `npm run validate` green.
+# `cargo test` compiles the crate (icons are committed and the desktop build
+# above produced tauri.conf's frontendDist, so generate_context! resolves) and
+# runs the tests; a compile error or failing test fails validation via set -e.
+# The crate only ships on macOS, so this is Darwin-gated; on Darwin without a
+# Rust toolchain it advisory-skips with a loud warning rather than blocking a
+# contributor who is only touching the web app.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if command -v cargo >/dev/null 2>&1; then
+    echo "[validate] rust build + tests"
+    cargo test --manifest-path src-tauri/Cargo.toml
+  else
+    echo "[validate] WARNING: cargo not found on PATH — the native src-tauri crate is NOT being validated locally." >&2
+    echo "[validate] WARNING: install the Rust toolchain (https://rustup.rs) so native breakage cannot ship green." >&2
+  fi
+else
+  echo "[validate] rust build + tests skipped (macOS only — the native crate ships on macOS)"
+fi
+
 if [[ "${TERMSNIP_RUN_NATIVE_TRUST:-0}" == "1" && "$(uname -s)" == "Darwin" ]]; then
   echo "[validate] native trust tooling"
   bash ./scripts/native-trust-tooling-test.sh
