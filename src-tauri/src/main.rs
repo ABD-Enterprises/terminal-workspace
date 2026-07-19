@@ -60,6 +60,11 @@ const DEFAULT_TERMINAL_PIXEL_HEIGHT: u16 = DEFAULT_TERMINAL_ROWS * 16;
 const NATIVE_SESSION_READ_CHUNK_SIZE: usize = 4096;
 const NATIVE_SESSION_PROMPT_WINDOW_SIZE: usize = 512;
 const NATIVE_SESSION_POLL_INTERVAL_MS: u64 = 10;
+/// Max time a write to an SSH channel may make NO progress before it is treated
+/// as a stalled remote and aborted, so it cannot wedge the session loop. This is
+/// an idle timeout — a slow-but-progressing transfer of any total duration is
+/// fine. See write_all_with_deadline.
+const NATIVE_SESSION_WRITE_TIMEOUT_MS: u64 = 10_000;
 const NATIVE_SESSION_BUFFER_LIMIT: usize = 128;
 /// Terminal-output coalescing bounds. Without these, a fast producer
 /// (`yes`, `cat huge.log`) makes the session loop emit one Tauri event per
@@ -2028,20 +2033,68 @@ fn run_jump_host_session_loop(
     let _ = fs::remove_dir_all(session_dir);
 }
 
-fn write_native_session_input(channel: &mut Channel, input: &[u8]) -> Result<(), String> {
+/// Write all bytes, retrying on WouldBlock, bounded by an *idle* deadline: the
+/// clock is the time spent making NO progress. Without a bound, a stalled remote
+/// (a full SSH window whose peer has stopped reading — e.g. a large paste) makes
+/// the loop busy-wait on WouldBlock forever, wedging the session and blocking any
+/// Close queued behind this write. Because the timer resets on every byte
+/// written, a legitimately slow-but-progressing link is never cut off no matter
+/// how long the whole transfer takes — only a genuine stall (no progress for the
+/// deadline) errors out, letting the loop unwind and process the Close. Generic
+/// over `Write` so the policy is testable without a live SSH channel.
+fn write_all_with_deadline<W: Write>(
+    writer: &mut W,
+    input: &[u8],
+    idle_deadline: Duration,
+) -> Result<(), String> {
     let mut written = 0;
+    let mut last_progress = Instant::now();
     while written < input.len() {
-        match channel.write(&input[written..]) {
+        match writer.write(&input[written..]) {
             Ok(0) => return Err("SSH session is closed".to_string()),
-            Ok(count) => written += count,
+            Ok(count) => {
+                written += count;
+                last_progress = Instant::now();
+            }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if last_progress.elapsed() >= idle_deadline {
+                    return Err(format!(
+                        "Timed out writing to the SSH session: no progress for {}ms; the remote stopped accepting input.",
+                        idle_deadline.as_millis()
+                    ));
+                }
                 thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
             }
             Err(error) => return Err(error.to_string()),
         }
     }
 
-    channel.flush().map_err(|error| error.to_string())
+    // Guard the flush with the same idle deadline: a flush that blocks on a
+    // stalled remote would otherwise reintroduce the very wedge we just avoided.
+    let flush_start = Instant::now();
+    loop {
+        match writer.flush() {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if flush_start.elapsed() >= idle_deadline {
+                    return Err(format!(
+                        "Timed out flushing the SSH session after {}ms; the remote stopped accepting input.",
+                        idle_deadline.as_millis()
+                    ));
+                }
+                thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+}
+
+fn write_native_session_input(channel: &mut Channel, input: &[u8]) -> Result<(), String> {
+    write_all_with_deadline(
+        channel,
+        input,
+        Duration::from_millis(NATIVE_SESSION_WRITE_TIMEOUT_MS),
+    )
 }
 
 fn handle_native_session_command(
@@ -3791,6 +3844,83 @@ mod native_transport_fixtures;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A writer that never accepts data — models a stalled remote / full SSH
+    /// window whose peer has stopped reading.
+    struct StalledWriter;
+    impl std::io::Write for StalledWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(std::io::ErrorKind::WouldBlock, "stalled"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn write_all_with_deadline_gives_up_on_stalled_remote() {
+        // The paste-against-stalled-remote case: the write must return an error
+        // within the deadline rather than busy-wait forever and wedge the loop.
+        let mut writer = StalledWriter;
+        let start = Instant::now();
+        let result =
+            write_all_with_deadline(&mut writer, b"a large paste", Duration::from_millis(50));
+        let elapsed = start.elapsed();
+        assert!(result.is_err(), "a stalled write must return Err, not hang");
+        assert!(elapsed >= Duration::from_millis(50), "must respect the deadline");
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "must not hang well past the deadline; took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn write_all_with_deadline_writes_all_bytes_when_accepted() {
+        // A writer that accepts everything completes without hitting the deadline.
+        let mut buffer: Vec<u8> = Vec::new();
+        write_all_with_deadline(&mut buffer, b"hello world", Duration::from_secs(1))
+            .expect("an accepting writer should succeed");
+        assert_eq!(buffer, b"hello world");
+    }
+
+    /// Accepts one byte per call, returning WouldBlock on alternate calls — a
+    /// slow link that keeps making progress.
+    struct SlowProgressWriter {
+        accepted: Vec<u8>,
+        block_next: bool,
+    }
+    impl std::io::Write for SlowProgressWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if self.block_next {
+                self.block_next = false;
+                return Err(std::io::Error::new(std::io::ErrorKind::WouldBlock, "slow"));
+            }
+            self.block_next = true;
+            self.accepted.push(buf[0]);
+            Ok(1)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn write_all_with_deadline_survives_slow_but_progressing_writes() {
+        // Progress resets the idle timer, so a transfer whose TOTAL time far
+        // exceeds the deadline still succeeds as long as no single stall does.
+        // 20 bytes * (~10ms poll per blocked call) is well over the 50ms idle
+        // deadline in total, but no individual stall reaches it.
+        let input = b"twenty-byte payload!";
+        assert!(input.len() as u128 * NATIVE_SESSION_POLL_INTERVAL_MS as u128 > 50);
+        let mut writer = SlowProgressWriter {
+            accepted: Vec::new(),
+            block_next: false,
+        };
+        write_all_with_deadline(&mut writer, input, Duration::from_millis(50))
+            .expect("a slow-but-progressing write must not be cut off");
+        assert_eq!(writer.accepted, input);
+    }
+
     use std::{
         env, process,
         time::{SystemTime, UNIX_EPOCH},
