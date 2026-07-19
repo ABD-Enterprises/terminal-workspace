@@ -85,7 +85,7 @@ mkdir -p "$ARTIFACT_ROOT"
 rm -f "$ZIP_PATH" "$MANIFEST_PATH" "$LATEST_MANIFEST_PATH" "$CODESIGN_VERIFY_LOG" "$CODESIGN_DISPLAY_LOG" "$SPCTL_LOG"
 
 echo "Building frontend bundle..."
-npm --prefix "$ROOT_DIR/apps/desktop" run build
+node "$ROOT_DIR/scripts/pnpmw.mjs" --filter desktop build
 
 echo "Generating native icons..."
 bash "$ROOT_DIR/scripts/generate-tauri-icons.sh"

@@ -24,7 +24,7 @@ Each task is tagged with the originating section in the review (`§3.S-1`, `§4.
 | P0-S7 | Append `codesign --verify --deep --strict --verbose=2` and `spctl -a -t exec -vv` to `scripts/native-release.sh` (or wherever the bundle is finalized) before `native:promote` runs. Fail-closed if either errors. | XS | §3.S-7 |
 | P0-UX1 | Restore the richer SSH config parser that was closed with PR #15: `Host *` defaults inheritance, multi-host lines, `ProxyJump`, port + identity inheritance. Keep current parser's tests passing; add the cases from the closed PR. | M | §4.5 |
 | P0-UX3 | Add a "Pinned hosts" section to the left sidebar that lists all hosts where `favorite === true`, with one-click connect (reuses existing session if open, else opens new tab). | S | §4.1, §6.9 |
-| P0-VAL | `npm run test`, `cargo test --manifest-path src-tauri/Cargo.toml`, `npm --prefix apps/desktop run typecheck`. | — | — |
+| P0-VAL | `npm run test`, `cargo test --manifest-path src-tauri/Cargo.toml`, `npm run typecheck`. | — | — |
 | P0-DOC | Rescore `FEATURE_PARITY.md` to reflect honest column ("Implemented vs. Daily-use"). | XS | §1 |
 
 **Out of P0 scope (deliberately):** anything that needs a product decision (IA collapse), anything ≥ M effort that touches multiple stores (Identity entity, "needs secrets" prompt redesign), anything that needs a new dependency to be added (xterm SearchAddon, addon-search).

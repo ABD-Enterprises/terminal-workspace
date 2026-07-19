@@ -22,3 +22,7 @@ artifacts/release/
 
 # Pipeline state and retained evidence files must not be gitignored — they are required by the AI validator
 .worktrees/
+
+# The desktop app is built through the pnpm workspace; an npm lockfile here
+# would describe a divergent dependency tree (see #176).
+apps/desktop/package-lock.json
