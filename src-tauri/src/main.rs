@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     env, fs,
     io::{self, Read, Write},
-    net::TcpStream,
+    net::{TcpStream, ToSocketAddrs},
     path::PathBuf,
     process::{Command, Output, Stdio},
     sync::{
@@ -62,6 +62,14 @@ const NATIVE_SESSION_PROMPT_WINDOW_SIZE: usize = 512;
 const NATIVE_SESSION_POLL_INTERVAL_MS: u64 = 10;
 const NATIVE_SESSION_BUFFER_LIMIT: usize = 128;
 const NATIVE_SSH_CONTROL_READY_TIMEOUT_MS: u64 = 15_000;
+/// Bound the native ssh2 connect/handshake/blocking-IO phases. Without these a
+/// black-holed port (SYN dropped) or a server that completes TCP but stalls the
+/// SSH banner pins the spawn_blocking worker until the OS TCP timeout (~75s+)
+/// or forever, and repeated attempts exhaust the blocking pool. connect_timeout
+/// bounds the TCP connect; Session::set_timeout bounds handshake, auth, and the
+/// blocking channel reads (e.g. copy-key's read_to_string).
+const NATIVE_SSH_CONNECT_TIMEOUT_MS: u64 = 15_000;
+const NATIVE_SSH_IO_TIMEOUT_MS: u32 = 30_000;
 const TERMSNIP_DATABASE_URL: &str = "sqlite:termsnip.db";
 static SESSION_STREAM_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NATIVE_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -1354,16 +1362,42 @@ fn open_native_channel(session: &Session, host: &BackendHostConnection) -> Resul
     Ok(channel)
 }
 
+/// Resolve `hostname:port` and TCP-connect with a bounded deadline so an
+/// unreachable-but-routable host (dropped SYN) fails fast instead of hanging on
+/// the OS TCP timeout. Tries each resolved address until one connects.
+fn connect_tcp_with_timeout(
+    hostname: &str,
+    port: u16,
+    timeout: Duration,
+) -> Result<TcpStream, String> {
+    let addrs = (hostname, port)
+        .to_socket_addrs()
+        .map_err(|error| format!("could not resolve {hostname}:{port}: {error}"))?;
+    let mut last_error = format!("no addresses resolved for {hostname}:{port}");
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, timeout) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last_error = error.to_string(),
+        }
+    }
+    Err(format!("could not connect to {hostname}:{port}: {last_error}"))
+}
+
 fn connect_native_session(host: &BackendHostConnection) -> Result<(Session, Channel), String> {
-    let tcp_stream = TcpStream::connect((
-        host.hostname.as_str(),
-        u16::try_from(host.port).map_err(|_| "SSH port must be between 1 and 65535".to_string())?,
-    ))
-    .map_err(|error| error.to_string())?;
+    let port =
+        u16::try_from(host.port).map_err(|_| "SSH port must be between 1 and 65535".to_string())?;
+    let tcp_stream = connect_tcp_with_timeout(
+        &host.hostname,
+        port,
+        Duration::from_millis(NATIVE_SSH_CONNECT_TIMEOUT_MS),
+    )?;
     let _ = tcp_stream.set_nodelay(true);
 
     let mut session = Session::new().map_err(|error| error.to_string())?;
     session.set_tcp_stream(tcp_stream);
+    // Bound handshake/auth (and any blocking channel IO before the loop switches
+    // the session to non-blocking) so a stalled SSH banner cannot hang forever.
+    session.set_timeout(NATIVE_SSH_IO_TIMEOUT_MS);
     session.handshake().map_err(|error| error.to_string())?;
 
     if let Some(expected_key) = host.known_host_public_key.as_ref() {
@@ -2241,7 +2275,11 @@ fn copy_key_to_host_blocking(
             });
         }
     };
-    let tcp_stream = match TcpStream::connect((request.host.hostname.as_str(), port)) {
+    let tcp_stream = match connect_tcp_with_timeout(
+        request.host.hostname.as_str(),
+        port,
+        Duration::from_millis(NATIVE_SSH_CONNECT_TIMEOUT_MS),
+    ) {
         Ok(stream) => stream,
         Err(error) => {
             return Ok(CopyKeyToHostResponse {
@@ -2262,6 +2300,9 @@ fn copy_key_to_host_blocking(
         }
     };
     session.set_tcp_stream(tcp_stream);
+    // Bound handshake, auth, and the blocking read_to_string below so a stalled
+    // banner or an unresponsive-but-connected host cannot hang this command.
+    session.set_timeout(NATIVE_SSH_IO_TIMEOUT_MS);
     if let Err(error) = session.handshake() {
         return Ok(CopyKeyToHostResponse {
             ok: false,
@@ -3620,6 +3661,36 @@ mod tests {
             get_native_session(&registry, "s1").is_some(),
             "registry write/read should still work after poisoning"
         );
+    }
+
+    #[test]
+    fn test_connect_timeout_fails_fast_on_black_hole() {
+        // 192.0.2.1 is in TEST-NET-1 (RFC 5737): guaranteed non-routable, so a
+        // SYN is dropped and the connect must hit the deadline rather than hang
+        // on the OS TCP timeout. (A network that replies with an ICMP
+        // unreachable instead just makes it fail faster — still Err, still
+        // bounded.)
+        let start = Instant::now();
+        let result = connect_tcp_with_timeout("192.0.2.1", 22, Duration::from_millis(300));
+        let elapsed = start.elapsed();
+        assert!(
+            result.is_err(),
+            "connect to a black-hole address must fail, got {result:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "connect must resolve within the bounded deadline; took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn test_connect_timeout_rejects_unresolvable_host() {
+        let result = connect_tcp_with_timeout(
+            "no-such-host.invalid",
+            22,
+            Duration::from_millis(300),
+        );
+        assert!(result.is_err(), "an unresolvable host must return Err");
     }
 
     fn build_test_host_chain() -> BackendHostConnection {
