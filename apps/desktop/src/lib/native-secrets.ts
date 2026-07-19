@@ -5,6 +5,12 @@ export interface NativeHostSecrets {
   passphrase: string;
 }
 
+interface HostSecretsResponse extends NativeHostSecrets {
+  /** Set by the backend when the keychain was locked or access was denied,
+   *  as opposed to the secret simply being absent (which returns empty). */
+  keychainUnavailable?: boolean;
+}
+
 interface HostSecretsRequest {
   hostId: string;
 }
@@ -45,11 +51,26 @@ export async function loadNativeHostSecrets(hostId: string): Promise<NativeHostS
     return emptySecrets;
   }
 
-  return invokeTauriCommand<NativeHostSecrets>("terminal_workspace_load_host_secrets", {
-    request: {
-      hostId,
-    } satisfies HostSecretsRequest,
-  });
+  const response = await invokeTauriCommand<HostSecretsResponse>(
+    "terminal_workspace_load_host_secrets",
+    {
+      request: {
+        hostId,
+      } satisfies HostSecretsRequest,
+    }
+  );
+
+  // A locked or access-denied keychain returns keychainUnavailable rather than
+  // an empty secret, so surface it as an error instead of silently attempting
+  // authentication with a blank password. (Prompting the user for the secret
+  // as a fallback is tracked in #203.)
+  if (response.keychainUnavailable) {
+    throw new Error(
+      "The keychain is locked or access was denied, so saved credentials could not be read. Unlock the keychain (or allow access) and try again."
+    );
+  }
+
+  return { password: response.password, passphrase: response.passphrase };
 }
 
 export async function storeNativeHostSecrets(hostId: string, secrets: NativeHostSecrets) {

@@ -551,6 +551,11 @@ struct StoreHostSecretsRequest {
 struct HostSecretsResponse {
     password: String,
     passphrase: String,
+    /// True when the keychain was locked or access was denied (as opposed to
+    /// the secret simply being absent). Lets the renderer branch on a stable
+    /// signal — surface an error / prompt for the secret — instead of parsing
+    /// an opaque error string or treating a locked keychain as "no secret".
+    keychain_unavailable: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1115,7 +1120,14 @@ fn build_external_command_session_spec(
 }
 
 fn emit_session_stream_event(app: &AppHandle, event: SessionStreamEvent) {
-    let _ = app.emit(SESSION_STREAM_EVENT_NAME, event);
+    // Log a dropped emit instead of swallowing it: losing a "close" event, for
+    // example, leaves the UI showing a connected tab for a session that has
+    // actually ended. `kind` is a &'static str, so capturing it before the move
+    // adds no allocation on the hot output path.
+    let kind = event.kind;
+    if let Err(error) = app.emit(SESSION_STREAM_EVENT_NAME, event) {
+        eprintln!("warning: dropped '{kind}' session stream event: {error}");
+    }
 }
 
 fn get_native_session(
@@ -2924,11 +2936,23 @@ async fn terminal_workspace_load_host_secrets(
     request: HostSecretsRequest,
 ) -> Result<HostSecretsResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let password = read_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id);
+        let passphrase = read_keychain_secret(KEYCHAIN_PASSPHRASE_SERVICE, &request.host_id);
+        // A locked/denied keychain must not masquerade as "no secret stored"
+        // (which would silently drop to an empty password and then fail auth
+        // with no explanation). Surface it so the renderer can prompt instead.
+        let keychain_unavailable = matches!(password, KeychainRead::Unavailable(_))
+            || matches!(passphrase, KeychainRead::Unavailable(_));
         Ok(HostSecretsResponse {
-            password: load_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id)?
-                .unwrap_or_default(),
-            passphrase: load_keychain_secret(KEYCHAIN_PASSPHRASE_SERVICE, &request.host_id)?
-                .unwrap_or_default(),
+            password: match password {
+                KeychainRead::Found(value) => value,
+                KeychainRead::Missing | KeychainRead::Unavailable(_) => String::new(),
+            },
+            passphrase: match passphrase {
+                KeychainRead::Found(value) => value,
+                KeychainRead::Missing | KeychainRead::Unavailable(_) => String::new(),
+            },
+            keychain_unavailable,
         })
     })
     .await
