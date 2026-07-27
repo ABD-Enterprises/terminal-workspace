@@ -67,12 +67,9 @@ jobs:
             test-results
 
   # #128: compile + test the Rust crate so a broken native build can no longer
-  # ship "green". Runs on the same self-hosted macOS runner release-macos.yml
-  # uses — the crate ships on macOS and the keychain-backed tests need a real
-  # login keychain. If that runner is offline, change this single `runs-on`
-  # line to `macos-latest` and re-run (no other step depends on the runner).
+  # ship "green". Public pull-request code runs on GitHub-hosted macOS.
   rust-validate:
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: macos-latest
     timeout-minutes: 30
 
     steps:
@@ -112,7 +109,7 @@ jobs:
 
       # #101: the localhost-sshd session fixture is #[ignore] by default (it
       # needs an unsandboxed sshd, which sandboxed local/dev envs lack). This
-      # self-hosted macOS runner is a real machine, so run it explicitly to
+      # hosted macOS runner is a real machine, so run it explicitly to
       # exercise the SSH session lifecycle (create -> open stream -> I/O ->
       # close) end-to-end on every PR. A failure fails Validate. The
       # localShell / external-protocol session lifecycle already runs in the
