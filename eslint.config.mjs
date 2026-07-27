@@ -11,6 +11,7 @@ export default tseslint.config(
       "dist",
       "coverage",
       "src-tauri/target",
+      ".ai",
     ],
   },
   js.configs.recommended,
