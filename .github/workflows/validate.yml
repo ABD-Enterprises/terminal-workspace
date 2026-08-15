@@ -7,6 +7,18 @@ concurrency:
   group: validate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# #227 (CodeQL actions/missing-workflow-permissions, alerts 16 + 19): without an
+# explicit block both jobs inherit the repository default token scope, which is
+# far wider than either needs. Every step here only reads the repo — checkout,
+# pnpm/Node setup, toolchain install, local build/test commands. The Playwright
+# and setup-node caches and actions/upload-artifact use the Actions runtime
+# services, not GITHUB_TOKEN, so they need no scope here either. Nothing in this
+# workflow comments, writes to an issue or PR, publishes, requests OIDC, or
+# pushes. Scope any future step that does need more at the job level rather than
+# widening this block.
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
