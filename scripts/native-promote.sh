@@ -160,6 +160,19 @@ fs.writeFileSync(process.env.UPDATER_LATEST_JSON, `${JSON.stringify(feed, null, 
 NODE
   echo "  updater tarball: $UPDATER_TARBALL_PATH"
   echo "  updater latest.json: $UPDATER_LATEST_JSON"
+elif [[ "${REQUIRE_UPDATER_ARTIFACTS:-0}" == "1" ]]; then
+  # #241: a real release must not be promotable without the updater feed. The
+  # branch below used to be the only behaviour, which is how v0.1.0 shipped with
+  # a DMG and nothing else — the promotion succeeded, the publish succeeded, and
+  # every installed copy's update check 404'd (#224). Opt-in rather than always
+  # on, so `native:bundle:preview` and local promote runs keep working unsigned.
+  echo "ERROR: REQUIRE_UPDATER_ARTIFACTS=1 but TAURI_SIGNING_PRIVATE_KEY is not set." >&2
+  echo "       Refusing to promote a release with no updater feed: without the signing" >&2
+  echo "       key there is no latest.json and no signed .app.tar.gz, so installed apps" >&2
+  echo "       cannot discover this version. Set TAURI_SIGNING_PRIVATE_KEY (and" >&2
+  echo "       TAURI_SIGNING_PRIVATE_KEY_PASSWORD), or unset REQUIRE_UPDATER_ARTIFACTS" >&2
+  echo "       if this is deliberately a non-updating build." >&2
+  exit 1
 else
   echo "Skipping updater artifacts (TAURI_SIGNING_PRIVATE_KEY not set)."
 fi
