@@ -1,0 +1,63 @@
+# #223: this file did not exist, so Dependabot ran security updates only — with
+# no scheduled version updates and no github-actions coverage at all. Security
+# alerts therefore accumulated (a critical shell-quote advisory sat open for two
+# months) with nothing routinely moving dependencies forward between them.
+#
+# Updates are grouped deliberately. Every bot-authored PR here fails the ORC
+# run-presence check — a bot cannot link a ticket, so each one needs a waiver
+# label applied by hand (filed upstream as ABD-Enterprises/orc#3382). Ungrouped
+# weekly updates would turn that into steady manual toil; one grouped PR per
+# ecosystem keeps it to a few.
+version: 2
+updates:
+  # SHA-pinned per #212 — Dependabot updates the pin and the version comment
+  # together, which is the only practical way to keep pinned actions current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Supply-chain hardening: wait before proposing a freshly published version.
+    # A brand-new release is the window in which a compromised or yanked package
+    # is most likely to be live. Security updates are exempt from cooldown, so
+    # this delays routine version bumps without holding back an advisory fix.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # pnpm workspace: the root manifest covers apps/* too.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Supply-chain hardening: wait before proposing a freshly published version.
+    # A brand-new release is the window in which a compromised or yanked package
+    # is most likely to be live. Security updates are exempt from cooldown, so
+    # this delays routine version bumps without holding back an advisory fix.
+    cooldown:
+      default-days: 7
+    groups:
+      # Split so a routine dev-tooling bump is never mixed into the same PR as a
+      # change to something that actually ships in the app.
+      production-dependencies:
+        dependency-type: "production"
+      development-dependencies:
+        dependency-type: "development"
+
+  # The native crate ships inside the app bundle, and ssh2 is built with
+  # vendored-openssl — a statically linked OpenSSL advisory needs a rebuild
+  # here, since the OS cannot patch it out from under the binary.
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+    # Supply-chain hardening: wait before proposing a freshly published version.
+    # A brand-new release is the window in which a compromised or yanked package
+    # is most likely to be live. Security updates are exempt from cooldown, so
+    # this delays routine version bumps without holding back an advisory fix.
+    cooldown:
+      default-days: 7
+    groups:
+      cargo:
+        patterns: ["*"]
