@@ -179,10 +179,13 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  // Refs let the xterm custom-key handler call into the latest React state
-  // setters without needing to re-attach the handler on every render.
-  const setSearchOpenRef = useRef(setSearchOpen);
-  setSearchOpenRef.current = setSearchOpen;
+  // #257: this used to be a `setSearchOpenRef` whose `.current` was assigned
+  // during render, so the xterm custom-key handler could reach the "latest"
+  // setter without re-attaching. React guarantees a useState setter's identity
+  // is stable for the lifetime of the component, so the ref never held anything
+  // but the same function — it bought nothing and cost a ref write during
+  // render, which is what react-hooks/refs flags. The handler closes over
+  // setSearchOpen directly now.
   const socketRef = useRef<SessionSocketLike | null>(null);
   const commandBufferRef = useRef("");
   const transportRef = useRef<SessionTransport>(pane.transport);
@@ -943,7 +946,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       const isMeta = event.metaKey || event.ctrlKey;
       if (isMeta && (event.key === "f" || event.key === "F")) {
         event.preventDefault();
-        setSearchOpenRef.current(true);
+        setSearchOpen(true);
         return false;
       }
       return true;

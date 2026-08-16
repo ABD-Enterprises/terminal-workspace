@@ -164,13 +164,25 @@ export function KeysPage() {
     }
   }, [hosts, resolvedScanHostId]);
 
-  useEffect(() => {
-    if (!requestedScanHostId) {
-      return;
+  // #257: was a useEffect on [requestedScanHostId] that mirrored the requested
+  // host (from the ?scanHost= query param) into local state. Derived state, not
+  // an external system, so it is adjusted during render per React's guidance.
+  // The equality guard is kept: it stops a re-render when the param resolves to
+  // the host already selected, which is the common case when the palette
+  // navigates here for a host the user is already scanning.
+  // The previous value is tracked UNCONDITIONALLY, mirroring the effect's
+  // dependency array — the falsy check belongs inside, exactly where the old
+  // effect's early return was. Gating the tracking on truthiness instead would
+  // regress: with ?scanHost=A cleared and then set back to A, `previous` would
+  // still hold A from before the clear and the update would never fire.
+  const [previousRequestedScanHostId, setPreviousRequestedScanHostId] =
+    useState(requestedScanHostId);
+  if (requestedScanHostId !== previousRequestedScanHostId) {
+    setPreviousRequestedScanHostId(requestedScanHostId);
+    if (requestedScanHostId) {
+      setScanHostId((current) => (current === requestedScanHostId ? current : requestedScanHostId));
     }
-
-    setScanHostId((current) => (current === requestedScanHostId ? current : requestedScanHostId));
-  }, [requestedScanHostId]);
+  }
 
   useEffect(() => {
     if (!autoScanRequested || !requestedScanHostId) {

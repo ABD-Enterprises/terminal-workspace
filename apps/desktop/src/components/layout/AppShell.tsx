@@ -87,16 +87,32 @@ export function AppShell() {
 
   useEffect(() => {
     if (commandPaletteOpen) {
-      inputRef.current?.focus();
+      // #257: this effect's primary job is the DOM focus — synchronising with an
+      // external system, exactly what effects are for. The index reset rides
+      // along because it must happen on open, and it is not redundant with the
+      // query-change reset below: openCommandPalette only flips the open flag
+      // (store/app-store.ts), so a palette closed with a query still in it
+      // reopens with that query unchanged and no query-change to react to.
+      // Runs once per open, not per keystroke.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- rides with the DOM focus this effect exists for
       setPaletteSelectedIndex(0);
+      inputRef.current?.focus();
     }
   }, [commandPaletteOpen]);
 
   // Reset selection when the result set changes so the highlight never points
   // at a row that no longer exists.
-  useEffect(() => {
+  //
+  // #257: this was a useEffect on [paletteQuery], which fired on every keystroke
+  // and cost a second render pass each time. React's documented way to adjust
+  // state when an input changes is to do it during render — the component
+  // re-renders immediately without painting the intermediate state, so there is
+  // no cascade. See https://react.dev/learn/you-might-not-need-an-effect.
+  const [previousPaletteQuery, setPreviousPaletteQuery] = useState(paletteQuery);
+  if (paletteQuery !== previousPaletteQuery) {
+    setPreviousPaletteQuery(paletteQuery);
     setPaletteSelectedIndex(0);
-  }, [paletteQuery]);
+  }
 
   // ---- Native menu wiring -------------------------------------------------
   // The macOS application menu emits `terminal_workspace://menu-event` with a string
