@@ -29,7 +29,10 @@ use tokio::sync::mpsc::{
 };
 
 mod keychain_support;
+mod native_host_keys;
 mod native_transport;
+
+use crate::native_host_keys::{HostKeyVerdict, NativeHostKeyStore, SharedNativeHostKeyStore};
 
 use keychain_support::*;
 use native_transport::*;
@@ -1472,7 +1475,78 @@ fn connect_tcp_with_timeout(
     Err(format!("could not connect to {hostname}:{port}: {last_error}"))
 }
 
-fn connect_native_session(host: &BackendHostConnection) -> Result<(Session, Channel), String> {
+/// #151: the single host-key decision for the direct ssh2 path.
+///
+/// An explicit pin from the renderer (requireTrusted, or a host the user has
+/// scanned and trusted) always wins and is checked exactly as before. When there
+/// is no explicit pin, `allowUnknown` used to mean "skip verification entirely",
+/// which left the host MITM-able on every connect. It now means trust-on-first-use
+/// against a durable store: pin what the server first presents, and refuse if it
+/// ever changes.
+///
+/// Called after `handshake()` and BEFORE any authentication, so credentials are
+/// never sent to a host that failed this check.
+fn verify_native_host_key(
+    session: &Session,
+    host: &BackendHostConnection,
+    store: &NativeHostKeyStore,
+) -> Result<(), String> {
+    let (actual_key, key_type) = session
+        .host_key()
+        .ok_or_else(|| "SSH server did not present a host key".to_string())?;
+    let presented = BASE64_STANDARD.encode(actual_key);
+
+    if let Some(expected_key) = host.known_host_public_key.as_ref() {
+        if presented != *expected_key {
+            return Err(format!(
+                "Trusted host key mismatch for {}:{}.",
+                host.hostname, host.port
+            ));
+        }
+        return Ok(());
+    }
+
+    if host_requires_trusted_key(host) {
+        // Defence in depth: validate_ssh_host already refuses this combination.
+        return Err(format!(
+            "Trusted host key required for {}:{} but none was provided. Scan and trust the host first.",
+            host.hostname, host.port
+        ));
+    }
+
+    let algorithm = host_key_algorithm_name(key_type);
+    let pattern = known_hosts_host_pattern(host);
+    match store.verify_or_pin(&pattern, algorithm, &presented)? {
+        HostKeyVerdict::Pinned | HostKeyVerdict::Matches => Ok(()),
+        HostKeyVerdict::Mismatch { .. } => Err(format!(
+            "Host key verification failed for {}:{}: the presented host key does not match the \
+             one first seen for this host. Credentials were not sent. This may indicate a \
+             machine-in-the-middle attack, or the host may have been rebuilt — re-scan and \
+             explicitly trust the replacement key before reconnecting.",
+            host.hostname, host.port
+        )),
+    }
+}
+
+/// ssh2 reports the key type as an enum; the store records an OpenSSH-style
+/// algorithm name so the file is readable and comparable to `known_hosts`.
+/// An unrecognised type fails closed rather than being written ambiguously.
+fn host_key_algorithm_name(key_type: ssh2::HostKeyType) -> &'static str {
+    match key_type {
+        ssh2::HostKeyType::Rsa => "ssh-rsa",
+        ssh2::HostKeyType::Dss => "ssh-dss",
+        ssh2::HostKeyType::Ecdsa256 => "ecdsa-sha2-nistp256",
+        ssh2::HostKeyType::Ecdsa384 => "ecdsa-sha2-nistp384",
+        ssh2::HostKeyType::Ecdsa521 => "ecdsa-sha2-nistp521",
+        ssh2::HostKeyType::Ed25519 => "ssh-ed25519",
+        ssh2::HostKeyType::Unknown => "unknown",
+    }
+}
+
+fn connect_native_session(
+    host: &BackendHostConnection,
+    store: &NativeHostKeyStore,
+) -> Result<(Session, Channel), String> {
     let port =
         u16::try_from(host.port).map_err(|_| "SSH port must be between 1 and 65535".to_string())?;
     let tcp_stream = connect_tcp_with_timeout(
@@ -1489,17 +1563,7 @@ fn connect_native_session(host: &BackendHostConnection) -> Result<(Session, Chan
     session.set_timeout(NATIVE_SSH_IO_TIMEOUT_MS);
     session.handshake().map_err(|error| error.to_string())?;
 
-    if let Some(expected_key) = host.known_host_public_key.as_ref() {
-        let (actual_key, _) = session
-            .host_key()
-            .ok_or_else(|| "SSH server did not present a host key".to_string())?;
-        if BASE64_STANDARD.encode(actual_key) != *expected_key {
-            return Err(format!(
-                "Trusted host key mismatch for {}:{}.",
-                host.hostname, host.port
-            ));
-        }
-    }
+    verify_native_host_key(&session, host, store)?;
 
     authenticate_native_session(&mut session, host)?;
     let channel = open_native_channel(&session, host)?;
@@ -2462,6 +2526,7 @@ struct CopyKeyToHostResponse {
 
 fn copy_key_to_host_blocking(
     request: &CopyKeyToHostRequest,
+    store: &NativeHostKeyStore,
 ) -> Result<CopyKeyToHostResponse, String> {
     // Validate the target host BEFORE any connect or authentication. This was
     // the one host-consuming command that skipped the gate, so an allowUnknown
@@ -2565,25 +2630,14 @@ fn copy_key_to_host_blocking(
     // Honor known_host_public_key the same way connect_native_session
     // does. requireTrusted defaults are enforced by the renderer +
     // launch-host-session gate; we still re-check here.
-    if let Some(expected_key) = request.host.known_host_public_key.as_ref() {
-        let (actual_key, _) = match session.host_key() {
-            Some(pair) => pair,
-            None => {
-                return Ok(CopyKeyToHostResponse {
-                    ok: false,
-                    reason: Some("SSH server did not present a host key".to_string()),
-                });
-            }
-        };
-        if BASE64_STANDARD.encode(actual_key) != *expected_key {
-            return Ok(CopyKeyToHostResponse {
-                ok: false,
-                reason: Some(format!(
-                    "Trusted host key mismatch for {}:{}",
-                    request.host.hostname, request.host.port
-                )),
-            });
-        }
+    // #151: same host-key decision as the direct session path, including TOFU
+    // for allowUnknown. Copying a key to a host authenticates, so it must not
+    // skip verification either.
+    if let Err(reason) = verify_native_host_key(&session, &request.host, store) {
+        return Ok(CopyKeyToHostResponse {
+            ok: false,
+            reason: Some(reason),
+        });
     }
 
     if let Err(error) = authenticate_native_session(&mut session, &request.host) {
@@ -2651,9 +2705,13 @@ fn copy_key_to_host_blocking(
 /// with the canonical permission tighten-down.
 #[tauri::command]
 async fn terminal_workspace_copy_key_to_host(
+    native_host_keys: State<'_, SharedNativeHostKeyStore>,
     request: CopyKeyToHostRequest,
 ) -> Result<CopyKeyToHostResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || copy_key_to_host_blocking(&request))
+    let host_key_store = native_host_keys.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        copy_key_to_host_blocking(&request, host_key_store.as_ref())
+    })
         .await
         .map_err(|error| error.to_string())?
 }
@@ -3485,9 +3543,13 @@ mod ssh_config_glob_tests {
 async fn terminal_workspace_create_backend_session(
     native_sessions: State<'_, NativeSessionRegistry>,
     native_forwards: State<'_, NativeForwardRegistry>,
+    // #151: the TOFU store is Tauri state rather than something resolved inside
+    // the connect path, so connect_native_session needs no AppHandle.
+    native_host_keys: State<'_, SharedNativeHostKeyStore>,
     app: AppHandle,
     request: CreateBackendSessionRequest,
 ) -> Result<CreateSessionResponse, String> {
+    let host_key_store = native_host_keys.inner().clone();
     validate_session_target(&request.host)?;
 
     if !should_use_native_session(&request.host) {
@@ -3566,7 +3628,7 @@ async fn terminal_workspace_create_backend_session(
         // Direct SSH connects synchronously. On failure, remove the handle we
         // pre-inserted so a failed connect leaves no orphan, then report it.
         let connect_result = tauri::async_runtime::spawn_blocking(move || {
-            let (session, channel) = connect_native_session(&host)?;
+            let (session, channel) = connect_native_session(&host, host_key_store.as_ref())?;
             thread::spawn(move || {
                 run_native_session_loop(
                     app_handle,
@@ -3865,6 +3927,19 @@ fn main() {
         .manage(NativeSessionRegistry::default())
         .manage(NativeForwardRegistry::default())
         .setup(|app| {
+            // #151: resolve the durable host-key store once, through Tauri, so it
+            // follows the bundle identifier and never lands in the per-session
+            // temp roots that get deleted on teardown. Folded into THIS setup
+            // block deliberately — Builder::setup keeps only one closure, so a
+            // second .setup() call would silently replace the menu wiring below.
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| format!("could not resolve the app data directory: {error}"))?;
+            app.manage(SharedNativeHostKeyStore::new(NativeHostKeyStore::new(
+                &data_dir,
+            )?));
+
             let handle = app.handle();
             let menu = build_app_menu(&handle)?;
             app.set_menu(menu)?;
@@ -3930,6 +4005,20 @@ mod native_transport_fixtures;
 
 #[cfg(test)]
 mod tests {
+    /// #151: the two copy-key refusal tests exercise validation that happens
+    /// BEFORE any connect, so they never reach the store. A throwaway one keeps
+    /// them honest about that rather than mocking the type away.
+    fn throwaway_host_key_store(label: &str) -> NativeHostKeyStore {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir()
+            .join(format!("tw-copykey-{label}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("test root should be created");
+        NativeHostKeyStore::new(&root).expect("store")
+    }
+
     use super::*;
 
     /// A writer that never accepts data — models a stalled remote / full SSH
@@ -4261,7 +4350,7 @@ mod tests {
             private_key_path: "~/.ssh/id_ed25519".to_string(),
             host,
         };
-        let response = copy_key_to_host_blocking(&request).expect("returns a structured response, not Err");
+        let response = copy_key_to_host_blocking(&request, &throwaway_host_key_store("refusal")).expect("returns a structured response, not Err");
         assert!(!response.ok, "the host must be refused");
     }
 
@@ -4275,7 +4364,7 @@ mod tests {
             private_key_path: "~/.ssh/id_ed25519".to_string(),
             host,
         };
-        let response = copy_key_to_host_blocking(&request).expect("returns a structured response, not Err");
+        let response = copy_key_to_host_blocking(&request, &throwaway_host_key_store("refusal")).expect("returns a structured response, not Err");
         assert!(!response.ok, "the host must be refused");
     }
 

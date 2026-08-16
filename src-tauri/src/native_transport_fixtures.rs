@@ -653,7 +653,8 @@ fn native_trust_tooling_fixture_flow() {
 fn localhost_ssh_transport_fixture_flow() {
     let fixture = NativeTransportFixture::new();
 
-    match connect_native_session(&fixture.direct_host) {
+    let store = tofu_store("legacy-flow");
+    match connect_native_session(&fixture.direct_host, &store) {
         Ok((session, mut channel)) => {
             write_native_session_input(&mut channel, b"printf 'DIRECT_NATIVE_OK\\n'; exit\n")
                 .expect("fixture shell command should write");
@@ -1092,4 +1093,125 @@ fn native_external_protocol_runtime_fixture_flow() {
     assert!(mosh_output.contains("--ssh="));
     assert!(mosh_output.contains("password:"));
     assert!(mosh_output.contains("MOSH_AUTH:fixture-secret"));
+}
+
+/// #151: a throwaway durable TOFU store rooted outside the session temp dirs,
+/// so each test starts with nothing pinned and the file it writes can be read
+/// back to prove the pin actually persisted.
+#[cfg(target_os = "macos")]
+fn tofu_store(label: &str) -> NativeHostKeyStore {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let root = env::temp_dir().join(format!("tw-tofu-{label}-{}-{nanos}", process::id()));
+    fs::create_dir_all(&root).expect("tofu store root should be created");
+    NativeHostKeyStore::new(&root).expect("tofu store")
+}
+
+/// #151: `allowUnknown` with nothing pinned must record the key it first sees,
+/// and that record must survive the store being dropped and rebuilt.
+///
+/// Negative control: the credentials here are VALID, so with the verifier
+/// removed the connection simply succeeds and nothing is written — the disk
+/// assertion below fails. The test cannot pass just because auth failed.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires an unsandboxed localhost sshd runtime"]
+fn test_allow_unknown_tofu_pins_first_key() {
+    let fixture = NativeTransportFixture::new();
+    let mut host = fixture.direct_host.clone();
+    host.host_key_policy = Some("allowUnknown".to_string());
+    host.known_host_public_key = None;
+    host.known_host_algorithm = None;
+
+    let store = tofu_store("pins-first");
+    let (session, mut channel) =
+        connect_native_session(&host, &store).expect("first allowUnknown connect should succeed");
+    let _ = channel.close();
+    let _ = session.disconnect(None, "tofu pin test", None);
+
+    let pattern = known_hosts_host_pattern(&host);
+    let recorded = fs::read_to_string(store.path()).expect("the store must exist on disk");
+    assert!(
+        recorded.contains(&pattern),
+        "first connect must PIN the key, not merely allow it; store held: {recorded}"
+    );
+
+    // Rebuild from the same path: a pin that does not survive is not TOFU.
+    let reopened = NativeHostKeyStore::new(store.root()).expect("reopen");
+    let (session, mut channel) = connect_native_session(&host, &reopened)
+        .expect("second connect against the persisted pin should succeed");
+    let _ = channel.close();
+    let _ = session.disconnect(None, "tofu pin test", None);
+}
+
+/// #151: once pinned, a DIFFERENT host key must be refused before any
+/// credential is sent.
+///
+/// Negative control: same valid credentials. Without the verifier this connect
+/// succeeds, so the assertion on the error is what fails.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires an unsandboxed localhost sshd runtime"]
+fn test_allow_unknown_tofu_rejects_changed_key() {
+    let fixture = NativeTransportFixture::new();
+    let mut host = fixture.direct_host.clone();
+    host.host_key_policy = Some("allowUnknown".to_string());
+    host.known_host_public_key = None;
+    host.known_host_algorithm = None;
+
+    let store = tofu_store("rejects-changed");
+    let (session, mut channel) =
+        connect_native_session(&host, &store).expect("first connect pins");
+    let _ = channel.close();
+    let _ = session.disconnect(None, "tofu change test", None);
+
+    // Simulate the server presenting a different key by rewriting the pin. That
+    // is equivalent to the host key changing underneath us and avoids tearing
+    // down and re-keying sshd mid-test.
+    let pattern = known_hosts_host_pattern(&host);
+    fs::write(
+        store.path(),
+        format!("{pattern} ssh-ed25519 AAAADIFFERENTKEYTHANPRESENTED\n"),
+    )
+    .expect("rewrite pin");
+
+    let error = connect_native_session(&host, &store)
+        .err()
+        .expect("a changed host key must be refused, not connected");
+    assert!(
+        error.contains("Host key verification failed"),
+        "unexpected error: {error}"
+    );
+    assert!(
+        error.contains("Credentials were not sent"),
+        "the message must make clear no credential was exposed: {error}"
+    );
+}
+
+/// #151: requireTrusted must keep failing on a mismatch — TOFU must not become
+/// a fallback that quietly repairs a bad explicit pin.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires an unsandboxed localhost sshd runtime"]
+fn test_require_trusted_still_rejects_mismatch() {
+    let fixture = NativeTransportFixture::new();
+    let mut host = fixture.direct_host.clone();
+    host.host_key_policy = Some("requireTrusted".to_string());
+    host.known_host_public_key = Some("AAAAWRONGPINNEDKEY".to_string());
+
+    let store = tofu_store("require-trusted");
+    let error = connect_native_session(&host, &store)
+        .err()
+        .expect("an explicit pin mismatch must be refused");
+    assert!(
+        error.contains("Trusted host key mismatch"),
+        "unexpected error: {error}"
+    );
+    // TOFU must not have written anything for a requireTrusted host.
+    assert!(
+        !store.path().exists(),
+        "requireTrusted must never fall through to the TOFU store"
+    );
 }
