@@ -273,9 +273,24 @@ export function AppShell() {
         }
         return getCurrentWindow().setTitle(nextTitle);
       })
-      .catch(() => {
-        // Ignore — the window may have been closed between effect schedule
-        // and resolve, or the build may not have the window plugin enabled.
+      .catch((error: unknown) => {
+        // #235: this used to swallow everything. The two causes named here are
+        // genuinely benign, but an ACL denial is neither — it is a permanent
+        // misconfiguration, and silence is why the window title never updated in
+        // a packaged build for as long as it didn't. A cancelled effect is the
+        // only case we can positively identify as expected, so report the rest.
+        if (cancelled) {
+          return;
+        }
+        // Log a flattened message, never the title or the raw error object. The
+        // title carries the active host label, and a rejected IPC call can echo
+        // its arguments back inside the error payload — logging the object whole
+        // would reintroduce the leak by the back door. Tauri's ACL denial text
+        // names the missing permission, which is the part worth having.
+        const reason = error instanceof Error ? error.message : String(error);
+        console.error(
+          `[termsnip] window setTitle failed — if this names a permission, add it to capabilities/default.json: ${reason}`,
+        );
       });
     return () => {
       cancelled = true;
