@@ -4,6 +4,13 @@ node_modules/
 .pnpm-store/
 apps/desktop/dist/
 src-tauri/target/
+# #170: tauri_build::build() regenerates src-tauri/gen/schemas on every build from
+# capabilities/ plus the resolved tauri dependency versions. Build output, like
+# target/ above — committing it would churn on every Tauri or plugin bump without
+# adding a gate, since the real check is that the build now validates capabilities
+# rather than that a snapshot is stored. capabilities/default.json's "$schema"
+# reference resolves after the first local build.
+src-tauri/gen/
 playwright-report/
 test-results/
 artifacts/e2e/
