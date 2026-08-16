@@ -119,6 +119,45 @@ jobs:
       - name: Compile + test the Rust crate
         run: npm run validate:rust
 
+      # #237: #170 started tracking src-tauri/gen/schemas/capabilities.json and
+      # acl-manifests.json so a change to the app's effective permission surface
+      # is visible in review. Tracking alone gates nothing: capabilities/default.json
+      # grants bundled SETS ("core:default", "sql:default"), and a Tauri or plugin
+      # bump can widen what a set expands to — the real permissions change while no
+      # hand-written file does. Build validation checks schema conformance, not
+      # breadth, so it stays green either way.
+      #
+      # touch build.rs first, deliberately. tauri_build::build() only re-runs when
+      # cargo decides the build script is stale, and Swatinem/rust-cache above
+      # restores a warm target dir — so `npm run validate:rust` can complete without
+      # regenerating anything, leaving this gate comparing the committed files
+      # against themselves and passing vacuously. Verified locally: deleting gen/
+      # and re-running native-check did NOT recreate it; touching build.rs did.
+      # The regeneration is byte-deterministic (confirmed across repeated runs;
+      # no absolute paths, LF endings), so forcing it cannot cause false positives.
+      #
+      # Deliberately scoped to these two files. desktop-schema.json and
+      # macOS-schema.json are gitignored IDE aids — byte-identical, 122K each,
+      # regenerated on every bump, no security value.
+      - name: ACL drift gate
+        shell: bash
+        run: |
+          touch src-tauri/build.rs
+          npm run validate:rust >/dev/null
+          if ! git diff --quiet -- src-tauri/gen/schemas/capabilities.json src-tauri/gen/schemas/acl-manifests.json; then
+            echo "::error::The app's effective permission surface changed, but the regenerated ACL artifacts are not committed."
+            echo "The resolved capability set differs from what is tracked on this branch. This is what the" >&2
+            echo "artifacts exist to make visible — a dependency bump can widen a bundled permission set" >&2
+            echo "without any hand-written file changing." >&2
+            echo "" >&2
+            echo "Fix: run 'npm run validate:rust' locally and commit the regenerated files." >&2
+            echo "" >&2
+            echo "Permission delta:" >&2
+            git --no-pager diff -- src-tauri/gen/schemas/capabilities.json src-tauri/gen/schemas/acl-manifests.json >&2
+            exit 1
+          fi
+          echo "ACL artifacts match the resolved permission surface."
+
       # #101: the localhost-sshd session fixture is #[ignore] by default (it
       # needs an unsandboxed sshd, which sandboxed local/dev envs lack). This
       # hosted macOS runner is a real machine, so run it explicitly to
