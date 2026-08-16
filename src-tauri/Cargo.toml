@@ -7,12 +7,12 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 portable-pty = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 # macos-private-api is required by the main window's `transparent: true` (and the
 # matching `macOSPrivateApi: true` in tauri.conf.json); Tauri's docs are explicit
