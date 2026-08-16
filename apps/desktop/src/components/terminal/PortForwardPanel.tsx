@@ -33,6 +33,13 @@ export function PortForwardPanel({ sessionId, disabled = false }: PortForwardPan
   }, [sessionId]);
 
   useEffect(() => {
+    // #257: react-hooks/set-state-in-effect fires because loadForwards resolves
+    // into setForwards/setErrorMessage. This is the case effects exist for —
+    // reading port-forward state from the backend, an external system — not
+    // derived state that could be computed during render. The setState happens
+    // in the promise callback, not synchronously in the effect body, so there is
+    // no cascading render to remove; the rule cannot see across the await.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- backend fetch, not derived state
     void loadForwards();
   }, [loadForwards]);
 

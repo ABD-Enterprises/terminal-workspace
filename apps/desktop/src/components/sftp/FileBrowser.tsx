@@ -124,9 +124,17 @@ export function FileBrowser({ host }: FileBrowserProps) {
     }
   }, [host.id, host.sftpRoot, rememberRemotePath, remotePathByHost]);
 
-  useEffect(() => {
+  // #257: was a useEffect on [currentPath] that only mirrored currentPath into
+  // the editable draft. That is derived state, not synchronisation with an
+  // external system, so React's guidance is to adjust it during render — the
+  // re-render happens before paint and costs no extra pass. The user's in-progress
+  // edit is still preserved between navigations, because this only resets when
+  // currentPath itself changes.
+  const [previousCurrentPath, setPreviousCurrentPath] = useState(currentPath);
+  if (currentPath !== previousCurrentPath) {
+    setPreviousCurrentPath(currentPath);
     setDraftPath(currentPath);
-  }, [currentPath]);
+  }
 
   useEffect(() => {
     const interactive = browseInteractionRef.current;

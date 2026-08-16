@@ -80,6 +80,12 @@ export function TunnelsPage() {
   }, [activeSessions, hosts]);
 
   useEffect(() => {
+    // #257: same shape as PortForwardPanel — refresh() reads live forwards from
+    // the backend across every active session and resolves into setRows/setBusy.
+    // That is synchronising with an external system, which is what an effect is
+    // for; the setState lands in the promise callback, not synchronously in the
+    // effect body, so there is no cascade for the rule to prevent here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- backend fetch, not derived state
     void refresh();
   }, [refresh]);
 
