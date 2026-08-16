@@ -62,6 +62,11 @@
       "cpu-features",
       "esbuild",
       "ssh2"
-    ]
+    ],
+    "overrides": {
+      "@babel/core": "^7.29.6",
+      "brace-expansion": "^5.0.7",
+      "shell-quote": "^1.9.0"
+    }
   }
 }
