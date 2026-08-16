@@ -1,6 +1,48 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/*
+ * #110 design tokens, migrated to Tailwind v4's CSS-first theme (#259).
+ *
+ * These previously lived in apps/desktop/tailwind.config.ts, which v4 no longer
+ * auto-detects — a JS config now has to be pulled in explicitly with @config.
+ * They are expressed as theme variables instead so there is one place to look,
+ * and the config file is deleted rather than left behind as a second source of
+ * truth that nothing reads.
+ *
+ * The `content` globs from that file are intentionally not carried over: v4
+ * detects source files automatically.
+ *
+ * Naming is v4's namespace convention, so the generated utilities keep their
+ * existing names — --text-* backs text-caption/footnote/body/callout/title,
+ * --radius-* backs rounded-control/surface/panel, --tracking-* backs
+ * tracking-label/brand. Nothing in the app markup had to change.
+ */
+@theme {
+  --color-neutral-925: #111111;
+
+  /* Type ramp — replaces ad-hoc 10/11/12/13/16px font sizes. The paired
+     line-heights are the --text-*--line-height form, v4's equivalent of v3's
+     [size, { lineHeight }] tuple. */
+  --text-caption: 0.625rem; /* 10px */
+  --text-caption--line-height: 0.875rem;
+  --text-footnote: 0.6875rem; /* 11px */
+  --text-footnote--line-height: 1rem;
+  --text-body: 0.75rem; /* 12px */
+  --text-body--line-height: 1.125rem;
+  --text-callout: 0.8125rem; /* 13px */
+  --text-callout--line-height: 1.25rem;
+  --text-title: 1rem; /* 16px */
+  --text-title--line-height: 1.5rem;
+
+  /* Three-step radius scale — controls, surfaces, panels. */
+  --radius-control: 0.625rem; /* 10px — buttons, inputs, list rows */
+  --radius-surface: 0.875rem; /* 14px — sections, cards */
+  --radius-panel: 1.25rem; /* 20px — large containers */
+
+  /* Collapsed to two values (was 0.14–0.26em scattered across the app). */
+  --tracking-label: 0.16em; /* section eyebrows / uppercase labels */
+  --tracking-brand: 0.26em; /* the single brand wordmark */
+}
 
 /*
  * T20: app-shell theme variables. `data-app-theme` on <html> is set
