@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default permissions for the main application window.","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-set-title","sql:default","sql:allow-execute"]}}
+{"default":{"identifier":"default","description":"Default permissions for the main application window.","local":true,"windows":["main"],"permissions":["core:event:allow-listen","core:event:allow-unlisten","core:window:allow-set-title","sql:allow-load","sql:allow-select","sql:allow-execute"]}}

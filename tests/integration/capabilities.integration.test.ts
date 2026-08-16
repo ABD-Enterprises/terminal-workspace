@@ -28,26 +28,70 @@ function loadDefaultCapability(): Capability {
 }
 
 describe("src-tauri/capabilities/default.json", () => {
-  it("grants every Tauri command the renderer invokes", () => {
+  // #236: the table is now the COMPLETE census of ACL-controlled Tauri commands
+  // this renderer can reach. Verified by scanning apps/desktop/src for every
+  // @tauri-apps import: only three modules are reachable (api/event and
+  // api/window via dynamic import, plugin-sql), and only these five distinct IPC
+  // calls exist. Custom `terminal_workspace_*` commands are NOT ACL-gated by this
+  // file — no capability grants them today and the app works.
+  const REQUIRED: Array<{ command: string; permission: string; callSite: string }> = [
+    {
+      command: "event.listen",
+      permission: "core:event:allow-listen",
+      callSite: "apps/desktop/src/components/layout/AppShell.tsx, lib/backend-runtime.ts",
+    },
+    {
+      command: "event.unlisten (returned callback)",
+      permission: "core:event:allow-unlisten",
+      callSite: "apps/desktop/src/components/layout/AppShell.tsx, lib/backend-runtime.ts",
+    },
+    {
+      command: "window.setTitle",
+      permission: "core:window:allow-set-title",
+      callSite: "apps/desktop/src/components/layout/AppShell.tsx",
+    },
+    {
+      command: "Database.load",
+      permission: "sql:allow-load",
+      callSite: "apps/desktop/src/lib/persistence.ts",
+    },
+    {
+      command: "db.select",
+      permission: "sql:allow-select",
+      callSite: "apps/desktop/src/lib/persistence.ts",
+    },
+    {
+      command: "db.execute",
+      permission: "sql:allow-execute",
+      callSite: "apps/desktop/src/lib/persistence.ts",
+    },
+  ];
+
+  it("grants every ACL-controlled Tauri command the renderer invokes", () => {
     const { permissions } = loadDefaultCapability();
 
-    // Each entry is a command the frontend actually calls, paired with the leaf
-    // permission that authorises it. Add a row when you add an invoke() site.
-    const required: Array<{ command: string; permission: string; callSite: string }> = [
-      {
-        command: "window.setTitle",
-        permission: "core:window:allow-set-title",
-        callSite: "apps/desktop/src/components/layout/AppShell.tsx",
-      },
-    ];
-
-    for (const { command, permission, callSite } of required) {
+    for (const { command, permission, callSite } of REQUIRED) {
       expect(
         permissions,
         `${command} is called from ${callSite}, so capabilities/default.json must grant ${permission}. ` +
           "Without it Tauri rejects the IPC call at runtime and the packaged app silently misbehaves.",
       ).toContain(permission);
     }
+  });
+
+  it("grants NOTHING beyond that census", () => {
+    // #236: a `toContain` loop alone would still pass with core:default or
+    // sql:default left in place, which is how the app came to grant a large
+    // unused menu/tray/path/webview surface. Compare the whole array.
+    const { permissions } = loadDefaultCapability();
+    const expected = [...new Set(REQUIRED.map((entry) => entry.permission))].sort();
+
+    expect(
+      [...permissions].sort(),
+      "capabilities/default.json grants a permission with no call site above. Either add the " +
+        "call site to the table, or drop the permission — bundled sets like core:default pull in " +
+        "a large surface this app never uses.",
+    ).toEqual(expected);
   });
 
   it("still targets the main window", () => {
