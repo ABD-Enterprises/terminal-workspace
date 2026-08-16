@@ -111,6 +111,18 @@ if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1;
   "${create_args[@]}"
 fi
 
+# #241: verify the updater triplet is actually in the asset list before publishing.
+# Promotion emits latest.json, a signed .app.tar.gz and its .sig only when the
+# signing key is present; this script uploads whatever it is handed. Between the
+# two, a release could publish successfully with a dead update feed — which is
+# exactly what happened to v0.1.0 (#224). Checked here as well as in promotion
+# because the two run as separate steps: promotion can be re-run, skipped, or its
+# output staged from elsewhere, so publish is the last point where the release
+# contents are known.
+if [[ "${REQUIRE_UPDATER_ARTIFACTS:-0}" == "1" ]]; then
+  bash "$(dirname "${BASH_SOURCE[0]}")/verify-updater-artifacts.sh" "${ASSET_PATHS[@]}"
+fi
+
 gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber "${ASSET_PATHS[@]}"
 
 echo "Published GitHub release $RELEASE_TAG with ${#ASSET_PATHS[@]} assets."
