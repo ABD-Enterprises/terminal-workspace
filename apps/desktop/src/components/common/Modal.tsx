@@ -67,7 +67,7 @@ export function Modal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-6 py-10 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-6 py-10 backdrop-blur-xs">
       <button
         type="button"
         aria-label="Close dialog"

@@ -714,7 +714,7 @@ export function AppShell() {
       </div>
 
       {commandPaletteOpen ? (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/70 px-6 py-20 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/70 px-6 py-20 backdrop-blur-xs">
           <button
             type="button"
             aria-label="Close command palette"
