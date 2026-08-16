@@ -16,10 +16,15 @@ sha2 = "0.10"
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 # macos-private-api is required by the main window's `transparent: true` (and the
 # matching `macOSPrivateApi: true` in tauri.conf.json); Tauri's docs are explicit
-# that transparent windows on macOS need this feature. It was missing here, which
+# that transparent windows on macOS need this feature. Note it turns on both
+# wry/transparent AND wry/fullscreen — the private fullscreen preference comes
+# along with it, so this is slightly wider than "transparency". It was missing, which
 # only surfaced once #170 made build.rs actually run tauri_build::build() — that is
 # the check that compares these features against the tauri.conf.json allowlist.
-# It does rule out Mac App Store distribution; this app ships as a notarized DMG.
+# Two costs, both accepted: it rules out Mac App Store distribution (this app ships
+# as a notarized DMG, so that is moot), and private APIs carry no ABI-stability
+# guarantee — Apple can change them in a point release, so a macOS update could
+# break the windowing layer. Notarization and the hardened runtime are unaffected.
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-updater = "2"

@@ -4,13 +4,22 @@ node_modules/
 .pnpm-store/
 apps/desktop/dist/
 src-tauri/target/
-# #170: tauri_build::build() regenerates src-tauri/gen/schemas on every build from
-# capabilities/ plus the resolved tauri dependency versions. Build output, like
-# target/ above — committing it would churn on every Tauri or plugin bump without
-# adding a gate, since the real check is that the build now validates capabilities
-# rather than that a snapshot is stored. capabilities/default.json's "$schema"
-# reference resolves after the first local build.
-src-tauri/gen/
+# #170: tauri_build::build() regenerates src-tauri/gen/schemas on every build.
+# The two *-schema.json files are IDE autocomplete aids for the "$schema" key in
+# capabilities/*.json — byte-identical to each other (122K each), regenerated on
+# every Tauri bump, no security value. Ignored.
+#
+# capabilities.json and acl-manifests.json are deliberately NOT ignored: they are
+# the only place the app's EFFECTIVE permission surface is visible. Our capability
+# grants "sql:default", and only acl-manifests.json records what that set expands
+# to (allow-close, allow-load, allow-select). A tauri-plugin-sql bump that widened
+# "default" would change the app's real database permissions without altering one
+# character of capabilities/default.json, and the build would still pass — build
+# validation checks schema conformance, not breadth. Committing these two is what
+# puts that change in front of a reviewer. Note this only surfaces drift; making it
+# an actual gate needs a CI `git diff --exit-code` on them, tracked in #237.
+src-tauri/gen/schemas/desktop-schema.json
+src-tauri/gen/schemas/macOS-schema.json
 playwright-report/
 test-results/
 artifacts/e2e/
