@@ -1167,6 +1167,14 @@ fn remove_native_session(
         .remove(session_id)
 }
 
+/// #148: how many native SSH sessions are currently live. Used to refuse an
+/// update-install-and-restart that would tear them down without the user
+/// knowing. Sessions are removed from the registry on close, so the map's
+/// length is the live count.
+fn live_native_session_count(registry: &NativeSessionRegistry) -> usize {
+    registry.sessions.lock_recover().len()
+}
+
 fn insert_native_forward(
     registry: &NativeForwardRegistry,
     forward_id: &str,
@@ -2681,6 +2689,22 @@ async fn terminal_workspace_set_dock_badge(
 #[serde(rename_all = "camelCase")]
 struct UpdateCheckRequest {}
 
+/// #148: `app.restart()` tears down every live SSH session. Installing used to
+/// do that with no warning, so an update accepted from the banner could drop a
+/// half-finished remote command. The install command now refuses while sessions
+/// are open unless the caller has confirmed with the user and set `force`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallUpdateRequest {
+    #[serde(default)]
+    force: bool,
+}
+
+/// Marker the renderer matches on to tell "you have N live sessions" apart from
+/// any other install failure. Kept in sync with LIVE_SESSIONS_MARKER in
+/// apps/desktop/src/lib/auto-update.ts.
+const LIVE_SESSIONS_REFUSAL_MARKER: &str = "live-sessions:";
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateCheckResult {
@@ -2725,9 +2749,31 @@ async fn terminal_workspace_check_for_updates(
 #[tauri::command]
 async fn terminal_workspace_install_update_and_restart(
     app: tauri::AppHandle,
-    _request: UpdateCheckRequest,
+    native_sessions: State<'_, NativeSessionRegistry>,
+    request: InstallUpdateRequest,
 ) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
+
+    // #148: the session count is checked TWICE, and the second one is the one
+    // that matters. Checking only up front looks right but loses the race the
+    // guard exists to close: the user confirms with nothing open, the download
+    // runs for tens of seconds, they open a session in the meantime, and the
+    // restart kills it silently — exactly the harm this ticket is about.
+    //
+    // The pre-download check is only an optimisation: fail fast instead of
+    // spending the user's bandwidth on an update we are about to refuse.
+    // Counted via lock_recover(), the idiom the rest of the registry uses, so a
+    // poisoned lock cannot turn "sessions are open" into "no sessions".
+    if !request.force {
+        let live = live_native_session_count(native_sessions.inner());
+        if live > 0 {
+            return Err(format!(
+                "Installing this update restarts the app and will close {live} live SSH \
+                 session(s). Confirm to continue. {LIVE_SESSIONS_REFUSAL_MARKER}{live}"
+            ));
+        }
+    }
+
     let updater = app.updater().map_err(|error| error.to_string())?;
     let update = updater
         .check()
@@ -2738,6 +2784,23 @@ async fn terminal_workspace_install_update_and_restart(
         .download_and_install(|_downloaded, _total| {}, || {})
         .await
         .map_err(|error| error.to_string())?;
+
+    // #148: re-check immediately before the restart. The update is downloaded
+    // and staged at this point, so refusing here is not a failure — Tauri applies
+    // a staged update on the next launch. Telling the user that and letting them
+    // finish their work is strictly better than relaunching out from under a live
+    // session, which is why this returns Err rather than restarting anyway.
+    if !request.force {
+        let live = live_native_session_count(native_sessions.inner());
+        if live > 0 {
+            return Err(format!(
+                "The update is downloaded and will be applied the next time you quit and \
+                 reopen the app. Restarting now would close {live} live SSH session(s). \
+                 {LIVE_SESSIONS_REFUSAL_MARKER}{live}"
+            ));
+        }
+    }
+
     app.restart();
 }
 
