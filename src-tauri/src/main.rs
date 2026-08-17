@@ -80,35 +80,118 @@ const NATIVE_SESSION_BUFFER_LIMIT: usize = 128;
 const NATIVE_OUTPUT_COALESCE_WINDOW_MS: u64 = 12;
 const NATIVE_OUTPUT_COALESCE_MAX_BYTES: usize = 64 * 1024;
 
+/// #194: decodes a byte stream as UTF-8 across arbitrary chunk boundaries.
+///
+/// Terminal output arrives in ~4KB reads that fall wherever the kernel puts
+/// them, so a multi-byte character routinely straddles two reads. Decoding each
+/// read on its own — which is what this code used to do — turns both halves
+/// into U+FFFD permanently, because nothing downstream can tell a replacement
+/// character apart from one the program really printed.
+///
+/// So an incomplete-but-still-valid trailing sequence is held back for the next
+/// chunk instead of being decoded. Genuinely invalid bytes are NOT held: they
+/// become U+FFFD immediately, so a stream that never produces valid UTF-8
+/// cannot stall output waiting for a completion that will never come.
+#[derive(Default)]
+pub(crate) struct Utf8StreamDecoder {
+    /// At most 3 bytes: a scalar is at most 4 bytes wide, so once 3 are held
+    /// the next byte either completes it or makes it invalid. This is why the
+    /// hold-back cannot grow without bound.
+    incomplete: Vec<u8>,
+}
+
+impl Utf8StreamDecoder {
+    /// Decode what is complete, retaining a valid-so-far trailing fragment.
+    pub(crate) fn decode(&mut self, bytes: &[u8]) -> String {
+        let mut buffer = std::mem::take(&mut self.incomplete);
+        buffer.extend_from_slice(bytes);
+
+        let mut decoded = String::new();
+        let mut rest = &buffer[..];
+        loop {
+            match std::str::from_utf8(rest) {
+                Ok(text) => {
+                    decoded.push_str(text);
+                    break;
+                }
+                Err(error) => {
+                    let valid_up_to = error.valid_up_to();
+                    // SAFETY-equivalent: valid_up_to() is by definition the
+                    // length of a valid prefix.
+                    decoded.push_str(&String::from_utf8_lossy(&rest[..valid_up_to]));
+                    match error.error_len() {
+                        // Genuinely malformed — emit the replacement now and
+                        // carry on past it rather than waiting for more input.
+                        Some(bad) => {
+                            decoded.push('\u{FFFD}');
+                            rest = &rest[valid_up_to + bad..];
+                        }
+                        // Truncated at the end of the input, still valid so far.
+                        // Hold it for the next chunk.
+                        None => {
+                            self.incomplete.extend_from_slice(&rest[valid_up_to..]);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        decoded
+    }
+
+    /// End of stream: a fragment that never completed is malformed after all.
+    /// Emitting it as U+FFFD keeps the last bytes of a session from vanishing.
+    pub(crate) fn finish(&mut self) -> String {
+        if self.incomplete.is_empty() {
+            return String::new();
+        }
+        self.incomplete.clear();
+        "\u{FFFD}".to_string()
+    }
+
+    fn buffered_len(&self) -> usize {
+        self.incomplete.len()
+    }
+}
+
 /// Accumulates terminal output and yields it in bounded, in-order flushes.
 /// Deterministic and side-effect-free (the caller supplies `now` and performs
 /// the emit) so the flush policy is unit-testable without a live session.
+///
+/// #194: buffers raw bytes and decodes once per flush, so the decoder above
+/// sees a continuous stream rather than per-read fragments.
 struct OutputCoalescer {
-    pending: String,
+    pending: Vec<u8>,
     pending_since: Option<Instant>,
     window: Duration,
     max_bytes: usize,
+    decoder: Utf8StreamDecoder,
 }
 
 impl OutputCoalescer {
     fn new(window: Duration, max_bytes: usize) -> Self {
         Self {
-            pending: String::new(),
+            pending: Vec::new(),
             pending_since: None,
             window,
             max_bytes,
+            decoder: Utf8StreamDecoder::default(),
         }
     }
 
     /// Append a chunk. Returns the coalesced buffer to emit immediately when
     /// the size threshold is reached, else `None` (still accumulating).
-    fn push(&mut self, chunk: &str, now: Instant) -> Option<String> {
-        if self.pending.is_empty() {
+    fn push(&mut self, chunk: &[u8], now: Instant) -> Option<String> {
+        // Not `pending.is_empty()`: the decoder may still hold a fragment from
+        // the previous flush, and that fragment is not what opens a window.
+        if self.pending_since.is_none() {
             self.pending_since = Some(now);
         }
-        self.pending.push_str(chunk);
-        if self.pending.len() >= self.max_bytes {
-            self.take()
+        self.pending.extend_from_slice(chunk);
+        // Count held-back bytes too, so the threshold still bounds everything
+        // buffered rather than just the part that happens to be decodable.
+        if self.pending.len() + self.decoder.buffered_len() >= self.max_bytes {
+            self.flush()
         } else {
             None
         }
@@ -118,19 +201,40 @@ impl OutputCoalescer {
     /// Caps latency for a producer that streams continuously without pausing.
     fn poll_flush(&mut self, now: Instant) -> Option<String> {
         match self.pending_since {
-            Some(since) if now.duration_since(since) >= self.window => self.take(),
+            Some(since) if now.duration_since(since) >= self.window => self.flush(),
             _ => None,
         }
     }
 
-    /// Flush everything pending unconditionally (producer paused, or the
-    /// session is closing). Returns `None` when there is nothing buffered.
-    fn take(&mut self) -> Option<String> {
+    /// Flush what decodes cleanly, keeping any truncated trailing character for
+    /// the next chunk. Returns `None` when that leaves nothing to emit — a
+    /// chunk consisting only of a partial character must not fire an empty
+    /// event.
+    fn flush(&mut self) -> Option<String> {
+        self.pending_since = None;
         if self.pending.is_empty() {
             return None;
         }
-        self.pending_since = None;
-        Some(std::mem::take(&mut self.pending))
+        let bytes = std::mem::take(&mut self.pending);
+        let decoded = self.decoder.decode(&bytes);
+        if decoded.is_empty() {
+            None
+        } else {
+            Some(decoded)
+        }
+    }
+
+    /// Final flush for a closing session. Unlike `flush`, this does not keep a
+    /// truncated character back — there is no next chunk, so holding it would
+    /// silently drop the last bytes the program wrote.
+    fn finish(&mut self) -> Option<String> {
+        let mut decoded = self.flush().unwrap_or_default();
+        decoded.push_str(&self.decoder.finish());
+        if decoded.is_empty() {
+            None
+        } else {
+            Some(decoded)
+        }
     }
 }
 const NATIVE_SSH_CONTROL_READY_TIMEOUT_MS: u64 = 15_000;
@@ -225,7 +329,10 @@ struct PromptResponse {
 enum JumpSessionEvent {
     Eof,
     Error(String),
-    Output(String),
+    // #194: raw bytes, not text. Decoding here would be per-read decoding by
+    // another name, which is the bug. `Error` stays a String because it comes
+    // from Rust error formatting, not the terminal stream.
+    Output(Vec<u8>),
 }
 
 struct ExternalCommandSessionSpec {
@@ -1613,7 +1720,12 @@ fn spawn_jump_session_reader(
 ) {
     thread::spawn(move || {
         let mut buffer = [0u8; NATIVE_SESSION_READ_CHUNK_SIZE];
-        let mut prompt_window = String::new();
+        // #194: bytes, not String. Trimming this window by a byte count used to
+        // panic outright — `String::drain` asserts the range lands on a
+        // character boundary, and the arithmetic below has no reason to. One
+        // line of CJK overflows the 512-byte window at a non-boundary and kills
+        // this thread, taking the session's output with it.
+        let mut prompt_window: Vec<u8> = Vec::new();
         let reusable_responses = prompt_responses.clone();
 
         loop {
@@ -1623,8 +1735,8 @@ fn spawn_jump_session_reader(
                     break;
                 }
                 Ok(count) => {
-                    let output = String::from_utf8_lossy(&buffer[..count]).to_string();
-                    prompt_window.push_str(&output);
+                    let output = buffer[..count].to_vec();
+                    prompt_window.extend_from_slice(&output);
                     if prompt_window.len() > NATIVE_SESSION_PROMPT_WINDOW_SIZE {
                         let excess = prompt_window.len() - NATIVE_SESSION_PROMPT_WINDOW_SIZE;
                         prompt_window.drain(0..excess);
@@ -1676,8 +1788,7 @@ fn spawn_local_session_reader(
                     break;
                 }
                 Ok(count) => {
-                    let output = String::from_utf8_lossy(&buffer[..count]).to_string();
-                    let _ = sender.send(JumpSessionEvent::Output(output));
+                    let _ = sender.send(JumpSessionEvent::Output(buffer[..count].to_vec()));
                 }
                 Err(error) => {
                     let _ = sender.send(JumpSessionEvent::Error(error.to_string()));
@@ -1768,7 +1879,7 @@ fn run_external_command_session_loop(
                         // Flush buffered output before propagating a write error
                         // so the `?` early-return cannot drop pending bytes.
                         if let Err(error) = write_jump_session_input(&writer, &input) {
-                            if let Some(flushed) = coalescer.take() {
+                            if let Some(flushed) = coalescer.finish() {
                                 emit_native_session_output(&app, &session_id, &state, flushed);
                             }
                             return Err(error);
@@ -1777,7 +1888,7 @@ fn run_external_command_session_loop(
                     Ok(NativeSessionCommand::Resize { cols, rows }) => {
                         did_work = true;
                         if let Err(error) = resize_jump_session_pty(&mut master, cols, rows) {
-                            if let Some(flushed) = coalescer.take() {
+                            if let Some(flushed) = coalescer.finish() {
                                 emit_native_session_output(&app, &session_id, &state, flushed);
                             }
                             return Err(error);
@@ -1802,7 +1913,7 @@ fn run_external_command_session_loop(
                     Ok(JumpSessionEvent::Error(error)) => {
                         // Emit any output received before the error first, so the
                         // terminal shows it in order ahead of the error notice.
-                        if let Some(flushed) = coalescer.take() {
+                        if let Some(flushed) = coalescer.finish() {
                             emit_native_session_output(&app, &session_id, &state, flushed);
                         }
                         emit_native_session_error(&app, &session_id, &state, error);
@@ -1853,7 +1964,7 @@ fn run_external_command_session_loop(
             }
         }
 
-        if let Some(flushed) = coalescer.take() {
+        if let Some(flushed) = coalescer.finish() {
             emit_native_session_output(&app, &session_id, &state, flushed);
         }
 
@@ -1991,7 +2102,7 @@ fn run_jump_host_session_loop(
                         // Flush buffered output before propagating a write error
                         // so the `?` early-return cannot drop pending bytes.
                         if let Err(error) = write_jump_session_input(&writer, &input) {
-                            if let Some(flushed) = coalescer.take() {
+                            if let Some(flushed) = coalescer.finish() {
                                 emit_native_session_output(&app, &session_id, &state, flushed);
                             }
                             return Err(error);
@@ -2000,7 +2111,7 @@ fn run_jump_host_session_loop(
                     Ok(NativeSessionCommand::Resize { cols, rows }) => {
                         did_work = true;
                         if let Err(error) = resize_jump_session_pty(&mut master, cols, rows) {
-                            if let Some(flushed) = coalescer.take() {
+                            if let Some(flushed) = coalescer.finish() {
                                 emit_native_session_output(&app, &session_id, &state, flushed);
                             }
                             return Err(error);
@@ -2025,7 +2136,7 @@ fn run_jump_host_session_loop(
                     Ok(JumpSessionEvent::Error(error)) => {
                         // Emit any output received before the error first, so the
                         // terminal shows it in order ahead of the error notice.
-                        if let Some(flushed) = coalescer.take() {
+                        if let Some(flushed) = coalescer.finish() {
                             emit_native_session_output(&app, &session_id, &state, flushed);
                         }
                         emit_native_session_error(&app, &session_id, &state, error);
@@ -2076,7 +2187,7 @@ fn run_jump_host_session_loop(
             }
         }
 
-        if let Some(flushed) = coalescer.take() {
+        if let Some(flushed) = coalescer.finish() {
             emit_native_session_output(&app, &session_id, &state, flushed);
         }
 
@@ -2271,14 +2382,14 @@ fn run_native_session_loop(
             Ok(count) => {
                 did_work = true;
                 if let Some(flushed) =
-                    coalescer.push(&String::from_utf8_lossy(&buffer[..count]), Instant::now())
+                    coalescer.push(&buffer[..count], Instant::now())
                 {
                     emit_native_session_output(&app, &session_id, &state, flushed);
                 }
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
             Err(error) => {
-                if let Some(flushed) = coalescer.take() {
+                if let Some(flushed) = coalescer.finish() {
                     emit_native_session_output(&app, &session_id, &state, flushed);
                 }
                 emit_native_session_error(&app, &session_id, &state, error.to_string());
@@ -2304,7 +2415,7 @@ fn run_native_session_loop(
 
     // Flush any remaining coalesced output before the session closes, on every
     // break path (eof, close command, read error), so no bytes are lost.
-    if let Some(flushed) = coalescer.take() {
+    if let Some(flushed) = coalescer.finish() {
         emit_native_session_output(&app, &session_id, &state, flushed);
     }
 
@@ -4186,7 +4297,7 @@ mod tests {
         let t0 = Instant::now();
         let mut flushes: Vec<String> = Vec::new();
         for i in 0..100 {
-            if let Some(flushed) = c.push(&format!("chunk{i};"), t0) {
+            if let Some(flushed) = c.push(format!("chunk{i};").as_bytes(), t0) {
                 flushes.push(flushed);
             }
         }
@@ -4211,11 +4322,11 @@ mod tests {
         let inputs = ["alpha", "-", "beta", "-", "gamma", "-", "delta", "-", "epsilon"];
         let mut out = String::new();
         for chunk in inputs {
-            if let Some(flushed) = c.push(chunk, t0) {
+            if let Some(flushed) = c.push(chunk.as_bytes(), t0) {
                 out.push_str(&flushed);
             }
         }
-        if let Some(flushed) = c.take() {
+        if let Some(flushed) = c.finish() {
             out.push_str(&flushed);
         }
         assert_eq!(out, inputs.concat());
@@ -4227,17 +4338,17 @@ mod tests {
         // bounding memory for a producer that never pauses.
         let mut c = OutputCoalescer::new(Duration::from_millis(10_000), 8);
         let t0 = Instant::now();
-        assert!(c.push("1234567", t0).is_none(), "7 bytes < threshold");
-        assert_eq!(c.push("89", t0), Some("123456789".to_string()));
+        assert!(c.push(b"1234567", t0).is_none(), "7 bytes < threshold");
+        assert_eq!(c.push(b"89", t0), Some("123456789".to_string()));
         // Buffer is empty again after the size flush.
-        assert!(c.take().is_none());
+        assert!(c.finish().is_none());
     }
 
     #[test]
     fn test_output_no_flush_before_window() {
         let mut c = OutputCoalescer::new(Duration::from_millis(12), 64 * 1024);
         let t0 = Instant::now();
-        c.push("hello", t0);
+        c.push(b"hello", t0);
         assert!(
             c.poll_flush(t0 + Duration::from_millis(11)).is_none(),
             "before the window elapses, nothing flushes"
@@ -4245,6 +4356,136 @@ mod tests {
         assert_eq!(
             c.poll_flush(t0 + Duration::from_millis(12)),
             Some("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn test_output_three_byte_scalar_survives_a_split() {
+        // The actual bug: a 3-byte character straddling a read boundary used to
+        // become two replacement characters, permanently. Feeding it one byte
+        // per flush is the worst case.
+        let mut c = OutputCoalescer::new(Duration::from_millis(12), 64 * 1024);
+        let euro = "€".as_bytes();
+        assert_eq!(euro.len(), 3);
+        let mut t = Instant::now();
+        let mut out = String::new();
+
+        for byte in euro {
+            c.push(&[*byte], t);
+            t += Duration::from_millis(12);
+            if let Some(flushed) = c.poll_flush(t) {
+                out.push_str(&flushed);
+            }
+        }
+
+        assert_eq!(out, "€", "a split scalar must survive intact, not become U+FFFD");
+    }
+
+    #[test]
+    fn test_output_four_byte_scalar_survives_three_boundaries() {
+        // A 4-byte scalar can straddle more than one boundary, so holding back
+        // has to survive being asked twice in a row.
+        let mut c = OutputCoalescer::new(Duration::from_millis(12), 64 * 1024);
+        let emoji = "🦀".as_bytes();
+        assert_eq!(emoji.len(), 4);
+        let mut t = Instant::now();
+        let mut out = String::new();
+
+        for byte in emoji {
+            c.push(&[*byte], t);
+            t += Duration::from_millis(12);
+            if let Some(flushed) = c.poll_flush(t) {
+                out.push_str(&flushed);
+            }
+        }
+
+        assert_eq!(out, "🦀");
+    }
+
+    #[test]
+    fn test_output_invalid_bytes_do_not_stall_the_stream() {
+        // Genuinely malformed input must not be mistaken for "incomplete" and
+        // held: that would let a bad stream freeze the terminal.
+        let mut c = OutputCoalescer::new(Duration::from_millis(12), 64 * 1024);
+        let t0 = Instant::now();
+
+        c.push(&[0xff], t0);
+        let first = c
+            .poll_flush(t0 + Duration::from_millis(12))
+            .expect("an invalid byte flushes immediately rather than being held");
+        assert_eq!(first, "\u{FFFD}");
+
+        c.push(b"ok", t0 + Duration::from_millis(12));
+        assert_eq!(
+            c.poll_flush(t0 + Duration::from_millis(24)),
+            Some("ok".to_string()),
+            "the stream keeps working after invalid input"
+        );
+    }
+
+    #[test]
+    fn test_output_finish_does_not_drop_a_truncated_tail() {
+        // At close there is no next chunk, so a held-back fragment has to be
+        // surfaced rather than silently discarded.
+        let mut c = OutputCoalescer::new(Duration::from_millis(12), 64 * 1024);
+        let t0 = Instant::now();
+
+        // First two bytes of a 3-byte scalar, then the session ends.
+        c.push(&"€".as_bytes()[..2], t0);
+        assert_eq!(
+            c.poll_flush(t0 + Duration::from_millis(12)),
+            None,
+            "an incomplete scalar alone emits nothing yet"
+        );
+        assert_eq!(c.finish(), Some("\u{FFFD}".to_string()));
+        assert_eq!(c.finish(), None, "finishing twice is harmless");
+    }
+
+    #[test]
+    fn test_output_size_threshold_counts_source_bytes() {
+        // max_bytes is a byte budget, not a character count.
+        let mut c = OutputCoalescer::new(Duration::from_millis(10_000), 6);
+        let t0 = Instant::now();
+
+        assert!(c.push("€".as_bytes(), t0).is_none(), "3 bytes < 6");
+        assert_eq!(c.push("€".as_bytes(), t0), Some("€€".to_string()));
+    }
+
+    #[test]
+    fn test_prompt_window_trimming_survives_multibyte_output() {
+        // Regression for the panic this ticket uncovered: the window used to be
+        // a String trimmed by a byte count, and String::drain asserts the range
+        // lands on a character boundary. CJK is 3 bytes wide and the window is
+        // 512, so the very first overflow lands mid-character and killed the
+        // reader thread.
+        let mut prompt_window: Vec<u8> = Vec::new();
+        prompt_window.extend_from_slice("日本語の出力".repeat(40).as_bytes());
+        assert!(prompt_window.len() > NATIVE_SESSION_PROMPT_WINDOW_SIZE);
+
+        // The exact maintenance spawn_jump_session_reader performs.
+        let excess = prompt_window.len() - NATIVE_SESSION_PROMPT_WINDOW_SIZE;
+        prompt_window.drain(0..excess);
+        assert_eq!(prompt_window.len(), NATIVE_SESSION_PROMPT_WINDOW_SIZE);
+
+        // And a prompt arriving after that trim is still detected, even though
+        // the window now starts mid-character.
+        prompt_window.extend_from_slice(b"user@host's password:");
+        assert_eq!(
+            detect_prompt_kind(&prompt_window),
+            Some(PromptResponseKind::Password)
+        );
+    }
+
+    #[test]
+    fn test_prompt_detected_when_split_across_reads() {
+        // The prompt window exists because a prompt can straddle two reads.
+        let mut prompt_window: Vec<u8> = Vec::new();
+        prompt_window.extend_from_slice(b"user@host's pass");
+        assert_eq!(detect_prompt_kind(&prompt_window), None);
+        prompt_window.extend_from_slice(b"word:");
+        assert_eq!(
+            detect_prompt_kind(&prompt_window),
+            Some(PromptResponseKind::Password)
         );
     }
 
@@ -4430,11 +4671,11 @@ mod tests {
     #[test]
     fn detects_only_complete_passphrase_prompts() {
         assert_eq!(
-            detect_prompt_kind("Enter passphrase for key '/tmp/id_fixture_ed25519':"),
+            detect_prompt_kind(b"Enter passphrase for key '/tmp/id_fixture_ed25519':"),
             Some(PromptResponseKind::Passphrase)
         );
         assert_eq!(
-            detect_prompt_kind("Enter passphrase for key '/tmp/id_fixture_ed25519"),
+            detect_prompt_kind(b"Enter passphrase for key '/tmp/id_fixture_ed25519"),
             None
         );
     }
