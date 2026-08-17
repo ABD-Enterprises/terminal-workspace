@@ -130,3 +130,22 @@ export function buildMockCommandResponse(
       : `No remote command was sent to ${host.hostname}.`,
   ];
 }
+
+/**
+ * #175: value-identity for the two object fields the terminal-owning effect
+ * depends on. Exported so a test can drive the real store churn and assert these
+ * stay put — the bug was invisible from the component's own behaviour.
+ *
+ * Environment keys are sorted so key order alone cannot fake a change. Tag ORDER
+ * is deliberately preserved: buildMockCommandResponse renders tags in order, so
+ * reordering them IS a change the terminal should see.
+ */
+export function terminalEnvironmentKey(environment: Record<string, string> | undefined) {
+  return JSON.stringify(
+    Object.entries(environment ?? {}).sort(([left], [right]) => left.localeCompare(right))
+  );
+}
+
+export function terminalTagsKey(tags: string[]) {
+  return JSON.stringify(tags);
+}
