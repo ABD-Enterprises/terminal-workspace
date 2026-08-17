@@ -44,6 +44,9 @@ import {
 import {
   OperationTimeoutError,
   REMOTE_COMMAND_TIMEOUT_MS,
+  SFTP_CONTROL_TIMEOUT_MS,
+  SFTP_DOWNLOAD_IDLE_TIMEOUT_MS,
+  SFTP_UPLOAD_TIMEOUT_MS,
   withDeadline,
 } from "./backend-deadline.mjs";
 import { respondError, sendJson } from "./backend-responses.mjs";
@@ -406,25 +409,58 @@ async function connectClient(host) {
   }
 }
 
-async function withSftp(host, callback) {
-  const client = await connectClient(host);
-
-  try {
-    const sftp = await new Promise((resolve, reject) => {
-      client.sftp((error, sftpHandle) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve(sftpHandle);
-      });
-    });
-
-    return await callback({ client, sftp });
-  } finally {
-    client.end();
+/**
+ * #182 slice 3: every SFTP operation now carries a deadline.
+ *
+ * ssh2 bounds only the INITIAL connect, via readyTimeout. Once connected, a
+ * readdir or a write against a host that is reachable but unresponsive never
+ * settled, so the request hung forever and the user had no way out.
+ *
+ * The deadline is armed AROUND the connect, not after it: a jump host whose
+ * forwardOut never answers hangs before any channel exists, which a
+ * post-connect timer would miss entirely.
+ *
+ * `timeoutMs` is per-operation because the workloads are not comparable — see
+ * the constants in backend-deadline.mjs. `idle` is for the streamed download,
+ * where a total budget would kill a large but perfectly healthy transfer;
+ * callers there call `resetDeadline()` on observed progress.
+ *
+ * Teardown on timeout is LIFO and uses destroy(), not the graceful end() of the
+ * happy path: a graceful close negotiates with a peer that has already proven
+ * unresponsive.
+ */
+async function withSftp(host, options, callback) {
+  // Back-compat shape: withSftp(host, callback) means a control operation.
+  if (typeof options === "function") {
+    callback = options;
+    options = {};
   }
+  const { timeoutMs = SFTP_CONTROL_TIMEOUT_MS } = options;
+
+  return withDeadline(timeoutMs, async ({ onTimeout, resetDeadline }) => {
+    const client = await connectClient(host);
+    onTimeout(() => client.destroy());
+
+    try {
+      const sftp = await new Promise((resolve, reject) => {
+        client.sftp((error, sftpHandle) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(sftpHandle);
+        });
+      });
+      // Destroyed before the transport carrying it, so outstanding SFTP
+      // callbacks cannot be left depending on a live channel.
+      onTimeout(() => sftp.destroy?.());
+
+      return await callback({ client, sftp, onTimeout, resetDeadline });
+    } finally {
+      client.end();
+    }
+  });
 }
 
 async function createSshSession(host) {
@@ -648,7 +684,10 @@ async function deleteRemoteEntry(host, pathname, isDirectoryEntry) {
 }
 
 async function uploadRemoteFile(host, pathname, contentsBase64) {
-  return withSftp(host, async ({ sftp }) => {
+  // #182: a TOTAL budget, not idle — sftp.write's single callback exposes no
+  // incremental progress to reset against. Sized for the request cap in
+  // backend-deadline.mjs.
+  return withSftp(host, { timeoutMs: SFTP_UPLOAD_TIMEOUT_MS }, async ({ sftp, onTimeout }) => {
     const targetPath = resolveRemotePath(host.sftpRoot ?? "/", pathname);
     const buffer = Buffer.from(contentsBase64, "base64");
     const handle = await new Promise((resolve, reject) => {
@@ -660,6 +699,18 @@ async function uploadRemoteFile(host, pathname, contentsBase64) {
 
         resolve(nextHandle);
       });
+    });
+
+    // Best-effort, never awaited: a timeout must not leave a file handle open
+    // on the remote. Guarded so it cannot race the normal close below, and the
+    // channel/transport teardown that follows is the real guarantee.
+    let closeStarted = false;
+    onTimeout(() => {
+      if (closeStarted) {
+        return;
+      }
+      closeStarted = true;
+      sftp.close(handle, () => {});
     });
 
     try {
@@ -674,6 +725,7 @@ async function uploadRemoteFile(host, pathname, contentsBase64) {
         });
       });
     } finally {
+      closeStarted = true;
       await new Promise((resolve, reject) => {
         sftp.close(handle, (error) => {
           if (error) {
@@ -691,27 +743,62 @@ async function uploadRemoteFile(host, pathname, contentsBase64) {
 }
 
 async function sendRemoteFile(response, host, pathname) {
-  await withSftp(host, async ({ sftp }) => {
-    const targetPath = resolveRemotePath(host.sftpRoot ?? "/", pathname);
-    const fileStats = await new Promise((resolve, reject) => {
-      sftp.stat(targetPath, (error, stats) => {
-        if (error) {
-          reject(error);
-          return;
-        }
+  // #182: an IDLE deadline, not a total one. A large download that is slow but
+  // progressing must not be killed; only silence should end it.
+  await withSftp(
+    host,
+    { timeoutMs: SFTP_DOWNLOAD_IDLE_TIMEOUT_MS },
+    async ({ sftp, onTimeout, resetDeadline }) => {
+      const targetPath = resolveRemotePath(host.sftpRoot ?? "/", pathname);
+      const fileStats = await new Promise((resolve, reject) => {
+        sftp.stat(targetPath, (error, stats) => {
+          if (error) {
+            reject(error);
+            return;
+          }
 
-        resolve(stats);
+          resolve(stats);
+        });
       });
-    });
+      resetDeadline();
 
-    response.writeHead(200, {
-      "Content-Disposition": `attachment; filename="${sanitizeFilename(posixPath.basename(targetPath))}"`,
-      "Content-Length": String(fileStats.size ?? 0),
-      "Content-Type": "application/octet-stream",
-    });
+      response.writeHead(200, {
+        "Content-Disposition": `attachment; filename="${sanitizeFilename(posixPath.basename(targetPath))}"`,
+        "Content-Length": String(fileStats.size ?? 0),
+        "Content-Type": "application/octet-stream",
+      });
 
-    await pipeline(sftp.createReadStream(targetPath), response);
-  });
+      const readStream = sftp.createReadStream(targetPath);
+      // Destroyed first so pipeline stops and the remote file handle starts
+      // closing before the channel underneath it goes away.
+      onTimeout(() => readStream.destroy());
+      // Headers — including a Content-Length — are already committed, so the
+      // status can no longer be replaced. DESTROY, never end(): end() asserts
+      // the response completed normally against a length the body will not
+      // reach, leaving the client to notice a framing violation and possibly
+      // keeping the connection alive. Destroying aborts it, so the browser's
+      // body read rejects and no truncated file reaches the save step.
+      onTimeout(() => response.destroy());
+
+      // What counts as progress. `data` is the remote supplying more body.
+      // `drain` matters because pipeline pauses the SFTP readable while
+      // response.write() applies backpressure — during that pause a slow but
+      // alive HTTP consumer produces no `data` at all, and a data-only timer
+      // would kill a healthy transfer.
+      const onProgress = () => resetDeadline();
+      readStream.on("open", onProgress);
+      readStream.on("data", onProgress);
+      response.on("drain", onProgress);
+
+      try {
+        await pipeline(readStream, response);
+      } finally {
+        readStream.off("open", onProgress);
+        readStream.off("data", onProgress);
+        response.off("drain", onProgress);
+      }
+    }
+  );
 }
 
 function serializeForward(forward) {
@@ -1492,9 +1579,16 @@ const server = createServer(async (request, response) => {
       await sendRemoteFile(response, body.host, body.path);
     } catch (error) {
       if (!response.headersSent) {
+        // Still recoverable — a hung stat times out here and surfaces as the
+        // 504 the error carries, before any filename or byte is committed.
         respondError(response, error);
       } else {
-        response.end();
+        // #182: was response.end(). Once a Content-Length is committed, end()
+        // asserts the response finished normally against a length the body will
+        // never reach — a truncated file that looks complete to anything not
+        // checking the framing. Destroying aborts the connection instead, so the
+        // client's body read fails loudly.
+        response.destroy();
       }
     }
     return;

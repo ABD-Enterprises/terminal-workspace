@@ -4,11 +4,35 @@
 /** #182: a remote command's total budget, matching the native side's policy. */
 export const REMOTE_COMMAND_TIMEOUT_MS = 60_000;
 
+/**
+ * #182 slice 3: SFTP budgets, argued from the workload rather than rounded.
+ *
+ * Control operations move almost no data. 30s is derived from ssh2's 10s
+ * readyTimeout: room for two sequential handshakes on a jump route, plus
+ * forwarding, SFTP subsystem setup, and one metadata call.
+ *
+ * Upload is a TOTAL budget because sftp.write's single callback exposes no
+ * incremental progress to reset an idle timer against. The request cap is
+ * 64 MiB of JSON+base64, so roughly 48 MiB of content; at a deliberately
+ * pessimistic 256 KiB/s that is 192s, plus the 30s control allowance.
+ *
+ * Download is an IDLE budget — a large but progressing transfer must not be
+ * killed, so any observed progress buys another interval.
+ */
+export const SFTP_CONTROL_TIMEOUT_MS = 30_000;
+export const SFTP_UPLOAD_TIMEOUT_MS = 222_000;
+export const SFTP_DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
+
 export class OperationTimeoutError extends Error {
   constructor(message, timeoutMs) {
     super(message);
     this.name = "OperationTimeoutError";
     this.timeoutMs = timeoutMs;
+    // #182: respondError honours a status the error carries, so a timeout that
+    // is caught before response headers are sent surfaces as a 504 rather than
+    // a generic 500. The sanitized MESSAGE is still generic by #230's policy —
+    // the status is what tells the caller this was a timeout.
+    this.statusCode = 504;
   }
 }
 
@@ -35,41 +59,79 @@ export class OperationTimeoutError extends Error {
  */
 export function withDeadline(timeoutMs, run) {
   const cleanups = [];
-  /** Register a synchronous teardown. Later registrations run first. */
+  // #182: three states, not a boolean. `timedOut` must be distinguishable from
+  // `completed`, because a cleanup registered AFTER the deadline fired has to
+  // run immediately rather than being queued for a timer that already went off,
+  // and a progress event arriving after expiry must not re-arm anything.
+  let state = "active";
+  let timer;
+  let fire;
+
+  /**
+   * Register a synchronous teardown. Later registrations run first, so an inner
+   * resource (a stream) is destroyed before the transport carrying it.
+   */
   const onTimeout = (cleanup) => {
+    if (state === "timed_out") {
+      // The connection resource appeared after the deadline already won. Nobody
+      // else will ever close it, so close it now.
+      runCleanup(cleanup);
+      return;
+    }
     cleanups.push(cleanup);
   };
 
-  let timer;
-  let settled = false;
+  function runCleanup(cleanup) {
+    try {
+      cleanup();
+    } catch {
+      // Deliberately swallowed: one resource refusing to close must not strand
+      // the others, and there is nothing useful to do with the error on a path
+      // that is already failing.
+    }
+  }
+
+  /**
+   * Extend the deadline because the operation made observable progress.
+   *
+   * Only meaningful for an idle deadline — a streamed download that is slow but
+   * alive must not be killed. Deliberately inert once the deadline has fired or
+   * the operation finished: late progress cannot resurrect an expired budget.
+   */
+  const resetDeadline = () => {
+    if (state !== "active") {
+      return;
+    }
+    clearTimeout(timer);
+    timer = setTimeout(fire, timeoutMs);
+    timer.unref?.();
+  };
 
   const timeout = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => {
-      if (settled) {
+    fire = () => {
+      if (state !== "active") {
         return;
       }
+      state = "timed_out";
       for (const cleanup of cleanups.reverse()) {
-        try {
-          cleanup();
-        } catch {
-          // Deliberately swallowed: one resource refusing to close must not
-          // strand the others, and there is nothing useful to do with the error
-          // on a path that is already failing.
-        }
+        runCleanup(cleanup);
       }
       reject(
         new OperationTimeoutError(`operation did not finish within ${timeoutMs}ms`, timeoutMs)
       );
-    }, timeoutMs);
+    };
+    timer = setTimeout(fire, timeoutMs);
     // Do not hold the event loop open purely for a pending deadline.
     timer.unref?.();
   });
 
   return Promise.race([
     Promise.resolve()
-      .then(() => run({ onTimeout }))
+      .then(() => run({ onTimeout, resetDeadline }))
       .finally(() => {
-        settled = true;
+        if (state === "active") {
+          state = "completed";
+        }
         clearTimeout(timer);
       }),
     timeout,
