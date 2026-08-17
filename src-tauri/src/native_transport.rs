@@ -546,7 +546,9 @@ pub(crate) fn build_prompt_responses(host: &BackendHostConnection) -> Vec<Prompt
 /// `[u8]` has `contains` for a single byte but not for a subslice, so the
 /// substring search is spelled out.
 fn contains_ascii_subslice(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack.windows(needle.len()).any(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 /// #194: matches on raw bytes so the caller can keep an undecoded prompt
@@ -758,9 +760,18 @@ fn scrub_passphrase_file(path: &Path, len: usize) {
     }
 }
 
+/// #157: the control-session opener hands back three things that must travel
+/// together — the context, the child, and the PTY master. Naming the triple
+/// keeps the signature readable without changing what is returned.
+pub(crate) type NativeSshControlParts = (
+    NativeSshControlContext,
+    Box<dyn Child + Send + Sync>,
+    Box<dyn MasterPty + Send>,
+);
+
 pub(crate) fn write_native_known_hosts(
     host: &BackendHostConnection,
-    session_dir: &PathBuf,
+    session_dir: &Path,
 ) -> Result<PathBuf, String> {
     let known_hosts_path = session_dir.join("known_hosts");
     let mut entries = Vec::new();
@@ -885,8 +896,8 @@ pub(crate) fn shell_single_quote(value: &str) -> String {
 
 pub(crate) fn build_native_ssh_config(
     host: &BackendHostConnection,
-    session_dir: &PathBuf,
-    known_hosts_path: &PathBuf,
+    session_dir: &Path,
+    known_hosts_path: &Path,
     control_path: Option<&PathBuf>,
 ) -> Result<(PathBuf, String), String> {
     let config_path = session_dir.join("ssh_config");
@@ -930,7 +941,7 @@ pub(crate) fn build_native_ssh_config(
         let hop_is_pinned =
             connection.known_host_public_key.is_some() && connection.known_host_algorithm.is_some();
         let hop_known_hosts = if hop_is_pinned {
-            known_hosts_path.clone()
+            known_hosts_path.to_path_buf()
         } else {
             crate::native_host_keys::durable_known_hosts_path()?.clone()
         };
@@ -1338,23 +1349,9 @@ pub(crate) fn wait_for_sftp_prompt(
 pub(crate) fn open_native_ssh_control_session(
     host: &BackendHostConnection,
     session_label: &str,
-) -> Result<
-    (
-        NativeSshControlContext,
-        Box<dyn Child + Send + Sync>,
-        Box<dyn MasterPty + Send>,
-    ),
-    String,
-> {
+) -> Result<NativeSshControlParts, String> {
     let session_dir = create_native_ssh_session_dir(session_label)?;
-    let result = (|| -> Result<
-        (
-            NativeSshControlContext,
-            Box<dyn Child + Send + Sync>,
-            Box<dyn MasterPty + Send>,
-        ),
-        String,
-    > {
+    let result = (|| -> Result<NativeSshControlParts, String> {
         let known_hosts_path = write_native_known_hosts(host, &session_dir)?;
         let control_path = session_dir.join("control.sock");
         let (config_path, target_alias) =
@@ -2103,7 +2100,11 @@ mod tests {
             write_private_file(&path, b"second", 0o600).is_err(),
             "writing over an existing path must fail"
         );
-        assert_eq!(fs::read(&path).unwrap(), b"first", "original content preserved");
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            b"first",
+            "original content preserved"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -2113,7 +2114,10 @@ mod tests {
         let path = root.join("passphrase");
         fs::write(&path, b"super-secret").unwrap();
         scrub_passphrase_file(&path, "super-secret".len());
-        assert!(!path.exists(), "passphrase file must be removed after scrub");
+        assert!(
+            !path.exists(),
+            "passphrase file must be removed after scrub"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -2552,7 +2556,7 @@ mod tests {
 
         let result = build_native_ssh_config(&host, &root, &known_hosts, None);
 
-        let error = result.err().expect("an unpinned hop must refuse, not fall back");
+        let error = result.expect_err("an unpinned hop must refuse, not fall back");
         assert!(
             error.contains("never initialised"),
             "the refusal should say what is missing: {error}"

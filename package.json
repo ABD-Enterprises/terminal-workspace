@@ -21,6 +21,8 @@
     "typecheck": "node ./scripts/pnpmw.mjs --filter desktop typecheck",
     "native:icons": "bash ./scripts/generate-tauri-icons.sh",
     "native:check": "bash ./scripts/native-check.sh",
+    "native:fmt:check": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
+    "native:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "native:bundle": "MACOS_SIGN_MODE=require bash ./scripts/native-bundle.sh",
     "native:bundle:preview": "MACOS_SIGN_MODE=skip bash ./scripts/native-bundle.sh",
     "native:release:check": "bash ./scripts/native-release-check.sh",

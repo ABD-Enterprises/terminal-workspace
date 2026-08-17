@@ -34,6 +34,12 @@ pub(crate) fn run_security_command(args: &[&str]) -> Result<Output, String> {
 pub(crate) enum KeychainRead {
     Found(String),
     Missing,
+    // #157: production reduces this to a boolean at main.rs, so the payload is
+    // dead outside tests — but classify_keychain_output's tests destructure it
+    // to prove a locked keychain stays distinguishable from a missing secret.
+    // Surfacing the message to the renderer would be a behaviour change, so the
+    // honest move is to keep the diagnostic and scope the allow, not delete it.
+    #[cfg_attr(not(test), allow(dead_code))]
     Unavailable(String),
 }
 
@@ -145,7 +151,8 @@ mod tests {
         ));
         // A locked keychain / denied access (any other non-zero) => Unavailable,
         // NOT Missing — so the caller prompts instead of silently using no secret.
-        match classify_keychain_output(&security_output(51, "", "User interaction is not allowed.")) {
+        match classify_keychain_output(&security_output(51, "", "User interaction is not allowed."))
+        {
             KeychainRead::Unavailable(message) => {
                 assert!(message.contains("User interaction is not allowed."))
             }

@@ -1166,8 +1166,7 @@ fn test_allow_unknown_tofu_rejects_changed_key() {
     host.known_host_algorithm = None;
 
     let store = tofu_store("rejects-changed");
-    let (session, mut channel) =
-        connect_native_session(&host, &store).expect("first connect pins");
+    let (session, mut channel) = connect_native_session(&host, &store).expect("first connect pins");
     let _ = channel.close();
     let _ = session.disconnect(None, "tofu change test", None);
 

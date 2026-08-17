@@ -23,6 +23,7 @@ node ./scripts/pnpmw.mjs --filter desktop build
 
 # #177: build + test the native (src-tauri) crate as part of the default local
 # gate so a broken native build can no longer pass `npm run validate` green.
+# #157 added the rustfmt and clippy gates to the same branch.
 # `cargo test` compiles the crate (icons are committed and the desktop build
 # above produced tauri.conf's frontendDist, so generate_context! resolves) and
 # runs the tests; a compile error or failing test fails validation via set -e.
@@ -31,6 +32,14 @@ node ./scripts/pnpmw.mjs --filter desktop build
 # contributor who is only touching the web app.
 if [[ "$(uname -s)" == "Darwin" ]]; then
   if command -v cargo >/dev/null 2>&1; then
+    # #157: format and lint before the build, so a style failure is reported in
+    # seconds rather than after a full compile. A missing clippy/rustfmt here is
+    # an INCOMPLETE toolchain and fails loudly — unlike a missing cargo, which
+    # advisory-skips below for contributors only touching the web app.
+    echo "[validate] rust formatting"
+    npm run native:fmt:check
+    echo "[validate] rust lint"
+    npm run native:clippy
     echo "[validate] rust build + tests"
     cargo test --manifest-path src-tauri/Cargo.toml
   else
