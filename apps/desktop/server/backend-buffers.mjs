@@ -13,6 +13,9 @@ export class PayloadTooLargeError extends Error {
     super(`Request body exceeds the ${limit}-byte limit.`);
     this.name = "PayloadTooLargeError";
     this.statusCode = 413;
+    // #230: respondError no longer relays `message`, so the limit has to travel
+    // as data for the 413 to keep telling the caller what the cap actually is.
+    this.limit = limit;
   }
 }
 
