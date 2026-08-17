@@ -403,10 +403,7 @@ fn host_requires_trusted_key(host: &BackendHostConnection) -> bool {
     if host.protocol != "ssh" && host.protocol != "mosh" {
         return false;
     }
-    match host.host_key_policy.as_deref() {
-        Some("allowUnknown") => false,
-        _ => true,
-    }
+    !matches!(host.host_key_policy.as_deref(), Some("allowUnknown"))
 }
 
 fn default_backend_protocol() -> String {
@@ -2362,6 +2359,11 @@ fn handle_native_session_command(
     }
 }
 
+// #157: this is the ownership boundary where eight independent values are moved
+// into one session worker. Bundling them into a one-use argument struct would
+// hide that handoff behind a type rather than reduce coupling, so the lint is
+// allowed here rather than designed around.
+#[allow(clippy::too_many_arguments)]
 fn run_native_session_loop(
     app: AppHandle,
     registry: NativeSessionRegistry,
@@ -2502,7 +2504,7 @@ fn open_native_session_stream(
         let stream_id = state
             .stream_id
             .clone()
-            .unwrap_or_else(|| next_session_stream_id());
+            .unwrap_or_else(next_session_stream_id);
         state.stream_id = Some(stream_id.clone());
         let buffered_messages = std::mem::take(&mut state.buffered_messages);
         (stream_id, state.connection_state.clone(), buffered_messages)
@@ -4090,7 +4092,7 @@ fn main() {
             app.manage(SharedNativeHostKeyStore::new(host_key_store));
 
             let handle = app.handle();
-            let menu = build_app_menu(&handle)?;
+            let menu = build_app_menu(handle)?;
             app.set_menu(menu)?;
             // Bridge OS menu activations to the renderer. Errors are not
             // recoverable here and the menu would degrade silently if we

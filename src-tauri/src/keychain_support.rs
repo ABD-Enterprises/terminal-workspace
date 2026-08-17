@@ -34,6 +34,12 @@ pub(crate) fn run_security_command(args: &[&str]) -> Result<Output, String> {
 pub(crate) enum KeychainRead {
     Found(String),
     Missing,
+    // #157: production reduces this to a boolean at main.rs, so the payload is
+    // dead outside tests — but classify_keychain_output's tests destructure it
+    // to prove a locked keychain stays distinguishable from a missing secret.
+    // Surfacing the message to the renderer would be a behaviour change, so the
+    // honest move is to keep the diagnostic and scope the allow, not delete it.
+    #[cfg_attr(not(test), allow(dead_code))]
     Unavailable(String),
 }
 
