@@ -2028,12 +2028,23 @@ mod tests {
         assert_eq!(sh_stdout(&script), "x'; id #");
     }
 
+    /// #274: the counter is what makes this unique, not the clock.
+    ///
+    /// This used to be label + pid + nanos. The pid is shared by every test in
+    /// the binary, so uniqueness rested entirely on the timestamp — and macOS's
+    /// clock is coarse enough that two tests starting together read the SAME
+    /// nanos. Same label then meant the same directory, and write_private_file
+    /// opens with create_new, so the loser died with "File exists". It failed
+    /// about 1 run in 10, which is worse than failing every time.
+    static TEST_ROOT_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
     fn test_suffix(label: &str) -> String {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
-        format!("{label}-{}-{nanos}", process::id())
+        let seq = TEST_ROOT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("{label}-{}-{nanos}-{seq}", process::id())
     }
 
     fn test_root(label: &str) -> PathBuf {
@@ -2042,6 +2053,23 @@ mod tests {
             .join(format!("termsnip-native-test-{}", test_suffix(label)));
         fs::create_dir_all(&root).expect("test root should be created");
         root
+    }
+
+    /// #274: uniqueness must come from the counter, not the clock.
+    ///
+    /// Asserting on a repeated label in a tight loop is the point: any run fast
+    /// enough to read the same nanos twice is exactly the case that used to
+    /// collide, and write_private_file's create_new turned that into a
+    /// "File exists" failure about 1 run in 10.
+    #[test]
+    fn test_roots_are_unique_even_for_a_repeated_label() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            assert!(
+                seen.insert(test_suffix("same-label")),
+                "test_suffix must never repeat for the same label"
+            );
+        }
     }
 
     #[test]

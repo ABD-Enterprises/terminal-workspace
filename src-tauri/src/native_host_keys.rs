@@ -343,8 +343,14 @@ mod tests {
     use std::process;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    /// Matches the pid+nanos convention the native_transport tests already use,
-    /// rather than pulling in a temp-dir crate for this alone.
+    /// Matches the convention the native_transport tests use, rather than
+    /// pulling in a temp-dir crate for this alone.
+    ///
+    /// #274: the counter carries the uniqueness. pid is shared across the whole
+    /// test binary and the nanos are coarser than they look, so two same-label
+    /// roots created together used to collide.
+    static TEMP_ROOT_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
     struct TempRoot(PathBuf);
 
     impl TempRoot {
@@ -353,8 +359,9 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .expect("system time should be after unix epoch")
                 .as_nanos();
+            let seq = TEMP_ROOT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let root = std::env::temp_dir()
-                .join(format!("tw-host-keys-{label}-{}-{nanos}", process::id()));
+                .join(format!("tw-host-keys-{label}-{}-{nanos}-{seq}", process::id()));
             fs::create_dir_all(&root).expect("test root should be created");
             Self(root)
         }

@@ -4177,13 +4177,18 @@ mod tests {
     /// #151: the two copy-key refusal tests exercise validation that happens
     /// BEFORE any connect, so they never reach the store. A throwaway one keeps
     /// them honest about that rather than mocking the type away.
+    /// #274: counter, not clock — see native_transport's test_suffix.
+    static KEYCHAIN_ACCOUNT_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static COPYKEY_ROOT_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
     fn throwaway_host_key_store(label: &str) -> NativeHostKeyStore {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
+        let seq = COPYKEY_ROOT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let root = std::env::temp_dir()
-            .join(format!("tw-copykey-{label}-{}-{nanos}", std::process::id()));
+            .join(format!("tw-copykey-{label}-{}-{nanos}-{seq}", std::process::id()));
         std::fs::create_dir_all(&root).expect("test root should be created");
         NativeHostKeyStore::new(&root).expect("store")
     }
@@ -5036,7 +5041,11 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
-        let account = format!("termsnip-test-{}-{unique_suffix}", process::id());
+        // #274: same reason as the filesystem roots — pid is shared and the
+        // clock is coarse, so the counter is what keeps concurrent tests from
+        // sharing a keychain account.
+        let seq = KEYCHAIN_ACCOUNT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let account = format!("termsnip-test-{}-{unique_suffix}-{seq}", process::id());
         let service = format!("{KEYCHAIN_PASSWORD_SERVICE}.tests");
 
         store_keychain_secret(&service, &account, "test-secret")
@@ -5064,7 +5073,8 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
-        let fingerprint = format!("SHA256:term-snip-test-{}-{unique_suffix}", process::id());
+        let seq = KEYCHAIN_ACCOUNT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let fingerprint = format!("SHA256:term-snip-test-{}-{unique_suffix}-{seq}", process::id());
         let service = format!("{KEYCHAIN_KEY_PASSPHRASE_SERVICE}.tests");
 
         store_keychain_secret(&service, &fingerprint, "key-pass")
@@ -5092,7 +5102,8 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
-        let identity_id = format!("termsnip-identity-test-{}-{unique_suffix}", process::id());
+        let seq = KEYCHAIN_ACCOUNT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let identity_id = format!("termsnip-identity-test-{}-{unique_suffix}-{seq}", process::id());
         let service = format!("{KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE}.tests");
 
         store_keychain_secret(&service, &identity_id, "identity-pass")
