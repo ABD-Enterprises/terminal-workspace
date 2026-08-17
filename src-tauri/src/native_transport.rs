@@ -900,17 +900,35 @@ pub(crate) fn build_native_ssh_config(
         // fast instead of hanging on the OS default connect timeout (~2 min).
         lines.push("  ConnectTimeout 15".to_string());
         lines.push("  GlobalKnownHostsFile /dev/null".to_string());
+        // #151 slice 2: a hop with an explicit pin uses the per-session file
+        // written from that pin. A hop WITHOUT one is the accept-new case, and
+        // the per-session file is deleted on teardown — so OpenSSH re-pinned on
+        // every connect and the hop was first-use-forever, the same defect the
+        // direct path had. Point those at the durable store instead so the pin
+        // survives. If setup never resolved it, fall back to the per-session
+        // file rather than guessing a location.
+        let hop_is_pinned =
+            connection.known_host_public_key.is_some() && connection.known_host_algorithm.is_some();
+        let hop_known_hosts = if hop_is_pinned {
+            known_hosts_path.clone()
+        } else {
+            crate::native_host_keys::durable_known_hosts_path()
+                .cloned()
+                .unwrap_or_else(|| known_hosts_path.clone())
+        };
         lines.push(format!(
             "  UserKnownHostsFile {}",
-            known_hosts_path.to_string_lossy()
+            hop_known_hosts.to_string_lossy()
         ));
+        // Never let OpenSSH add or rotate keys behind our back after auth.
+        lines.push("  UpdateHostKeys no".to_string());
         if let Some(control_path) = control_path {
             lines.push("  ControlMaster auto".to_string());
             lines.push(format!("  ControlPath {}", control_path.to_string_lossy()));
             lines.push("  ControlPersist no".to_string());
         }
 
-        if connection.known_host_public_key.is_some() && connection.known_host_algorithm.is_some() {
+        if hop_is_pinned {
             lines.push("  StrictHostKeyChecking yes".to_string());
         } else {
             // Security: never `no` (which silently accepts CHANGED keys too).
@@ -2441,6 +2459,66 @@ mod tests {
 
         let _ = fs::remove_dir_all(session_dir);
         let _ = fs::remove_dir_all(root);
+    }
+
+    /// #151 slice 2: an unpinned hop must NOT be pointed at the per-session
+    /// known_hosts file, because that file is remove_dir_all'd on teardown — so
+    /// OpenSSH's accept-new pin never survived and every connect was a first
+    /// use. With no durable path published (as in this unit test) the config
+    /// must still fall back to the session file rather than inventing a path,
+    /// and it must always set UpdateHostKeys no so ssh cannot rotate keys after
+    /// authenticating.
+    #[test]
+    fn unpinned_hop_config_disables_host_key_updates_and_keeps_accept_new() {
+        let root = test_root("jump-known-hosts");
+        let mut host = test_host(Path::new("/tmp/tw-unused-key"), "");
+        host.known_host_public_key = None;
+        host.known_host_algorithm = None;
+        let known_hosts = root.join("known_hosts");
+        fs::write(&known_hosts, "").expect("seed known_hosts");
+
+        // build_native_ssh_config returns (config_path, target_alias); the
+        // config body is the file it writes.
+        let (config_path, _alias) =
+            build_native_ssh_config(&host, &root, &known_hosts, None).expect("config builds");
+        let config = fs::read_to_string(&config_path).expect("config file");
+
+        assert!(
+            config.contains("StrictHostKeyChecking accept-new"),
+            "an unpinned hop must stay accept-new, never `no`: {config}"
+        );
+        assert!(
+            config.contains("UpdateHostKeys no"),
+            "ssh must not rotate host keys behind us: {config}"
+        );
+        // No durable path is published in a unit test, so the fallback applies.
+        assert!(
+            config.contains(&known_hosts.to_string_lossy().to_string()),
+            "without a published durable path the session file is the fallback: {config}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A pinned hop is unchanged: session file plus StrictHostKeyChecking yes.
+    #[test]
+    fn pinned_hop_config_still_uses_the_session_file_and_strict_yes() {
+        let root = test_root("jump-known-hosts-pinned");
+        let mut host = test_host(Path::new("/tmp/tw-unused-key"), "");
+        host.known_host_public_key = Some("AAAAPINNED".to_string());
+        host.known_host_algorithm = Some("ssh-ed25519".to_string());
+        let known_hosts = root.join("known_hosts");
+        fs::write(&known_hosts, "").expect("seed known_hosts");
+
+        let (config_path, _alias) =
+            build_native_ssh_config(&host, &root, &known_hosts, None).expect("config builds");
+        let config = fs::read_to_string(&config_path).expect("config file");
+
+        assert!(config.contains("StrictHostKeyChecking yes"), "{config}");
+        assert!(
+            config.contains(&known_hosts.to_string_lossy().to_string()),
+            "a pinned hop keeps the per-session file: {config}"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
