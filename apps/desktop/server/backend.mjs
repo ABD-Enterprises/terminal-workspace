@@ -30,7 +30,17 @@ import {
   describeServerListenError,
   shutdownBackend,
 } from "./backend-lifecycle.mjs";
-import { resolvePathInsideRoot } from "./backend-paths.mjs";
+import {
+  resolvePathInsideRoot,
+  resolveRemotePath,
+  sanitizeFilename,
+} from "./backend-paths.mjs";
+import {
+  buildExecCommand,
+  buildInteractiveShellCommand,
+  getChannelEnvironment,
+  shellSingleQuote,
+} from "./backend-shell.mjs";
 import { respondError, sendJson } from "./backend-responses.mjs";
 import { SecretBuffer } from "./secrets.mjs";
 import {
@@ -178,23 +188,6 @@ async function globSshConfigFiles(pattern) {
   return { matches };
 }
 
-function normalizeRemotePath(pathname) {
-  const normalized = pathname ? posixPath.normalize(pathname) : "/";
-  return normalized.startsWith("/") ? normalized : `/${normalized}`;
-}
-
-function resolveRemotePath(rootPath = "/", pathname) {
-  if (!pathname) {
-    return normalizeRemotePath(rootPath);
-  }
-
-  if (pathname.startsWith("/")) {
-    return normalizeRemotePath(pathname);
-  }
-
-  return normalizeRemotePath(posixPath.join(rootPath, pathname));
-}
-
 function isDirectory(attrs, longname = "") {
   if (typeof attrs?.mode === "number") {
     return (attrs.mode & FILE_TYPE_MASK) === DIRECTORY_TYPE;
@@ -227,63 +220,8 @@ function toIsoTimestamp(unixSeconds) {
   return new Date(unixSeconds * 1000).toISOString();
 }
 
-function sanitizeFilename(value) {
-  return value.replace(/[^a-zA-Z0-9._-]/g, "_") || "download";
-}
-
 function getErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function getChannelEnvironment(environment) {
-  if (!environment || typeof environment !== "object") {
-    return undefined;
-  }
-
-  const entries = Object.entries(environment).filter(([key]) =>
-    /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
-  );
-  if (!entries.length) {
-    return undefined;
-  }
-
-  return Object.fromEntries(entries.map(([key, value]) => [key, String(value ?? "")]));
-}
-
-function escapeShellValue(value) {
-  return `'${String(value ?? "").replace(/'/g, `'"'"'`)}'`;
-}
-
-function buildEnvironmentExportPrefix(environment) {
-  const channelEnvironment = getChannelEnvironment(environment);
-
-  if (!channelEnvironment) {
-    return "";
-  }
-
-  return Object.entries(channelEnvironment)
-    .map(([key, value]) => `export ${key}=${escapeShellValue(value)}`)
-    .join("; ");
-}
-
-function buildInteractiveShellCommand(environment) {
-  const exportPrefix = buildEnvironmentExportPrefix(environment);
-
-  if (!exportPrefix) {
-    return undefined;
-  }
-
-  return `${exportPrefix}; exec "${'${SHELL:-/bin/sh}'}" -l`;
-}
-
-function buildExecCommand(command, environment) {
-  const exportPrefix = buildEnvironmentExportPrefix(environment);
-
-  if (!exportPrefix) {
-    return command;
-  }
-
-  return `${exportPrefix}; ${command}`;
 }
 
 function normalizeKeyAlgorithm(value) {
@@ -964,12 +902,6 @@ async function inspectKey(pathname) {
     privateKeyPath: resolvedPath,
     publicKeyPath,
   };
-}
-
-// Quote a path for safe inclusion inside a /bin/sh single-quoted string.
-// Mirrors shell_single_quote in src-tauri/src/native_transport.rs.
-function shellSingleQuote(value) {
-  return "'" + String(value).replace(/'/g, "'\\''") + "'";
 }
 
 async function generateKeyPair({ comment, passphrase, path, type }) {

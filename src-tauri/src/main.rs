@@ -4176,6 +4176,9 @@ fn main() {
 }
 
 #[cfg(test)]
+mod native_transport_conformance_tests;
+
+#[cfg(test)]
 mod native_transport_fixtures;
 
 #[cfg(test)]

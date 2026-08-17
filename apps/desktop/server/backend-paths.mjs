@@ -33,3 +33,70 @@ export function resolvePathInsideRoot(root, requestedPath) {
 
   return targetPath;
 }
+
+/**
+ * Canonicalise a REMOTE (POSIX) path. Distinct from `resolvePathInsideRoot`
+ * above, which is local static-file containment.
+ *
+ * #155: this used to wrap `posixPath.normalize`, and that quietly disagreed
+ * with Rust's `normalize_remote_path` on four shapes a user can type into the
+ * SFTP bar: `/a/b/` kept its trailing slash, `/a//` and `/a/b/../` kept one,
+ * and `.` became `/.`. Rust's segment-stack is the canonical form — it never
+ * leaves a trailing separator and never leaves a `.` or `..` segment behind —
+ * so the algorithm is reproduced here rather than approximated by a library
+ * call with different edge semantics.
+ */
+export function normalizeRemotePath(pathname) {
+  const segments = [];
+
+  for (const segment of String(pathname ?? "").split("/")) {
+    if (segment === "" || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      // Pops at the root are a no-op, so traversal clamps rather than escaping.
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+
+  return segments.length ? `/${segments.join("/")}` : "/";
+}
+
+/**
+ * Resolve `pathname` against `rootPath`.
+ *
+ * An absolute `pathname` overrides the root: `sftpRoot` is the directory the
+ * browser opens at, not a jail, and the UI's "up" navigation is unrestricted.
+ * Turning it into a containment boundary would be a separate product decision.
+ *
+ * #155: the empty check TRIMS. It previously tested only falsiness, so a
+ * whitespace-only entry produced `/srv/   ` in JS while Rust produced `/srv`.
+ */
+export function resolveRemotePath(rootPath = "/", pathname) {
+  if (!pathname || !String(pathname).trim()) {
+    return normalizeRemotePath(rootPath);
+  }
+
+  const value = String(pathname);
+  if (value.startsWith("/")) {
+    return normalizeRemotePath(value);
+  }
+
+  const base = String(rootPath ?? "").replace(/\/+$/, "");
+  return normalizeRemotePath(base === "" ? `/${value}` : `${base}/${value}`);
+}
+
+/**
+ * Reduce a value to a safe download filename.
+ *
+ * #155: the `u` flag is load-bearing. Without it the regex matches UTF-16 code
+ * units, so an astral character such as an emoji became TWO underscores in JS
+ * and one in Rust, which iterates Unicode scalars. Dots stay allowed, so
+ * traversal-looking text survives as a literal name — this produces a filename,
+ * not a path.
+ */
+export function sanitizeFilename(value) {
+  return String(value ?? "").replace(/[^a-zA-Z0-9._-]/gu, "_") || "download";
+}

@@ -1,0 +1,414 @@
+{
+  "$comment": [
+    "#155: one corpus, executed against BOTH the Rust and JS implementations of",
+    "the security-relevant helpers that exist independently in each backend.",
+    "",
+    "These expectations are hand-authored, NOT generated from either side. A",
+    "golden produced by one backend would make that backend the oracle and would",
+    "have blessed the seven divergences this fixture was written to expose —",
+    "trailing slashes, '.', whitespace-only paths, astral filenames, and quote",
+    "spelling all differed between Rust and JS when this was written.",
+    "",
+    "Canonical form is Rust's in every case, because it was the safer or more",
+    "predictable behaviour each time: no trailing slash, no surviving '.' or",
+    "'..' segment, trimmed input, one replacement character per Unicode scalar.",
+    "",
+    "Where the two backends legitimately differ in REPRESENTATION rather than",
+    "behaviour (Rust returns Option<Vec<(String,String)>>, JS an object or",
+    "undefined), each harness adapts to ordered [key, value] pairs before",
+    "comparing. That difference is intended and is not a divergence."
+  ],
+  "normalizeRemotePath": [
+    {
+      "input": "/a/b",
+      "expected": "/a/b",
+      "why": "already canonical"
+    },
+    {
+      "input": "/a/b/",
+      "expected": "/a/b",
+      "why": "trailing separator is dropped — JS kept it"
+    },
+    {
+      "input": "/a//",
+      "expected": "/a",
+      "why": "trailing separators collapse — JS kept one"
+    },
+    {
+      "input": "/a/b/../",
+      "expected": "/a",
+      "why": "parent then trailing slash — JS kept it"
+    },
+    {
+      "input": "",
+      "expected": "/",
+      "why": "empty is the root"
+    },
+    {
+      "input": "/",
+      "expected": "/",
+      "why": "root stays root"
+    },
+    {
+      "input": ".",
+      "expected": "/",
+      "why": "a bare dot is the root — JS produced '/.'"
+    },
+    {
+      "input": "..",
+      "expected": "/",
+      "why": "parent of root is root, never above it"
+    },
+    {
+      "input": "/a/../b",
+      "expected": "/b",
+      "why": "parent segments resolve"
+    },
+    {
+      "input": "/../a",
+      "expected": "/a",
+      "why": "parent traversal clamps at root"
+    },
+    {
+      "input": "/a/../../..",
+      "expected": "/",
+      "why": "repeated traversal cannot escape root"
+    },
+    {
+      "input": "a/b",
+      "expected": "/a/b",
+      "why": "relative input is anchored at root"
+    },
+    {
+      "input": "//a//b",
+      "expected": "/a/b",
+      "why": "repeated separators collapse"
+    },
+    {
+      "input": "/a/./b",
+      "expected": "/a/b",
+      "why": "current-directory segments drop out"
+    },
+    {
+      "input": "/a/ b",
+      "expected": "/a/ b",
+      "why": "an interior space is part of the name"
+    },
+    {
+      "input": "/a/b.txt",
+      "expected": "/a/b.txt",
+      "why": "a dot inside a name is not a segment"
+    },
+    {
+      "input": "/a/..b",
+      "expected": "/a/..b",
+      "why": "'..b' is a name, not a parent segment"
+    }
+  ],
+  "resolveRemotePath": [
+    {
+      "root": "/srv",
+      "input": "logs",
+      "expected": "/srv/logs",
+      "why": "relative joins onto the root"
+    },
+    {
+      "root": "/srv",
+      "input": "/var/tmp",
+      "expected": "/var/tmp",
+      "why": "an absolute path overrides the root — sftpRoot is a starting directory, not a jail"
+    },
+    {
+      "root": "/srv",
+      "input": "",
+      "expected": "/srv",
+      "why": "empty falls back to the root"
+    },
+    {
+      "root": "/srv",
+      "input": "   ",
+      "expected": "/srv",
+      "why": "whitespace-only is absent — JS produced '/srv/   '"
+    },
+    {
+      "root": "/srv",
+      "input": "../etc",
+      "expected": "/etc",
+      "why": "traversal above the root is permitted and normalized, matching the UI's unrestricted 'up'"
+    },
+    {
+      "root": "/",
+      "input": "logs",
+      "expected": "/logs",
+      "why": "root base does not double the separator"
+    },
+    {
+      "root": "/srv/",
+      "input": "logs",
+      "expected": "/srv/logs",
+      "why": "a trailing separator on the root is absorbed"
+    },
+    {
+      "root": "",
+      "input": "logs",
+      "expected": "/logs",
+      "why": "an empty root behaves as '/'"
+    },
+    {
+      "root": "/srv",
+      "input": "a/../b",
+      "expected": "/srv/b",
+      "why": "traversal resolves after joining"
+    }
+  ],
+  "sanitizeFilename": [
+    {
+      "input": "report.txt",
+      "expected": "report.txt",
+      "why": "allowed characters pass through"
+    },
+    {
+      "input": "my file.txt",
+      "expected": "my_file.txt",
+      "why": "a space is replaced"
+    },
+    {
+      "input": "../../etc/passwd",
+      "expected": ".._.._etc_passwd",
+      "why": "separators are replaced but dots are ALLOWED, so traversal text survives as a literal name — the filename is not a path"
+    },
+    {
+      "input": "a\"b",
+      "expected": "a_b",
+      "why": "quotes are replaced"
+    },
+    {
+      "input": "a'b",
+      "expected": "a_b",
+      "why": "single quotes are replaced"
+    },
+    {
+      "input": "a;rm -rf b",
+      "expected": "a_rm_-rf_b",
+      "why": "a semicolon is replaced; '-' is allowed"
+    },
+    {
+      "input": "",
+      "expected": "download",
+      "why": "empty falls back to a name"
+    },
+    {
+      "input": "///",
+      "expected": "___",
+      "why": "every character replaced, but the result is non-empty so it is kept rather than falling back"
+    },
+    {
+      "input": "a🦀b",
+      "expected": "a_b",
+      "why": "ONE replacement per Unicode scalar — the JS regex lacked the u flag and produced two"
+    },
+    {
+      "input": "héllo",
+      "expected": "h_llo",
+      "why": "a non-ASCII letter is one scalar, one replacement"
+    },
+    {
+      "input": "a\nb",
+      "expected": "a_b",
+      "why": "a newline is replaced"
+    }
+  ],
+  "shellSingleQuote": [
+    {
+      "input": "abc",
+      "expected": "'abc'",
+      "why": "plain values are wrapped"
+    },
+    {
+      "input": "",
+      "expected": "''",
+      "why": "empty is an explicit empty word"
+    },
+    {
+      "input": "a'b",
+      "expected": "'a'\\''b'",
+      "why": "POSIX close-escape-reopen — JS spelled it '\"'\"' instead"
+    },
+    {
+      "input": "it's done",
+      "expected": "'it'\\''s done'",
+      "why": "an ordinary apostrophe survives"
+    },
+    {
+      "input": "a b",
+      "expected": "'a b'",
+      "why": "spaces stay inside one word"
+    },
+    {
+      "input": "$(whoami)",
+      "expected": "'$(whoami)'",
+      "why": "command substitution is inert inside single quotes"
+    },
+    {
+      "input": "`id`",
+      "expected": "'`id`'",
+      "why": "backticks are inert"
+    },
+    {
+      "input": "a;b",
+      "expected": "'a;b'",
+      "why": "a separator is literal"
+    },
+    {
+      "input": "a\nb",
+      "expected": "'a\nb'",
+      "why": "a newline stays inside the word"
+    },
+    {
+      "input": "$HOME",
+      "expected": "'$HOME'",
+      "why": "no expansion inside single quotes"
+    }
+  ],
+  "environment": [
+    {
+      "why": "valid keys are kept and sorted; Rust iterated a HashMap, so its own order was unstable run to run",
+      "input": [
+        [
+          "ZED",
+          "1"
+        ],
+        [
+          "ALPHA",
+          "2"
+        ],
+        [
+          "_under",
+          "3"
+        ]
+      ],
+      "command": "echo hi",
+      "expectedEntries": [
+        [
+          "ALPHA",
+          "2"
+        ],
+        [
+          "ZED",
+          "1"
+        ],
+        [
+          "_under",
+          "3"
+        ]
+      ],
+      "expectedExportPrefix": "export ALPHA='2'; export ZED='1'; export _under='3'",
+      "expectedInteractiveShellCommand": "export ALPHA='2'; export ZED='1'; export _under='3'; exec \"${SHELL:-/bin/sh}\" -l",
+      "expectedExecCommand": "export ALPHA='2'; export ZED='1'; export _under='3'; echo hi"
+    },
+    {
+      "why": "keys that are not a valid shell identifier are filtered, not rejected",
+      "input": [
+        [
+          "OK",
+          "1"
+        ],
+        [
+          "bad-key",
+          "2"
+        ],
+        [
+          "9lead",
+          "3"
+        ],
+        [
+          "with space",
+          "4"
+        ],
+        [
+          "",
+          "5"
+        ]
+      ],
+      "command": "echo hi",
+      "expectedEntries": [
+        [
+          "OK",
+          "1"
+        ]
+      ],
+      "expectedExportPrefix": "export OK='1'",
+      "expectedInteractiveShellCommand": "export OK='1'; exec \"${SHELL:-/bin/sh}\" -l",
+      "expectedExecCommand": "export OK='1'; echo hi"
+    },
+    {
+      "why": "a hostile VALUE is quoted, never escaped away",
+      "input": [
+        [
+          "EVIL",
+          "$(touch /tmp/pwned)"
+        ],
+        [
+          "QUOTE",
+          "a'b"
+        ]
+      ],
+      "command": "echo hi",
+      "expectedEntries": [
+        [
+          "EVIL",
+          "$(touch /tmp/pwned)"
+        ],
+        [
+          "QUOTE",
+          "a'b"
+        ]
+      ],
+      "expectedExportPrefix": "export EVIL='$(touch /tmp/pwned)'; export QUOTE='a'\\''b'",
+      "expectedInteractiveShellCommand": "export EVIL='$(touch /tmp/pwned)'; export QUOTE='a'\\''b'; exec \"${SHELL:-/bin/sh}\" -l",
+      "expectedExecCommand": "export EVIL='$(touch /tmp/pwned)'; export QUOTE='a'\\''b'; echo hi"
+    },
+    {
+      "why": "no valid keys means no environment at all, and the command is untouched",
+      "input": [
+        [
+          "bad-key",
+          "1"
+        ]
+      ],
+      "command": "echo hi",
+      "expectedEntries": [],
+      "expectedExportPrefix": "",
+      "expectedInteractiveShellCommand": null,
+      "expectedExecCommand": "echo hi"
+    },
+    {
+      "why": "an absent environment behaves as an empty one",
+      "input": [],
+      "command": "echo hi",
+      "expectedEntries": [],
+      "expectedExportPrefix": "",
+      "expectedInteractiveShellCommand": null,
+      "expectedExecCommand": "echo hi"
+    },
+    {
+      "why": "an empty VALUE is still exported, as an explicit empty string",
+      "input": [
+        [
+          "EMPTY",
+          ""
+        ]
+      ],
+      "command": "echo hi",
+      "expectedEntries": [
+        [
+          "EMPTY",
+          ""
+        ]
+      ],
+      "expectedExportPrefix": "export EMPTY=''",
+      "expectedInteractiveShellCommand": "export EMPTY=''; exec \"${SHELL:-/bin/sh}\" -l",
+      "expectedExecCommand": "export EMPTY=''; echo hi"
+    }
+  ]
+}
