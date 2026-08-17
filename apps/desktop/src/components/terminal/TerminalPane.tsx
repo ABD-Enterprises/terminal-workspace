@@ -1,5 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "xterm";
 import "xterm/css/xterm.css";
 import {
@@ -13,7 +13,13 @@ import {
 import { isTauriRuntime, parseSessionFrame } from "../../lib/backend-runtime";
 import { buildBackendConnectionFromKnownHost, findKnownHostMatch } from "../../lib/connections";
 import { canRestoreSessionWithoutPrompt, ensureRuntimeSecrets } from "../../lib/runtime-secrets";
-import { buildMockCommandResponse, buildTerminalIntro, formatPrompt } from "../../lib/terminal";
+import {
+  buildMockCommandResponse,
+  buildTerminalIntro,
+  formatPrompt,
+  terminalEnvironmentKey,
+  terminalTagsKey,
+} from "../../lib/terminal";
 import {
   detectSystemColorScheme,
   resolveTerminalTheme,
@@ -114,6 +120,41 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     username,
   } =
     host;
+
+  /*
+   * #175: the terminal-owning effect below is torn down and rebuilt whenever any
+   * of its deps change identity — and hosts-store rebuilds EVERY host object on
+   * any mutation (markHostConnectedInCollection -> sortHostCollection ->
+   * map(normalizeHostRecord)). So running a snippet on one host disposed the
+   * xterm and closed the socket on every open terminal: scrollback gone, intro
+   * reprinted, all sockets flapping.
+   *
+   * The primitive fields above are value-compared by React and are fine. These
+   * two are objects, so they churn on every rebuild even when their contents are
+   * identical. Re-memoizing them against a serialized value keeps the effect's
+   * dependency honest — a real environment or tag change still changes the key
+   * and still recreates the terminal, which is the behaviour we must not lose.
+   *
+   * Environment keys are sorted so key order cannot fake a change; tag ORDER is
+   * significant (buildMockCommandResponse renders it), so tags are not sorted.
+   */
+  const environmentKey = terminalEnvironmentKey(environment);
+  const tagsKey = terminalTagsKey(tags);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by value on purpose
+  const stableEnvironment = useMemo(() => environment, [environmentKey]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by value on purpose
+  const stableTags = useMemo(() => tags, [tagsKey]);
+
+  /*
+   * #175: the whole `host` object is passed to two async secret helpers inside
+   * the effect. It cannot be a dependency — `markConnected` changes
+   * `lastConnectedAt`, so the object differs on every connect even when nothing
+   * the terminal cares about did. Reading it through an Effect Event gets the
+   * LATEST host at call time without making the effect re-run, which is exactly
+   * the semantics those checks want: they run seconds after setup, and should
+   * see current state rather than a snapshot.
+   */
+  const readLatestHost = useEffectEvent(() => host);
   const setPaneState = useSessionsStore((state) => state.setPaneState);
   const setPaneReconnectOnRestore = useSessionsStore((state) => state.setPaneReconnectOnRestore);
   const setPanePersistOutputPreview = useSessionsStore(
@@ -392,7 +433,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           port,
           protocol,
           sftpRoot,
-          tags,
+          tags: stableTags,
           username,
         });
         responseLines.forEach((line) => terminal.writeln(line));
@@ -545,7 +586,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
       const requiresSecrets = (protocol === "ssh" || protocol === "mosh") && authMethod !== "none";
       const hasReusableBackendSession = Boolean(backendSessionIdRef.current);
       const canConnectWithoutPrompt =
-        hasReusableBackendSession || !requiresSecrets || (await canRestoreSessionWithoutPrompt(host));
+        hasReusableBackendSession || !requiresSecrets || (await canRestoreSessionWithoutPrompt(readLatestHost()));
 
       if (!hasReusableBackendSession) {
         if (!promptForSecrets && !canConnectWithoutPrompt) {
@@ -560,7 +601,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
         if (promptForSecrets && requiresSecrets) {
           const readyForConnection = await ensureRuntimeSecrets(
-            host,
+            readLatestHost(),
             allowPendingSecrets ? "Resume SSH session" : "Open SSH session"
           );
 
@@ -619,7 +660,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
                 {
                   agentForwarding,
                   authMethod,
-                  environment,
+                  environment: stableEnvironment,
                   hostKeyPolicy,
                   hostname,
                   id,
@@ -1026,7 +1067,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           protocol === "telnet" ||
           protocol === "serial" ||
           authMethod === "none" ||
-          (await canRestoreSessionWithoutPrompt(host))
+          (await canRestoreSessionWithoutPrompt(readLatestHost()))
         ) {
           await connectNativeSession({
             allowPendingSecrets: true,
@@ -1067,9 +1108,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     agentForwarding,
     authMethod,
     consumePaneCommand,
-    environment,
+    stableEnvironment,
     group,
-    host,
     hostname,
     hostKeyPolicy,
     id,
@@ -1089,7 +1129,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     setPaneState,
     setPaneTransport,
     sftpRoot,
-    tags,
+    stableTags,
     unsupportedTransport,
     useMockTransport,
     username,
