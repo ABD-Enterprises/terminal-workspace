@@ -543,14 +543,30 @@ pub(crate) fn build_prompt_responses(host: &BackendHostConnection) -> Vec<Prompt
     responses
 }
 
-pub(crate) fn detect_prompt_kind(buffer: &str) -> Option<PromptResponseKind> {
+/// `[u8]` has `contains` for a single byte but not for a subslice, so the
+/// substring search is spelled out.
+fn contains_ascii_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|window| window == needle)
+}
+
+/// #194: matches on raw bytes so the caller can keep an undecoded prompt
+/// window.
+///
+/// Safe because every token below is pure ASCII, and UTF-8 encodes every
+/// non-ASCII scalar entirely in bytes >= 0x80. A multi-byte character therefore
+/// cannot contribute a byte that forges an ASCII match, and a window trimmed
+/// mid-character cannot produce a false positive. Only these literal English
+/// tokens were ever recognised; localized prompts were unsupported before this
+/// change and remain so. If that ever changes, this needs a real decoder and a
+/// character-safe window rather than byte matching.
+pub(crate) fn detect_prompt_kind(buffer: &[u8]) -> Option<PromptResponseKind> {
     let lowercase = buffer.to_ascii_lowercase();
 
-    if lowercase.contains("passphrase for key") && lowercase.contains(':') {
+    if contains_ascii_subslice(&lowercase, b"passphrase for key") && lowercase.contains(&b':') {
         return Some(PromptResponseKind::Passphrase);
     }
 
-    if lowercase.contains("password:") {
+    if contains_ascii_subslice(&lowercase, b"password:") {
         return Some(PromptResponseKind::Password);
     }
 
@@ -1236,12 +1252,16 @@ pub(crate) fn wait_for_sftp_prompt(
 ) -> Result<String, String> {
     let started_at = Instant::now();
     let mut captured_output = String::new();
+    // #194: the reader now sends raw bytes, so this capture decodes through one
+    // stateful decoder rather than per chunk — otherwise the boundary bug just
+    // moves here.
+    let mut decoder = crate::Utf8StreamDecoder::default();
 
     loop {
         loop {
             match output_receiver.try_recv() {
                 Ok(JumpSessionEvent::Output(output)) => {
-                    captured_output.push_str(&output);
+                    captured_output.push_str(&decoder.decode(&output));
                     if let Some(prompt_output) =
                         extract_sftp_prompt_output(&captured_output, pending_command)
                     {
@@ -1249,10 +1269,12 @@ pub(crate) fn wait_for_sftp_prompt(
                     }
                 }
                 Ok(JumpSessionEvent::Error(error)) => {
+                    captured_output.push_str(&decoder.finish());
                     captured_output.push_str(&error);
                     return Err(trim_ssh_output(&captured_output));
                 }
                 Ok(JumpSessionEvent::Eof) => {
+                    captured_output.push_str(&decoder.finish());
                     let message = trim_ssh_output(&captured_output);
                     return Err(if message.is_empty() {
                         "sftp exited before becoming ready".to_string()
@@ -1360,13 +1382,16 @@ pub(crate) fn open_native_ssh_control_session(
 
         let started_at = Instant::now();
         let mut captured_output = String::new();
+        // #194: same reason as wait_for_sftp_prompt — one decoder for the stream.
+        let mut decoder = crate::Utf8StreamDecoder::default();
         loop {
             loop {
                 match output_receiver.try_recv() {
                     Ok(JumpSessionEvent::Output(output)) => {
-                        captured_output.push_str(&output);
+                        captured_output.push_str(&decoder.decode(&output));
                     }
                     Ok(JumpSessionEvent::Error(error)) => {
+                        captured_output.push_str(&decoder.finish());
                         captured_output.push_str(&error);
                         return Err(trim_ssh_output(&captured_output));
                     }

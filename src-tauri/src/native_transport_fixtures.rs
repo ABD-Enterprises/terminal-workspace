@@ -444,12 +444,14 @@ fn collect_external_command_output(
 ) -> String {
     let started_at = Instant::now();
     let mut output = String::new();
+    // #194: the reader sends raw bytes now; decode through one decoder.
+    let mut decoder = crate::Utf8StreamDecoder::default();
 
     while started_at.elapsed() < FIXTURE_TIMEOUT {
         loop {
             match receiver.try_recv() {
                 Ok(JumpSessionEvent::Output(chunk)) => {
-                    output.push_str(&chunk);
+                    output.push_str(&decoder.decode(&chunk));
                     if output.contains(expected_marker) {
                         return output;
                     }
