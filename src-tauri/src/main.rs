@@ -3936,9 +3936,11 @@ fn main() {
                 .path()
                 .app_data_dir()
                 .map_err(|error| format!("could not resolve the app data directory: {error}"))?;
-            app.manage(SharedNativeHostKeyStore::new(NativeHostKeyStore::new(
-                &data_dir,
-            )?));
+            let host_key_store = NativeHostKeyStore::new(&data_dir)?;
+            // #151 slice 2: publish the same path for the OpenSSH-driven jump
+            // path, which needs the location but not the store itself.
+            native_host_keys::publish_durable_known_hosts_path(host_key_store.path().to_path_buf());
+            app.manage(SharedNativeHostKeyStore::new(host_key_store));
 
             let handle = app.handle();
             let menu = build_app_menu(&handle)?;

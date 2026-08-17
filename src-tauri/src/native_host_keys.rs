@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -49,6 +49,29 @@ pub(crate) enum HostKeyVerdict {
 }
 
 pub(crate) type SharedNativeHostKeyStore = Arc<NativeHostKeyStore>;
+
+/// #151 slice 2: the OpenSSH-driven jump path needs the same durable location,
+/// but only as a constant path — it hands verification to `ssh` via a config
+/// file rather than checking keys itself. Threading the store through the five
+/// jump/mosh helper signatures and their 19 call sites purely to carry that
+/// constant would be churn, so the resolved path is published once at setup.
+static DURABLE_KNOWN_HOSTS: OnceLock<PathBuf> = OnceLock::new();
+
+/// Publish the durable store path. Called once from Tauri setup; later calls are
+/// ignored, so a test or a second init cannot repoint trust state at runtime.
+pub(crate) fn publish_durable_known_hosts_path(path: PathBuf) {
+    let _ = DURABLE_KNOWN_HOSTS.set(path);
+}
+
+/// The durable `known_hosts` path, if setup has run.
+///
+/// `None` means the app-data location was never resolved — in that case the jump
+/// path must keep using its per-session file rather than silently writing pins
+/// somewhere unexpected.
+pub(crate) fn durable_known_hosts_path() -> Option<&'static PathBuf> {
+    DURABLE_KNOWN_HOSTS.get()
+}
+
 
 impl NativeHostKeyStore {
     /// `dir` is the app-data directory; the store lives in `<dir>/ssh/known_hosts`.
@@ -75,7 +98,6 @@ impl NativeHostKeyStore {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
