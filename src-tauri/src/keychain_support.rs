@@ -145,7 +145,8 @@ mod tests {
         ));
         // A locked keychain / denied access (any other non-zero) => Unavailable,
         // NOT Missing — so the caller prompts instead of silently using no secret.
-        match classify_keychain_output(&security_output(51, "", "User interaction is not allowed.")) {
+        match classify_keychain_output(&security_output(51, "", "User interaction is not allowed."))
+        {
             KeychainRead::Unavailable(message) => {
                 assert!(message.contains("User interaction is not allowed."))
             }

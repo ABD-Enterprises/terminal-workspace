@@ -95,7 +95,6 @@ pub(crate) fn durable_known_hosts_path() -> Result<&'static PathBuf, String> {
     })
 }
 
-
 impl NativeHostKeyStore {
     /// `dir` is the app-data directory; the store lives in `<dir>/ssh/known_hosts`.
     /// Resolved through Tauri at setup rather than hard-coded, so it follows the
@@ -219,16 +218,15 @@ impl NativeHostKeyStore {
     fn load(&self) -> Result<HashMap<String, (String, String)>, String> {
         let metadata = match fs::symlink_metadata(&self.path) {
             Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(HashMap::new())
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
             Err(error) => return Err(format!("could not read the SSH host-key store: {error}")),
         };
         if !metadata.is_file() {
             // A symlink or directory here means something is manipulating trust
             // state. Refuse rather than follow it.
             return Err(
-                "the SSH host-key store is not a regular file; refusing to authenticate".to_string(),
+                "the SSH host-key store is not a regular file; refusing to authenticate"
+                    .to_string(),
             );
         }
 
@@ -243,10 +241,7 @@ impl NativeHostKeyStore {
             let mut fields = line.split_whitespace();
             match (fields.next(), fields.next(), fields.next()) {
                 (Some(host), Some(algorithm), Some(key)) => {
-                    records.insert(
-                        host.to_string(),
-                        (algorithm.to_string(), key.to_string()),
-                    );
+                    records.insert(host.to_string(), (algorithm.to_string(), key.to_string()));
                 }
                 _ => {
                     return Err(format!(
@@ -333,7 +328,6 @@ impl NativeHostKeyStore {
         }
         Ok(())
     }
-
 }
 
 #[cfg(test)]
@@ -360,8 +354,10 @@ mod tests {
                 .expect("system time should be after unix epoch")
                 .as_nanos();
             let seq = TEMP_ROOT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let root = std::env::temp_dir()
-                .join(format!("tw-host-keys-{label}-{}-{nanos}-{seq}", process::id()));
+            let root = std::env::temp_dir().join(format!(
+                "tw-host-keys-{label}-{}-{nanos}-{seq}",
+                process::id()
+            ));
             fs::create_dir_all(&root).expect("test root should be created");
             Self(root)
         }
@@ -453,8 +449,14 @@ mod tests {
             gate.wait();
             two.verify_or_pin("beta.example", "ssh-rsa", "AAAABETA")
         });
-        assert_eq!(first.join().expect("thread").expect("verdict"), HostKeyVerdict::Pinned);
-        assert_eq!(second.join().expect("thread").expect("verdict"), HostKeyVerdict::Pinned);
+        assert_eq!(
+            first.join().expect("thread").expect("verdict"),
+            HostKeyVerdict::Pinned
+        );
+        assert_eq!(
+            second.join().expect("thread").expect("verdict"),
+            HostKeyVerdict::Pinned
+        );
 
         let reader = NativeHostKeyStore::new(dir.path()).expect("store");
         let mut lines = pin_lines(&reader);
@@ -561,7 +563,10 @@ mod tests {
         let error = store
             .verify_or_pin("other.example", "ssh-ed25519", "AAAAKEY")
             .expect_err("a malformed store must refuse");
-        assert!(error.contains(&store.path().display().to_string()), "{error}");
+        assert!(
+            error.contains(&store.path().display().to_string()),
+            "{error}"
+        );
         assert!(error.contains("delete the file"), "{error}");
         drop(dir);
     }
@@ -687,7 +692,14 @@ mod tests {
         store
             .verify_or_pin("example", "ssh-ed25519", "AAAAKEY1")
             .expect("pin");
-        let mode = fs::metadata(store.path()).expect("stat").permissions().mode();
-        assert_eq!(mode & 0o777, 0o600, "store must not be group/world readable");
+        let mode = fs::metadata(store.path())
+            .expect("stat")
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "store must not be group/world readable"
+        );
     }
 }

@@ -1255,11 +1255,7 @@ fn get_native_session(
     registry: &NativeSessionRegistry,
     session_id: &str,
 ) -> Option<NativeSessionHandle> {
-    registry
-        .sessions
-        .lock_recover()
-        .get(session_id)
-        .cloned()
+    registry.sessions.lock_recover().get(session_id).cloned()
 }
 
 fn insert_native_session(
@@ -1277,10 +1273,7 @@ fn remove_native_session(
     registry: &NativeSessionRegistry,
     session_id: &str,
 ) -> Option<NativeSessionHandle> {
-    registry
-        .sessions
-        .lock_recover()
-        .remove(session_id)
+    registry.sessions.lock_recover().remove(session_id)
 }
 
 /// #148: how many native SSH sessions are currently live. Used to refuse an
@@ -1306,10 +1299,7 @@ fn remove_native_forward(
     registry: &NativeForwardRegistry,
     forward_id: &str,
 ) -> Option<NativeForwardHandle> {
-    registry
-        .forwards
-        .lock_recover()
-        .remove(forward_id)
+    registry.forwards.lock_recover().remove(forward_id)
 }
 
 fn list_native_forwards(
@@ -1326,9 +1316,7 @@ fn list_native_forwards(
 }
 
 fn close_native_forward_handle(handle: NativeForwardHandle) {
-    let mut killer = handle
-        .killer
-        .lock_recover();
+    let mut killer = handle.killer.lock_recover();
     let _ = killer.kill();
 }
 
@@ -1585,7 +1573,9 @@ fn connect_tcp_with_timeout(
             Err(error) => last_error = error.to_string(),
         }
     }
-    Err(format!("could not connect to {hostname}:{port}: {last_error}"))
+    Err(format!(
+        "could not connect to {hostname}:{port}: {last_error}"
+    ))
 }
 
 /// #151: the single host-key decision for the direct ssh2 path.
@@ -2437,9 +2427,7 @@ fn run_native_session_loop(
             }
             Ok(count) => {
                 did_work = true;
-                if let Some(flushed) =
-                    coalescer.push(&buffer[..count], Instant::now())
-                {
+                if let Some(flushed) = coalescer.push(&buffer[..count], Instant::now()) {
                     emit_native_session_output(&app, &session_id, &state, flushed);
                 }
             }
@@ -2510,9 +2498,7 @@ fn open_native_session_stream(
         .ok_or_else(|| "Session stream not found".to_string())?;
 
     let (stream_id, connection_state, buffered_messages) = {
-        let mut state = handle
-            .state
-            .lock_recover();
+        let mut state = handle.state.lock_recover();
         let stream_id = state
             .stream_id
             .clone()
@@ -2562,11 +2548,7 @@ fn send_native_session_stream(
     let handle = get_native_session(registry, &request.session_id)
         .ok_or_else(|| "Session stream not found".to_string())?;
 
-    let active_stream_id = handle
-        .state
-        .lock_recover()
-        .stream_id
-        .clone();
+    let active_stream_id = handle.state.lock_recover().stream_id.clone();
 
     if active_stream_id.as_deref() != Some(request.stream_id.as_str()) {
         return Err("Session stream is stale".to_string());
@@ -2588,9 +2570,7 @@ fn close_native_session_stream(
     request: SessionStreamRequest,
 ) -> Option<BackendBooleanResponse> {
     let handle = get_native_session(registry, &request.session_id)?;
-    let mut state = handle
-        .state
-        .lock_recover();
+    let mut state = handle.state.lock_recover();
 
     let should_detach = match (&request.stream_id, &state.stream_id) {
         (Some(request_stream_id), Some(active_stream_id)) => request_stream_id == active_stream_id,
@@ -2879,8 +2859,8 @@ async fn terminal_workspace_copy_key_to_host(
     tauri::async_runtime::spawn_blocking(move || {
         copy_key_to_host_blocking(&request, host_key_store.as_ref())
     })
-        .await
-        .map_err(|error| error.to_string())?
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[derive(Debug, Deserialize)]
@@ -4178,8 +4158,10 @@ mod tests {
     /// BEFORE any connect, so they never reach the store. A throwaway one keeps
     /// them honest about that rather than mocking the type away.
     /// #274: counter, not clock — see native_transport's test_suffix.
-    static KEYCHAIN_ACCOUNT_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    static COPYKEY_ROOT_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static KEYCHAIN_ACCOUNT_SEQ: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+    static COPYKEY_ROOT_SEQ: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
 
     fn throwaway_host_key_store(label: &str) -> NativeHostKeyStore {
         let nanos = std::time::SystemTime::now()
@@ -4187,8 +4169,10 @@ mod tests {
             .expect("system time should be after unix epoch")
             .as_nanos();
         let seq = COPYKEY_ROOT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let root = std::env::temp_dir()
-            .join(format!("tw-copykey-{label}-{}-{nanos}-{seq}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "tw-copykey-{label}-{}-{nanos}-{seq}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&root).expect("test root should be created");
         NativeHostKeyStore::new(&root).expect("store")
     }
@@ -4200,7 +4184,10 @@ mod tests {
     struct StalledWriter;
     impl std::io::Write for StalledWriter {
         fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::new(std::io::ErrorKind::WouldBlock, "stalled"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "stalled",
+            ))
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
@@ -4217,7 +4204,10 @@ mod tests {
             write_all_with_deadline(&mut writer, b"a large paste", Duration::from_millis(50));
         let elapsed = start.elapsed();
         assert!(result.is_err(), "a stalled write must return Err, not hang");
-        assert!(elapsed >= Duration::from_millis(50), "must respect the deadline");
+        assert!(
+            elapsed >= Duration::from_millis(50),
+            "must respect the deadline"
+        );
         assert!(
             elapsed < Duration::from_secs(2),
             "must not hang well past the deadline; took {elapsed:?}"
@@ -4342,11 +4332,8 @@ mod tests {
 
     #[test]
     fn test_connect_timeout_rejects_unresolvable_host() {
-        let result = connect_tcp_with_timeout(
-            "no-such-host.invalid",
-            22,
-            Duration::from_millis(300),
-        );
+        let result =
+            connect_tcp_with_timeout("no-such-host.invalid", 22, Duration::from_millis(300));
         assert!(result.is_err(), "an unresolvable host must return Err");
     }
 
@@ -4380,7 +4367,9 @@ mod tests {
         // take) must equal the exact input byte sequence, in order.
         let mut c = OutputCoalescer::new(Duration::from_millis(12), 32);
         let t0 = Instant::now();
-        let inputs = ["alpha", "-", "beta", "-", "gamma", "-", "delta", "-", "epsilon"];
+        let inputs = [
+            "alpha", "-", "beta", "-", "gamma", "-", "delta", "-", "epsilon",
+        ];
         let mut out = String::new();
         for chunk in inputs {
             if let Some(flushed) = c.push(chunk.as_bytes(), t0) {
@@ -4535,7 +4524,10 @@ mod tests {
             seen.push(receiver.recv().expect("event"));
         }
 
-        blocked.join().expect("thread").expect("the blocked send delivers");
+        blocked
+            .join()
+            .expect("thread")
+            .expect("the blocked send delivers");
         match seen.last().expect("last event") {
             JumpSessionEvent::Output(bytes) => assert_eq!(bytes, b"after-the-block"),
             _ => panic!("the blocked event must arrive last and intact"),
@@ -4561,7 +4553,10 @@ mod tests {
             }
         }
 
-        assert_eq!(out, "€", "a split scalar must survive intact, not become U+FFFD");
+        assert_eq!(
+            out, "€",
+            "a split scalar must survive intact, not become U+FFFD"
+        );
     }
 
     #[test]
@@ -4776,7 +4771,8 @@ mod tests {
             private_key_path: "~/.ssh/id_ed25519".to_string(),
             host,
         };
-        let response = copy_key_to_host_blocking(&request, &throwaway_host_key_store("refusal")).expect("returns a structured response, not Err");
+        let response = copy_key_to_host_blocking(&request, &throwaway_host_key_store("refusal"))
+            .expect("returns a structured response, not Err");
         assert!(!response.ok, "the host must be refused");
     }
 
@@ -4790,7 +4786,8 @@ mod tests {
             private_key_path: "~/.ssh/id_ed25519".to_string(),
             host,
         };
-        let response = copy_key_to_host_blocking(&request, &throwaway_host_key_store("refusal")).expect("returns a structured response, not Err");
+        let response = copy_key_to_host_blocking(&request, &throwaway_host_key_store("refusal"))
+            .expect("returns a structured response, not Err");
         assert!(!response.ok, "the host must be refused");
     }
 
@@ -5074,7 +5071,10 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
             .expect("system time should be after unix epoch")
             .as_nanos();
         let seq = KEYCHAIN_ACCOUNT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let fingerprint = format!("SHA256:term-snip-test-{}-{unique_suffix}-{seq}", process::id());
+        let fingerprint = format!(
+            "SHA256:term-snip-test-{}-{unique_suffix}-{seq}",
+            process::id()
+        );
         let service = format!("{KEYCHAIN_KEY_PASSPHRASE_SERVICE}.tests");
 
         store_keychain_secret(&service, &fingerprint, "key-pass")
@@ -5103,7 +5103,10 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
             .expect("system time should be after unix epoch")
             .as_nanos();
         let seq = KEYCHAIN_ACCOUNT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let identity_id = format!("termsnip-identity-test-{}-{unique_suffix}-{seq}", process::id());
+        let identity_id = format!(
+            "termsnip-identity-test-{}-{unique_suffix}-{seq}",
+            process::id()
+        );
         let service = format!("{KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE}.tests");
 
         store_keychain_secret(&service, &identity_id, "identity-pass")

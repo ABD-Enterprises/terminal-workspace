@@ -546,7 +546,9 @@ pub(crate) fn build_prompt_responses(host: &BackendHostConnection) -> Vec<Prompt
 /// `[u8]` has `contains` for a single byte but not for a subslice, so the
 /// substring search is spelled out.
 fn contains_ascii_subslice(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack.windows(needle.len()).any(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 /// #194: matches on raw bytes so the caller can keep an undecoded prompt
@@ -2103,7 +2105,11 @@ mod tests {
             write_private_file(&path, b"second", 0o600).is_err(),
             "writing over an existing path must fail"
         );
-        assert_eq!(fs::read(&path).unwrap(), b"first", "original content preserved");
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            b"first",
+            "original content preserved"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -2113,7 +2119,10 @@ mod tests {
         let path = root.join("passphrase");
         fs::write(&path, b"super-secret").unwrap();
         scrub_passphrase_file(&path, "super-secret".len());
-        assert!(!path.exists(), "passphrase file must be removed after scrub");
+        assert!(
+            !path.exists(),
+            "passphrase file must be removed after scrub"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -2552,7 +2561,9 @@ mod tests {
 
         let result = build_native_ssh_config(&host, &root, &known_hosts, None);
 
-        let error = result.err().expect("an unpinned hop must refuse, not fall back");
+        let error = result
+            .err()
+            .expect("an unpinned hop must refuse, not fall back");
         assert!(
             error.contains("never initialised"),
             "the refusal should say what is missing: {error}"
