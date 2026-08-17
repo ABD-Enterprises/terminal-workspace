@@ -56,3 +56,21 @@ Hard rules:
 - Secret-resolution commands run UNSANDBOXED. Any `.ai/secrets.json` `exec:` source — or any command that fetches a secret from a local secret manager, agent, keychain, or socket (whatever you use: `pass`, `gopass`, `vault`, a cloud provider's secrets CLI, an OS keychain, 1Password's `op`, …) — MUST run with the agent Bash sandbox disabled. The sandbox blocks the local socket/agent these tools rely on, so they fail misleadingly (auth timeouts, "not signed in", or hangs) even when correctly configured and unlocked. That is the sandbox, NOT a real auth failure — do not loop or ask the operator to re-authenticate; re-run unsandboxed. Only if the unsandboxed command still errors does an actual credential problem apply. See `docs/credentials.md`.
 
 <!-- END ORC-STANDARDS LOCAL ADAPTER -->
+
+## Repo-specific notes
+
+### Changes to the PTY readers, session loops, or `native_transport` capture loops
+
+Run the localhost sshd fixture before pushing:
+
+```bash
+TERMSNIP_RUN_SSH_FIXTURE=1 bash scripts/validate.sh
+```
+
+It is `#[ignore]`d (it needs a real sshd and an unsandboxed shell), so the
+default gate skips it — and it is the only test that exercises the real
+transport. The failure mode in that code is a **hang**, not a failing assertion,
+so a green unit suite is not evidence there. #193 shipped a reader change with
+30 consecutive clean local runs behind it and still deadlocked the ControlMaster
+PTY; this fixture reproduces that in 10 seconds, while CI took 30 minutes to
+report it as a timeout that looked like infra.
