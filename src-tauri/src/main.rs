@@ -25,7 +25,9 @@ use tauri::menu::{AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, Subm
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tokio::sync::mpsc::{
-    error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender,
+    channel,
+    error::{TryRecvError, TrySendError},
+    Receiver, Sender,
 };
 
 mod keychain_support;
@@ -68,6 +70,16 @@ const NATIVE_SESSION_PROMPT_WINDOW_SIZE: usize = 512;
 /// batch. Smaller would backpressure before the loop can assemble one normal
 /// batch; larger just holds more output without improving latency or ordering.
 const NATIVE_SESSION_EVENT_CHANNEL_CAPACITY: usize = 16;
+/// #205: bound on the renderer -> session-loop input channel.
+///
+/// It was unbounded, so a renderer feeding a session whose write path is stalled
+/// could queue keystrokes and resizes without limit. 32 holds roughly half a
+/// second even at 60 input events per second — well past any human typing rate,
+/// and an xterm paste arrives as ONE event rather than one per character. The
+/// loops drain with an inner try_recv until empty, so they consume faster than
+/// this fills. A full queue therefore means the session is genuinely stalled,
+/// not merely busy, and more buffering would only postpone saying so.
+const NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY: usize = 32;
 const NATIVE_SESSION_POLL_INTERVAL_MS: u64 = 10;
 /// Max time a write to an SSH channel may make NO progress before it is treated
 /// as a stalled remote and aborted, so it cannot wedge the session loop. This is
@@ -295,7 +307,7 @@ struct NativeForwardRegistry {
 
 #[derive(Clone)]
 struct NativeSessionHandle {
-    command_sender: UnboundedSender<NativeSessionCommand>,
+    command_sender: Sender<NativeSessionCommand>,
     host: BackendHostConnection,
     state: Arc<Mutex<NativeSessionState>>,
 }
@@ -1873,7 +1885,7 @@ fn run_external_command_session_loop(
     session_id: String,
     state: Arc<Mutex<NativeSessionState>>,
     host: BackendHostConnection,
-    mut receiver: UnboundedReceiver<NativeSessionCommand>,
+    mut receiver: Receiver<NativeSessionCommand>,
 ) {
     let mut cleanup_dir = None;
     let result = (|| -> Result<(), String> {
@@ -2081,7 +2093,7 @@ fn run_jump_host_session_loop(
     session_id: String,
     state: Arc<Mutex<NativeSessionState>>,
     host: BackendHostConnection,
-    mut receiver: UnboundedReceiver<NativeSessionCommand>,
+    mut receiver: Receiver<NativeSessionCommand>,
 ) {
     let session_dir = match create_native_ssh_session_dir(&session_id) {
         Ok(path) => path,
@@ -2396,7 +2408,7 @@ fn run_native_session_loop(
     state: Arc<Mutex<NativeSessionState>>,
     session: Session,
     mut channel: Channel,
-    mut receiver: UnboundedReceiver<NativeSessionCommand>,
+    mut receiver: Receiver<NativeSessionCommand>,
 ) {
     // The direct-SSH connect already succeeded before this loop was spawned, so
     // the session is connected the moment we start. Emit it here (like the
@@ -2580,10 +2592,23 @@ fn send_native_session_stream(
         return Err("Session stream is stale".to_string());
     }
 
+    // #205: try_send, never blocking. Close and Resize are async commands that
+    // Tauri spawns onto the tokio runtime, where a blocking send panics; this
+    // one is synchronous and would instead freeze the IPC thread for as long as
+    // the session stays stalled. Neither is acceptable, so a full queue is
+    // reported rather than waited on.
+    //
+    // The error deliberately does NOT include the rejected input: it is
+    // keystrokes, which may be a password being typed at a prompt.
     handle
         .command_sender
-        .send(NativeSessionCommand::Input(request.data))
-        .map_err(|_| "Session stream is closed".to_string())?;
+        .try_send(NativeSessionCommand::Input(request.data))
+        .map_err(|error| match error {
+            TrySendError::Full(_) => {
+                "Session input queue is full; the session is not draining input".to_string()
+            }
+            TrySendError::Closed(_) => "Session stream is closed".to_string(),
+        })?;
 
     Ok(BackendBooleanResponse {
         ok: true,
@@ -3753,7 +3778,7 @@ async fn terminal_workspace_create_backend_session(
     // "connected" below could also overwrite the loop's terminal state on an
     // instant failure. Inserting first makes the loop's remove-on-exit correct,
     // and each loop now owns its own connected/disconnected transitions.
-    let (command_sender, command_receiver) = unbounded_channel();
+    let (command_sender, command_receiver) = channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
     insert_native_session(
         native_sessions.inner(),
         &session_id,
@@ -3840,7 +3865,12 @@ async fn terminal_workspace_close_backend_session(
 ) -> Result<BackendBooleanResponse, String> {
     if let Some(handle) = remove_native_session(native_sessions.inner(), &request.session_id) {
         close_native_forwards_for_session(native_forwards.inner(), &request.session_id);
-        let _ = handle.command_sender.send(NativeSessionCommand::Close);
+        // #205: still fire-and-forget, and still correct on a bounded channel.
+        // Close is a promptness optimisation, not the shutdown guarantee: the
+        // handle was just removed from the registry above, so once it and any
+        // transient clone drop, the channel disconnects and every loop already
+        // treats TryRecvError::Disconnected as close.
+        let _ = handle.command_sender.try_send(NativeSessionCommand::Close);
         return Ok(BackendBooleanResponse {
             ok: true,
             pending: None,
@@ -3858,11 +3888,16 @@ async fn terminal_workspace_resize_backend_session(
     if let Some(handle) = get_native_session(native_sessions.inner(), &request.session_id) {
         handle
             .command_sender
-            .send(NativeSessionCommand::Resize {
+            .try_send(NativeSessionCommand::Resize {
                 cols: request.payload.cols,
                 rows: request.payload.rows,
             })
-            .map_err(|_| "Session stream is closed".to_string())?;
+            .map_err(|error| match error {
+                TrySendError::Full(_) => {
+                    "Session input queue is full; the session is not draining input".to_string()
+                }
+                TrySendError::Closed(_) => "Session stream is closed".to_string(),
+            })?;
 
         return Ok(BackendBooleanResponse {
             ok: true,
@@ -4323,7 +4358,7 @@ mod tests {
             "registry read should recover from poisoning"
         );
 
-        let (command_sender, _command_receiver) = unbounded_channel();
+        let (command_sender, _command_receiver) = channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
         insert_native_session(
             &registry,
             "s1",
@@ -4696,6 +4731,76 @@ mod tests {
         );
     }
 
+    /// #205: the renderer -> loop input channel is bounded, so a session whose
+    /// write path has stalled cannot let the renderer queue keystrokes without
+    /// limit. Past capacity the send is REFUSED rather than dropped — silently
+    /// discarding a keystroke is the one outcome the ticket forbids.
+    #[tokio::test]
+    async fn input_channel_refuses_rather_than_growing_without_limit() {
+        let (sender, mut receiver) =
+            channel::<NativeSessionCommand>(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
+
+        for index in 0..NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY {
+            sender
+                .try_send(NativeSessionCommand::Input(format!("keystroke-{index}")))
+                .expect("the queue accepts up to its capacity");
+        }
+
+        let overflow = sender
+            .try_send(NativeSessionCommand::Input("one too many".to_string()))
+            .expect_err("past capacity the queue must refuse, not grow");
+        assert!(matches!(overflow, TrySendError::Full(_)));
+
+        // Nothing already accepted was lost, and order is preserved.
+        for index in 0..NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY {
+            match receiver.recv().await.expect("queued input") {
+                NativeSessionCommand::Input(data) => {
+                    assert_eq!(data, format!("keystroke-{index}"));
+                }
+                _ => panic!("expected an Input command"),
+            }
+        }
+
+        // And draining frees capacity again, so a stall that clears resumes.
+        sender
+            .try_send(NativeSessionCommand::Input("after drain".to_string()))
+            .expect("capacity returns once the loop drains");
+    }
+
+    /// #205: Close is fire-and-forget and stays that way on a bounded channel.
+    ///
+    /// It is a promptness optimisation, not the shutdown guarantee. Dropping
+    /// the sender disconnects the channel, and every session loop already
+    /// treats a disconnected receiver as close — so a Close that cannot be
+    /// queued still terminates the session.
+    #[tokio::test]
+    async fn a_dropped_sender_still_closes_a_session_whose_queue_is_full() {
+        let (sender, mut receiver) =
+            channel::<NativeSessionCommand>(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
+        for _ in 0..NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY {
+            sender
+                .try_send(NativeSessionCommand::Input("filler".to_string()))
+                .expect("fill");
+        }
+
+        // The registry has already removed the handle at this point, so the
+        // Close that cannot fit is discarded exactly as production discards it.
+        assert!(matches!(
+            sender.try_send(NativeSessionCommand::Close),
+            Err(TrySendError::Full(_))
+        ));
+        drop(sender);
+
+        // Drain what was queued, then observe the disconnect the loops act on.
+        for _ in 0..NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY {
+            receiver.recv().await.expect("queued filler");
+        }
+        assert!(
+            receiver.recv().await.is_none(),
+            "a dropped sender must surface as disconnect, which is what closes the loop"
+        );
+    }
+
     #[test]
     fn test_registry_insert_remove_leaves_no_orphan() {
         // create_backend_session now inserts the handle BEFORE spawning the loop
@@ -4704,7 +4809,7 @@ mod tests {
         // no orphaned handle, and on a racing double-remove being a harmless
         // no-op. This pins that invariant.
         let registry = NativeSessionRegistry::default();
-        let (command_sender, _command_receiver) = unbounded_channel();
+        let (command_sender, _command_receiver) = channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
         insert_native_session(
             &registry,
             "s1",
