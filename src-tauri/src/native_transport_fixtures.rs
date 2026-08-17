@@ -12,7 +12,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::channel;
 
 const FIXTURE_TIMEOUT: Duration = Duration::from_secs(15);
 const FIXTURE_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -408,7 +408,8 @@ fn insert_fixture_session(
     session_id: &str,
     host: BackendHostConnection,
 ) {
-    let (command_sender, _command_receiver) = unbounded_channel();
+    let (command_sender, _command_receiver) =
+        channel(crate::NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
     insert_native_session(
         registry,
         session_id,
