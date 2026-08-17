@@ -1807,12 +1807,16 @@ fn spawn_jump_session_reader<S: JumpSessionEventSender>(
                     // before it can drain. Sending while holding it is the one
                     // way to turn this into a deadlock.
                     //
-                    // #193: a failed send means the receiver is gone, so stop
-                    // reading. It used to be discarded, which left the thread
-                    // draining the PTY into nothing until the PTY itself closed.
-                    if sender.send_event(JumpSessionEvent::Output(output)).is_err() {
-                        break;
-                    }
+                    // #193: a FAILED send is deliberately ignored rather than
+                    // ending the thread, which looks like a leak and is not.
+                    // with_native_ssh_control_session leaves its ControlMaster
+                    // child running on purpose and drops this receiver when it
+                    // returns (native_transport.rs:1424). Nothing else drains
+                    // that PTY, so a reader that stopped here would let its
+                    // buffer fill, block `ssh` on write, and hang every later
+                    // operation multiplexed over that control socket. Draining
+                    // until EOF is the job; the thread ends when the PTY closes.
+                    let _ = sender.send_event(JumpSessionEvent::Output(output));
                 }
                 Err(error) => {
                     let _ = sender.send_event(JumpSessionEvent::Error(error.to_string()));
@@ -1837,15 +1841,10 @@ fn spawn_local_session_reader<S: JumpSessionEventSender>(
                     break;
                 }
                 Ok(count) => {
-                    // #193: see spawn_jump_session_reader — a failed send means
-                    // the receiver is gone, so stop reading rather than draining
-                    // the PTY into nothing.
-                    if sender
-                        .send_event(JumpSessionEvent::Output(buffer[..count].to_vec()))
-                        .is_err()
-                    {
-                        break;
-                    }
+                    // #193: see spawn_jump_session_reader — a failed send must
+                    // NOT end this thread. Draining the PTY until EOF is what
+                    // keeps its writer from blocking.
+                    let _ = sender.send_event(JumpSessionEvent::Output(buffer[..count].to_vec()));
                 }
                 Err(error) => {
                     let _ = sender.send_event(JumpSessionEvent::Error(error.to_string()));
@@ -4416,31 +4415,66 @@ mod tests {
         );
     }
 
-    /// A reader that always has more to give — the shape that makes the
-    /// unbounded hop dangerous, and the only shape that can prove the exit
-    /// behaviour: dropping a receiver cannot interrupt a blocked `read`, so a
-    /// reader that ever waits for input would pass either way.
-    struct EndlessReader {
-        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        exited: std::sync::mpsc::Sender<()>,
-    }
-
-    impl std::io::Read for EndlessReader {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            if self.stop.load(std::sync::atomic::Ordering::SeqCst) {
-                return Ok(0);
-            }
-            let count = buf.len().min(64);
-            buf[..count].fill(b'x');
-            Ok(count)
+    /// #193: the readers MUST keep draining after their receiver is gone, and
+    /// must stop only at EOF.
+    ///
+    /// This looks like a thread leak and is not. `with_native_ssh_control_session`
+    /// deliberately leaves its ControlMaster child running and drops the receiver
+    /// when it returns (native_transport.rs:1424); nothing else drains that PTY.
+    /// A reader that exited on the first failed send let the buffer fill, blocked
+    /// `ssh` on write, and hung every later operation multiplexed over that
+    /// control socket — which is exactly how it presented: the localhost sshd
+    /// fixture timed out after 30 minutes in CI while the whole suite passed
+    /// locally in a second.
+    #[test]
+    fn test_readers_keep_draining_after_their_receiver_is_gone() {
+        /// Yields a fixed number of chunks, then EOF, counting reads.
+        struct CountingReader {
+            remaining: usize,
+            reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
         }
-    }
 
-    impl Drop for EndlessReader {
-        fn drop(&mut self) {
-            // Fires when the reader thread returns, so the test observes the
-            // thread ending rather than inferring it from a timeout.
-            let _ = self.exited.send(());
+        impl std::io::Read for CountingReader {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if self.remaining == 0 {
+                    return Ok(0);
+                }
+                self.remaining -= 1;
+                buf[0] = b'x';
+                Ok(1)
+            }
+        }
+
+        for jump in [false, true] {
+            let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let (sender, receiver) = native_session_event_channel();
+            // The receiver is gone before a single byte is read, so EVERY send
+            // fails. The reader still has to consume all 8 chunks.
+            drop(receiver);
+
+            let reader = Box::new(CountingReader {
+                remaining: 8,
+                reads: reads.clone(),
+            });
+            if jump {
+                let writer: Arc<Mutex<Box<dyn std::io::Write + Send>>> =
+                    Arc::new(Mutex::new(Box::new(std::io::sink())));
+                spawn_jump_session_reader(reader, writer, Vec::new(), sender);
+            } else {
+                spawn_local_session_reader(reader, sender);
+            }
+
+            // 8 chunks plus the read that returns EOF.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while reads.load(std::sync::atomic::Ordering::SeqCst) < 9 && Instant::now() < deadline {
+                thread::yield_now();
+            }
+            assert_eq!(
+                reads.load(std::sync::atomic::Ordering::SeqCst),
+                9,
+                "reader (jump={jump}) must drain to EOF even with no receiver"
+            );
         }
     }
 
@@ -4501,54 +4535,6 @@ mod tests {
             JumpSessionEvent::Output(bytes) => assert_eq!(bytes, b"after-the-block"),
             _ => panic!("the blocked event must arrive last and intact"),
         }
-    }
-
-    #[test]
-    fn test_local_reader_exits_when_the_receiver_is_gone() {
-        // #193: this used to leak. A failed send was discarded, so the thread
-        // kept reading and throwing output away until the PTY itself closed.
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (exited, exit_signal) = std::sync::mpsc::channel();
-        let (sender, receiver) = native_session_event_channel();
-        drop(receiver);
-
-        spawn_local_session_reader(
-            Box::new(EndlessReader {
-                stop: stop.clone(),
-                exited,
-            }),
-            sender,
-        );
-
-        let ended = exit_signal.recv_timeout(Duration::from_secs(5));
-        // Let the thread finish even if the assertion below fails, so a failing
-        // run does not leave a thread spinning on the endless reader.
-        stop.store(true, std::sync::atomic::Ordering::SeqCst);
-        ended.expect("the reader must exit once its receiver is gone");
-    }
-
-    #[test]
-    fn test_jump_reader_exits_when_the_receiver_is_gone() {
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (exited, exit_signal) = std::sync::mpsc::channel();
-        let (sender, receiver) = native_session_event_channel();
-        drop(receiver);
-
-        let writer: Arc<Mutex<Box<dyn std::io::Write + Send>>> =
-            Arc::new(Mutex::new(Box::new(std::io::sink())));
-        spawn_jump_session_reader(
-            Box::new(EndlessReader {
-                stop: stop.clone(),
-                exited,
-            }),
-            writer,
-            Vec::new(),
-            sender,
-        );
-
-        let ended = exit_signal.recv_timeout(Duration::from_secs(5));
-        stop.store(true, std::sync::atomic::Ordering::SeqCst);
-        ended.expect("the reader must exit once its receiver is gone");
     }
 
     #[test]
