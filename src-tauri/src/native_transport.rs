@@ -921,16 +921,18 @@ pub(crate) fn build_native_ssh_config(
         // the per-session file is deleted on teardown — so OpenSSH re-pinned on
         // every connect and the hop was first-use-forever, the same defect the
         // direct path had. Point those at the durable store instead so the pin
-        // survives. If setup never resolved it, fall back to the per-session
-        // file rather than guessing a location.
+        // survives.
+        //
+        // #151 slice 3: if setup never resolved the durable location this now
+        // REFUSES rather than falling back to the per-session file. The fallback
+        // reinstated first-use-forever precisely when something had already gone
+        // wrong, which is the worst moment to quietly downgrade trust.
         let hop_is_pinned =
             connection.known_host_public_key.is_some() && connection.known_host_algorithm.is_some();
         let hop_known_hosts = if hop_is_pinned {
             known_hosts_path.clone()
         } else {
-            crate::native_host_keys::durable_known_hosts_path()
-                .cloned()
-                .unwrap_or_else(|| known_hosts_path.clone())
+            crate::native_host_keys::durable_known_hosts_path()?.clone()
         };
         lines.push(format!(
             "  UserKnownHostsFile {}",
@@ -938,6 +940,13 @@ pub(crate) fn build_native_ssh_config(
         ));
         // Never let OpenSSH add or rotate keys behind our back after auth.
         lines.push("  UpdateHostKeys no".to_string());
+        // #151 slice 3: this file is shared with our own writer, which records
+        // plain hostnames. A host whose /etc/ssh/ssh_config turns HashKnownHosts
+        // on would have ssh write `|1|salt|hash` entries here — parseable, but
+        // never matchable against a plain pattern, so the two writers would stop
+        // seeing each other's pins and each keep appending its own. Pin the form
+        // rather than inherit it.
+        lines.push("  HashKnownHosts no".to_string());
         if let Some(control_path) = control_path {
             lines.push("  ControlMaster auto".to_string());
             lines.push(format!("  ControlPath {}", control_path.to_string_lossy()));
@@ -2486,15 +2495,18 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
-    /// #151 slice 2: an unpinned hop must NOT be pointed at the per-session
-    /// known_hosts file, because that file is remove_dir_all'd on teardown — so
-    /// OpenSSH's accept-new pin never survived and every connect was a first
-    /// use. With no durable path published (as in this unit test) the config
-    /// must still fall back to the session file rather than inventing a path,
-    /// and it must always set UpdateHostKeys no so ssh cannot rotate keys after
-    /// authenticating.
+    /// #151 slice 3: with no durable path published — which is the state of any
+    /// unit test, and of a process whose setup never ran — an unpinned hop must
+    /// REFUSE rather than build a config.
+    ///
+    /// This inverts the slice-2 assertion deliberately. Falling back to the
+    /// per-session file looked harmless, but that file is remove_dir_all'd on
+    /// teardown, so the fallback silently restored first-use-forever exactly
+    /// when something had already gone wrong. Refusing is what makes the
+    /// publish-before-connect ordering in main.rs setup a guarded invariant
+    /// instead of a coincidence of statement order.
     #[test]
-    fn unpinned_hop_config_disables_host_key_updates_and_keeps_accept_new() {
+    fn unpinned_hop_refuses_without_a_durable_store() {
         let root = test_root("jump-known-hosts");
         let mut host = test_host(Path::new("/tmp/tw-unused-key"), "");
         host.known_host_public_key = None;
@@ -2502,24 +2514,38 @@ mod tests {
         let known_hosts = root.join("known_hosts");
         fs::write(&known_hosts, "").expect("seed known_hosts");
 
-        // build_native_ssh_config returns (config_path, target_alias); the
-        // config body is the file it writes.
+        let result = build_native_ssh_config(&host, &root, &known_hosts, None);
+
+        let error = result.err().expect("an unpinned hop must refuse, not fall back");
+        assert!(
+            error.contains("never initialised"),
+            "the refusal should say what is missing: {error}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A PINNED hop is unaffected by the above: it carries its own key, writes
+    /// the per-session file from it, and never consults the durable store — so
+    /// it must still build here, with the strict setting and the shared-format
+    /// pin that keeps our writer and ssh reading the same records.
+    #[test]
+    fn pinned_hop_still_builds_without_a_durable_store() {
+        let root = test_root("jump-known-hosts-pinned");
+        let host = test_host(Path::new("/tmp/tw-unused-key"), "");
+        let known_hosts = root.join("known_hosts");
+        fs::write(&known_hosts, "").expect("seed known_hosts");
+
         let (config_path, _alias) =
             build_native_ssh_config(&host, &root, &known_hosts, None).expect("config builds");
         let config = fs::read_to_string(&config_path).expect("config file");
 
         assert!(
-            config.contains("StrictHostKeyChecking accept-new"),
-            "an unpinned hop must stay accept-new, never `no`: {config}"
-        );
-        assert!(
             config.contains("UpdateHostKeys no"),
             "ssh must not rotate host keys behind us: {config}"
         );
-        // No durable path is published in a unit test, so the fallback applies.
         assert!(
-            config.contains(&known_hosts.to_string_lossy().to_string()),
-            "without a published durable path the session file is the fallback: {config}"
+            config.contains("HashKnownHosts no"),
+            "hashed entries would be unmatchable against our plain records: {config}"
         );
         let _ = fs::remove_dir_all(&root);
     }
