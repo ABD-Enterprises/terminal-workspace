@@ -1047,6 +1047,26 @@ fn validate_network_host(
     Ok(())
 }
 
+/// #152(a): telnet takes the hostname as a bare positional argument
+/// (`main.rs`'s telnet branch does `command.arg(host.hostname)`), so a hostname
+/// beginning with `-` is handed to the client where it reads a flag.
+///
+/// Rejecting is deliberate rather than inserting a `--` separator. Apple's
+/// telnet uses getopt and would honour `--`, but `TERMSNIP_TELNET_PATH` lets an
+/// operator substitute a different client whose parser we have not verified —
+/// and a value that must never be a flag is better refused than escaped for one
+/// specific implementation. No DNS name, IPv4 or IPv6 literal can begin with a
+/// dash, so nothing legitimate is lost.
+fn validate_telnet_host(host: &BackendHostConnection) -> Result<(), String> {
+    validate_network_host(host, false)?;
+
+    if host.hostname.starts_with('-') {
+        return Err("Telnet hostname cannot start with '-'".to_string());
+    }
+
+    Ok(())
+}
+
 fn validate_mosh_host(host: &BackendHostConnection) -> Result<(), String> {
     validate_network_host(host, true)?;
 
@@ -1172,6 +1192,10 @@ fn build_external_command_session_spec(
                 &["/usr/bin/screen", "screen"],
             ) {
                 let mut command = CommandBuilder::new(executable);
+                // #152(a): the configured device is data even when its name
+                // begins with '-'. screen's parser consumes `--` and stops
+                // reading options, so the device cannot be taken as a flag.
+                command.arg("--");
                 command.arg(host.hostname.clone());
                 command.arg(host.port.to_string());
                 command
@@ -1481,7 +1505,7 @@ fn validate_session_target(host: &BackendHostConnection) -> Result<(), String> {
     match host.protocol.as_str() {
         "localShell" => Ok(()),
         "ssh" => validate_ssh_host(host),
-        "telnet" => validate_network_host(host, false),
+        "telnet" => validate_telnet_host(host),
         "serial" => validate_network_host(host, false),
         "mosh" => validate_mosh_host(host),
         other => Err(format!("Unsupported session protocol: {other}")),
@@ -4945,6 +4969,131 @@ mod tests {
         assert!(validate_session_target(&telnet_host).is_ok());
         assert!(validate_session_target(&serial_host).is_ok());
         assert!(validate_session_target(&mosh_host).is_ok());
+    }
+
+    /// #152(a): telnet takes the hostname as a bare positional argument, so a
+    /// hostname beginning with `-` reaches the client where it reads a flag.
+    /// Against the pre-fix code this passes validation and `--version` would be
+    /// handed to telnet as an option.
+    #[test]
+    fn rejects_a_telnet_hostname_that_would_read_as_a_flag() {
+        let host = BackendHostConnection {
+            agent_forwarding: false,
+            auth_method: "none".to_string(),
+            environment: None,
+            host_key_policy: None,
+            hostname: "--version".to_string(),
+            jump_host: None,
+            known_host_algorithm: None,
+            known_host_public_key: None,
+            password: "".to_string(),
+            passphrase: "".to_string(),
+            port: 23,
+            private_key_path: "".to_string(),
+            protocol: "telnet".to_string(),
+            sftp_root: None,
+            username: "".to_string(),
+        };
+
+        let error = validate_session_target(&host)
+            .expect_err("a leading-dash telnet hostname must be refused");
+        assert!(error.contains("cannot start with"), "{error}");
+
+        // A single dash is enough to be read as an option cluster.
+        let short = BackendHostConnection {
+            hostname: "-l".to_string(),
+            ..host.clone()
+        };
+        assert!(validate_session_target(&short).is_err());
+
+        // And an ordinary hostname is untouched — nothing legitimate starts
+        // with a dash.
+        let ordinary = BackendHostConnection {
+            hostname: "legacy.internal".to_string(),
+            ..host.clone()
+        };
+        assert!(validate_session_target(&ordinary).is_ok());
+
+        // Serial is deliberately NOT covered by this rule: `screen` gets a `--`
+        // separator instead, and `cu`'s shape (`-l <device>`) already consumes
+        // the value as an argument rather than an option. Verified against the
+        // installed cu: `cu -l --version -s 9600` reports "--version: Line in
+        // use", i.e. it took it as a device name.
+        let serial = BackendHostConnection {
+            hostname: "-dev-oddly-named".to_string(),
+            port: 115200,
+            protocol: "serial".to_string(),
+            ..host.clone()
+        };
+        assert!(validate_session_target(&serial).is_ok());
+    }
+
+    /// #152(a): the serial device is data even when its name begins with `-`,
+    /// so the screen invocation must carry a `--` separator ahead of it.
+    #[test]
+    fn serial_screen_invocation_separates_options_from_the_device() {
+        let host = BackendHostConnection {
+            agent_forwarding: false,
+            auth_method: "none".to_string(),
+            environment: None,
+            host_key_policy: None,
+            hostname: "/dev/cu.usbserial-1410".to_string(),
+            jump_host: None,
+            known_host_algorithm: None,
+            known_host_public_key: None,
+            password: "".to_string(),
+            passphrase: "".to_string(),
+            port: 115200,
+            private_key_path: "".to_string(),
+            protocol: "serial".to_string(),
+            sftp_root: None,
+            username: "".to_string(),
+        };
+
+        let Ok(spec) = build_external_command_session_spec(&host, "test-serial-argv") else {
+            // Neither screen nor cu installed — nothing to assert on this host.
+            return;
+        };
+        let argv: Vec<String> = spec
+            .command
+            .get_argv()
+            .iter()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect();
+
+        // Which branch ran is decided by what is installed, so establish it from
+        // argv[0] rather than assuming. `contains` not `ends_with`: the fixtures
+        // point TERMSNIP_SCREEN_PATH at a `screen-fixture` stub, and an
+        // ends_with guard silently matched neither branch — a test that no-ops
+        // is worse than no test.
+        let executable = argv.first().expect("argv always has the executable");
+        let device = argv
+            .iter()
+            .position(|value| value == "/dev/cu.usbserial-1410")
+            .expect("the device must be present in argv");
+
+        if executable.contains("screen") {
+            let separator = argv
+                .iter()
+                .position(|value| value == "--")
+                .expect("screen must receive a -- separator before the device");
+            assert!(
+                separator < device,
+                "the separator must precede the device: {argv:?}"
+            );
+        } else {
+            // The cu branch: `-l <device>` already consumes the value as an
+            // argument, so no separator is expected or wanted.
+            assert!(
+                executable.contains("cu"),
+                "unexpected serial runtime: {argv:?}"
+            );
+            assert_eq!(
+                argv.get(device - 1).map(String::as_str),
+                Some("-l"),
+                "{argv:?}"
+            );
+        }
     }
 
     #[test]

@@ -985,7 +985,11 @@ fn native_external_protocol_runtime_fixture_flow() {
     let screen_path = bin_dir.join("screen-fixture");
     write_fixture_executable(
         &screen_path,
-        "#!/bin/sh\nprintf 'SERIAL:%s:%s\\n' \"$1\" \"$2\"\nIFS= read -r line || exit 1\nprintf 'SERIAL_INPUT:%s\\n' \"$line\"\n",
+        // #152(a): the stub consumes a leading `--` the way real screen does,
+        // so the fixture keeps proving the DEVICE arrives intact rather than
+        // just echoing whatever lands in $1. Without this it would report the
+        // separator as the device and hide a genuine argv regression.
+        "#!/bin/sh\nif [ \"$1\" = \"--\" ]; then shift; fi\nprintf 'SERIAL:%s:%s\\n' \"$1\" \"$2\"\nIFS= read -r line || exit 1\nprintf 'SERIAL_INPUT:%s\\n' \"$line\"\n",
     );
     let mosh_path = bin_dir.join("mosh-fixture");
     write_fixture_executable(

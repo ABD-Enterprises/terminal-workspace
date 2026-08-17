@@ -30,6 +30,7 @@ import {
   describeServerListenError,
   shutdownBackend,
 } from "./backend-lifecycle.mjs";
+import { resolvePathInsideRoot } from "./backend-paths.mjs";
 import { respondError, sendJson } from "./backend-responses.mjs";
 import { SecretBuffer } from "./secrets.mjs";
 import {
@@ -1253,9 +1254,11 @@ async function scanKnownHost({ hostname, port }) {
 async function serveStatic(request, response) {
   const requestedPath = new URL(request.url, "http://localhost").pathname;
   const normalizedPath = requestedPath === "/" ? "/index.html" : requestedPath;
-  const targetPath = normalize(join(distRoot, normalizedPath));
+  // #152(d): was `targetPath.startsWith(distRoot)`, a string prefix rather than
+  // a path one — `/app/dist-evil/x` starts with `/app/dist`.
+  const targetPath = resolvePathInsideRoot(distRoot, normalizedPath);
 
-  if (!targetPath.startsWith(distRoot)) {
+  if (targetPath === null) {
     response.writeHead(403);
     response.end("Forbidden");
     return;
