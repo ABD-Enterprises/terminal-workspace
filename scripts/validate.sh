@@ -50,6 +50,38 @@ else
   echo "[validate] native trust tooling skipped (macOS only)"
 fi
 
+# #275: the localhost sshd fixture, which CI runs and local validation did not.
+#
+# It is #[ignore]d because it needs a real sshd and an unsandboxed environment,
+# so it cannot be on by default. But it is the ONLY test that exercises the real
+# transport, which means the deadlock-prone paths were the least covered locally.
+#
+# That is not hypothetical. #193 changed the PTY reader threads to stop on a
+# failed send — reviewed and merged as an obvious thread-leak fix. It was wrong:
+# with_native_ssh_control_session leaves its ControlMaster child running and
+# drops the receiver, so a reader that stops lets the PTY buffer fill and blocks
+# ssh forever. The full local suite was green 30 runs running; this fixture
+# reproduces it in 10 seconds. CI found it instead, as a 30-minute timeout
+# reported as "cancelled" — which reads as infra, so a rerun was spent
+# confirming it was not.
+#
+# Run this before pushing anything that touches the reader threads, the session
+# loops, or native_transport's capture loops. The failure mode there is a hang,
+# not a failing assertion, so a green unit suite is not evidence.
+if [[ "${TERMSNIP_RUN_SSH_FIXTURE:-0}" == "1" && "$(uname -s)" == "Darwin" ]]; then
+  if command -v cargo >/dev/null 2>&1; then
+    echo "[validate] localhost sshd transport fixture"
+    cargo test --manifest-path src-tauri/Cargo.toml \
+      localhost_ssh_transport_fixture_flow -- --include-ignored
+  else
+    echo "[validate] localhost sshd fixture skipped (cargo not found on PATH)" >&2
+  fi
+elif [[ "$(uname -s)" == "Darwin" ]]; then
+  echo "[validate] localhost sshd transport fixture skipped (set TERMSNIP_RUN_SSH_FIXTURE=1 to include — required for changes to the PTY readers, session loops, or native_transport capture loops)"
+else
+  echo "[validate] localhost sshd transport fixture skipped (macOS only — the native crate ships on macOS)"
+fi
+
 if [[ "${TERMSNIP_RUN_E2E:-0}" == "1" ]]; then
   echo "[validate] browser e2e"
   ./node_modules/.bin/playwright test --config playwright.config.ts
