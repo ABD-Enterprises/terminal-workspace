@@ -1172,6 +1172,12 @@ pub(crate) fn run_sftp_batch_commands(
         .try_clone_reader()
         .map_err(|error| error.to_string())?;
     let master = pair.master;
+    // #193: deliberately UNBOUNDED, unlike the live session loops. This receiver
+    // is reused across prompt waits and stops draining while the next command is
+    // issued, so a bounded queue would stall the reader mid-capture. The capture
+    // accumulates into an unbounded String anyway, so bounding only the channel
+    // would not give this path a memory bound — that needs its own truncation
+    // policy, not a channel size.
     let (output_sender, output_receiver) = std::sync::mpsc::channel();
     spawn_jump_session_reader(
         reader,
@@ -1386,6 +1392,8 @@ pub(crate) fn open_native_ssh_control_session(
             .try_clone_reader()
             .map_err(|error| error.to_string())?;
         let master = pair.master;
+        // #193: unbounded on purpose — see wait_for_sftp_prompt. This one stops
+        // consuming the moment the control session reports ready.
         let (output_sender, output_receiver) = std::sync::mpsc::channel();
         spawn_jump_session_reader(reader, writer, build_prompt_responses(host), output_sender);
 
@@ -2530,7 +2538,13 @@ mod tests {
     /// pin that keeps our writer and ssh reading the same records.
     #[test]
     fn pinned_hop_still_builds_without_a_durable_store() {
-        let root = test_root("jump-known-hosts-pinned");
+        // A label of its own, NOT "jump-known-hosts-pinned" shared with the
+        // sibling pinned test. test_root disambiguates by SystemTime nanos, but
+        // macOS's clock is coarse enough that two tests starting together can
+        // read the same value — same label then means the same directory, and
+        // write_private_file uses create_new, so the loser died with
+        // "File exists". Roughly one run in ten, which is worse than always.
+        let root = test_root("jump-known-hosts-pinned-no-durable");
         let host = test_host(Path::new("/tmp/tw-unused-key"), "");
         let known_hosts = root.join("known_hosts");
         fs::write(&known_hosts, "").expect("seed known_hosts");

@@ -518,6 +518,8 @@ fn run_external_protocol_fixture(
         .expect("fixture pty reader should clone");
     drop(pair.master);
 
+    // #193: unbounded on purpose — the collector stops at its marker and tears
+    // the child down, so a bounded queue would only stall the reader.
     let (sender, receiver) = std::sync::mpsc::channel();
     if prompt_responses.is_empty() {
         spawn_local_session_reader(reader, sender);

@@ -62,6 +62,12 @@ const DEFAULT_TERMINAL_PIXEL_WIDTH: u16 = DEFAULT_TERMINAL_COLS * 8;
 const DEFAULT_TERMINAL_PIXEL_HEIGHT: u16 = DEFAULT_TERMINAL_ROWS * 16;
 const NATIVE_SESSION_READ_CHUNK_SIZE: usize = 4096;
 const NATIVE_SESSION_PROMPT_WINDOW_SIZE: usize = 512;
+/// #193: bound on the reader->loop hop for jump and external sessions.
+///
+/// 16 x the 4 KiB read chunk is 64 KiB — exactly one NATIVE_OUTPUT_COALESCE_MAX_BYTES
+/// batch. Smaller would backpressure before the loop can assemble one normal
+/// batch; larger just holds more output without improving latency or ordering.
+const NATIVE_SESSION_EVENT_CHANNEL_CAPACITY: usize = 16;
 const NATIVE_SESSION_POLL_INTERVAL_MS: u64 = 10;
 /// Max time a write to an SSH channel may make NO progress before it is treated
 /// as a stalled remote and aborted, so it cannot wedge the session loop. This is
@@ -1712,11 +1718,43 @@ fn resize_jump_session_pty(
         .map_err(|error| error.to_string())
 }
 
-fn spawn_jump_session_reader(
+/// #193: lets the two readers serve both a bounded live-session channel and the
+/// unbounded channels the short-lived capture loops in `native_transport` use,
+/// without duplicating the reader bodies.
+trait JumpSessionEventSender: Send + 'static {
+    /// `Err` means the receiver is gone — for a bounded sender this also wakes a
+    /// send that was blocked on a full queue, so it is an exit signal, not a
+    /// reason to retry.
+    fn send_event(&self, event: JumpSessionEvent) -> Result<(), ()>;
+}
+
+impl JumpSessionEventSender for std::sync::mpsc::Sender<JumpSessionEvent> {
+    fn send_event(&self, event: JumpSessionEvent) -> Result<(), ()> {
+        self.send(event).map_err(|_| ())
+    }
+}
+
+impl JumpSessionEventSender for std::sync::mpsc::SyncSender<JumpSessionEvent> {
+    fn send_event(&self, event: JumpSessionEvent) -> Result<(), ()> {
+        self.send(event).map_err(|_| ())
+    }
+}
+
+/// The bounded channel a live session loop reads from. Blocking the reader's
+/// send is the point: it stops draining the PTY, which pushes backpressure down
+/// to the remote producer instead of queueing its output in this process.
+fn native_session_event_channel() -> (
+    std::sync::mpsc::SyncSender<JumpSessionEvent>,
+    std::sync::mpsc::Receiver<JumpSessionEvent>,
+) {
+    std::sync::mpsc::sync_channel(NATIVE_SESSION_EVENT_CHANNEL_CAPACITY)
+}
+
+fn spawn_jump_session_reader<S: JumpSessionEventSender>(
     mut reader: Box<dyn Read + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     mut prompt_responses: Vec<PromptResponse>,
-    sender: std::sync::mpsc::Sender<JumpSessionEvent>,
+    sender: S,
 ) {
     thread::spawn(move || {
         let mut buffer = [0u8; NATIVE_SESSION_READ_CHUNK_SIZE];
@@ -1731,7 +1769,7 @@ fn spawn_jump_session_reader(
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => {
-                    let _ = sender.send(JumpSessionEvent::Eof);
+                    let _ = sender.send_event(JumpSessionEvent::Eof);
                     break;
                 }
                 Ok(count) => {
@@ -1763,10 +1801,21 @@ fn spawn_jump_session_reader(
                         prompt_window.clear();
                     }
 
-                    let _ = sender.send(JumpSessionEvent::Output(output));
+                    // The writer guard from any prompt response above is already
+                    // released here, and must stay that way: this send can block
+                    // on a full queue, and the loop may need that same mutex
+                    // before it can drain. Sending while holding it is the one
+                    // way to turn this into a deadlock.
+                    //
+                    // #193: a failed send means the receiver is gone, so stop
+                    // reading. It used to be discarded, which left the thread
+                    // draining the PTY into nothing until the PTY itself closed.
+                    if sender.send_event(JumpSessionEvent::Output(output)).is_err() {
+                        break;
+                    }
                 }
                 Err(error) => {
-                    let _ = sender.send(JumpSessionEvent::Error(error.to_string()));
+                    let _ = sender.send_event(JumpSessionEvent::Error(error.to_string()));
                     break;
                 }
             }
@@ -1774,9 +1823,9 @@ fn spawn_jump_session_reader(
     });
 }
 
-fn spawn_local_session_reader(
+fn spawn_local_session_reader<S: JumpSessionEventSender>(
     mut reader: Box<dyn Read + Send>,
-    sender: std::sync::mpsc::Sender<JumpSessionEvent>,
+    sender: S,
 ) {
     thread::spawn(move || {
         let mut buffer = [0u8; NATIVE_SESSION_READ_CHUNK_SIZE];
@@ -1784,14 +1833,22 @@ fn spawn_local_session_reader(
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => {
-                    let _ = sender.send(JumpSessionEvent::Eof);
+                    let _ = sender.send_event(JumpSessionEvent::Eof);
                     break;
                 }
                 Ok(count) => {
-                    let _ = sender.send(JumpSessionEvent::Output(buffer[..count].to_vec()));
+                    // #193: see spawn_jump_session_reader — a failed send means
+                    // the receiver is gone, so stop reading rather than draining
+                    // the PTY into nothing.
+                    if sender
+                        .send_event(JumpSessionEvent::Output(buffer[..count].to_vec()))
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
                 Err(error) => {
-                    let _ = sender.send(JumpSessionEvent::Error(error.to_string()));
+                    let _ = sender.send_event(JumpSessionEvent::Error(error.to_string()));
                     break;
                 }
             }
@@ -1843,13 +1900,13 @@ fn run_external_command_session_loop(
             .try_clone_reader()
             .map_err(|error| error.to_string())?;
         let mut master = pair.master;
-        // The loop drains this channel fully every iteration (cheap string
-        // moves) and coalesces before the expensive per-event emit, so the
-        // emit path — the actual flood vector — is bounded by OutputCoalescer.
-        // The reader→loop hop itself is still unbounded; converting it to a
-        // bounded sync_channel for true reader backpressure is tracked as a
-        // hardening follow-up (see the #143 comment thread).
-        let (output_sender, output_receiver) = std::sync::mpsc::channel();
+        // #143 bounded the emit path with OutputCoalescer. #193 bounds this hop
+        // too: a reader that outpaces the loop's drain used to queue Output
+        // events without limit and could exhaust memory on its own. A full queue
+        // now blocks the reader's send, which stops it draining the PTY and
+        // pushes backpressure to the remote producer — output is delayed, never
+        // dropped.
+        let (output_sender, output_receiver) = native_session_event_channel();
 
         if prompt_responses.is_empty() {
             spawn_local_session_reader(reader, output_sender);
@@ -2065,13 +2122,13 @@ fn run_jump_host_session_loop(
             .try_clone_reader()
             .map_err(|error| error.to_string())?;
         let mut master = pair.master;
-        // The loop drains this channel fully every iteration (cheap string
-        // moves) and coalesces before the expensive per-event emit, so the
-        // emit path — the actual flood vector — is bounded by OutputCoalescer.
-        // The reader→loop hop itself is still unbounded; converting it to a
-        // bounded sync_channel for true reader backpressure is tracked as a
-        // hardening follow-up (see the #143 comment thread).
-        let (output_sender, output_receiver) = std::sync::mpsc::channel();
+        // #143 bounded the emit path with OutputCoalescer. #193 bounds this hop
+        // too: a reader that outpaces the loop's drain used to queue Output
+        // events without limit and could exhaust memory on its own. A full queue
+        // now blocks the reader's send, which stops it draining the PTY and
+        // pushes backpressure to the remote producer — output is delayed, never
+        // dropped.
+        let (output_sender, output_receiver) = native_session_event_channel();
 
         spawn_jump_session_reader(
             reader,
@@ -4357,6 +4414,141 @@ mod tests {
             c.poll_flush(t0 + Duration::from_millis(12)),
             Some("hello".to_string())
         );
+    }
+
+    /// A reader that always has more to give — the shape that makes the
+    /// unbounded hop dangerous, and the only shape that can prove the exit
+    /// behaviour: dropping a receiver cannot interrupt a blocked `read`, so a
+    /// reader that ever waits for input would pass either way.
+    struct EndlessReader {
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        exited: std::sync::mpsc::Sender<()>,
+    }
+
+    impl std::io::Read for EndlessReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.stop.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(0);
+            }
+            let count = buf.len().min(64);
+            buf[..count].fill(b'x');
+            Ok(count)
+        }
+    }
+
+    impl Drop for EndlessReader {
+        fn drop(&mut self) {
+            // Fires when the reader thread returns, so the test observes the
+            // thread ending rather than inferring it from a timeout.
+            let _ = self.exited.send(());
+        }
+    }
+
+    #[test]
+    fn test_session_event_channel_backpressures_instead_of_queueing() {
+        // #193: the queue must stop accepting at its bound rather than growing.
+        let (sender, receiver) = native_session_event_channel();
+        for index in 0..NATIVE_SESSION_EVENT_CHANNEL_CAPACITY {
+            sender
+                .try_send(JumpSessionEvent::Output(vec![index as u8; 4096]))
+                .expect("the queue accepts up to its capacity");
+        }
+
+        assert!(
+            matches!(
+                sender.try_send(JumpSessionEvent::Output(vec![0xff; 4096])),
+                Err(std::sync::mpsc::TrySendError::Full(_))
+            ),
+            "past capacity the queue must refuse, not grow"
+        );
+
+        // And nothing was dropped or reordered on the way in.
+        for index in 0..NATIVE_SESSION_EVENT_CHANNEL_CAPACITY {
+            // Deliberately not asserting via Debug: JumpSessionEvent carries raw
+            // terminal bytes, and deriving Debug on it would put a typed
+            // password one stray log line away from disk.
+            match receiver.recv().expect("queued event") {
+                JumpSessionEvent::Output(bytes) => {
+                    assert_eq!(bytes.len(), 4096);
+                    assert_eq!(bytes[0], index as u8, "events must arrive in order");
+                }
+                _ => panic!("expected an Output event"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_a_blocked_send_completes_once_the_loop_drains() {
+        // Backpressure has to be a pause, not a loss: the blocked send must
+        // deliver its event as soon as space appears.
+        let (sender, receiver) = native_session_event_channel();
+        for _ in 0..NATIVE_SESSION_EVENT_CHANNEL_CAPACITY {
+            sender.try_send(JumpSessionEvent::Eof).expect("fill");
+        }
+
+        let blocked = thread::spawn(move || {
+            sender.send(JumpSessionEvent::Output(b"after-the-block".to_vec()))
+        });
+
+        // Draining one slot is what releases it.
+        let mut seen = Vec::new();
+        for _ in 0..=NATIVE_SESSION_EVENT_CHANNEL_CAPACITY {
+            seen.push(receiver.recv().expect("event"));
+        }
+
+        blocked.join().expect("thread").expect("the blocked send delivers");
+        match seen.last().expect("last event") {
+            JumpSessionEvent::Output(bytes) => assert_eq!(bytes, b"after-the-block"),
+            _ => panic!("the blocked event must arrive last and intact"),
+        }
+    }
+
+    #[test]
+    fn test_local_reader_exits_when_the_receiver_is_gone() {
+        // #193: this used to leak. A failed send was discarded, so the thread
+        // kept reading and throwing output away until the PTY itself closed.
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (exited, exit_signal) = std::sync::mpsc::channel();
+        let (sender, receiver) = native_session_event_channel();
+        drop(receiver);
+
+        spawn_local_session_reader(
+            Box::new(EndlessReader {
+                stop: stop.clone(),
+                exited,
+            }),
+            sender,
+        );
+
+        let ended = exit_signal.recv_timeout(Duration::from_secs(5));
+        // Let the thread finish even if the assertion below fails, so a failing
+        // run does not leave a thread spinning on the endless reader.
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        ended.expect("the reader must exit once its receiver is gone");
+    }
+
+    #[test]
+    fn test_jump_reader_exits_when_the_receiver_is_gone() {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (exited, exit_signal) = std::sync::mpsc::channel();
+        let (sender, receiver) = native_session_event_channel();
+        drop(receiver);
+
+        let writer: Arc<Mutex<Box<dyn std::io::Write + Send>>> =
+            Arc::new(Mutex::new(Box::new(std::io::sink())));
+        spawn_jump_session_reader(
+            Box::new(EndlessReader {
+                stop: stop.clone(),
+                exited,
+            }),
+            writer,
+            Vec::new(),
+            sender,
+        );
+
+        let ended = exit_signal.recv_timeout(Duration::from_secs(5));
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        ended.expect("the reader must exit once its receiver is gone");
     }
 
     #[test]
