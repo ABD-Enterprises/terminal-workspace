@@ -174,11 +174,18 @@ pub(crate) fn get_channel_environment(
     environment: &Option<HashMap<String, String>>,
 ) -> Option<Vec<(String, String)>> {
     let environment = environment.as_ref()?;
-    let entries = environment
+    let mut entries = environment
         .iter()
         .filter(|(key, _)| is_valid_environment_key(key))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<Vec<_>>();
+    // #155: sorted. This iterates a HashMap, whose order is unspecified and
+    // randomly seeded per process, so the export prefix built from it was
+    // textually unstable RUN TO RUN and could never match the JS backend.
+    // Ordering carries no meaning here — the exports are independent
+    // assignments of unique keys — but an unstable command string defeats
+    // reproducibility and makes cross-backend conformance impossible to assert.
+    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
 
     if entries.is_empty() {
         None
