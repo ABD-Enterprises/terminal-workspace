@@ -99,10 +99,14 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # #157: components must be requested explicitly. This action installs a
+      # minimal rustup profile, so clippy and rustfmt are not present by default
+      # and the two gates below would fail on a clean runner.
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: stable
+          components: clippy,rustfmt
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
@@ -116,8 +120,20 @@ jobs:
       # frontendDist must exist for generate_context!) + runs cargo check;
       # validate:rust then adds cargo test. The localhost-sshd session fixture
       # stays #[ignore] (needs an unsandboxed sshd — tracked in #101).
+      # #157: formatting first — it needs no compile, so a style failure is
+      # reported in seconds instead of after the build below.
+      - name: Check Rust formatting
+        run: npm run native:fmt:check
+
       - name: Compile + test the Rust crate
         run: npm run validate:rust
+
+      # #157: clippy is deliberately NOT inside validate:rust. The ACL drift
+      # gate below runs that script a second time on purpose, so anything folded
+      # into it pays twice. It must also run after validate:rust, because
+      # native-check.sh builds the frontendDist that generate_context! needs.
+      - name: Lint the Rust crate
+        run: npm run native:clippy
 
       # #237: #170 started tracking src-tauri/gen/schemas/capabilities.json and
       # acl-manifests.json so a change to the app's effective permission surface
