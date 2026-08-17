@@ -151,7 +151,19 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   fi
 
   if [[ ${#SEMGREP_TARGETS[@]} -gt 0 ]]; then
-    if docker run --rm -v "${SEMGREP_SCAN_ROOT}":/src -w /src -e SEMGREP_APP_TOKEN semgrep/semgrep semgrep scan --config=auto --error "${SEMGREP_TARGETS[@]}" >"$SEMGREP_OUTPUT_FILE" 2>&1; then
+    # #149: the image is pinned by tag AND digest. It was `semgrep/semgrep`,
+    # i.e. :latest, so a semgrep release could change this gate's behaviour with
+    # no commit here. The digest was verified against the live registry
+    # (`docker buildx imagetools inspect semgrep/semgrep:1.172.0`) rather than
+    # copied from a doc page.
+    #
+    # `--config=auto` is knowingly still remote, and is the other half of the
+    # nondeterminism: the ruleset can change under a PR. Pinning it means
+    # vendoring the ruleset, which needs a license review — tracked separately
+    # rather than done hastily here.
+    if docker run --rm -v "${SEMGREP_SCAN_ROOT}":/src -w /src -e SEMGREP_APP_TOKEN \
+      semgrep/semgrep:1.172.0@sha256:65dcd4408adda7c183a6b4550cb1e9b19f7f627a6fbb7e0559bd466bedc44d7b \
+      semgrep scan --config=auto --error "${SEMGREP_TARGETS[@]}" >"$SEMGREP_OUTPUT_FILE" 2>&1; then
       printf 'PASS: semgrep completed successfully
 ' >"$SEMGREP_STATUS_FILE"
     else
@@ -160,6 +172,18 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     fi
   fi
 else
-  printf 'NOT RUN: Docker is unavailable in this environment
+  # #149: this used to record NOT RUN and continue, so local validation passed
+  # while quietly skipping the scan that CI always runs — the worst kind of
+  # green, because it looks identical to a real one.
+  #
+  # Fail closed, matching the posture for clippy/rustfmt rather than the one for
+  # cargo: a missing cargo advisory-skips because a web-only contributor should
+  # not be blocked by a native toolchain, but semgrep covers the web and native
+  # code alike, so its absence is an incomplete toolchain rather than an absent
+  # optional one.
+  printf 'FAIL: Docker is unavailable, so semgrep did not run
 ' >"$SEMGREP_STATUS_FILE"
+  echo "[validate] Docker is unavailable, so semgrep could not run." >&2
+  echo "[validate] Start Docker and re-run: this gate gives CI-equivalent coverage and is not optional." >&2
+  exit 1
 fi
