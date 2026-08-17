@@ -41,6 +41,11 @@ import {
   getChannelEnvironment,
   shellSingleQuote,
 } from "./backend-shell.mjs";
+import {
+  OperationTimeoutError,
+  REMOTE_COMMAND_TIMEOUT_MS,
+  withDeadline,
+} from "./backend-deadline.mjs";
 import { respondError, sendJson } from "./backend-responses.mjs";
 import { SecretBuffer } from "./secrets.mjs";
 import {
@@ -1072,65 +1077,82 @@ async function copyKeyToHostBackend({ privateKeyPath, host }) {
   }
 }
 
+/**
+ * #182: a remote command now carries a total deadline.
+ *
+ * ssh2 only bounds the initial connect (`readyTimeout`), so an exec against a
+ * host that is reachable but unresponsive never settled — and because the
+ * snippet endpoint joins targets with `Promise.all`, ONE such host withheld
+ * every other host's result forever. Giving each host a deadline is what fixes
+ * the batch: no target can stay pending, so the join always completes.
+ *
+ * The deadline is armed around the connect too, not just the exec. A jump host
+ * whose forwardOut never answers hangs before any channel exists.
+ */
 async function executeRemoteCommand(target, command) {
   try {
-    const client = await connectClient(target.host);
-    const channelEnvironment = getChannelEnvironment(target.host.environment);
-    const execOptions = channelEnvironment
-      ? { env: channelEnvironment }
-      : undefined;
-    const resolvedCommand = buildExecCommand(command, target.host.environment);
+    return await withDeadline(REMOTE_COMMAND_TIMEOUT_MS, async ({ onTimeout }) => {
+      const client = await connectClient(target.host);
+      // Destroy, not end(): a graceful close negotiates with a peer that has
+      // already proven unresponsive.
+      onTimeout(() => client.destroy());
+      const channelEnvironment = getChannelEnvironment(target.host.environment);
+      const execOptions = channelEnvironment ? { env: channelEnvironment } : undefined;
+      const resolvedCommand = buildExecCommand(command, target.host.environment);
 
-    try {
-      return await new Promise((resolve) => {
-        const handleExec = (error, stream) => {
-          if (error) {
-            resolve({
-              targetId: target.id,
-              label: target.label,
-              ok: false,
-              stdout: "",
-              stderr: "",
-              exitCode: null,
-              errorMessage: getErrorMessage(error),
+      try {
+        return await new Promise((resolve) => {
+          const handleExec = (error, stream) => {
+            if (error) {
+              resolve({
+                targetId: target.id,
+                label: target.label,
+                ok: false,
+                stdout: "",
+                stderr: "",
+                exitCode: null,
+                errorMessage: getErrorMessage(error),
+              });
+              return;
+            }
+
+            onTimeout(() => stream.destroy());
+
+            let stdout = "";
+            let stderr = "";
+
+            stream.on("data", (chunk) => {
+              stdout += chunk.toString("utf8");
             });
-            return;
+            stream.stderr.on("data", (chunk) => {
+              stderr += chunk.toString("utf8");
+            });
+            stream.on("close", (code) => {
+              resolve({
+                targetId: target.id,
+                label: target.label,
+                ok: code === 0,
+                stdout,
+                stderr,
+                exitCode: code ?? null,
+                errorMessage:
+                  code === 0
+                    ? undefined
+                    : stderr.trim() || `Command exited with code ${code ?? "unknown"}`,
+              });
+            });
+          };
+
+          if (execOptions) {
+            client.exec(resolvedCommand, execOptions, handleExec);
+          } else {
+            client.exec(resolvedCommand, handleExec);
           }
-
-          let stdout = "";
-          let stderr = "";
-
-          stream.on("data", (chunk) => {
-            stdout += chunk.toString("utf8");
-          });
-          stream.stderr.on("data", (chunk) => {
-            stderr += chunk.toString("utf8");
-          });
-          stream.on("close", (code) => {
-            resolve({
-              targetId: target.id,
-              label: target.label,
-              ok: code === 0,
-              stdout,
-              stderr,
-              exitCode: code ?? null,
-              errorMessage:
-                code === 0
-                  ? undefined
-                  : stderr.trim() || `Command exited with code ${code ?? "unknown"}`,
-            });
-          });
-        };
-
-        if (execOptions) {
-          client.exec(resolvedCommand, execOptions, handleExec);
-        } else {
-          client.exec(resolvedCommand, handleExec);
-        }
-      });
-    } finally {
-      client.end();
-    }
+        });
+      } finally {
+        client.end();
+      }
+    });
   } catch (error) {
     return {
       targetId: target.id,
@@ -1139,7 +1161,10 @@ async function executeRemoteCommand(target, command) {
       stdout: "",
       stderr: "",
       exitCode: null,
-      errorMessage: getErrorMessage(error),
+      errorMessage:
+        error instanceof OperationTimeoutError
+          ? `Command did not finish within ${Math.round(error.timeoutMs / 1000)} seconds. The SSH connection was closed; verify the host before rerunning.`
+          : getErrorMessage(error),
     };
   }
 }
