@@ -30,6 +30,7 @@ import {
   describeServerListenError,
   shutdownBackend,
 } from "./backend-lifecycle.mjs";
+import { respondError, sendJson } from "./backend-responses.mjs";
 import { SecretBuffer } from "./secrets.mjs";
 import {
   bufferDetachedOutput,
@@ -59,18 +60,6 @@ console.error(`[termsnip] backend allowed origins: ${allowedOrigins.join(", ")}`
 function denyUnauthorized(response, decision) {
   response.writeHead(403, { "content-type": "application/json; charset=utf-8" });
   response.end(JSON.stringify({ error: "Unauthorized", reason: decision.reason }));
-}
-
-// Single response shape for every catch-block in the HTTP handlers
-// below. Audit pickup: the pattern
-//   sendJson(response, 500, { error: getErrorMessage(error) })
-// was duplicated 16 times in this file, which made the contract
-// implicit and brittle (e.g. one site forgot the `error` key, would
-// be hard to notice). Use this helper instead.
-function respondError(response, error, status = 500) {
-  // Honor a status the error carries (e.g. PayloadTooLargeError => 413) so
-  // readJson's body-cap rejection surfaces as the right HTTP status.
-  sendJson(response, error?.statusCode ?? status, { error: getErrorMessage(error) });
 }
 
 const mimeTypes = {
@@ -312,13 +301,6 @@ function normalizeKeyAlgorithm(value) {
   }
 
   return "UNKNOWN";
-}
-
-function sendJson(response, statusCode, body) {
-  response.writeHead(statusCode, {
-    "Content-Type": "application/json; charset=utf-8",
-  });
-  response.end(JSON.stringify(body));
 }
 
 function broadcast(session, message) {
