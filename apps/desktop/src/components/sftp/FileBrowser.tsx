@@ -13,6 +13,7 @@ import { formatBytes, formatHostAddress } from "../../lib/utils";
 import { useKnownHostsStore } from "../../store/known-hosts-store";
 import { useTransfersStore } from "../../store/transfers-store";
 import type { HostRecord } from "../../types/host";
+import { createLatestRequestGuard } from "../../lib/latest-request";
 import type { RemoteFileEntry } from "../../types/transfer";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { Modal } from "../common/Modal";
@@ -87,8 +88,17 @@ export function FileBrowser({ host }: FileBrowserProps) {
   const [deleteTarget, setDeleteTarget] = useState<RemoteFileEntry>();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const browseInteractionRef = useRef(false);
+  /*
+   * #182: latest-request-wins. Navigating A then B quickly used to let A's late
+   * response overwrite B — entries from one directory under another's
+   * breadcrumb, with rename/delete then acting on the wrong one.
+   */
+  const loadGuardRef = useRef(createLatestRequestGuard());
 
   const loadDirectory = useCallback(async (targetPath: string, interactive = false) => {
+    // Claimed before any await, so a second navigation supersedes this one even
+    // if it starts while this is still resolving credentials.
+    const token = loadGuardRef.current.begin();
     setLoading(true);
     setErrorMessage(undefined);
 
@@ -96,6 +106,9 @@ export function FileBrowser({ host }: FileBrowserProps) {
       const readyForConnection = await ensureRuntimeSecrets(host, "Browse remote files", {
         interactive,
       });
+      if (!loadGuardRef.current.isCurrent(token)) {
+        return;
+      }
       if (!readyForConnection) {
         setBrowserLocked(true);
         setEntries([]);
@@ -105,18 +118,43 @@ export function FileBrowser({ host }: FileBrowserProps) {
 
       setBrowserLocked(false);
       const result = await listRemoteDirectory(buildBackendConnection(host, knownHosts), targetPath);
+      // The check that actually closes the bug: a superseded load commits
+      // nothing — not the path, not the entries, not the selection.
+      if (!loadGuardRef.current.isCurrent(token)) {
+        return;
+      }
       rememberRemotePath(host.id, result.path);
       setEntries(result.entries);
       setSelectedEntry((current) =>
         current ? result.entries.find((entry) => entry.path === current.path) : undefined
       );
     } catch (error) {
+      if (!loadGuardRef.current.isCurrent(token)) {
+        return;
+      }
       setErrorMessage(error instanceof Error ? error.message : String(error));
       setEntries([]);
     } finally {
-      setLoading(false);
+      // Also guarded: a stale load clearing `loading` would hide the spinner
+      // for the request that is still genuinely in flight.
+      if (loadGuardRef.current.isCurrent(token)) {
+        setLoading(false);
+      }
     }
   }, [host, knownHosts, rememberRemotePath]);
+
+  /*
+   * #182: this stops the UI waiting; it does not stop the server. The request is
+   * not abortable — listRemoteDirectory takes no signal, and under Tauri it goes
+   * through invokeTauriCommand, which has none — so what this genuinely provides
+   * is that a late result commits nothing. The wording says the LOAD was
+   * cancelled for that reason.
+   */
+  const cancelLoad = useCallback(() => {
+    loadGuardRef.current.cancel();
+    setLoading(false);
+    setErrorMessage("Directory load cancelled.");
+  }, []);
 
   useEffect(() => {
     if (!remotePathByHost[host.id] && host.sftpRoot) {
@@ -509,7 +547,19 @@ export function FileBrowser({ host }: FileBrowserProps) {
 
           {loading ? (
             <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/70 px-4 py-10 text-center text-sm text-slate-500">
-              Loading remote directory…
+              <p>Loading remote directory…</p>
+              {/*
+                #182: without this there was no way out of a load against a
+                server that is connected but unresponsive — `loading` stayed true
+                forever.
+              */}
+              <button
+                type="button"
+                onClick={cancelLoad}
+                className="mt-3 rounded-control border border-slate-700/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-label text-slate-300 hover:border-slate-500 hover:text-slate-100"
+              >
+                Cancel
+              </button>
             </div>
           ) : browserLocked ? (
             <div className="rounded-[22px] border border-dashed border-slate-800/80 bg-slate-950/70 px-6 py-10 text-center">
