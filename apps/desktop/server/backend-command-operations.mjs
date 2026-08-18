@@ -14,6 +14,25 @@ function commandResult(target, fields) {
   };
 }
 
+export function sshFailureStage(error) {
+  switch (error?.level) {
+    case "handshake":
+      return error.message === "Host denied (verification failed)"
+        ? "host-key-verification"
+        : "handshake";
+    case "client-authentication":
+    case "agent":
+      return "authentication";
+    case "client-timeout":
+      return "handshake";
+    case "client-socket":
+    case "client-dns":
+      return "connect";
+    default:
+      return undefined;
+  }
+}
+
 export function createBackendCommandOperations({ expandHome, readFile, runRemoteCommand }) {
   async function executeRemoteCommand(target, command) {
     let stage = "configuration";
@@ -29,7 +48,7 @@ export function createBackendCommandOperations({ expandHome, readFile, runRemote
         ...(result.ok
           ? {}
           : {
-              failure: result.failure ?? {
+              failure: {
                 reason: "remote-command-exited",
                 exitCode: result.exitCode,
               },

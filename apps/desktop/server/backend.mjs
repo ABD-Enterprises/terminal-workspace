@@ -49,7 +49,10 @@ import {
   withDeadline,
 } from "./backend-deadline.mjs";
 import { respondError, sendJson } from "./backend-responses.mjs";
-import { createBackendCommandOperations } from "./backend-command-operations.mjs";
+import {
+  createBackendCommandOperations,
+  sshFailureStage,
+} from "./backend-command-operations.mjs";
 import { SecretBuffer } from "./secrets.mjs";
 import {
   bufferDetachedOutput,
@@ -395,10 +398,9 @@ async function connectClient(host, setStage) {
         resolve(client);
       });
       client.on("error", (error) => {
-        if (error?.level === "client-authentication") {
-          setStage?.("authentication");
-        } else if (error?.level === "client-ssh") {
-          setStage?.("handshake");
+        const failureStage = sshFailureStage(error);
+        if (failureStage) {
+          setStage?.(failureStage);
         }
         jumpConnection?.jumpClient?.end();
         reject(error);

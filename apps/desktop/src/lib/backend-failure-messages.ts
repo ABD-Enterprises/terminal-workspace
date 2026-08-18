@@ -41,9 +41,14 @@ function remoteCommandMessage(failure: RemoteCommandFailure, host: string, copyK
         ? `Public-key installation on ${host} did not finish within ${failure.timeoutSeconds} seconds. The SSH connection was closed; verify the host before rerunning.`
         : `Command did not finish within ${failure.timeoutSeconds} seconds. The SSH connection was closed; verify the host before rerunning.`;
     case "remote-command-exited":
+      if (failure.exitCode === null) {
+        return copyKey
+          ? `Public-key installation on ${host} failed without an exit code.`
+          : "The command failed without an exit code.";
+      }
       return copyKey
-        ? `Could not install the public key on ${host}.`
-        : `The command failed on ${host}.`;
+        ? `Public-key installation on ${host} exited with code ${failure.exitCode}.`
+        : `Command exited with code ${failure.exitCode}.`;
     case "worker-failed":
       return `The command worker failed for ${host}.`;
   }

@@ -1,11 +1,45 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { sendJson } from "../../apps/desktop/server/backend-responses.mjs";
-import { createBackendCommandOperations } from "../../apps/desktop/server/backend-command-operations.mjs";
+import {
+  createBackendCommandOperations,
+  sshFailureStage,
+} from "../../apps/desktop/server/backend-command-operations.mjs";
 import { OperationTimeoutError } from "../../apps/desktop/server/backend-deadline.mjs";
 
 const host = { hostname: "caller-host.example" };
 const target = { host, id: "caller-target-id", label: "Caller host label" };
+const requireFromDesktop = createRequire(
+  new URL("../../apps/desktop/package.json", import.meta.url)
+);
+const ssh2LibDirectory = dirname(requireFromDesktop.resolve("ssh2"));
+
+function assignedLevelAfter(source: string, marker: string) {
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex === -1) {
+    throw new Error(`Installed ssh2 source no longer contains ${JSON.stringify(marker)}`);
+  }
+  const match = source.slice(markerIndex, markerIndex + 800).match(/\.level = ['"]([^'"]+)['"]/);
+  if (!match?.[1]) {
+    throw new Error(`Installed ssh2 no longer assigns an error level after ${JSON.stringify(marker)}`);
+  }
+  return match[1];
+}
+
+function readJavaScriptTree(directory: string): string {
+  return readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        return [readJavaScriptTree(path)];
+      }
+      return entry.name.endsWith(".js") ? [readFileSync(path, "utf8")] : [];
+    })
+    .join("\n");
+}
 
 function serialize(body: unknown) {
   const recorded: { status?: number; body?: string } = {};
@@ -34,6 +68,49 @@ function operations(readFile: ReturnType<typeof vi.fn>, runRemoteCommand: Return
 }
 
 describe("#266: Node SSH responses disclose only typed failures", () => {
+  it("maps the failure levels assigned by the installed ssh2 implementation", () => {
+    const clientSource = readFileSync(join(ssh2LibDirectory, "client.js"), "utf8");
+    const kexSource = readFileSync(join(ssh2LibDirectory, "protocol/kex.js"), "utf8");
+    const hostVerificationFailure = kexSource.match(
+      /doFatalError\(\s*this\._protocol,\s*['"](Host denied \(verification failed\))['"],\s*['"]([^'"]+)['"]/
+    );
+    if (!hostVerificationFailure?.[1] || !hostVerificationFailure[2]) {
+      throw new Error("Installed ssh2 no longer exposes the expected host-verification failure");
+    }
+
+    expect(
+      sshFailureStage({
+        level: assignedLevelAfter(kexSource, "Error while computing DH secret"),
+      })
+    ).toBe("handshake");
+    expect(
+      sshFailureStage({
+        message: hostVerificationFailure[1],
+        level: hostVerificationFailure[2],
+      })
+    ).toBe("host-key-verification");
+    expect(
+      sshFailureStage({
+        level: assignedLevelAfter(clientSource, "All configured authentication methods failed"),
+      })
+    ).toBe("authentication");
+    expect(
+      sshFailureStage({
+        level: assignedLevelAfter(clientSource, "Timed out while waiting for handshake"),
+      })
+    ).toBe("handshake");
+    expect(
+      sshFailureStage({ level: assignedLevelAfter(clientSource, "Socket error:") })
+    ).toBe("connect");
+    expect(
+      sshFailureStage({ level: assignedLevelAfter(clientSource, "Error while looking up") })
+    ).toBe("connect");
+    expect(
+      sshFailureStage({ level: assignedLevelAfter(clientSource, "curAuth.agentCtx.init") })
+    ).toBe("authentication");
+    expect(readJavaScriptTree(ssh2LibDirectory)).not.toContain("client-ssh");
+  });
+
   it("withholds fs error text and the expanded HOME path from copy-key", async () => {
     const sentinel = "TS_COPY_FS_PROBE_3b9075";
     const plantedError = new Error(`EACCES ${sentinel} /Users/operator/.ssh/caller.pub`);
@@ -135,7 +212,6 @@ describe("#266: Node SSH responses disclose only typed failures", () => {
       stdout: "",
       stderr: remoteStderr,
       exitCode: 23,
-      failure: { reason: "remote-command-exited", exitCode: 23 },
     };
     const snippetResult = await operations(vi.fn(), vi.fn().mockResolvedValue(failedCommand))
       .executeRemoteCommand(target, "false");
