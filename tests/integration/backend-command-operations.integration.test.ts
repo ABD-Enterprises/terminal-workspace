@@ -61,7 +61,7 @@ function serialize(body: unknown) {
 
 function operations(readFile: ReturnType<typeof vi.fn>, runRemoteCommand: ReturnType<typeof vi.fn>) {
   return createBackendCommandOperations({
-    expandHome: (path: string) => path.replace(/^~\//, "/Users/operator/"),
+    expandHome: (path: string) => path.replace(/^~\//, "/fixture-home/"),
     readFile,
     runRemoteCommand,
   });
@@ -113,7 +113,7 @@ describe("#266: Node SSH responses disclose only typed failures", () => {
 
   it("withholds fs error text and the expanded HOME path from copy-key", async () => {
     const sentinel = "TS_COPY_FS_PROBE_3b9075";
-    const plantedError = new Error(`EACCES ${sentinel} /Users/operator/.ssh/caller.pub`);
+    const plantedError = new Error(`EACCES ${sentinel} /fixture-home/.ssh/caller.pub`);
     const readFile = vi.fn().mockRejectedValue(plantedError);
     const runRemoteCommand = vi.fn();
 
@@ -123,7 +123,7 @@ describe("#266: Node SSH responses disclose only typed failures", () => {
     });
     const body = serialize(result);
 
-    expect(readFile).toHaveBeenCalledWith("/Users/operator/.ssh/caller.pub", "utf8");
+    expect(readFile).toHaveBeenCalledWith("/fixture-home/.ssh/caller.pub", "utf8");
     expect(runRemoteCommand).not.toHaveBeenCalled();
     expect(result).toEqual({
       ok: false,
@@ -131,7 +131,7 @@ describe("#266: Node SSH responses disclose only typed failures", () => {
     });
     expect(body).toContain("~/.ssh/caller.pub");
     expect(body).not.toContain(sentinel);
-    expect(body).not.toContain("/Users/operator");
+    expect(body).not.toContain("/fixture-home");
     expect(JSON.parse(body)).not.toHaveProperty("reason");
   });
 
