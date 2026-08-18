@@ -2,6 +2,7 @@ import type { BackendHostConnection, KnownHostScanResult, SnippetExecutionResult
 import type { PortForwardRecord } from "../types/forward";
 import type { KeyGenerationType, KeyMetadata } from "../types/key";
 import type { RemoteFileEntry, RemoteEntryKind } from "../types/transfer";
+import type { CopyKeyToHostResponse } from "./backend-contract";
 import type { SshConfigGlobMatch } from "./ssh-config-include";
 
 interface DemoDirectoryResponse {
@@ -495,7 +496,7 @@ export async function importDemoPrivateKeyFromBody(payload: {
 export async function copyDemoKeyToHost(payload: {
   privateKeyPath: string;
   host: { hostname: string; port: number };
-}): Promise<{ ok: boolean; reason?: string }> {
+}): Promise<CopyKeyToHostResponse> {
   if (!payload.privateKeyPath.trim()) {
     return { ok: false, reason: "A private key path is required." };
   }

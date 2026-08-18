@@ -4,10 +4,11 @@ import { ConfirmDialog } from "../components/common/ConfirmDialog";
 import { SearchInput } from "../components/common/SearchInput";
 import { SnippetEditor } from "../components/snippets/SnippetEditor";
 import { SnippetList } from "../components/snippets/SnippetList";
+import { executeSnippetOnHosts, type SnippetExecutionResult } from "../lib/api";
+import { formatSnippetExecutionFailure } from "../lib/backend-failure-messages";
 import { buildBackendConnection } from "../lib/connections";
 import { ensureRuntimeSecrets } from "../lib/runtime-secrets";
 import { formatHostAddress } from "../lib/utils";
-import { executeSnippetOnHosts, type SnippetExecutionResult } from "../lib/api";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useSessionsStore } from "../store/sessions-store";
@@ -358,9 +359,12 @@ export function SnippetsPage() {
                               </span>
                             </div>
                             <p className="mt-1 text-[11px] leading-5 text-slate-400">
-                              {(result.stdout || result.stderr || result.errorMessage || "No output")
-                                .trim()
-                                .slice(0, 160) || "No output"}
+                              {(
+                                result.stdout ||
+                                result.stderr ||
+                                formatSnippetExecutionFailure(result) ||
+                                "No output"
+                              ).trim().slice(0, 160) || "No output"}
                             </p>
                           </div>
                         ))}
