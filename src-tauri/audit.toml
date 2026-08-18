@@ -1,15 +1,41 @@
 # cargo-audit configuration documenting advisories consciously accepted for the
-# macOS-only ship. Verified clean (exit 0) with:
-#   cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2023-0071
-# (the installed cargo-audit doesn't auto-load this file's ignore table, so the
-# enforcing invocation passes --ignore explicitly; keep both in sync.)
+# macOS-only ship.
+#
+# #226: this file used to CLAIM the tree was "verified clean" while nothing in
+# the repo ever ran the scan. By the time a gate was added the tree had FOUR
+# advisories, two of them 7.5 high, and nobody had noticed. The enforcing
+# invocation is now scripts/native-audit.sh, which CI runs on every PR — the
+# claim is true by construction or the build fails.
+#
+# cargo-audit still does not auto-load this ignore table. Verified by control
+# experiment rather than inherited from the old comment: running with and
+# without this file present produces identical output, including the
+# supposedly-ignored advisory. So the script passes --ignore explicitly and
+# hard-fails if the two lists ever disagree.
+#
+# EVERY entry below carries a re-evaluation trigger. An ignore with no expiry is
+# how this file went stale in the first place.
 [advisories]
 ignore = [
   # rsa — Marvin Attack timing side-channel (medium). Pulled in transitively
   # via the RSA key path. No fixed upstream release exists yet; practical risk
   # for a desktop SSH client is low (requires local timing observation).
-  # Re-evaluate when a patched `rsa` ships.
+  # RE-EVALUATE WHEN: a patched `rsa` release exists — cargo-audit starts
+  # printing a Solution line for this advisory when one does.
   "RUSTSEC-2023-0071",
+
+  # rkyv 0.7.46 — out-of-bounds reads validating archives containing Rc/Arc.
+  # Accepted because the vulnerable code is never built. rkyv is an OPTIONAL
+  # dependency of rust_decimal (via tauri-plugin-sql) and this app enables only
+  # the sqlite feature. Verified rather than assumed: `cargo tree -i rkyv`
+  # reports "nothing to print" for this target, and target/debug/.fingerprint
+  # contains zero rkyv entries, so it has never been compiled. It is in
+  # Cargo.lock only because a lockfile records optional deps that the
+  # build-time feature resolution then excludes.
+  # RE-EVALUATE WHEN: anything enables a rust_decimal rkyv feature, or
+  # `cargo tree -i rkyv` stops reporting "nothing to print" — either means it is
+  # being compiled and this justification no longer holds.
+  "RUSTSEC-2026-0235",
 ]
 # Note: cargo audit also reports gtk-rs GTK3 bindings (atk/gdk/gtk/…) as
 # "unmaintained". Those are Linux-only deps Tauri links for its Linux target;
