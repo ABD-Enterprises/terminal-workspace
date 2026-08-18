@@ -11,6 +11,7 @@ import {
   inspectPrivateKey,
   scanKnownHost,
 } from "../lib/api";
+import { formatCopyKeyToHostFailure } from "../lib/backend-failure-messages";
 import { validatePastedPrivateKey } from "../lib/private-key-validation";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
@@ -469,7 +470,7 @@ export function KeysPage() {
             if (result.ok) {
               setCopySuccess(`Installed key on ${host.label}.`);
             } else {
-              setCopyError(result.reason ?? "Copy failed.");
+              setCopyError(formatCopyKeyToHostFailure(result));
             }
           } catch (error) {
             setCopyError(error instanceof Error ? error.message : String(error));

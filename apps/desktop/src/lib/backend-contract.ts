@@ -94,10 +94,37 @@ export interface CopyKeyToHostPayload {
   host: BackendHostConnection;
 }
 
-export interface CopyKeyToHostResponse {
-  ok: boolean;
-  reason?: string;
-}
+export type SshFailureStage =
+  | "configuration"
+  | "connect"
+  | "session-initialization"
+  | "handshake"
+  | "host-key-verification"
+  | "authentication"
+  | "channel-open"
+  | "exec-request"
+  | "output-read";
+
+export type RemoteCommandFailure =
+  | { reason: "ssh-failed"; stage: SshFailureStage }
+  | { reason: "timed-out"; timeoutSeconds: number }
+  | { reason: "worker-failed" }
+  | { reason: "remote-command-exited"; exitCode: number | null };
+
+export type CopyKeyToHostFailure =
+  | { reason: "private-key-path-required" }
+  | { reason: "target-host-required" }
+  | { reason: "public-key-unreadable"; publicKeyPath: string }
+  | { reason: "public-key-empty"; publicKeyPath: string }
+  | {
+      reason: "remote-command-failed";
+      hostname: string;
+      command: RemoteCommandFailure;
+    };
+
+export type CopyKeyToHostResponse =
+  | { ok: true; failure?: never; reason?: string }
+  | { ok: false; failure?: CopyKeyToHostFailure; reason?: string };
 
 export interface CreateForwardPayload {
   direction: "local" | "remote";
@@ -114,15 +141,19 @@ export interface SnippetExecutionTarget {
   label: string;
 }
 
-export interface SnippetExecutionResult {
+interface SnippetExecutionResultBase {
   targetId: string;
   label: string;
-  ok: boolean;
   stdout: string;
   stderr: string;
   exitCode: number | null;
-  errorMessage?: string;
 }
+
+export type SnippetExecutionResult = SnippetExecutionResultBase &
+  (
+    | { ok: true; failure?: never; errorMessage?: string }
+    | { ok: false; failure?: RemoteCommandFailure; errorMessage?: string }
+  );
 
 export interface DownloadRemoteFileResponse {
   blob: Blob;

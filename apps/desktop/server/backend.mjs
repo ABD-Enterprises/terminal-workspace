@@ -42,7 +42,6 @@ import {
   shellSingleQuote,
 } from "./backend-shell.mjs";
 import {
-  OperationTimeoutError,
   REMOTE_COMMAND_TIMEOUT_MS,
   SFTP_CONTROL_TIMEOUT_MS,
   SFTP_DOWNLOAD_IDLE_TIMEOUT_MS,
@@ -50,6 +49,7 @@ import {
   withDeadline,
 } from "./backend-deadline.mjs";
 import { respondError, sendJson } from "./backend-responses.mjs";
+import { createBackendCommandOperations } from "./backend-command-operations.mjs";
 import { SecretBuffer } from "./secrets.mjs";
 import {
   bufferDetachedOutput,
@@ -352,8 +352,8 @@ async function createConnectConfig(host) {
   return { config: connectConfig, scrub: scrubBundle };
 }
 
-async function openJumpSocket(host) {
-  const jumpClient = await connectClient(host.jumpHost);
+async function openJumpSocket(host, setStage) {
+  const jumpClient = await connectClient(host.jumpHost, setStage);
 
   try {
     const socket = await new Promise((resolve, reject) => {
@@ -374,10 +374,12 @@ async function openJumpSocket(host) {
   }
 }
 
-async function connectClient(host) {
+async function connectClient(host, setStage) {
+  setStage?.("configuration");
   const client = new Client();
   const { config: connectConfig, scrub } = await createConnectConfig(host);
-  const jumpConnection = host.jumpHost ? await openJumpSocket(host) : undefined;
+  setStage?.("connect");
+  const jumpConnection = host.jumpHost ? await openJumpSocket(host, setStage) : undefined;
 
   if (jumpConnection?.socket) {
     connectConfig.sock = jumpConnection.socket;
@@ -393,6 +395,11 @@ async function connectClient(host) {
         resolve(client);
       });
       client.on("error", (error) => {
+        if (error?.level === "client-authentication") {
+          setStage?.("authentication");
+        } else if (error?.level === "client-ssh") {
+          setStage?.("handshake");
+        }
         jumpConnection?.jumpClient?.end();
         reject(error);
       });
@@ -1117,54 +1124,6 @@ async function importPrivateKeyFromBody({ path, body }) {
 }
 
 /**
- * T12: install a public key on a remote host. Reads the .pub file
- * sitting next to the private key, opens a one-shot SSH connection
- * using the host's existing credentials, and appends to
- * authorized_keys with the canonical permission tighten-down.
- */
-async function copyKeyToHostBackend({ privateKeyPath, host }) {
-  if (!privateKeyPath || typeof privateKeyPath !== "string") {
-    return { ok: false, reason: "A private key path is required." };
-  }
-  if (!host || !host.hostname) {
-    return { ok: false, reason: "A target host is required." };
-  }
-  const pubPath = expandHome(`${privateKeyPath}.pub`);
-  let pubBody;
-  try {
-    pubBody = (await readFile(pubPath, "utf8")).trim();
-  } catch (error) {
-    return {
-      ok: false,
-      reason: `Could not read public key at ${pubPath}: ${getErrorMessage(error)}`,
-    };
-  }
-  if (pubBody.length === 0) {
-    return { ok: false, reason: `Public key at ${pubPath} is empty.` };
-  }
-  // Shell-quote the pub body so a shell-special char in the comment
-  // section can't break out. Single quotes don't allow embedded
-  // single quotes, so we use the standard `'\''` escape.
-  const quoted = `'${pubBody.replace(/'/g, "'\\''")}'`;
-  const command =
-    "mkdir -p ~/.ssh && chmod 700 ~/.ssh && " +
-    `printf '%s\\n' ${quoted} >> ~/.ssh/authorized_keys && ` +
-    "chmod 600 ~/.ssh/authorized_keys && echo OK";
-  try {
-    const result = await executeRemoteCommand({ id: host.hostname, label: host.hostname, host }, command);
-    if (result.ok && result.stdout.trim().endsWith("OK")) {
-      return { ok: true };
-    }
-    return {
-      ok: false,
-      reason: result.errorMessage ?? result.stderr.trim() ?? "Remote command failed.",
-    };
-  } catch (error) {
-    return { ok: false, reason: getErrorMessage(error) };
-  }
-}
-
-/**
  * #182: a remote command now carries a total deadline.
  *
  * ssh2 only bounds the initial connect (`readyTimeout`), so an exec against a
@@ -1176,33 +1135,27 @@ async function copyKeyToHostBackend({ privateKeyPath, host }) {
  * The deadline is armed around the connect too, not just the exec. A jump host
  * whose forwardOut never answers hangs before any channel exists.
  */
-async function executeRemoteCommand(target, command) {
-  try {
+async function runRemoteCommand(target, command, setStage) {
+  if (typeof setStage === "function") {
     return await withDeadline(REMOTE_COMMAND_TIMEOUT_MS, async ({ onTimeout }) => {
-      const client = await connectClient(target.host);
+      const client = await connectClient(target.host, setStage);
       // Destroy, not end(): a graceful close negotiates with a peer that has
       // already proven unresponsive.
       onTimeout(() => client.destroy());
+      setStage("exec-request");
       const channelEnvironment = getChannelEnvironment(target.host.environment);
       const execOptions = channelEnvironment ? { env: channelEnvironment } : undefined;
       const resolvedCommand = buildExecCommand(command, target.host.environment);
 
       try {
-        return await new Promise((resolve) => {
+        return await new Promise((resolve, reject) => {
           const handleExec = (error, stream) => {
             if (error) {
-              resolve({
-                targetId: target.id,
-                label: target.label,
-                ok: false,
-                stdout: "",
-                stderr: "",
-                exitCode: null,
-                errorMessage: getErrorMessage(error),
-              });
+              reject(error);
               return;
             }
 
+            setStage("output-read");
             onTimeout(() => stream.destroy());
 
             let stdout = "";
@@ -1222,10 +1175,6 @@ async function executeRemoteCommand(target, command) {
                 stdout,
                 stderr,
                 exitCode: code ?? null,
-                errorMessage:
-                  code === 0
-                    ? undefined
-                    : stderr.trim() || `Command exited with code ${code ?? "unknown"}`,
               });
             });
           };
@@ -1240,21 +1189,15 @@ async function executeRemoteCommand(target, command) {
         client.end();
       }
     });
-  } catch (error) {
-    return {
-      targetId: target.id,
-      label: target.label,
-      ok: false,
-      stdout: "",
-      stderr: "",
-      exitCode: null,
-      errorMessage:
-        error instanceof OperationTimeoutError
-          ? `Command did not finish within ${Math.round(error.timeoutMs / 1000)} seconds. The SSH connection was closed; verify the host before rerunning.`
-          : getErrorMessage(error),
-    };
   }
+  throw new TypeError("A remote-command stage reporter is required");
 }
+
+const { copyKeyToHostBackend, executeRemoteCommand } = createBackendCommandOperations({
+  expandHome,
+  readFile,
+  runRemoteCommand,
+});
 
 async function scanKnownHost({ hostname, port }) {
   const { stdout } = await execFileAsync("/usr/bin/ssh-keyscan", [
