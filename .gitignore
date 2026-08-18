@@ -24,6 +24,12 @@ playwright-report/
 test-results/
 artifacts/e2e/
 artifacts/validation/
+# `orc add-evidence` rejects every path outside this directory, so local
+# validation logs have nowhere else to land. They carry the absolute paths and
+# hostnames of the machine that ran the gate, which is exactly the local detail
+# #230 and #266 spent two tickets keeping out of responses — committing one
+# would put it in the repo permanently.
+artifacts/local-review/
 # Build output from native:bundle / native:notarize. Manifests, signed
 # archives, codesign + spctl + stapler logs all land here. Recreated by
 # every build; should not be tracked.
