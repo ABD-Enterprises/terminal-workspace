@@ -56,6 +56,11 @@ It does **not** prove:
 
 - anything about the Tauri/native transport — that is the Rust fixture suite
   (`TERMSNIP_RUN_SSH_FIXTURE=1`), which covers a separate implementation of the same operations;
+- **host-key verification.** The fixture generates a fresh host key per run, so there is nothing
+  stable to pin against and it connects with `hostKeyPolicy: "allowUnknown"`. It therefore proves
+  the handshake succeeds, not that a changed or untrusted host key is rejected. That property is
+  covered by the Rust fixture's TOFU tests (`test_allow_unknown_tofu_pins_first_key`,
+  `test_allow_unknown_tofu_rejects_changed_key`, `test_require_trusted_still_rejects_mismatch`);
 - browser rendering or UI behaviour — no browser is involved;
 - password or keyboard-interactive auth, jump hosts, or mosh — the fixture is a single direct
   public-key host;
