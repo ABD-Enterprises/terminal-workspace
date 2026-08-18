@@ -122,6 +122,17 @@ jobs:
       # stays #[ignore] (needs an unsandboxed sshd — tracked in #101).
       # #157: formatting first — it needs no compile, so a style failure is
       # reported in seconds instead of after the build below.
+      # #226: Rust advisory scan, required on every PR. cargo-audit is not part
+      # of the toolchain, so it is installed here; --locked keeps that install
+      # reproducible. ssh2 is built with vendored-openssl, so an OpenSSL
+      # advisory needs a rebuild rather than an OS patch — noticing is the
+      # whole point.
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Rust advisory audit
+        run: npm run native:audit
+
       # #185: the only CI step that runs the real backend.mjs against a live
       # sshd. It sits before the Rust build because it is fast and because a
       # broken transport should fail early rather than after a full compile.

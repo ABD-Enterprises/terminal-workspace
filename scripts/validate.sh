@@ -91,6 +91,21 @@ else
   echo "[validate] localhost sshd transport fixture skipped (macOS only — the native crate ships on macOS)"
 fi
 
+# #226: Rust advisory scan. src-tauri/audit.toml described an "enforcing
+# invocation" that nothing ran, so its "verified clean" claim rotted — by the
+# time this gate was added the tree had four advisories, two of them 7.5 high.
+#
+# Opt-in locally (cargo-audit is not part of the Rust toolchain and fetches an
+# advisory database), REQUIRED in CI. It matters here because ssh2 is built with
+# vendored-openssl: OpenSSL is statically linked, so an advisory needs a rebuild
+# rather than an OS patch.
+if [[ "${TERMSNIP_RUN_RUST_AUDIT:-0}" == "1" ]]; then
+  echo "[validate] rust advisory audit"
+  bash ./scripts/native-audit.sh
+else
+  echo "[validate] rust advisory audit skipped (set TERMSNIP_RUN_RUST_AUDIT=1 to include — required for dependency changes; CI runs it on every PR)"
+fi
+
 # #185: the real backend.mjs. Everything else in this gate proves UI wiring
 # against mocks — playwright boots vite in demo mode and the integration suite
 # exercises resetDemoBackend() or extracted helpers, none of which binds a port.
