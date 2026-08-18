@@ -54,7 +54,14 @@ export function waitForSshReady(client, connectConfig, jumpClient, setStage) {
       }
       reject(error);
     });
-    client.connect(connectConfig);
+    try {
+      client.connect(connectConfig);
+    } catch (error) {
+      if (settled) return;
+      settled = true;
+      jumpClient?.end();
+      reject(error);
+    }
   });
 }
 

@@ -147,6 +147,27 @@ describe("#266: Node SSH responses disclose only typed failures", () => {
     expect(postReadyStages).toEqual(["output-read"]);
   });
 
+  it("settles synchronous connect failures before later errors", async () => {
+    const connectError = new Error("synchronous connect failure");
+    const client = Object.assign(new EventEmitter(), {
+      connect() {
+        throw connectError;
+      },
+    });
+    const jumpClient = { end: vi.fn() };
+    let stage = "connect";
+    const connection = waitForSshReady(client, {}, jumpClient, (nextStage: string) => {
+      stage = nextStage;
+    });
+
+    await expect(connection).rejects.toBe(connectError);
+    expect(jumpClient.end).toHaveBeenCalled();
+
+    const lateError = Object.assign(new Error("late error"), { level: "client-authentication" });
+    client.emit("error", lateError);
+    expect(stage).toBe("connect");
+  });
+
   it("withholds fs error text and the expanded HOME path from copy-key", async () => {
     const sentinel = "TS_COPY_FS_PROBE_3b9075";
     const plantedError = new Error(`EACCES ${sentinel} /fixture-home/.ssh/caller.pub`);
