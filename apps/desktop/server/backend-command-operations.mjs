@@ -33,6 +33,31 @@ export function sshFailureStage(error) {
   }
 }
 
+export function waitForSshReady(client, connectConfig, jumpClient, setStage) {
+  let settled = false;
+  return new Promise((resolve, reject) => {
+    client.once("ready", () => {
+      if (settled) return;
+      settled = true;
+      if (jumpClient) {
+        client.once("close", () => jumpClient.end());
+      }
+      resolve(client);
+    });
+    client.on("error", (error) => {
+      jumpClient?.end();
+      if (settled) return;
+      settled = true;
+      const failureStage = sshFailureStage(error);
+      if (failureStage) {
+        setStage?.(failureStage);
+      }
+      reject(error);
+    });
+    client.connect(connectConfig);
+  });
+}
+
 export function createBackendCommandOperations({ expandHome, readFile, runRemoteCommand }) {
   async function executeRemoteCommand(target, command) {
     let stage = "configuration";

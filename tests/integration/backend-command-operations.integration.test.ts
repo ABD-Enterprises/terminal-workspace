@@ -1,4 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
+import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -7,6 +8,7 @@ import { sendJson } from "../../apps/desktop/server/backend-responses.mjs";
 import {
   createBackendCommandOperations,
   sshFailureStage,
+  waitForSshReady,
 } from "../../apps/desktop/server/backend-command-operations.mjs";
 import { OperationTimeoutError } from "../../apps/desktop/server/backend-deadline.mjs";
 
@@ -109,6 +111,40 @@ describe("#266: Node SSH responses disclose only typed failures", () => {
       sshFailureStage({ level: assignedLevelAfter(clientSource, "curAuth.agentCtx.init") })
     ).toBe("authentication");
     expect(readJavaScriptTree(ssh2LibDirectory)).not.toContain("client-ssh");
+  });
+
+  it("classifies client-timeout only while waiting for SSH readiness", async () => {
+    const timeout = Object.assign(new Error("timeout"), { level: "client-timeout" });
+    const preReadyClient = Object.assign(new EventEmitter(), { connect: vi.fn() });
+    const preReadyStages: string[] = [];
+    const preReady = waitForSshReady(
+      preReadyClient,
+      { hostname: "pre-ready.example" },
+      undefined,
+      (stage: string) => preReadyStages.push(stage)
+    );
+
+    preReadyClient.emit("error", timeout);
+    await expect(preReady).rejects.toBe(timeout);
+    expect(preReadyStages).toEqual(["handshake"]);
+
+    const postReadyClient = Object.assign(new EventEmitter(), { connect: vi.fn() });
+    const jumpClient = { end: vi.fn() };
+    const postReadyStages: string[] = [];
+    const postReady = waitForSshReady(
+      postReadyClient,
+      { hostname: "post-ready.example" },
+      jumpClient,
+      (stage: string) => postReadyStages.push(stage)
+    );
+
+    postReadyClient.emit("ready");
+    await expect(postReady).resolves.toBe(postReadyClient);
+    postReadyStages.push("output-read");
+    postReadyClient.emit("error", timeout);
+
+    expect(jumpClient.end).toHaveBeenCalled();
+    expect(postReadyStages).toEqual(["output-read"]);
   });
 
   it("withholds fs error text and the expanded HOME path from copy-key", async () => {

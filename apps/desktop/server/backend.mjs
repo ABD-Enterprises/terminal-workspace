@@ -51,7 +51,7 @@ import {
 import { respondError, sendJson } from "./backend-responses.mjs";
 import {
   createBackendCommandOperations,
-  sshFailureStage,
+  waitForSshReady,
 } from "./backend-command-operations.mjs";
 import { SecretBuffer } from "./secrets.mjs";
 import {
@@ -389,24 +389,12 @@ async function connectClient(host, setStage) {
   }
 
   try {
-    return await new Promise((resolve, reject) => {
-      client.on("ready", () => {
-        if (jumpConnection?.jumpClient) {
-          client.once("close", () => jumpConnection.jumpClient.end());
-          client.once("error", () => jumpConnection.jumpClient.end());
-        }
-        resolve(client);
-      });
-      client.on("error", (error) => {
-        const failureStage = sshFailureStage(error);
-        if (failureStage) {
-          setStage?.(failureStage);
-        }
-        jumpConnection?.jumpClient?.end();
-        reject(error);
-      });
-      client.connect(connectConfig);
-    });
+    return await waitForSshReady(
+      client,
+      connectConfig,
+      jumpConnection?.jumpClient,
+      setStage
+    );
   } finally {
     // Whether the SSH handshake succeeded or failed, ssh2 has already read
     // password / passphrase / private-key bytes off connectConfig (the
