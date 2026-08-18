@@ -91,6 +91,23 @@ else
   echo "[validate] localhost sshd transport fixture skipped (macOS only — the native crate ships on macOS)"
 fi
 
+# #185: the real backend.mjs. Everything else in this gate proves UI wiring
+# against mocks — playwright boots vite in demo mode and the integration suite
+# exercises resetDemoBackend() or extracted helpers, none of which binds a port.
+# So a broken SSH/SFTP transport, auth gate, or session lifecycle could pass the
+# entire local gate while the shipped app could not open a session.
+#
+# Opt-in locally because it needs a real sshd, but REQUIRED in CI (the macOS job)
+# — leaving it local-only would preserve exactly that failure mode.
+if [[ "${TERMSNIP_RUN_BACKEND_FIXTURE:-0}" == "1" && "$(uname -s)" == "Darwin" ]]; then
+  echo "[validate] real backend transport fixture"
+  bash ./scripts/backend-transport-test.sh
+elif [[ "$(uname -s)" == "Darwin" ]]; then
+  echo "[validate] real backend transport fixture skipped (set TERMSNIP_RUN_BACKEND_FIXTURE=1 to include — required for changes to backend.mjs, its auth gate, or the session lifecycle)"
+else
+  echo "[validate] real backend transport fixture skipped (macOS only — needs a local sshd)"
+fi
+
 if [[ "${TERMSNIP_RUN_E2E:-0}" == "1" ]]; then
   echo "[validate] browser e2e"
   ./node_modules/.bin/playwright test --config playwright.config.ts

@@ -122,6 +122,14 @@ jobs:
       # stays #[ignore] (needs an unsandboxed sshd — tracked in #101).
       # #157: formatting first — it needs no compile, so a style failure is
       # reported in seconds instead of after the build below.
+      # #185: the only CI step that runs the real backend.mjs against a live
+      # sshd. It sits before the Rust build because it is fast and because a
+      # broken transport should fail early rather than after a full compile.
+      # This runner already proves sshd works — the Rust sshd fixture below
+      # uses the same facility.
+      - name: Real backend transport fixture
+        run: npm run backend:fixtures
+
       - name: Check Rust formatting
         run: npm run native:fmt:check
 
