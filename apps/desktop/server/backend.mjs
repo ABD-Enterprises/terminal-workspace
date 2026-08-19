@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
@@ -59,6 +59,11 @@ import {
   readJson,
   SFTP_UPLOAD_MAX_BYTES,
 } from "./backend-buffers.mjs";
+import {
+  resolveSshConfigPath,
+  SshConfigResolutionFailure,
+  SshConfigResolutionRegistry,
+} from "./ssh-config-resolution.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appRoot = normalize(join(__dirname, ".."));
@@ -116,57 +121,9 @@ function expandHome(pathname) {
 // exhaust the import.
 const SSH_CONFIG_MAX_BYTES = 1024 * 1024;
 const SSH_CONFIG_GLOB_MAX_MATCHES = 256;
-// A fresh 256-bit OS-random salt is created once at process start and never
-// leaves the backend. It must not be derivable from a PID, time, or constant,
-// or cycle keys would let the renderer confirm guesses about canonical paths.
-const SSH_CONFIG_CYCLE_KEY_SALT = randomBytes(32);
-// Canonical paths stay backend-private. The opaque cycle identity doubles as
-// the lookup handle for resolving the next relative Include at any depth.
-const SSH_CONFIG_CANONICAL_PATHS = new Map();
-
-function sshConfigCycleKey(canonicalPath) {
-  return createHash("sha256")
-    .update(SSH_CONFIG_CYCLE_KEY_SALT)
-    .update("\0")
-    .update(canonicalPath)
-    .digest("hex");
-}
-
-function rememberSshConfigPath(canonicalPath) {
-  const cycleKey = sshConfigCycleKey(canonicalPath);
-  SSH_CONFIG_CANONICAL_PATHS.set(cycleKey, canonicalPath);
-  return cycleKey;
-}
-
-async function resolveSshConfigPath(requestedPath, context, sshRoot) {
-  const parentCycleKey = context?.parentCycleKey;
-  const relativePath = context?.relativePath;
-  const hasContext = parentCycleKey !== undefined || relativePath !== undefined;
-  if (!hasContext) {
-    return expandHome(requestedPath);
-  }
-  if (
-    typeof parentCycleKey !== "string" ||
-    typeof relativePath !== "string" ||
-    relativePath.startsWith("/") ||
-    relativePath.startsWith("~")
-  ) {
-    throw new Error("invalid relative Include context");
-  }
-
-  const parentReal = SSH_CONFIG_CANONICAL_PATHS.get(parentCycleKey);
-  if (parentReal === undefined) {
-    throw new Error("relative Include context was rejected");
-  }
-  const rootPrefix = sshRoot.endsWith("/") ? sshRoot : `${sshRoot}/`;
-  if (
-    (parentReal !== sshRoot && !parentReal.startsWith(rootPrefix)) ||
-    sshConfigCycleKey(parentReal) !== parentCycleKey
-  ) {
-    throw new Error("relative Include context was rejected");
-  }
-  return join(dirname(parentReal), relativePath);
-}
+// The HTTP API has no import-session boundary, so keep only the 4,096 most
+// recently used canonical paths. Evicted keys fail as invalid resolution context.
+const SSH_CONFIG_RESOLUTION_REGISTRY = new SshConfigResolutionRegistry();
 
 function globToRegExp(pattern) {
   let source = "^";
@@ -195,7 +152,12 @@ function globToRegExp(pattern) {
  */
 async function globSshConfigFiles(pattern, context) {
   const sshRoot = await realpath(join(os.homedir(), ".ssh"));
-  const expanded = await resolveSshConfigPath(pattern, context, sshRoot);
+  const expanded = resolveSshConfigPath(
+    pattern,
+    context,
+    sshRoot,
+    SSH_CONFIG_RESOLUTION_REGISTRY
+  );
   const parent = dirname(expanded);
   const filePattern = basename(expanded);
 
@@ -241,7 +203,7 @@ async function globSshConfigFiles(pattern, context) {
       continue;
     }
     matches.push({
-      cycleKey: rememberSshConfigPath(real),
+      cycleKey: SSH_CONFIG_RESOLUTION_REGISTRY.remember(real),
       // This is the directory entry selected by the caller's final glob
       // component, not a resolved path or the target of a symlink.
       name,
@@ -1406,7 +1368,11 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, result);
     } catch (error) {
       // A refused/outside-~/.ssh pattern is a 400, not a 500.
-      respondError(response, error, 400);
+      if (error instanceof SshConfigResolutionFailure) {
+        sendJson(response, error.statusCode, error);
+      } else {
+        respondError(response, error, 400);
+      }
     }
     return;
   }

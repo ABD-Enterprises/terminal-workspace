@@ -195,6 +195,21 @@ async function main() {
       Boolean(globMatches[2]?.cycleKey) &&
         globMatches[0]?.cycleKey !== globMatches[2]?.cycleKey);
 
+    const unknownParent = await api("/api/backend/ssh-config/glob", {
+      method: "POST",
+      token: TOKEN,
+      body: {
+        pattern: "~/.ssh/conf.d/*.conf",
+        parentCycleKey: "garbage",
+        relativePath: "*.conf",
+      },
+    });
+    check("an unknown parent cycle key returns a typed failure",
+      unknownParent.status === 400 &&
+        unknownParent.json?.reason === "invalid-path" &&
+        unknownParent.json?.path === "~/.ssh/conf.d/*.conf",
+      `status ${unknownParent.status} body ${unknownParent.text.slice(0, 200)}`);
+
     console.log("[client] session lifecycle over real SSH");
     const created = await api("/api/backend/sessions", {
       method: "POST",

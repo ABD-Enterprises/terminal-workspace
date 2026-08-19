@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     env, fs,
     io::{self, Read, Write},
     net::{TcpStream, ToSocketAddrs},
@@ -3802,6 +3802,9 @@ struct GlobSshConfigFilesResponse {
 /// Defensive cap on how many files one glob may expand to, so a pathological
 /// pattern over a huge directory can't pin the UI or balloon the import.
 const SSH_CONFIG_GLOB_MAX_MATCHES: usize = 256;
+// Tauri commands are separate managed-state calls with no import-complete
+// signal. Bound their shared LRU; an evicted key resolves as InvalidPath.
+const SSH_CONFIG_RESOLUTION_MAX_ENTRIES: usize = 4096;
 
 #[derive(Clone)]
 struct SshConfigCycleKeySalt([u8; 32]);
@@ -3822,27 +3825,68 @@ fn ssh_config_cycle_key(canonical: &Path, salt: &SshConfigCycleKeySalt) -> Strin
     BASE64_STANDARD.encode(hasher.finalize())
 }
 
-#[derive(Clone, Default)]
+#[derive(Default)]
+struct SshConfigResolutionRegistryState {
+    canonical_paths: HashMap<String, PathBuf>,
+    recency: VecDeque<String>,
+}
+
+#[derive(Clone)]
 struct SshConfigResolutionRegistry {
-    canonical_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
+    state: Arc<Mutex<SshConfigResolutionRegistryState>>,
+    max_entries: usize,
+}
+
+impl Default for SshConfigResolutionRegistry {
+    fn default() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(SshConfigResolutionRegistryState::default())),
+            max_entries: SSH_CONFIG_RESOLUTION_MAX_ENTRIES,
+        }
+    }
 }
 
 impl SshConfigResolutionRegistry {
+    #[cfg(test)]
+    fn with_max_entries(max_entries: usize) -> Self {
+        assert!(max_entries > 0);
+        Self {
+            state: Arc::new(Mutex::new(SshConfigResolutionRegistryState::default())),
+            max_entries,
+        }
+    }
+
     fn remember(&self, canonical: &Path, salt: &SshConfigCycleKeySalt) -> String {
         let cycle_key = ssh_config_cycle_key(canonical, salt);
-        self.canonical_paths
+        let mut state = self
+            .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(position) = state.recency.iter().position(|key| key == &cycle_key) {
+            state.recency.remove(position);
+        } else if state.canonical_paths.len() >= self.max_entries {
+            if let Some(stale_key) = state.recency.pop_front() {
+                state.canonical_paths.remove(&stale_key);
+            }
+        }
+        state
+            .canonical_paths
             .insert(cycle_key.clone(), canonical.to_path_buf());
+        state.recency.push_back(cycle_key.clone());
         cycle_key
     }
 
     fn canonical_path(&self, cycle_key: &str) -> Option<PathBuf> {
-        self.canonical_paths
+        let mut state = self
+            .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(cycle_key)
-            .cloned()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let canonical = state.canonical_paths.get(cycle_key).cloned()?;
+        if let Some(position) = state.recency.iter().position(|key| key == cycle_key) {
+            state.recency.remove(position);
+        }
+        state.recency.push_back(cycle_key.to_string());
+        Some(canonical)
     }
 }
 
@@ -4120,6 +4164,55 @@ mod ssh_config_command_tests {
             &SshConfigResolutionRegistry::default(),
         )
         .is_err());
+    }
+
+    #[test]
+    fn unknown_parent_cycle_key_is_a_typed_invalid_path_failure() {
+        let requested = "/fixture/.ssh/child.conf";
+        let failure = super::resolve_ssh_config_path(
+            requested,
+            Some("garbage"),
+            Some("child.conf"),
+            std::path::Path::new("/fixture/.ssh"),
+            &SshConfigCycleKeySalt([7; 32]),
+            &SshConfigResolutionRegistry::default(),
+        )
+        .expect_err("an unknown parent key must be rejected");
+
+        assert_eq!(
+            failure,
+            SshConfigCommandFailure::InvalidPath {
+                path: requested.to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn evicted_parent_cycle_key_is_a_typed_invalid_path_failure() {
+        let ssh_root = std::path::Path::new("/fixture/.ssh");
+        let cycle_key_salt = SshConfigCycleKeySalt([7; 32]);
+        let resolution_registry = SshConfigResolutionRegistry::with_max_entries(2);
+        let stale_key = resolution_registry.remember(&ssh_root.join("first.conf"), &cycle_key_salt);
+        resolution_registry.remember(&ssh_root.join("second.conf"), &cycle_key_salt);
+        resolution_registry.remember(&ssh_root.join("third.conf"), &cycle_key_salt);
+
+        let requested = "/fixture/.ssh/child.conf";
+        let failure = super::resolve_ssh_config_path(
+            requested,
+            Some(&stale_key),
+            Some("child.conf"),
+            ssh_root,
+            &cycle_key_salt,
+            &resolution_registry,
+        )
+        .expect_err("an evicted parent key must be rejected");
+
+        assert_eq!(
+            failure,
+            SshConfigCommandFailure::InvalidPath {
+                path: requested.to_string(),
+            }
+        );
     }
 
     #[cfg(unix)]
