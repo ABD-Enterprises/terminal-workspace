@@ -11,7 +11,10 @@ import {
   inspectPrivateKey,
   scanKnownHost,
 } from "../lib/api";
-import { formatCopyKeyToHostFailure } from "../lib/backend-failure-messages";
+import {
+  formatBackendFailure,
+  formatCopyKeyToHostFailure,
+} from "../lib/backend-failure-messages";
 import { validatePastedPrivateKey } from "../lib/private-key-validation";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
@@ -102,7 +105,7 @@ export function KeysPage() {
       closeEditor();
     } catch (error) {
       setEditorBusy(false);
-      setEditorError(error instanceof Error ? error.message : String(error));
+      setEditorError(formatBackendFailure(error));
     }
   };
 
@@ -126,7 +129,7 @@ export function KeysPage() {
       closeEditor();
     } catch (error) {
       setEditorBusy(false);
-      setEditorError(error instanceof Error ? error.message : String(error));
+      setEditorError(formatBackendFailure(error));
     }
   };
 
@@ -159,7 +162,7 @@ export function KeysPage() {
       setScanResults(result.entries);
     } catch (error) {
       setScanResults([]);
-      setScanError(error instanceof Error ? error.message : String(error));
+      setScanError(formatBackendFailure(error));
     } finally {
       setScanBusy(false);
     }
@@ -473,7 +476,7 @@ export function KeysPage() {
               setCopyError(formatCopyKeyToHostFailure(result));
             }
           } catch (error) {
-            setCopyError(error instanceof Error ? error.message : String(error));
+            setCopyError(formatBackendFailure(error));
           } finally {
             setCopyBusy(false);
           }

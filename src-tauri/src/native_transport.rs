@@ -30,27 +30,19 @@ fn lexically_normalize_absolute(path: &Path) -> PathBuf {
     out
 }
 
-pub(crate) fn validate_user_owned_key_path(path: &Path) -> Result<(), String> {
+pub(crate) fn validate_user_owned_key_path(
+    path: &Path,
+    requested_path: &str,
+) -> Result<(), KeyCommandFailure> {
     if path.as_os_str().is_empty() {
-        return Err("Key path is required".to_string());
+        return Err(KeyCommandFailure::PathRequired);
     }
 
     if !path.is_absolute() {
-        return Err(format!(
-            "Key path must be absolute after home-expansion: {}",
-            path.display()
-        ));
+        return Err(KeyCommandFailure::PathMustBeAbsolute {
+            path: requested_path.to_string(),
+        });
     }
-
-    // Defeat `..` traversal and symlink trickery before the allowlist check.
-    // First collapse `.`/`..` lexically so a literal path like `/tmp/../etc/x`
-    // cannot escape the allowlist even when its leaf/dir does not exist yet
-    // (the generate-new-key flow stages into a not-yet-created directory).
-    // Then resolve symlinks when the path actually exists; otherwise fall back
-    // to the normalized (already `..`-free) path, which is matched against both
-    // the literal and canonical allowlist roots below.
-    let normalized = lexically_normalize_absolute(path);
-    let canonical = fs::canonicalize(&normalized).unwrap_or(normalized);
 
     let mut allowed_roots: Vec<PathBuf> = Vec::new();
     let mut push_with_canonical = |path: PathBuf| {
@@ -88,14 +80,31 @@ pub(crate) fn validate_user_owned_key_path(path: &Path) -> Result<(), String> {
     // The per-user TMPDIR (0700) pushed above covers legitimate staging and
     // fixture flows.
 
-    if allowed_roots.iter().any(|root| canonical.starts_with(root)) {
-        return Ok(());
-    }
+    validate_user_owned_key_path_against_roots(path, requested_path, &allowed_roots)
+}
 
-    Err(format!(
-        "Refusing to access private key outside HOME or /etc/ssh: {}",
-        canonical.display()
-    ))
+fn validate_user_owned_key_path_against_roots(
+    path: &Path,
+    requested_path: &str,
+    allowed_roots: &[PathBuf],
+) -> Result<(), KeyCommandFailure> {
+    // Defeat `..` traversal and symlink trickery before the allowlist check.
+    // First collapse `.`/`..` lexically so a literal path like `/tmp/../etc/x`
+    // cannot escape the allowlist even when its leaf/dir does not exist yet
+    // (the generate-new-key flow stages into a not-yet-created directory).
+    // Then resolve symlinks when the path actually exists; otherwise fall back
+    // to the normalized (already `..`-free) path, which is matched against both
+    // the literal and canonical allowlist roots below.
+    let normalized = lexically_normalize_absolute(path);
+    let canonical = fs::canonicalize(&normalized).unwrap_or(normalized);
+
+    if allowed_roots.iter().any(|root| canonical.starts_with(root)) {
+        Ok(())
+    } else {
+        Err(KeyCommandFailure::PathOutsideAllowedRoots {
+            path: requested_path.to_string(),
+        })
+    }
 }
 
 pub(crate) fn normalize_remote_path(pathname: &str) -> String {
@@ -254,23 +263,33 @@ pub(crate) fn normalize_key_algorithm(value: &str) -> String {
 pub(crate) fn parse_ssh_keygen_summary(
     summary: &str,
     resolved_path: &str,
-) -> Result<KeyMetadata, String> {
+    requested_path: &str,
+) -> Result<KeyMetadata, KeyCommandFailure> {
     let trimmed = summary.trim();
     let parts = trimmed.split_whitespace().collect::<Vec<_>>();
     if parts.len() < 4 {
-        return Err(format!("Unexpected ssh-keygen output: {trimmed}"));
+        return Err(KeyCommandFailure::InvalidKeyMetadata {
+            path: requested_path.to_string(),
+        });
     }
 
     let bits = parts[0]
         .parse::<u32>()
-        .map_err(|_| format!("Unexpected ssh-keygen output (bit length): {trimmed}"))?;
+        .map_err(|_| KeyCommandFailure::InvalidKeyMetadata {
+            path: requested_path.to_string(),
+        })?;
     let fingerprint = parts[1].to_string();
-    let (comment_prefix, algorithm_suffix) = trimmed
-        .rsplit_once(" (")
-        .ok_or_else(|| format!("Unexpected ssh-keygen output: {trimmed}"))?;
-    let algorithm_raw = algorithm_suffix
-        .strip_suffix(')')
-        .ok_or_else(|| format!("Unexpected ssh-keygen output: {trimmed}"))?;
+    let (comment_prefix, algorithm_suffix) =
+        trimmed
+            .rsplit_once(" (")
+            .ok_or_else(|| KeyCommandFailure::InvalidKeyMetadata {
+                path: requested_path.to_string(),
+            })?;
+    let algorithm_raw = algorithm_suffix.strip_suffix(')').ok_or_else(|| {
+        KeyCommandFailure::InvalidKeyMetadata {
+            path: requested_path.to_string(),
+        }
+    })?;
     let comment = comment_prefix
         .strip_prefix(&format!("{} {} ", parts[0], fingerprint))
         .map(str::trim)
@@ -308,20 +327,27 @@ pub(crate) fn parse_ssh_keygen_summary(
 /// Normalizes line endings + ensures the body ends with a single LF
 /// — some clipboards strip the trailing newline and ssh-keygen
 /// rejects keys without it.
-pub(crate) fn import_private_key_from_body(path: &str, body: &str) -> Result<KeyMetadata, String> {
+pub(crate) fn import_private_key_from_body(
+    path: &str,
+    body: &str,
+) -> Result<KeyMetadata, KeyCommandFailure> {
     if path.trim().is_empty() {
-        return Err("A destination path is required".to_string());
+        return Err(KeyCommandFailure::PathRequired);
     }
     if body.trim().is_empty() {
-        return Err("A key body is required".to_string());
+        return Err(KeyCommandFailure::KeyBodyRequired);
     }
     let resolved_path = expand_home(path);
-    validate_user_owned_key_path(&resolved_path)?;
+    validate_user_owned_key_path(&resolved_path, path)?;
     if let Some(parent) = resolved_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        fs::create_dir_all(parent).map_err(|_| KeyCommandFailure::ParentDirectoryUnavailable {
+            path: path.to_string(),
+        })?;
     }
     if resolved_path.exists() {
-        return Err("Target private key path already exists".to_string());
+        return Err(KeyCommandFailure::PathAlreadyExists {
+            path: path.to_string(),
+        });
     }
 
     let mut normalized = body.replace("\r\n", "\n").replace('\r', "\n");
@@ -334,57 +360,86 @@ pub(crate) fn import_private_key_from_body(path: &str, body: &str) -> Result<Key
     // a file or symlink planted between the exists() check and here makes the
     // create fail rather than overwriting or following it. Mirrors
     // write_private_file (which the write path already uses).
-    write_private_file(&resolved_path, normalized.as_bytes(), 0o600)?;
+    write_private_file(&resolved_path, normalized.as_bytes(), 0o600).map_err(|_| {
+        KeyCommandFailure::PrivateKeyWriteFailed {
+            path: path.to_string(),
+        }
+    })?;
 
-    let path_string = resolved_path.to_string_lossy().into_owned();
-    inspect_private_key(&path_string)
+    inspect_private_key_at(&resolved_path, path)
 }
 
-pub(crate) fn inspect_private_key(pathname: &str) -> Result<KeyMetadata, String> {
+pub(crate) fn inspect_private_key(pathname: &str) -> Result<KeyMetadata, KeyCommandFailure> {
     let resolved_path = expand_home(pathname);
-    validate_user_owned_key_path(&resolved_path)?;
-    fs::metadata(&resolved_path).map_err(|error| error.to_string())?;
+    inspect_private_key_at(&resolved_path, pathname)
+}
+
+fn inspect_private_key_at(
+    resolved_path: &Path,
+    requested_path: &str,
+) -> Result<KeyMetadata, KeyCommandFailure> {
+    validate_user_owned_key_path(resolved_path, requested_path)?;
+    fs::metadata(resolved_path).map_err(|_| KeyCommandFailure::PrivateKeyUnreadable {
+        path: requested_path.to_string(),
+    })?;
     let resolved_path = resolved_path.to_string_lossy().into_owned();
+    let stdout = run_ssh_keygen(
+        &["-lf".to_string(), resolved_path.clone()],
+        KeyCommandOperation::Inspect,
+        requested_path,
+    )?;
+
+    parse_ssh_keygen_summary(&stdout, &resolved_path, requested_path)
+}
+
+fn run_ssh_keygen(
+    args: &[String],
+    operation: KeyCommandOperation,
+    requested_path: &str,
+) -> Result<String, KeyCommandFailure> {
     let output = Command::new("/usr/bin/ssh-keygen")
-        .args(["-lf", &resolved_path])
+        .args(args)
         .output()
-        .map_err(|error| error.to_string())?;
+        .map_err(|_| KeyCommandFailure::SshKeygenUnavailable {
+            operation,
+            path: requested_path.to_string(),
+        })?;
     let stdout = trim_ssh_output(&String::from_utf8_lossy(&output.stdout));
-    let stderr = trim_ssh_output(&String::from_utf8_lossy(&output.stderr));
 
     if !output.status.success() {
-        return Err(if stderr.is_empty() {
-            if stdout.is_empty() {
-                format!("ssh-keygen exited with status {}", output.status)
-            } else {
-                stdout
-            }
-        } else {
-            stderr
+        return Err(KeyCommandFailure::SshKeygenFailed {
+            operation,
+            path: requested_path.to_string(),
         });
     }
 
-    parse_ssh_keygen_summary(&stdout, &resolved_path)
+    Ok(stdout)
 }
 
-pub(crate) fn generate_key_pair(request: &GenerateKeyRequest) -> Result<KeyMetadata, String> {
+pub(crate) fn generate_key_pair(
+    request: &GenerateKeyRequest,
+) -> Result<KeyMetadata, KeyCommandFailure> {
     if request.path.trim().is_empty() {
-        return Err("Target private key path is required".to_string());
+        return Err(KeyCommandFailure::PathRequired);
     }
 
     let key_type = request.key_type.trim().to_ascii_lowercase();
     if !matches!(key_type.as_str(), "ed25519" | "ecdsa" | "rsa") {
-        return Err("Unsupported key type".to_string());
+        return Err(KeyCommandFailure::UnsupportedKeyType);
     }
 
     let resolved_path = expand_home(&request.path);
-    validate_user_owned_key_path(&resolved_path)?;
+    validate_user_owned_key_path(&resolved_path, &request.path)?;
     if let Some(parent) = resolved_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        fs::create_dir_all(parent).map_err(|_| KeyCommandFailure::ParentDirectoryUnavailable {
+            path: request.path.clone(),
+        })?;
     }
 
     if resolved_path.exists() {
-        return Err("Target private key path already exists".to_string());
+        return Err(KeyCommandFailure::PathAlreadyExists {
+            path: request.path.clone(),
+        });
     }
 
     let resolved_path_string = resolved_path.to_string_lossy().into_owned();
@@ -406,25 +461,9 @@ pub(crate) fn generate_key_pair(request: &GenerateKeyRequest) -> Result<KeyMetad
         args.splice(3..3, ["-b".to_string(), "521".to_string()]);
     }
 
-    let output = Command::new("/usr/bin/ssh-keygen")
-        .args(args)
-        .output()
-        .map_err(|error| error.to_string())?;
-    let stdout = trim_ssh_output(&String::from_utf8_lossy(&output.stdout));
-    let stderr = trim_ssh_output(&String::from_utf8_lossy(&output.stderr));
-    if !output.status.success() {
-        return Err(if stderr.is_empty() {
-            if stdout.is_empty() {
-                format!("ssh-keygen exited with status {}", output.status)
-            } else {
-                stdout
-            }
-        } else {
-            stderr
-        });
-    }
+    run_ssh_keygen(&args, KeyCommandOperation::Generate, &request.path)?;
 
-    inspect_private_key(&resolved_path_string)
+    inspect_private_key_at(&resolved_path, &request.path)
 }
 
 pub(crate) fn compute_public_key_fingerprint(public_key: &str) -> Result<String, String> {
@@ -627,10 +666,7 @@ fn native_ssh_session_root_from(temp_root: PathBuf, home: PathBuf) -> Result<Pat
 
     let metadata = fs::metadata(&fallback_root).map_err(|error| error.to_string())?;
     if metadata.uid() != user_uid || metadata.mode() & 0o002 != 0 {
-        return Err(format!(
-            "Refusing to stage SSH material in insecure temp root: {}",
-            fallback_root.display()
-        ));
+        return Err("Refusing to stage SSH material in an insecure temp root".to_string());
     }
 
     Ok(fallback_root)
@@ -2126,14 +2162,122 @@ mod tests {
     fn parse_ssh_keygen_summary_rejects_non_numeric_bits() {
         // A non-numeric bit length must error rather than silently become 0.
         let bad = "notanumber SHA256:abcdef testkey (ED25519)";
-        assert!(parse_ssh_keygen_summary(bad, "/tmp/key").is_err());
+        assert!(parse_ssh_keygen_summary(bad, "/tmp/key", "~/.ssh/key").is_err());
     }
 
     #[test]
     fn parse_ssh_keygen_summary_parses_valid_bits() {
         let good = "256 SHA256:abcdef testkey (ED25519)";
-        let meta = parse_ssh_keygen_summary(good, "/tmp/key").expect("valid summary parses");
+        let meta =
+            parse_ssh_keygen_summary(good, "/tmp/key", "~/.ssh/key").expect("valid summary parses");
         assert_eq!(meta.bits, 256);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn key_path_rejections_keep_expanded_and_canonical_paths_private() {
+        let root = test_root("key-path-rejections");
+        let allowed_root = root.join("allowed");
+        fs::create_dir(&allowed_root).expect("allowed root should be created");
+        let requested_path = "~/.ssh/requested-key";
+
+        // This simulates the already-expanded path handed to the validator.
+        // Its sentinel must be present before serialization, or the assertion
+        // below could pass without proving that expansion output was removed.
+        let expanded_sentinel = "EXPANDED_KEY_PATH_SENTINEL";
+        let expanded_path = root.join(expanded_sentinel).join("missing-key");
+        assert!(expanded_path.to_string_lossy().contains(expanded_sentinel));
+        let expanded_failure = validate_user_owned_key_path_against_roots(
+            &expanded_path,
+            requested_path,
+            std::slice::from_ref(&allowed_root),
+        )
+        .expect_err("expanded path outside the allowlist must be rejected");
+        let expanded_serialized =
+            serde_json::to_string(&expanded_failure).expect("failure must serialize");
+        assert!(expanded_serialized.contains(requested_path));
+        assert!(!expanded_serialized.contains(expanded_sentinel));
+
+        // The visible path is inside the allowlist, but its symlink target is
+        // not. Prove canonicalization reaches the sentinel-bearing target,
+        // then prove the rejection still contains only the caller's spelling.
+        let canonical_sentinel = "CANONICAL_KEY_PATH_SENTINEL";
+        let canonical_target_root = root.join(canonical_sentinel);
+        fs::create_dir(&canonical_target_root).expect("canonical target root should be created");
+        let canonical_target = canonical_target_root.join("private-key");
+        fs::write(&canonical_target, "not a private key")
+            .expect("canonical target should be created");
+        let visible_path = allowed_root.join("visible-key");
+        symlink(&canonical_target, &visible_path).expect("validator symlink should be created");
+        let canonical_path =
+            fs::canonicalize(&visible_path).expect("validator symlink should canonicalize");
+        assert!(canonical_path
+            .to_string_lossy()
+            .contains(canonical_sentinel));
+        let canonical_failure = validate_user_owned_key_path_against_roots(
+            &visible_path,
+            requested_path,
+            std::slice::from_ref(&allowed_root),
+        )
+        .expect_err("symlink escaping the allowlist must be rejected");
+        let canonical_serialized =
+            serde_json::to_string(&canonical_failure).expect("failure must serialize");
+        assert!(canonical_serialized.contains(requested_path));
+        assert!(!canonical_serialized.contains(canonical_sentinel));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ssh_keygen_failure_does_not_relay_output_or_the_resolved_path() {
+        assert!(
+            ssh_keygen_available(),
+            "the native key-command regression test requires /usr/bin/ssh-keygen"
+        );
+
+        let root = test_root("keygen-relay");
+        let relay_sentinel = "SSH_KEYGEN_RELAY_SENTINEL";
+        let hidden_root = root.join(relay_sentinel);
+        fs::create_dir(&hidden_root).expect("hidden key root should be created");
+        let resolved_path = hidden_root.join("invalid-key");
+        fs::write(&resolved_path, "not a private key").expect("invalid key should be created");
+
+        // Verify the fixture gets past metadata and reaches a real ssh-keygen
+        // failure whose output contains the hidden resolved path. Without both
+        // checks, the sanitization assertion could pass through an earlier arm.
+        fs::metadata(&resolved_path).expect("invalid key must exist before inspection");
+        let raw_output = Command::new("/usr/bin/ssh-keygen")
+            .args(["-lf", &resolved_path.to_string_lossy()])
+            .output()
+            .expect("ssh-keygen should start");
+        assert!(!raw_output.status.success());
+        let raw_diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&raw_output.stderr),
+            String::from_utf8_lossy(&raw_output.stdout)
+        );
+        assert!(
+            raw_diagnostic.contains(relay_sentinel),
+            "fixture must prove ssh-keygen would relay the resolved path: {raw_diagnostic}"
+        );
+
+        let requested_path = "~/.ssh/invalid-key";
+        let failure = match inspect_private_key_at(&resolved_path, requested_path) {
+            Ok(_) => panic!("invalid key must fail inspection"),
+            Err(failure) => failure,
+        };
+        assert_eq!(
+            failure,
+            KeyCommandFailure::SshKeygenFailed {
+                operation: KeyCommandOperation::Inspect,
+                path: requested_path.to_string(),
+            }
+        );
+        let serialized = serde_json::to_string(&failure).expect("failure must serialize");
+        assert!(serialized.contains(requested_path));
+        assert!(!serialized.contains(relay_sentinel));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

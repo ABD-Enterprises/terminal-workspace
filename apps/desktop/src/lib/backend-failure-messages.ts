@@ -1,9 +1,86 @@
 import type {
   CopyKeyToHostResponse,
+  KeyCommandFailure,
   RemoteCommandFailure,
   SnippetExecutionResult,
   SshFailureStage,
 } from "./backend-contract";
+
+function pathFailure(
+  error: Record<string, unknown>
+): error is Record<string, unknown> & { path: string } {
+  return typeof error.path === "string";
+}
+
+function keyCommandFailureMessage(error: unknown) {
+  if (typeof error !== "object" || error === null || !("reason" in error)) {
+    return undefined;
+  }
+
+  const failure = error as Record<string, unknown>;
+  switch (failure.reason) {
+    case "path-required":
+      return "A private key path is required.";
+    case "key-body-required":
+      return "A private key body is required.";
+    case "path-must-be-absolute":
+      return pathFailure(failure)
+        ? `Private key path ${failure.path} must be absolute or start with ~/.`
+        : undefined;
+    case "path-outside-allowed-roots":
+      return pathFailure(failure)
+        ? `Private key path ${failure.path} is outside the approved user-owned locations.`
+        : undefined;
+    case "parent-directory-unavailable":
+      return pathFailure(failure)
+        ? `Could not create the parent directory for ${failure.path}.`
+        : undefined;
+    case "path-already-exists":
+      return pathFailure(failure) ? `A key already exists at ${failure.path}.` : undefined;
+    case "private-key-unreadable":
+      return pathFailure(failure) ? `Could not read private key at ${failure.path}.` : undefined;
+    case "private-key-write-failed":
+      return pathFailure(failure) ? `Could not write private key at ${failure.path}.` : undefined;
+    case "unsupported-key-type":
+      return "Choose an ED25519, ECDSA, or RSA key type.";
+    case "ssh-keygen-unavailable":
+      if (!pathFailure(failure)) {
+        return undefined;
+      }
+      return `Could not start ssh-keygen for ${failure.path}.`;
+    case "ssh-keygen-failed":
+      if (!pathFailure(failure)) {
+        return undefined;
+      }
+      return failure.operation === "generate"
+        ? `ssh-keygen could not generate a private key at ${failure.path}.`
+        : `ssh-keygen could not inspect the private key at ${failure.path}.`;
+    case "invalid-key-metadata":
+      return pathFailure(failure)
+        ? `ssh-keygen returned invalid metadata for ${failure.path}.`
+        : undefined;
+    case "worker-failed":
+      return pathFailure(failure)
+        ? `The private-key operation failed for ${failure.path}.`
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+export function formatBackendFailure(error: unknown) {
+  const keyCommandMessage = keyCommandFailureMessage(error as KeyCommandFailure);
+  if (keyCommandMessage) {
+    return keyCommandMessage;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return "The backend request failed.";
+}
 
 function sshStageMessage(stage: SshFailureStage, host: string, copyKey: boolean) {
   switch (stage) {
