@@ -26,12 +26,34 @@ export interface ResolveSshIncludesResult {
  * returns `null` for every path, so Include lines fall back to the existing
  * "log and skip" behavior.
  */
-export type SshConfigFileReader = (resolvedPath: string) => Promise<string | null>;
+export interface SshConfigFileRead {
+  /** Opaque identity derived from the canonical file under a process-random salt. */
+  cycleKey: string;
+  content: string;
+}
+
+/**
+ * Context for resolving a nested relative Include beside its canonical
+ * containing file without returning that canonical path to the renderer.
+ */
+export interface SshConfigResolutionContext {
+  parentCycleKey: string;
+  /** Caller-visible spelling of the containing file, used to re-open it safely. */
+  parentPath: string;
+  relativePath: string;
+}
+
+export type SshConfigFileReader = (
+  resolvedPath: string,
+  context?: SshConfigResolutionContext
+) => Promise<SshConfigFileRead | null>;
 
 /** A single file matched by a glob Include, with its already-read content. */
 export interface SshConfigGlobMatch {
-  /** Canonical path of the matched file (used for cycle detection + base dir). */
-  path: string;
+  /** Opaque identity derived from the canonical file under a process-random salt. */
+  cycleKey: string;
+  /** Final directory-entry name matched by the caller's glob; never a resolved path. */
+  name: string;
   content: string;
 }
 
@@ -47,7 +69,10 @@ export interface SshConfigGlobMatch {
  * fixture. When no lister is supplied, glob Includes fall back to the previous
  * "log and skip" behavior.
  */
-export type SshConfigGlobLister = (pattern: string) => Promise<SshConfigGlobMatch[]>;
+export type SshConfigGlobLister = (
+  pattern: string,
+  context?: SshConfigResolutionContext
+) => Promise<SshConfigGlobMatch[]>;
 
 export interface ResolveSshIncludesOptions {
   readFile: SshConfigFileReader;
@@ -64,7 +89,7 @@ export interface ResolveSshIncludesOptions {
   baseDir?: string;
   /**
    * Maximum depth of nested Includes. Ten is generous — real configs nest
-   * two or three levels at most, and the visited-paths set blocks true
+   * two or three levels at most, and the visited-identities set blocks true
    * cycles. The depth cap is a defensive limit on pathological chains
    * (tens of thousands of files referenced from a top-level glob, etc).
    */
@@ -106,10 +131,27 @@ function hasGlobChar(value: string): boolean {
   return value.includes("*") || value.includes("?") || value.includes("[");
 }
 
+function isRelativePath(value: string): boolean {
+  return !value.startsWith("/") && !value.startsWith("~");
+}
+
+function resolutionContext(
+  entry: string,
+  currentFile: { cycleKey: string; path: string } | undefined
+): SshConfigResolutionContext | undefined {
+  if (!currentFile || !isRelativePath(entry)) return undefined;
+  return {
+    parentCycleKey: currentFile.cycleKey,
+    parentPath: currentFile.path,
+    relativePath: entry,
+  };
+}
+
 async function expandText(
   text: string,
   options: ResolvedSshIncludesOptions,
   currentBaseDir: string,
+  currentFile: { cycleKey: string; path: string } | undefined,
   visited: Set<string>,
   depth: number,
   skipped: SshConfigImportSkip[]
@@ -171,7 +213,7 @@ async function expandText(
         const pattern = normalizePath(entry, currentBaseDir);
         let matches: SshConfigGlobMatch[];
         try {
-          matches = await options.globFiles(pattern);
+          matches = await options.globFiles(pattern, resolutionContext(entry, currentFile));
         } catch (error) {
           skipped.push({
             reason: "include-directive",
@@ -186,21 +228,23 @@ async function expandText(
           });
           continue;
         }
-        const ordered = [...matches].sort((left, right) => left.path.localeCompare(right.path));
+        const ordered = [...matches].sort((left, right) => left.name.localeCompare(right.name));
         for (const matchEntry of ordered) {
-          if (visited.has(matchEntry.path)) {
+          if (visited.has(matchEntry.cycleKey)) {
             skipped.push({
               reason: "include-directive",
-              detail: `Include ${matchEntry.path} (cycle)`,
+              detail: `Include ${entry} matched file ${JSON.stringify(matchEntry.name)} (cycle)`,
             });
             continue;
           }
           const nextVisited = new Set(visited);
-          nextVisited.add(matchEntry.path);
+          nextVisited.add(matchEntry.cycleKey);
+          const matchPath = normalizePath(matchEntry.name, dirnamePath(pattern));
           const expanded = await expandText(
             matchEntry.content,
             options,
-            dirnamePath(matchEntry.path),
+            dirnamePath(matchPath),
+            { cycleKey: matchEntry.cycleKey, path: matchPath },
             nextVisited,
             depth + 1,
             skipped
@@ -210,16 +254,9 @@ async function expandText(
         continue;
       }
       const normalized = normalizePath(entry, currentBaseDir);
-      if (visited.has(normalized)) {
-        skipped.push({
-          reason: "include-directive",
-          detail: `Include ${entry} (cycle)`,
-        });
-        continue;
-      }
-      let included: string | null;
+      let included: SshConfigFileRead | null;
       try {
-        included = await options.readFile(normalized);
+        included = await options.readFile(normalized, resolutionContext(entry, currentFile));
       } catch (error) {
         skipped.push({
           reason: "include-directive",
@@ -234,12 +271,20 @@ async function expandText(
         });
         continue;
       }
+      if (visited.has(included.cycleKey)) {
+        skipped.push({
+          reason: "include-directive",
+          detail: `Include ${entry} (cycle)`,
+        });
+        continue;
+      }
       const nextVisited = new Set(visited);
-      nextVisited.add(normalized);
+      nextVisited.add(included.cycleKey);
       const expanded = await expandText(
-        included,
+        included.content,
         options,
         dirnamePath(normalized),
+        { cycleKey: included.cycleKey, path: normalized },
         nextVisited,
         depth + 1,
         skipped
@@ -274,6 +319,14 @@ export async function resolveSshIncludes(
     baseDir: options.baseDir ?? DEFAULT_BASE_DIR,
     maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
   };
-  const text = await expandText(initialText, filled, filled.baseDir, new Set(), 0, skipped);
+  const text = await expandText(
+    initialText,
+    filled,
+    filled.baseDir,
+    undefined,
+    new Set(),
+    0,
+    skipped
+  );
   return { text, skipped };
 }

@@ -20,6 +20,7 @@ const SSH_PORT = Number(process.env.TW_SSH_PORT);
 const SSH_USER = process.env.TW_SSH_USER;
 const TOKEN = process.env.TW_BACKEND_TOKEN;
 const ORIGIN = process.env.TW_ALLOWED_ORIGIN;
+const GLOB_CANONICAL_SENTINEL = "GLOB_SUCCESS_CANONICAL_PATH_SENTINEL";
 
 const DEADLINE_MS = 30_000;
 
@@ -167,6 +168,32 @@ async function main() {
 
     const byToken = await api("/api/backend/status", { token: TOKEN });
     check("a valid token alone is accepted", byToken.status === 200, `status ${byToken.status}`);
+
+    console.log("[client] SSH config glob success boundary");
+    const glob = await api("/api/backend/ssh-config/glob", {
+      method: "POST",
+      token: TOKEN,
+      body: { pattern: "~/.ssh/conf.d/*.conf" },
+    });
+    const globMatches = glob.json?.matches ?? [];
+    check("symlinked fragments inside ~/.ssh still resolve",
+      glob.status === 200 && globMatches.length === 3 &&
+        globMatches.slice(0, 2).every((match) => match.content.includes("Host linked-fragment")) &&
+        globMatches[2]?.content.includes("Host distinct-fragment"),
+      `status ${glob.status} body ${glob.text.slice(0, 300)}`);
+    check("glob matches carry names and no paths",
+      globMatches.map((match) => match.name).join(",") ===
+        "10-visible.conf,20-alias.conf,30-distinct.conf" &&
+        globMatches.every((match) =>
+          Object.keys(match).sort().join(",") === "content,cycleKey,name"));
+    check("the canonical target sentinel is withheld",
+      !glob.text.includes(GLOB_CANONICAL_SENTINEL));
+    check("two names for one file share one opaque cycle identity",
+      globMatches.length === 3 && Boolean(globMatches[0]?.cycleKey) &&
+        globMatches[0]?.cycleKey === globMatches[1]?.cycleKey);
+    check("different files have different opaque cycle identities",
+      Boolean(globMatches[2]?.cycleKey) &&
+        globMatches[0]?.cycleKey !== globMatches[2]?.cycleKey);
 
     console.log("[client] session lifecycle over real SSH");
     const created = await api("/api/backend/sessions", {

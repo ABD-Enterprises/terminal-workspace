@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
@@ -116,6 +116,48 @@ function expandHome(pathname) {
 // exhaust the import.
 const SSH_CONFIG_MAX_BYTES = 1024 * 1024;
 const SSH_CONFIG_GLOB_MAX_MATCHES = 256;
+// A fresh 256-bit OS-random salt is created once at process start and never
+// leaves the backend. It must not be derivable from a PID, time, or constant,
+// or cycle keys would let the renderer confirm guesses about canonical paths.
+const SSH_CONFIG_CYCLE_KEY_SALT = randomBytes(32);
+
+function sshConfigCycleKey(canonicalPath) {
+  return createHash("sha256")
+    .update(SSH_CONFIG_CYCLE_KEY_SALT)
+    .update("\0")
+    .update(canonicalPath)
+    .digest("hex");
+}
+
+async function resolveSshConfigPath(requestedPath, context, sshRoot) {
+  const parentCycleKey = context?.parentCycleKey;
+  const parentPath = context?.parentPath;
+  const relativePath = context?.relativePath;
+  const hasContext =
+    parentCycleKey !== undefined || parentPath !== undefined || relativePath !== undefined;
+  if (!hasContext) {
+    return expandHome(requestedPath);
+  }
+  if (
+    typeof parentCycleKey !== "string" ||
+    typeof parentPath !== "string" ||
+    typeof relativePath !== "string" ||
+    relativePath.startsWith("/") ||
+    relativePath.startsWith("~")
+  ) {
+    throw new Error("invalid relative Include context");
+  }
+
+  const parentReal = await realpath(expandHome(parentPath));
+  const rootPrefix = sshRoot.endsWith("/") ? sshRoot : `${sshRoot}/`;
+  if (
+    (parentReal !== sshRoot && !parentReal.startsWith(rootPrefix)) ||
+    sshConfigCycleKey(parentReal) !== parentCycleKey
+  ) {
+    throw new Error("relative Include context was rejected");
+  }
+  return join(dirname(parentReal), relativePath);
+}
 
 function globToRegExp(pattern) {
   let source = "^";
@@ -142,9 +184,9 @@ function globToRegExp(pattern) {
  * stay under the canonical ~/.ssh root — anything outside is refused/dropped.
  * Only the final path component may be a glob.
  */
-async function globSshConfigFiles(pattern) {
+async function globSshConfigFiles(pattern, context) {
   const sshRoot = await realpath(join(os.homedir(), ".ssh"));
-  const expanded = expandHome(pattern);
+  const expanded = await resolveSshConfigPath(pattern, context, sshRoot);
   const parent = dirname(expanded);
   const filePattern = basename(expanded);
 
@@ -189,13 +231,19 @@ async function globSshConfigFiles(pattern) {
     } catch {
       continue;
     }
-    matches.push({ path: real, content });
+    matches.push({
+      cycleKey: sshConfigCycleKey(real),
+      // This is the directory entry selected by the caller's final glob
+      // component, not a resolved path or the target of a symlink.
+      name,
+      content,
+    });
     if (matches.length >= SSH_CONFIG_GLOB_MAX_MATCHES) {
       break;
     }
   }
 
-  matches.sort((left, right) => left.path.localeCompare(right.path));
+  matches.sort((left, right) => left.name.localeCompare(right.name));
   return { matches };
 }
 
@@ -1345,7 +1393,7 @@ const server = createServer(async (request, response) => {
   if (request.method === "POST" && url.pathname === "/api/backend/ssh-config/glob") {
     try {
       const body = await readJson(request);
-      const result = await globSshConfigFiles(body.pattern);
+      const result = await globSshConfigFiles(body.pattern, body);
       sendJson(response, 200, result);
     } catch (error) {
       // A refused/outside-~/.ssh pattern is a 400, not a 500.
