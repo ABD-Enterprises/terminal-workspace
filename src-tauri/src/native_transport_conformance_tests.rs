@@ -24,6 +24,7 @@ use crate::native_transport::{
     get_channel_environment, normalize_remote_path, resolve_remote_path, sanitize_filename,
     shell_single_quote,
 };
+use crate::{CopyKeyToHostFailure, RemoteCommandFailure, SshFailureStage};
 
 fn fixture() -> Value {
     // CARGO_MANIFEST_DIR is src-tauri/, so the repo root is its parent.
@@ -55,6 +56,93 @@ fn text(case: &Value, field: &str) -> String {
         .as_str()
         .unwrap_or_else(|| panic!("`{field}` must be a string: {case}"))
         .to_string()
+}
+
+fn assert_reachability(case: &Value) {
+    const RESPONSE_PATHS: [&str; 4] = [
+        "node-snippet",
+        "node-copy-key",
+        "native-snippet",
+        "native-copy-key",
+    ];
+    let reachable_by = case
+        .get("reachableBy")
+        .unwrap_or_else(|| panic!("case is missing `reachableBy`: {case}"))
+        .as_array()
+        .unwrap_or_else(|| panic!("`reachableBy` must be an array: {case}"));
+    assert!(
+        !reachable_by.is_empty(),
+        "`reachableBy` must not be empty: {case}"
+    );
+    assert!(
+        reachable_by.iter().all(|backend| backend
+            .as_str()
+            .is_some_and(|backend| RESPONSE_PATHS.contains(&backend))),
+        "every `reachableBy` entry must name a known response path: {case}"
+    );
+}
+
+fn ssh_failure_stage(case: &Value) -> SshFailureStage {
+    match text(case, "stage").as_str() {
+        "configuration" => SshFailureStage::Configuration,
+        "connect" => SshFailureStage::Connect,
+        "session-initialization" => SshFailureStage::SessionInitialization,
+        "handshake" => SshFailureStage::Handshake,
+        "host-key-verification" => SshFailureStage::HostKeyVerification,
+        "authentication" => SshFailureStage::Authentication,
+        "channel-open" => SshFailureStage::ChannelOpen,
+        "exec-request" => SshFailureStage::ExecRequest,
+        "output-read" => SshFailureStage::OutputRead,
+        stage => panic!("unknown SSH failure stage `{stage}`: {case}"),
+    }
+}
+
+fn remote_command_failure(case: &Value) -> RemoteCommandFailure {
+    match text(case, "variant").as_str() {
+        "ssh-failed" => RemoteCommandFailure::SshFailed {
+            stage: ssh_failure_stage(case),
+        },
+        "timed-out" => RemoteCommandFailure::TimedOut {
+            timeout_seconds: case["timeoutSeconds"]
+                .as_u64()
+                .expect("timeoutSeconds must be an unsigned integer"),
+        },
+        "worker-failed" => RemoteCommandFailure::WorkerFailed,
+        "remote-command-exited" => RemoteCommandFailure::RemoteCommandExited {
+            exit_code: if case["exitCode"].is_null() {
+                None
+            } else {
+                Some(
+                    case["exitCode"]
+                        .as_i64()
+                        .and_then(|code| i32::try_from(code).ok())
+                        .expect("exitCode must fit in i32 or be null"),
+                )
+            },
+        },
+        variant => panic!("unknown remote-command failure variant `{variant}`: {case}"),
+    }
+}
+
+fn copy_key_failure(case: &Value) -> CopyKeyToHostFailure {
+    match text(case, "variant").as_str() {
+        "private-key-path-required" => CopyKeyToHostFailure::PrivateKeyPathRequired,
+        "target-host-required" => CopyKeyToHostFailure::TargetHostRequired,
+        "public-key-unreadable" => CopyKeyToHostFailure::PublicKeyUnreadable {
+            public_key_path: text(case, "publicKeyPath"),
+        },
+        "public-key-empty" => CopyKeyToHostFailure::PublicKeyEmpty {
+            public_key_path: text(case, "publicKeyPath"),
+        },
+        "remote-command-failed" => CopyKeyToHostFailure::RemoteCommandFailed {
+            hostname: text(case, "hostname"),
+            command: remote_command_failure(
+                case.get("command")
+                    .expect("remote-command-failed needs a command"),
+            ),
+        },
+        variant => panic!("unknown copy-key failure variant `{variant}`: {case}"),
+    }
 }
 
 /// Fixture environments are ordered PAIRS, not JSON objects: the JS harness
@@ -178,6 +266,36 @@ fn environment_helpers_match_the_shared_corpus() {
             build_exec_command(&command, &environment),
             text(case, "expectedExecCommand"),
             "exec command — {why}"
+        );
+    }
+}
+
+// These cases prove serialized vocabulary agreement only. `reachableBy` is a
+// required record of which concrete backend paths can actually emit each value.
+#[test]
+fn copy_key_failures_match_the_shared_corpus() {
+    let fixture = fixture();
+    for case in cases(&fixture, "copyKeyFailures") {
+        assert_reachability(case);
+        let why = text(case, "why");
+        assert_eq!(
+            serde_json::to_value(copy_key_failure(case)).expect("failure must serialize"),
+            case["expected"],
+            "copy-key failure — {why}"
+        );
+    }
+}
+
+#[test]
+fn remote_command_failures_match_the_shared_corpus() {
+    let fixture = fixture();
+    for case in cases(&fixture, "remoteCommandFailures") {
+        assert_reachability(case);
+        let why = text(case, "why");
+        assert_eq!(
+            serde_json::to_value(remote_command_failure(case)).expect("failure must serialize"),
+            case["expected"],
+            "remote-command failure — {why}"
         );
     }
 }

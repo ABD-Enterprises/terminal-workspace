@@ -410,5 +410,260 @@
       "expectedInteractiveShellCommand": "export EMPTY=''; exec \"${SHELL:-/bin/sh}\" -l",
       "expectedExecCommand": "export EMPTY=''; echo hi"
     }
+  ],
+  "$failureVocabularyComment": [
+    "The groups below prove serialization agreement only. They do NOT prove that either backend can produce every value.",
+    "reachableBy names the concrete response-producing paths that can reach each value. Native snippets use OpenSSH and cannot distinguish handshake or authentication failures, while native copy-key uses libssh2 and can."
+  ],
+  "copyKeyFailures": [
+    {
+      "variant": "private-key-path-required",
+      "expected": {
+        "reason": "private-key-path-required"
+      },
+      "reachableBy": [
+        "node-copy-key",
+        "native-copy-key"
+      ],
+      "why": "both copy-key implementations reject an absent private-key path before file access"
+    },
+    {
+      "variant": "target-host-required",
+      "expected": {
+        "reason": "target-host-required"
+      },
+      "reachableBy": [
+        "node-copy-key",
+        "native-copy-key"
+      ],
+      "why": "both copy-key implementations require a target hostname"
+    },
+    {
+      "variant": "public-key-unreadable",
+      "publicKeyPath": "~/.ssh/deploy.pub",
+      "expected": {
+        "reason": "public-key-unreadable",
+        "publicKeyPath": "~/.ssh/deploy.pub"
+      },
+      "reachableBy": [
+        "node-copy-key",
+        "native-copy-key"
+      ],
+      "why": "the caller's unexpanded path is preserved while filesystem and validator error text is withheld"
+    },
+    {
+      "variant": "public-key-empty",
+      "publicKeyPath": "~/.ssh/deploy.pub",
+      "expected": {
+        "reason": "public-key-empty",
+        "publicKeyPath": "~/.ssh/deploy.pub"
+      },
+      "reachableBy": [
+        "node-copy-key",
+        "native-copy-key"
+      ],
+      "why": "an empty public key carries only the caller-supplied path"
+    },
+    {
+      "variant": "remote-command-failed",
+      "hostname": "build.example",
+      "command": {
+        "variant": "ssh-failed",
+        "stage": "connect"
+      },
+      "expected": {
+        "reason": "remote-command-failed",
+        "hostname": "build.example",
+        "command": {
+          "reason": "ssh-failed",
+          "stage": "connect"
+        }
+      },
+      "reachableBy": [
+        "node-copy-key",
+        "native-copy-key"
+      ],
+      "why": "copy-key wraps the shared remote-command failure while retaining only the caller's hostname"
+    }
+  ],
+  "remoteCommandFailures": [
+    {
+      "variant": "ssh-failed",
+      "stage": "configuration",
+      "expected": {
+        "reason": "ssh-failed",
+        "stage": "configuration"
+      },
+      "reachableBy": [
+        "node-snippet",
+        "node-copy-key",
+        "native-snippet",
+        "native-copy-key"
+      ],
+      "why": "host and connection configuration can fail in every command path"
+    },
+    {
+      "variant": "ssh-failed",
+      "stage": "connect",
+      "expected": {
+        "reason": "ssh-failed",
+        "stage": "connect"
+      },
+      "reachableBy": [
+        "node-snippet",
+        "node-copy-key",
+        "native-snippet",
+        "native-copy-key"
+      ],
+      "why": "every command path can fail while establishing its SSH transport"
+    },
+    {
+      "variant": "ssh-failed",
+      "stage": "session-initialization",
+      "expected": {
+        "reason": "ssh-failed",
+        "stage": "session-initialization"
+      },
+      "reachableBy": [
+        "native-copy-key"
+      ],
+      "why": "only the libssh2 copy-key path separately constructs a session"
+    },
+    {
+      "variant": "ssh-failed",
+      "stage": "handshake",
+      "expected": {
+        "reason": "ssh-failed",
+        "stage": "handshake"
+      },
+      "reachableBy": [
+        "node-snippet",
+        "node-copy-key",
+        "native-copy-key"
+      ],
+      "why": "Node ssh2 and native copy-key expose handshake failures; native OpenSSH snippets do not"
+    },
+    {
+      "variant": "ssh-failed",
+      "stage": "host-key-verification",
+      "expected": {
+        "reason": "ssh-failed",
+        "stage": "host-key-verification"
+      },
+      "reachableBy": [
+        "node-snippet",
+        "node-copy-key",
+        "native-copy-key"
+      ],
+      "why": "Node ssh2 and native copy-key expose host-key verification; native OpenSSH snippets do not"
+    },
+    {
+      "variant": "ssh-failed",
+      "stage": "authentication",
+      "expected": {
+        "reason": "ssh-failed",
+        "stage": "authentication"
+      },
+      "reachableBy": [
+        "node-snippet",
+        "node-copy-key",
+        "native-copy-key"
+      ],
+      "why": "Node ssh2 and native copy-key expose authentication failures; native OpenSSH snippets do not"
+    },
+    {
+      "variant": "ssh-failed",
+      "stage": "channel-open",
+      "expected": {
+        "reason": "ssh-failed",
+        "stage": "channel-open"
+      },
+      "reachableBy": [
+        "native-copy-key"
+      ],
+      "why": "only native copy-key separately opens a libssh2 session channel"
+    },
+    {
+      "variant": "ssh-failed",
+      "stage": "exec-request",
+      "expected": {
+        "reason": "ssh-failed",
+        "stage": "exec-request"
+      },
+      "reachableBy": [
+        "node-snippet",
+        "node-copy-key",
+        "native-snippet",
+        "native-copy-key"
+      ],
+      "why": "every command path can fail while starting the remote command"
+    },
+    {
+      "variant": "ssh-failed",
+      "stage": "output-read",
+      "expected": {
+        "reason": "ssh-failed",
+        "stage": "output-read"
+      },
+      "reachableBy": [
+        "native-copy-key"
+      ],
+      "why": "native copy-key directly reports a libssh2 channel read failure at this stage"
+    },
+    {
+      "variant": "timed-out",
+      "timeoutSeconds": 60,
+      "expected": {
+        "reason": "timed-out",
+        "timeoutSeconds": 60
+      },
+      "reachableBy": [
+        "node-snippet",
+        "node-copy-key",
+        "native-snippet"
+      ],
+      "why": "Node wraps both command uses in a total deadline and native snippets bound the OpenSSH child"
+    },
+    {
+      "variant": "worker-failed",
+      "expected": {
+        "reason": "worker-failed"
+      },
+      "reachableBy": [
+        "native-snippet",
+        "native-copy-key"
+      ],
+      "why": "both Rust worker boundaries turn a join failure into a typed response"
+    },
+    {
+      "variant": "remote-command-exited",
+      "exitCode": 23,
+      "expected": {
+        "reason": "remote-command-exited",
+        "exitCode": 23
+      },
+      "reachableBy": [
+        "node-snippet",
+        "node-copy-key",
+        "native-snippet",
+        "native-copy-key"
+      ],
+      "why": "all command paths retain a real non-zero remote process exit code"
+    },
+    {
+      "variant": "remote-command-exited",
+      "exitCode": null,
+      "expected": {
+        "reason": "remote-command-exited",
+        "exitCode": null
+      },
+      "reachableBy": [
+        "node-snippet",
+        "node-copy-key",
+        "native-snippet",
+        "native-copy-key"
+      ],
+      "why": "a signal-killed command has no process exit code and never uses a numeric sentinel"
+    }
   ]
 }

@@ -1514,6 +1514,11 @@ enum TimedCommand {
     TimedOut,
 }
 
+enum NativeSnippetCommandFailure {
+    ExecRequest,
+    TimedOut,
+}
+
 /// Run `command`, capturing stdout/stderr, but kill the child if it has not
 /// exited within `timeout`. Dedicated reader threads drain the pipes so a
 /// child that produces more output than the pipe buffer holds cannot deadlock
@@ -1572,10 +1577,10 @@ fn run_command_with_timeout(
     }
 }
 
-pub(crate) fn run_native_ssh_command(
+fn run_native_ssh_command_typed(
     context: &NativeSshControlContext,
     command: &str,
-) -> Result<Output, String> {
+) -> Result<Output, NativeSnippetCommandFailure> {
     let mut ssh = Command::new("/usr/bin/ssh");
     ssh.arg("-F")
         .arg(&context.config_path)
@@ -1586,13 +1591,28 @@ pub(crate) fn run_native_ssh_command(
     match run_command_with_timeout(
         ssh,
         Duration::from_millis(NATIVE_SNIPPET_COMMAND_TIMEOUT_MS),
-    )? {
+    )
+    .map_err(|_| NativeSnippetCommandFailure::ExecRequest)?
+    {
         TimedCommand::Completed(output) => Ok(output),
-        TimedCommand::TimedOut => Err(format!(
+        TimedCommand::TimedOut => Err(NativeSnippetCommandFailure::TimedOut),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn run_native_ssh_command(
+    context: &NativeSshControlContext,
+    command: &str,
+) -> Result<Output, String> {
+    run_native_ssh_command_typed(context, command).map_err(|failure| match failure {
+        NativeSnippetCommandFailure::ExecRequest => {
+            "Could not start the native SSH command".to_string()
+        }
+        NativeSnippetCommandFailure::TimedOut => format!(
             "Command did not finish within {}s and was terminated",
             NATIVE_SNIPPET_COMMAND_TIMEOUT_MS / 1000
-        )),
-    }
+        ),
+    })
 }
 
 pub(crate) fn run_native_ssh_control_command(
@@ -1687,28 +1707,27 @@ pub(crate) fn execute_native_snippet_target(
     target: SnippetExecutionTarget,
     command: String,
 ) -> SnippetExecutionResult {
-    match validate_ssh_host(&target.host) {
-        Ok(()) => {}
-        Err(error) => {
-            return SnippetExecutionResult {
-                target_id: target.id,
-                label: target.label,
-                ok: false,
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: None,
-                error_message: Some(error),
-            };
-        }
+    if validate_ssh_host(&target.host).is_err() {
+        return SnippetExecutionResult {
+            target_id: target.id,
+            label: target.label,
+            ok: false,
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: None,
+            failure: Some(RemoteCommandFailure::SshFailed {
+                stage: SshFailureStage::Configuration,
+            }),
+        };
     }
 
     let session_label = next_native_session_id();
     let resolved_command = build_exec_command(&command, &target.host.environment);
     let output = match with_native_ssh_control_session(&target.host, &session_label, |context| {
-        run_native_ssh_command(context, &resolved_command)
+        Ok(run_native_ssh_command_typed(context, &resolved_command))
     }) {
-        Ok(output) => output,
-        Err(error) => {
+        Ok(Ok(output)) => output,
+        Ok(Err(NativeSnippetCommandFailure::TimedOut)) => {
             return SnippetExecutionResult {
                 target_id: target.id,
                 label: target.label,
@@ -1716,7 +1735,38 @@ pub(crate) fn execute_native_snippet_target(
                 stdout: String::new(),
                 stderr: String::new(),
                 exit_code: None,
-                error_message: Some(error),
+                failure: Some(RemoteCommandFailure::TimedOut {
+                    timeout_seconds: NATIVE_SNIPPET_COMMAND_TIMEOUT_MS / 1000,
+                }),
+            };
+        }
+        Ok(Err(NativeSnippetCommandFailure::ExecRequest)) => {
+            return SnippetExecutionResult {
+                target_id: target.id,
+                label: target.label,
+                ok: false,
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: None,
+                failure: Some(RemoteCommandFailure::SshFailed {
+                    stage: SshFailureStage::ExecRequest,
+                }),
+            };
+        }
+        Err(_) => {
+            return SnippetExecutionResult {
+                target_id: target.id,
+                label: target.label,
+                ok: false,
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: None,
+                // Native snippets use OpenSSH's ControlMaster rather than
+                // libssh2. Pre-ready failures are therefore opaque here and
+                // are assigned structurally to the control-session connect.
+                failure: Some(RemoteCommandFailure::SshFailed {
+                    stage: SshFailureStage::Connect,
+                }),
             };
         }
     };
@@ -1730,16 +1780,12 @@ pub(crate) fn execute_native_snippet_target(
         label: target.label,
         ok: output.status.success(),
         stdout,
-        stderr: stderr.clone(),
+        stderr,
         exit_code,
-        error_message: if output.status.success() {
+        failure: if output.status.success() {
             None
         } else {
-            Some(if stderr.trim().is_empty() {
-                format!("Command exited with code {}", exit_code.unwrap_or(-1))
-            } else {
-                stderr.trim().to_string()
-            })
+            Some(RemoteCommandFailure::RemoteCommandExited { exit_code })
         },
     }
 }
@@ -1953,7 +1999,7 @@ pub(crate) fn execute_native_snippet_request(
                 stdout: String::new(),
                 stderr: String::new(),
                 exit_code: None,
-                error_message: Some("Snippet execution worker panicked".to_string()),
+                failure: Some(RemoteCommandFailure::WorkerFailed),
             })
         })
     };
@@ -2177,6 +2223,30 @@ mod tests {
             sftp_root: None,
             username: "deploy".to_string(),
         }
+    }
+
+    #[test]
+    fn native_snippet_host_rejection_is_typed_without_validation_prose() {
+        let sentinel = "TS_NATIVE_SNIPPET_VALIDATION_PROBE";
+        let mut host = test_host(Path::new("/nonexistent/id_ed25519"), "");
+        host.hostname = format!("host.internal\n  ProxyCommand {sentinel}");
+        let result = execute_native_snippet_target(
+            SnippetExecutionTarget {
+                host,
+                id: "target-1".to_string(),
+                label: "Build host".to_string(),
+            },
+            "uptime".to_string(),
+        );
+
+        assert_eq!(
+            result.failure.as_ref(),
+            Some(&RemoteCommandFailure::SshFailed {
+                stage: SshFailureStage::Configuration,
+            })
+        );
+        let serialized = serde_json::to_string(&result).expect("result must serialize");
+        assert!(!serialized.contains(sentinel));
     }
 
     #[test]
