@@ -1,4 +1,5 @@
 import { isDemoModeEnabled } from "../store/app-store";
+import { formatSshConfigCommandFailure } from "./backend-failure-messages";
 import { invokeTauriCommand, isTauriRuntime } from "./backend-runtime";
 import { globDemoSshConfigFiles } from "./demo-backend";
 import type {
@@ -45,7 +46,11 @@ export const readSshConfigFile: SshConfigFileReader = async (path: string) => {
     // preprocessor logs an `include-directive` skip with the right detail.
     // We log to the console for diagnostics rather than throwing, so a single
     // bad Include in a user's config does not abort the whole import.
-    console.warn("[ssh-config] read rejected:", path, error);
+    console.warn(
+      "[ssh-config] read rejected:",
+      path,
+      formatSshConfigCommandFailure(error, "read")
+    );
     return null;
   }
 };
@@ -74,7 +79,11 @@ export const globSshConfigFiles: SshConfigGlobLister = async (pattern: string) =
       );
       return response.matches;
     } catch (error) {
-      console.warn("[ssh-config] glob rejected:", pattern, error);
+      console.warn(
+        "[ssh-config] glob rejected:",
+        pattern,
+        formatSshConfigCommandFailure(error, "glob")
+      );
       return [];
     }
   }
@@ -85,12 +94,17 @@ export const globSshConfigFiles: SshConfigGlobLister = async (pattern: string) =
       body: JSON.stringify({ pattern }),
     });
     if (!response.ok) {
+      console.warn("[ssh-config] glob rejected:", pattern, `HTTP ${response.status}`);
       return [];
     }
     const data = (await response.json()) as GlobSshConfigFilesResponse;
     return data.matches ?? [];
   } catch (error) {
-    console.warn("[ssh-config] glob rejected:", pattern, error);
+    console.warn(
+      "[ssh-config] glob rejected:",
+      pattern,
+      formatSshConfigCommandFailure(error, "glob")
+    );
     return [];
   }
 };
