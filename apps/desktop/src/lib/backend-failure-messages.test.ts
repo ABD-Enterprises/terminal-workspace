@@ -4,6 +4,7 @@ import {
   formatBackendFailure,
   formatCopyKeyToHostFailure,
   formatSnippetExecutionFailure,
+  formatSshConfigCommandFailure,
 } from "./backend-failure-messages";
 
 describe("backend failure messages", () => {
@@ -50,6 +51,20 @@ describe("backend failure messages", () => {
       "Known-host scan failed"
     );
     expect(formatBackendFailure("Copy worker failed")).toBe("Copy worker failed");
+  });
+
+  it("keeps SSH config Include failures actionable for each operation", () => {
+    const failure = {
+      reason: "path-outside-ssh-root",
+      path: "~/.ssh/linked-config",
+    };
+
+    expect(formatSshConfigCommandFailure(failure, "read")).toBe(
+      "SSH config Include ~/.ssh/linked-config resolves outside ~/.ssh and was rejected."
+    );
+    expect(formatSshConfigCommandFailure(failure, "glob")).toBe(
+      "SSH config Include glob ~/.ssh/linked-config resolves outside ~/.ssh and was rejected."
+    );
   });
 
   it("keeps the timeout budget, connection teardown, and rerun action", () => {

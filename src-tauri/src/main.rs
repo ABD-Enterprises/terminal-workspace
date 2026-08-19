@@ -3652,6 +3652,25 @@ struct ReadSshConfigFileResponse {
     content: String,
 }
 
+/// #300: SSH-config commands use a sibling failure type rather than
+/// `KeyCommandFailure`. The two families share the kebab-case `reason` wire
+/// convention and retain only the caller's path spelling, but reusing the key
+/// enum would make `worker-failed` render as a private-key operation. That
+/// sentence is actively wrong for Include reads and globs.
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(tag = "reason", rename_all = "kebab-case")]
+enum SshConfigCommandFailure {
+    SshRootUnavailable { path: String },
+    InvalidPath { path: String },
+    PathUnavailable { path: String },
+    PathOutsideSshRoot { path: String },
+    PathNotRegularFile { path: String },
+    SizeLimitExceeded { path: String },
+    ReadFailed { path: String },
+    GlobInDirectoryComponent { path: String },
+    WorkerFailed { path: String },
+}
+
 /// Read a single OpenSSH config file from the user's ~/.ssh/ tree. Used by
 /// the renderer's Include-directive preprocessor (issue #28). The path
 /// allowlist is the security boundary — any file outside the canonicalized
@@ -3664,51 +3683,72 @@ struct ReadSshConfigFileResponse {
 #[tauri::command]
 async fn terminal_workspace_read_ssh_config_file(
     request: ReadSshConfigFileRequest,
-) -> Result<ReadSshConfigFileResponse, String> {
+) -> Result<ReadSshConfigFileResponse, SshConfigCommandFailure> {
+    let requested_path = request.path.clone();
     tauri::async_runtime::spawn_blocking(move || read_ssh_config_file_blocking(&request.path))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|_| SshConfigCommandFailure::WorkerFailed {
+            path: requested_path,
+        })?
 }
 
 const SSH_CONFIG_MAX_BYTES: u64 = 1024 * 1024;
 
-fn read_ssh_config_file_blocking(raw_path: &str) -> Result<ReadSshConfigFileResponse, String> {
-    let home = env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| "HOME env var is not set".to_string())?;
-    let ssh_root = home
+fn canonical_ssh_config_root() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .map(PathBuf::from)?
         .join(".ssh")
         .canonicalize()
-        .map_err(|error| format!("cannot canonicalize ~/.ssh: {error}"))?;
+        .ok()
+}
 
+fn read_ssh_config_file_blocking(
+    raw_path: &str,
+) -> Result<ReadSshConfigFileResponse, SshConfigCommandFailure> {
+    let ssh_root =
+        canonical_ssh_config_root().ok_or_else(|| SshConfigCommandFailure::SshRootUnavailable {
+            path: raw_path.to_string(),
+        })?;
+    read_ssh_config_file_from_root(raw_path, &ssh_root)
+}
+
+fn read_ssh_config_file_from_root(
+    raw_path: &str,
+    ssh_root: &std::path::Path,
+) -> Result<ReadSshConfigFileResponse, SshConfigCommandFailure> {
+    let requested_path = || raw_path.to_string();
     let raw = expand_home(raw_path);
     let canonical = raw
         .canonicalize()
-        .map_err(|error| format!("cannot canonicalize {raw_path}: {error}"))?;
+        .map_err(|_| SshConfigCommandFailure::PathUnavailable {
+            path: requested_path(),
+        })?;
 
-    if !canonical.starts_with(&ssh_root) {
-        return Err(format!(
-            "path {} is not under {}",
-            canonical.display(),
-            ssh_root.display()
-        ));
+    if !canonical.starts_with(ssh_root) {
+        return Err(SshConfigCommandFailure::PathOutsideSshRoot {
+            path: requested_path(),
+        });
     }
 
-    let metadata = std::fs::metadata(&canonical)
-        .map_err(|error| format!("cannot stat {}: {error}", canonical.display()))?;
+    let metadata =
+        std::fs::metadata(&canonical).map_err(|_| SshConfigCommandFailure::ReadFailed {
+            path: requested_path(),
+        })?;
     if !metadata.is_file() {
-        return Err(format!("{} is not a regular file", canonical.display()));
+        return Err(SshConfigCommandFailure::PathNotRegularFile {
+            path: requested_path(),
+        });
     }
     if metadata.len() > SSH_CONFIG_MAX_BYTES {
-        return Err(format!(
-            "{} exceeds SSH config size limit of {} bytes",
-            canonical.display(),
-            SSH_CONFIG_MAX_BYTES
-        ));
+        return Err(SshConfigCommandFailure::SizeLimitExceeded {
+            path: requested_path(),
+        });
     }
 
-    let content = std::fs::read_to_string(&canonical)
-        .map_err(|error| format!("cannot read {}: {error}", canonical.display()))?;
+    let content =
+        std::fs::read_to_string(&canonical).map_err(|_| SshConfigCommandFailure::ReadFailed {
+            path: requested_path(),
+        })?;
     Ok(ReadSshConfigFileResponse { content })
 }
 
@@ -3775,26 +3815,37 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 #[tauri::command]
 async fn terminal_workspace_glob_ssh_config_files(
     request: GlobSshConfigFilesRequest,
-) -> Result<GlobSshConfigFilesResponse, String> {
+) -> Result<GlobSshConfigFilesResponse, SshConfigCommandFailure> {
+    let requested_pattern = request.pattern.clone();
     tauri::async_runtime::spawn_blocking(move || glob_ssh_config_files_blocking(&request.pattern))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|_| SshConfigCommandFailure::WorkerFailed {
+            path: requested_pattern,
+        })?
 }
 
-fn glob_ssh_config_files_blocking(raw_pattern: &str) -> Result<GlobSshConfigFilesResponse, String> {
-    let home = env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| "HOME env var is not set".to_string())?;
-    let ssh_root = home
-        .join(".ssh")
-        .canonicalize()
-        .map_err(|error| format!("cannot canonicalize ~/.ssh: {error}"))?;
+fn glob_ssh_config_files_blocking(
+    raw_pattern: &str,
+) -> Result<GlobSshConfigFilesResponse, SshConfigCommandFailure> {
+    let ssh_root =
+        canonical_ssh_config_root().ok_or_else(|| SshConfigCommandFailure::SshRootUnavailable {
+            path: raw_pattern.to_string(),
+        })?;
+    glob_ssh_config_files_from_root(raw_pattern, &ssh_root)
+}
 
+fn glob_ssh_config_files_from_root(
+    raw_pattern: &str,
+    ssh_root: &std::path::Path,
+) -> Result<GlobSshConfigFilesResponse, SshConfigCommandFailure> {
+    let requested_path = || raw_pattern.to_string();
     let expanded = expand_home(raw_pattern);
     let file_pattern = expanded
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| format!("invalid glob pattern {raw_pattern}"))?
+        .ok_or_else(|| SshConfigCommandFailure::InvalidPath {
+            path: requested_path(),
+        })?
         .to_string();
     let parent = expanded
         .parent()
@@ -3804,26 +3855,33 @@ fn glob_ssh_config_files_blocking(raw_pattern: &str) -> Result<GlobSshConfigFile
     // Only the final component may contain glob metacharacters.
     let parent_text = parent.to_string_lossy();
     if parent_text.contains('*') || parent_text.contains('?') || parent_text.contains('[') {
-        return Err("glob in a directory component is not supported".to_string());
+        return Err(SshConfigCommandFailure::GlobInDirectoryComponent {
+            path: requested_path(),
+        });
     }
 
-    let parent_canonical = parent
-        .canonicalize()
-        .map_err(|error| format!("cannot canonicalize {}: {error}", parent.display()))?;
-    if !parent_canonical.starts_with(&ssh_root) {
-        return Err(format!(
-            "glob directory {} is not under {}",
-            parent_canonical.display(),
-            ssh_root.display()
-        ));
+    let parent_canonical =
+        parent
+            .canonicalize()
+            .map_err(|_| SshConfigCommandFailure::PathUnavailable {
+                path: requested_path(),
+            })?;
+    if !parent_canonical.starts_with(ssh_root) {
+        return Err(SshConfigCommandFailure::PathOutsideSshRoot {
+            path: requested_path(),
+        });
     }
 
-    let entries = std::fs::read_dir(&parent_canonical)
-        .map_err(|error| format!("cannot read {}: {error}", parent_canonical.display()))?;
+    let entries =
+        std::fs::read_dir(&parent_canonical).map_err(|_| SshConfigCommandFailure::ReadFailed {
+            path: requested_path(),
+        })?;
 
     let mut matches: Vec<SshConfigGlobMatch> = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|error| error.to_string())?;
+        let entry = entry.map_err(|_| SshConfigCommandFailure::ReadFailed {
+            path: requested_path(),
+        })?;
         let file_name = entry.file_name();
         let name = match file_name.to_str() {
             Some(name) => name,
@@ -3836,7 +3894,7 @@ fn glob_ssh_config_files_blocking(raw_pattern: &str) -> Result<GlobSshConfigFile
             Ok(canonical) => canonical,
             Err(_) => continue,
         };
-        if !canonical.starts_with(&ssh_root) {
+        if !canonical.starts_with(ssh_root) {
             continue;
         }
         let metadata = match std::fs::metadata(&canonical) {
@@ -3865,8 +3923,29 @@ fn glob_ssh_config_files_blocking(raw_pattern: &str) -> Result<GlobSshConfigFile
 }
 
 #[cfg(test)]
-mod ssh_config_glob_tests {
-    use super::{glob_match, glob_ssh_config_files_blocking};
+mod ssh_config_command_tests {
+    use super::{
+        glob_match, glob_ssh_config_files_blocking, glob_ssh_config_files_from_root,
+        read_ssh_config_file_from_root, SshConfigCommandFailure,
+    };
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+
+    static TEST_ROOT_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+    fn test_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "term-snip-{label}-{}-{}",
+            std::process::id(),
+            TEST_ROOT_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
 
     #[test]
     fn glob_match_supports_star_and_question() {
@@ -3885,6 +3964,91 @@ mod ssh_config_glob_tests {
         // because the directory is not under ~/.ssh, or because ~/.ssh itself
         // cannot be canonicalized in this environment — both are errors).
         assert!(glob_ssh_config_files_blocking("/etc/*.conf").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_rejection_serializes_only_the_requested_path() {
+        let root = test_root("ssh-config-read-rejection");
+        let ssh_root = root.join("ssh-root");
+        fs::create_dir_all(&ssh_root).expect("temporary SSH root should be created");
+        let canonical_ssh_root =
+            fs::canonicalize(&ssh_root).expect("temporary SSH root should canonicalize");
+
+        let canonical_sentinel = "READ_CONFIG_CANONICAL_PATH_SENTINEL";
+        let target_root = root.join(canonical_sentinel);
+        fs::create_dir(&target_root).expect("sentinel target root should be created");
+        let target = target_root.join("config");
+        fs::write(&target, "Host escaped\n").expect("sentinel config should be created");
+        let requested = ssh_root.join("visible-config");
+        symlink(&target, &requested).expect("config symlink should be created");
+
+        // Prove the fixture reaches the outside-root arm with a canonical path
+        // containing the sentinel. Without this check, the no-sentinel
+        // assertion could pass because an earlier failure handled the request.
+        let canonical = fs::canonicalize(&requested).expect("config symlink should canonicalize");
+        assert!(canonical.to_string_lossy().contains(canonical_sentinel));
+
+        let requested = requested.to_string_lossy().to_string();
+        let failure = match read_ssh_config_file_from_root(&requested, &canonical_ssh_root) {
+            Ok(_) => panic!("symlink escaping the SSH root must be rejected"),
+            Err(failure) => failure,
+        };
+        assert_eq!(
+            failure,
+            SshConfigCommandFailure::PathOutsideSshRoot {
+                path: requested.clone(),
+            }
+        );
+        let serialized = serde_json::to_string(&failure).expect("failure must serialize");
+        assert!(serialized.contains("\"reason\":\"path-outside-ssh-root\""));
+        assert!(serialized.contains(&requested));
+        assert!(!serialized.contains(canonical_sentinel));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn glob_rejection_serializes_only_the_requested_pattern() {
+        let root = test_root("ssh-config-glob-rejection");
+        let ssh_root = root.join("ssh-root");
+        fs::create_dir_all(&ssh_root).expect("temporary SSH root should be created");
+        let canonical_ssh_root =
+            fs::canonicalize(&ssh_root).expect("temporary SSH root should canonicalize");
+
+        let canonical_sentinel = "GLOB_CONFIG_CANONICAL_PATH_SENTINEL";
+        let target_dir = root.join(canonical_sentinel);
+        fs::create_dir(&target_dir).expect("sentinel glob directory should be created");
+        let requested_dir = ssh_root.join("visible-directory");
+        symlink(&target_dir, &requested_dir).expect("glob directory symlink should be created");
+
+        // Prove canonicalizing the glob's parent reaches the sentinel-bearing
+        // directory before checking that serialization withholds it.
+        let canonical_parent =
+            fs::canonicalize(&requested_dir).expect("glob parent should canonicalize");
+        assert!(canonical_parent
+            .to_string_lossy()
+            .contains(canonical_sentinel));
+
+        let requested_pattern = format!("{}/*.conf", requested_dir.to_string_lossy());
+        let failure = match glob_ssh_config_files_from_root(&requested_pattern, &canonical_ssh_root)
+        {
+            Ok(_) => panic!("glob parent escaping the SSH root must be rejected"),
+            Err(failure) => failure,
+        };
+        assert_eq!(
+            failure,
+            SshConfigCommandFailure::PathOutsideSshRoot {
+                path: requested_pattern.clone(),
+            }
+        );
+        let serialized = serde_json::to_string(&failure).expect("failure must serialize");
+        assert!(serialized.contains("\"reason\":\"path-outside-ssh-root\""));
+        assert!(serialized.contains(&requested_pattern));
+        assert!(!serialized.contains(canonical_sentinel));
+
+        let _ = fs::remove_dir_all(root);
     }
 }
 

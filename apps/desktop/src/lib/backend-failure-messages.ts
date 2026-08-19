@@ -3,6 +3,8 @@ import type {
   KeyCommandFailure,
   RemoteCommandFailure,
   SnippetExecutionResult,
+  SshConfigCommandFailure,
+  SshConfigCommandOperation,
   SshFailureStage,
 } from "./backend-contract";
 
@@ -80,6 +82,58 @@ export function formatBackendFailure(error: unknown) {
     return error;
   }
   return "The backend request failed.";
+}
+
+function sshConfigCommandFailureMessage(
+  error: unknown,
+  operation: SshConfigCommandOperation
+) {
+  if (typeof error !== "object" || error === null || !("reason" in error)) {
+    return undefined;
+  }
+
+  const failure = error as Record<string, unknown>;
+  if (!pathFailure(failure)) {
+    return undefined;
+  }
+
+  const path = failure.path;
+  const target = operation === "read" ? `SSH config Include ${path}` : `SSH config Include glob ${path}`;
+  switch (failure.reason) {
+    case "ssh-root-unavailable":
+      return `Could not access ~/.ssh while processing ${target}.`;
+    case "invalid-path":
+      return `${target} is not a valid path.`;
+    case "path-unavailable":
+      return `Could not resolve ${target}.`;
+    case "path-outside-ssh-root":
+      return `${target} resolves outside ~/.ssh and was rejected.`;
+    case "path-not-regular-file":
+      return `${target} is not a regular file.`;
+    case "size-limit-exceeded":
+      return `${target} exceeds the 1 MiB size limit.`;
+    case "read-failed":
+      return `Could not read ${target}.`;
+    case "glob-in-directory-component":
+      return `${target} has a wildcard in a directory component; only filename wildcards are supported.`;
+    case "worker-failed":
+      return `The SSH config ${operation} operation failed for ${path}.`;
+    default:
+      return undefined;
+  }
+}
+
+export function formatSshConfigCommandFailure(
+  error: unknown,
+  operation: SshConfigCommandOperation
+) {
+  const message = sshConfigCommandFailureMessage(error as SshConfigCommandFailure, operation);
+  if (message) {
+    return message;
+  }
+  return operation === "read"
+    ? "The SSH config Include could not be read."
+    : "The SSH config Include glob could not be expanded.";
 }
 
 function sshStageMessage(stage: SshFailureStage, host: string, copyKey: boolean) {

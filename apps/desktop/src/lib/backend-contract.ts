@@ -87,6 +87,19 @@ export type KeyCommandFailure =
   | { reason: "invalid-key-metadata"; path: string }
   | { reason: "worker-failed"; path: string };
 
+export type SshConfigCommandOperation = "read" | "glob";
+
+export type SshConfigCommandFailure =
+  | { reason: "ssh-root-unavailable"; path: string }
+  | { reason: "invalid-path"; path: string }
+  | { reason: "path-unavailable"; path: string }
+  | { reason: "path-outside-ssh-root"; path: string }
+  | { reason: "path-not-regular-file"; path: string }
+  | { reason: "size-limit-exceeded"; path: string }
+  | { reason: "read-failed"; path: string }
+  | { reason: "glob-in-directory-component"; path: string }
+  | { reason: "worker-failed"; path: string };
+
 /**
  * T13: import a private key by pasting its body. The backend writes
  * the body to `path` with 0600 perms, then runs inspect and returns
