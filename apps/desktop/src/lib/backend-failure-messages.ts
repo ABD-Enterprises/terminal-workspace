@@ -54,27 +54,18 @@ function remoteCommandMessage(failure: RemoteCommandFailure, host: string, copyK
   }
 }
 
-function legacyMessage(message: string | undefined, fallback: string) {
-  // Rust backend structured-failure parity is #293, so native responses still
-  // need their legacy prose field until that separate change lands.
-  return message?.trim() || fallback;
-}
-
 export function formatSnippetExecutionFailure(result: SnippetExecutionResult) {
   if (result.ok) {
     return undefined;
   }
-  if (result.failure) {
-    return remoteCommandMessage(result.failure, result.label);
-  }
-  return legacyMessage(result.errorMessage, `Could not run the command on ${result.label}.`);
+  return remoteCommandMessage(result.failure, result.label);
 }
 
 export function formatCopyKeyToHostFailure(result: CopyKeyToHostResponse) {
   if (result.ok) {
     return undefined;
   }
-  switch (result.failure?.reason) {
+  switch (result.failure.reason) {
     case "private-key-path-required":
       return "A private key path is required.";
     case "target-host-required":
@@ -89,7 +80,5 @@ export function formatCopyKeyToHostFailure(result: CopyKeyToHostResponse) {
         result.failure.hostname,
         true
       );
-    default:
-      return legacyMessage(result.reason, "Copy failed.");
   }
 }

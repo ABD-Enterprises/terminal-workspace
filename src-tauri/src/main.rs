@@ -622,6 +622,37 @@ struct SnippetExecutionTarget {
     label: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum SshFailureStage {
+    Configuration,
+    Connect,
+    SessionInitialization,
+    Handshake,
+    HostKeyVerification,
+    Authentication,
+    ChannelOpen,
+    ExecRequest,
+    OutputRead,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(tag = "reason", rename_all = "kebab-case")]
+enum RemoteCommandFailure {
+    SshFailed {
+        stage: SshFailureStage,
+    },
+    TimedOut {
+        #[serde(rename = "timeoutSeconds")]
+        timeout_seconds: u64,
+    },
+    WorkerFailed,
+    RemoteCommandExited {
+        #[serde(rename = "exitCode")]
+        exit_code: Option<i32>,
+    },
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SnippetExecutionResult {
@@ -631,7 +662,8 @@ struct SnippetExecutionResult {
     stdout: String,
     stderr: String,
     exit_code: Option<i32>,
-    error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure: Option<RemoteCommandFailure>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2714,67 +2746,110 @@ struct CopyKeyToHostRequest {
     host: BackendHostConnection,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(tag = "reason", rename_all = "kebab-case")]
+enum CopyKeyToHostFailure {
+    PrivateKeyPathRequired,
+    TargetHostRequired,
+    PublicKeyUnreadable {
+        #[serde(rename = "publicKeyPath")]
+        public_key_path: String,
+    },
+    PublicKeyEmpty {
+        #[serde(rename = "publicKeyPath")]
+        public_key_path: String,
+    },
+    RemoteCommandFailed {
+        hostname: String,
+        command: RemoteCommandFailure,
+    },
+}
+
+#[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CopyKeyToHostResponse {
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
+    failure: Option<CopyKeyToHostFailure>,
+}
+
+impl CopyKeyToHostResponse {
+    fn success() -> Self {
+        Self {
+            ok: true,
+            failure: None,
+        }
+    }
+
+    fn failure(failure: CopyKeyToHostFailure) -> Self {
+        Self {
+            ok: false,
+            failure: Some(failure),
+        }
+    }
+
+    fn remote_command_failed(hostname: &str, command: RemoteCommandFailure) -> Self {
+        Self::failure(CopyKeyToHostFailure::RemoteCommandFailed {
+            hostname: hostname.to_string(),
+            command,
+        })
+    }
+}
+
+fn copy_key_to_host_join_response(
+    hostname: &str,
+    result: tauri::Result<CopyKeyToHostResponse>,
+) -> CopyKeyToHostResponse {
+    result.unwrap_or_else(|_| {
+        CopyKeyToHostResponse::remote_command_failed(hostname, RemoteCommandFailure::WorkerFailed)
+    })
 }
 
 fn copy_key_to_host_blocking(
     request: &CopyKeyToHostRequest,
     store: &NativeHostKeyStore,
-) -> Result<CopyKeyToHostResponse, String> {
+) -> CopyKeyToHostResponse {
+    if request.private_key_path.trim().is_empty() {
+        return CopyKeyToHostResponse::failure(CopyKeyToHostFailure::PrivateKeyPathRequired);
+    }
+    if request.host.hostname.is_empty() {
+        return CopyKeyToHostResponse::failure(CopyKeyToHostFailure::TargetHostRequired);
+    }
+
     // Validate the target host BEFORE any connect or authentication. This was
     // the one host-consuming command that skipped the gate, so an allowUnknown
     // or requireTrusted-without-pinned-key host would have its auth password
     // sent to an unverified server (host-key MITM); validate_ssh_host also
-    // rejects control-char injection into the generated ssh_config. Surface the
-    // rejection as a normal ok:false response so the renderer shows the reason
-    // consistently with this command's other failures.
-    if let Err(reason) = validate_ssh_host(&request.host) {
-        return Ok(CopyKeyToHostResponse {
-            ok: false,
-            reason: Some(reason),
-        });
-    }
-
-    if request.private_key_path.trim().is_empty() {
-        return Ok(CopyKeyToHostResponse {
-            ok: false,
-            reason: Some("A private key path is required".to_string()),
-        });
-    }
-    if request.host.hostname.is_empty() {
-        return Ok(CopyKeyToHostResponse {
-            ok: false,
-            reason: Some("A target host is required".to_string()),
-        });
+    // rejects control-char injection into the generated ssh_config.
+    if validate_ssh_host(&request.host).is_err() {
+        return CopyKeyToHostResponse::remote_command_failed(
+            &request.host.hostname,
+            RemoteCommandFailure::SshFailed {
+                stage: SshFailureStage::Configuration,
+            },
+        );
     }
 
     // Read <privateKeyPath>.pub through the same allowlist gate the
     // inspect path uses.
     let pub_path_string = format!("{}.pub", request.private_key_path);
     let pub_path = expand_home(&pub_path_string);
-    validate_user_owned_key_path(&pub_path)?;
+    if validate_user_owned_key_path(&pub_path).is_err() {
+        return CopyKeyToHostResponse::failure(CopyKeyToHostFailure::PublicKeyUnreadable {
+            public_key_path: pub_path_string,
+        });
+    }
     let pub_body = match std::fs::read_to_string(&pub_path) {
         Ok(body) => body.trim().to_string(),
-        Err(error) => {
-            return Ok(CopyKeyToHostResponse {
-                ok: false,
-                reason: Some(format!(
-                    "Could not read public key at {}: {}",
-                    pub_path.display(),
-                    error
-                )),
+        Err(_) => {
+            return CopyKeyToHostResponse::failure(CopyKeyToHostFailure::PublicKeyUnreadable {
+                public_key_path: pub_path_string,
             });
         }
     };
     if pub_body.is_empty() {
-        return Ok(CopyKeyToHostResponse {
-            ok: false,
-            reason: Some(format!("Public key at {} is empty", pub_path.display())),
+        return CopyKeyToHostResponse::failure(CopyKeyToHostFailure::PublicKeyEmpty {
+            public_key_path: pub_path_string,
         });
     }
 
@@ -2784,10 +2859,12 @@ fn copy_key_to_host_blocking(
     let port = match u16::try_from(request.host.port) {
         Ok(p) => p,
         Err(_) => {
-            return Ok(CopyKeyToHostResponse {
-                ok: false,
-                reason: Some("SSH port must be between 1 and 65535".to_string()),
-            });
+            return CopyKeyToHostResponse::remote_command_failed(
+                &request.host.hostname,
+                RemoteCommandFailure::SshFailed {
+                    stage: SshFailureStage::Configuration,
+                },
+            );
         }
     };
     let tcp_stream = match connect_tcp_with_timeout(
@@ -2796,33 +2873,39 @@ fn copy_key_to_host_blocking(
         Duration::from_millis(NATIVE_SSH_CONNECT_TIMEOUT_MS),
     ) {
         Ok(stream) => stream,
-        Err(error) => {
-            return Ok(CopyKeyToHostResponse {
-                ok: false,
-                reason: Some(format!("TCP connect failed: {}", error)),
-            });
+        Err(_) => {
+            return CopyKeyToHostResponse::remote_command_failed(
+                &request.host.hostname,
+                RemoteCommandFailure::SshFailed {
+                    stage: SshFailureStage::Connect,
+                },
+            );
         }
     };
     let _ = tcp_stream.set_nodelay(true);
 
     let mut session = match Session::new() {
         Ok(s) => s,
-        Err(error) => {
-            return Ok(CopyKeyToHostResponse {
-                ok: false,
-                reason: Some(format!("ssh2 session new: {}", error)),
-            });
+        Err(_) => {
+            return CopyKeyToHostResponse::remote_command_failed(
+                &request.host.hostname,
+                RemoteCommandFailure::SshFailed {
+                    stage: SshFailureStage::SessionInitialization,
+                },
+            );
         }
     };
     session.set_tcp_stream(tcp_stream);
     // Bound handshake, auth, and the blocking read_to_string below so a stalled
     // banner or an unresponsive-but-connected host cannot hang this command.
     session.set_timeout(NATIVE_SSH_IO_TIMEOUT_MS);
-    if let Err(error) = session.handshake() {
-        return Ok(CopyKeyToHostResponse {
-            ok: false,
-            reason: Some(format!("SSH handshake failed: {}", error)),
-        });
+    if session.handshake().is_err() {
+        return CopyKeyToHostResponse::remote_command_failed(
+            &request.host.hostname,
+            RemoteCommandFailure::SshFailed {
+                stage: SshFailureStage::Handshake,
+            },
+        );
     }
 
     // Honor known_host_public_key the same way connect_native_session
@@ -2831,27 +2914,33 @@ fn copy_key_to_host_blocking(
     // #151: same host-key decision as the direct session path, including TOFU
     // for allowUnknown. Copying a key to a host authenticates, so it must not
     // skip verification either.
-    if let Err(reason) = verify_native_host_key(&session, &request.host, store) {
-        return Ok(CopyKeyToHostResponse {
-            ok: false,
-            reason: Some(reason),
-        });
+    if verify_native_host_key(&session, &request.host, store).is_err() {
+        return CopyKeyToHostResponse::remote_command_failed(
+            &request.host.hostname,
+            RemoteCommandFailure::SshFailed {
+                stage: SshFailureStage::HostKeyVerification,
+            },
+        );
     }
 
-    if let Err(error) = authenticate_native_session(&mut session, &request.host) {
-        return Ok(CopyKeyToHostResponse {
-            ok: false,
-            reason: Some(format!("Authentication failed: {}", error)),
-        });
+    if authenticate_native_session(&mut session, &request.host).is_err() {
+        return CopyKeyToHostResponse::remote_command_failed(
+            &request.host.hostname,
+            RemoteCommandFailure::SshFailed {
+                stage: SshFailureStage::Authentication,
+            },
+        );
     }
 
     let mut channel = match session.channel_session() {
         Ok(c) => c,
-        Err(error) => {
-            return Ok(CopyKeyToHostResponse {
-                ok: false,
-                reason: Some(format!("Channel open failed: {}", error)),
-            });
+        Err(_) => {
+            return CopyKeyToHostResponse::remote_command_failed(
+                &request.host.hostname,
+                RemoteCommandFailure::SshFailed {
+                    stage: SshFailureStage::ChannelOpen,
+                },
+            );
         }
     };
 
@@ -2863,37 +2952,37 @@ fn copy_key_to_host_blocking(
         "mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '%s\\n' {} >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && echo OK",
         quoted
     );
-    if let Err(error) = channel.exec(&command) {
-        return Ok(CopyKeyToHostResponse {
-            ok: false,
-            reason: Some(format!("exec failed: {}", error)),
-        });
+    if channel.exec(&command).is_err() {
+        return CopyKeyToHostResponse::remote_command_failed(
+            &request.host.hostname,
+            RemoteCommandFailure::SshFailed {
+                stage: SshFailureStage::ExecRequest,
+            },
+        );
     }
 
     let mut stdout = String::new();
-    if let Err(error) = std::io::Read::read_to_string(&mut channel, &mut stdout) {
-        return Ok(CopyKeyToHostResponse {
-            ok: false,
-            reason: Some(format!("Read stdout failed: {}", error)),
-        });
+    if std::io::Read::read_to_string(&mut channel, &mut stdout).is_err() {
+        return CopyKeyToHostResponse::remote_command_failed(
+            &request.host.hostname,
+            RemoteCommandFailure::SshFailed {
+                stage: SshFailureStage::OutputRead,
+            },
+        );
     }
     let _ = channel.wait_close();
-    let exit_status = channel.exit_status().unwrap_or(-1);
+    let exit_code = match channel.exit_signal() {
+        Ok(signal) if signal.exit_signal.is_some() => None,
+        _ => channel.exit_status().ok(),
+    };
 
-    if exit_status == 0 && stdout.trim().ends_with("OK") {
-        Ok(CopyKeyToHostResponse {
-            ok: true,
-            reason: None,
-        })
+    if exit_code == Some(0) && stdout.trim().ends_with("OK") {
+        CopyKeyToHostResponse::success()
     } else {
-        Ok(CopyKeyToHostResponse {
-            ok: false,
-            reason: Some(format!(
-                "Remote command exited with status {} (stdout: {})",
-                exit_status,
-                stdout.trim()
-            )),
-        })
+        CopyKeyToHostResponse::remote_command_failed(
+            &request.host.hostname,
+            RemoteCommandFailure::RemoteCommandExited { exit_code },
+        )
     }
 }
 
@@ -2907,11 +2996,12 @@ async fn terminal_workspace_copy_key_to_host(
     request: CopyKeyToHostRequest,
 ) -> Result<CopyKeyToHostResponse, String> {
     let host_key_store = native_host_keys.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let hostname = request.host.hostname.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         copy_key_to_host_blocking(&request, host_key_store.as_ref())
     })
-    .await
-    .map_err(|error| error.to_string())?
+    .await;
+    Ok(copy_key_to_host_join_response(&hostname, result))
 }
 
 #[derive(Debug, Deserialize)]
@@ -4895,8 +4985,8 @@ mod tests {
     #[test]
     fn copy_key_to_host_refuses_untrusted_host_before_connect() {
         // A requireTrusted host (the default policy) with no pinned key must be
-        // refused by the top-of-function validate_ssh_host gate — returning Err
-        // BEFORE any TCP connect or authentication, so the auth password never
+        // refused by the top-of-function validate_ssh_host gate BEFORE any TCP
+        // connect or authentication, so the auth password never
         // reaches an unverified server. No network or key file is touched.
         let mut host = minimal_ssh_host();
         host.host_key_policy = None; // default => requireTrusted
@@ -4905,9 +4995,16 @@ mod tests {
             private_key_path: "~/.ssh/id_ed25519".to_string(),
             host,
         };
-        let response = copy_key_to_host_blocking(&request, &throwaway_host_key_store("refusal"))
-            .expect("returns a structured response, not Err");
-        assert!(!response.ok, "the host must be refused");
+        let response = copy_key_to_host_blocking(&request, &throwaway_host_key_store("refusal"));
+        assert_eq!(
+            response.failure,
+            Some(CopyKeyToHostFailure::RemoteCommandFailed {
+                hostname: "host.internal".to_string(),
+                command: RemoteCommandFailure::SshFailed {
+                    stage: SshFailureStage::Configuration,
+                },
+            })
+        );
     }
 
     #[test]
@@ -4920,9 +5017,62 @@ mod tests {
             private_key_path: "~/.ssh/id_ed25519".to_string(),
             host,
         };
-        let response = copy_key_to_host_blocking(&request, &throwaway_host_key_store("refusal"))
-            .expect("returns a structured response, not Err");
-        assert!(!response.ok, "the host must be refused");
+        let response = copy_key_to_host_blocking(&request, &throwaway_host_key_store("refusal"));
+        assert_eq!(
+            response.failure,
+            Some(CopyKeyToHostFailure::RemoteCommandFailed {
+                hostname: "evil.com\n  ProxyCommand sh -c 'id'".to_string(),
+                command: RemoteCommandFailure::SshFailed {
+                    stage: SshFailureStage::Configuration,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn copy_key_to_host_path_rejection_is_typed_and_keeps_home_private() {
+        let private_key_path = "~/../termsnip-validator-probe/caller";
+        let request = CopyKeyToHostRequest {
+            private_key_path: private_key_path.to_string(),
+            host: minimal_ssh_host(),
+        };
+        let response =
+            copy_key_to_host_blocking(&request, &throwaway_host_key_store("path-refusal"));
+
+        assert_eq!(
+            response.failure,
+            Some(CopyKeyToHostFailure::PublicKeyUnreadable {
+                public_key_path: format!("{private_key_path}.pub"),
+            })
+        );
+        let serialized = serde_json::to_string(&response).expect("response must serialize");
+        assert!(serialized.contains("~/../termsnip-validator-probe/caller.pub"));
+        if let Some(home) = env::var_os("HOME") {
+            assert!(
+                !serialized.contains(&home.to_string_lossy().into_owned()),
+                "the expanded HOME path must stay backend-only"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn copy_key_to_host_join_panic_is_a_typed_worker_failure() {
+        let panic_probe = "COPY_KEY_JOIN_PANIC_PROBE";
+        let result = tauri::async_runtime::spawn_blocking(move || -> CopyKeyToHostResponse {
+            panic!("{panic_probe}");
+        })
+        .await;
+        let response = copy_key_to_host_join_response("build.example", result);
+
+        assert_eq!(
+            response.failure,
+            Some(CopyKeyToHostFailure::RemoteCommandFailed {
+                hostname: "build.example".to_string(),
+                command: RemoteCommandFailure::WorkerFailed,
+            })
+        );
+        let serialized = serde_json::to_string(&response).expect("response must serialize");
+        assert!(!serialized.contains(panic_probe));
     }
 
     #[test]

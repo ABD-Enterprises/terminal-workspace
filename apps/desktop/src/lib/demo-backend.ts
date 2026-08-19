@@ -498,10 +498,10 @@ export async function copyDemoKeyToHost(payload: {
   host: { hostname: string; port: number };
 }): Promise<CopyKeyToHostResponse> {
   if (!payload.privateKeyPath.trim()) {
-    return { ok: false, reason: "A private key path is required." };
+    return { ok: false, failure: { reason: "private-key-path-required" } };
   }
   if (!payload.host.hostname.trim()) {
-    return { ok: false, reason: "A target host is required." };
+    return { ok: false, failure: { reason: "target-host-required" } };
   }
   return { ok: true };
 }

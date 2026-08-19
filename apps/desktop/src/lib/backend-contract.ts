@@ -123,8 +123,8 @@ export type CopyKeyToHostFailure =
     };
 
 export type CopyKeyToHostResponse =
-  | { ok: true; failure?: never; reason?: string }
-  | { ok: false; failure?: CopyKeyToHostFailure; reason?: string };
+  | { ok: true; failure?: never }
+  | { ok: false; failure: CopyKeyToHostFailure };
 
 export interface CreateForwardPayload {
   direction: "local" | "remote";
@@ -151,8 +151,8 @@ interface SnippetExecutionResultBase {
 
 export type SnippetExecutionResult = SnippetExecutionResultBase &
   (
-    | { ok: true; failure?: never; errorMessage?: string }
-    | { ok: false; failure?: RemoteCommandFailure; errorMessage?: string }
+    | { ok: true; failure?: never }
+    | { ok: false; failure: RemoteCommandFailure }
   );
 
 export interface DownloadRemoteFileResponse {
