@@ -3647,7 +3647,6 @@ async fn terminal_workspace_clear_identity_passphrase(
 struct ReadSshConfigFileRequest {
     path: String,
     parent_cycle_key: Option<String>,
-    parent_path: Option<String>,
     relative_path: Option<String>,
 }
 
@@ -3690,11 +3689,13 @@ enum SshConfigCommandFailure {
 async fn terminal_workspace_read_ssh_config_file(
     request: ReadSshConfigFileRequest,
     cycle_key_salt: State<'_, SshConfigCycleKeySalt>,
+    resolution_registry: State<'_, SshConfigResolutionRegistry>,
 ) -> Result<ReadSshConfigFileResponse, SshConfigCommandFailure> {
     let requested_path = request.path.clone();
     let cycle_key_salt = cycle_key_salt.inner().clone();
+    let resolution_registry = resolution_registry.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        read_ssh_config_file_blocking(&request, &cycle_key_salt)
+        read_ssh_config_file_blocking(&request, &cycle_key_salt, &resolution_registry)
     })
     .await
     .map_err(|_| SshConfigCommandFailure::WorkerFailed {
@@ -3715,27 +3716,29 @@ fn canonical_ssh_config_root() -> Option<PathBuf> {
 fn read_ssh_config_file_blocking(
     request: &ReadSshConfigFileRequest,
     cycle_key_salt: &SshConfigCycleKeySalt,
+    resolution_registry: &SshConfigResolutionRegistry,
 ) -> Result<ReadSshConfigFileResponse, SshConfigCommandFailure> {
     let ssh_root =
         canonical_ssh_config_root().ok_or_else(|| SshConfigCommandFailure::SshRootUnavailable {
             path: request.path.clone(),
         })?;
-    read_ssh_config_file_from_root(request, &ssh_root, cycle_key_salt)
+    read_ssh_config_file_from_root(request, &ssh_root, cycle_key_salt, resolution_registry)
 }
 
 fn read_ssh_config_file_from_root(
     request: &ReadSshConfigFileRequest,
     ssh_root: &std::path::Path,
     cycle_key_salt: &SshConfigCycleKeySalt,
+    resolution_registry: &SshConfigResolutionRegistry,
 ) -> Result<ReadSshConfigFileResponse, SshConfigCommandFailure> {
     let requested_path = || request.path.clone();
     let raw = resolve_ssh_config_path(
         &request.path,
         request.parent_cycle_key.as_deref(),
-        request.parent_path.as_deref(),
         request.relative_path.as_deref(),
         ssh_root,
         cycle_key_salt,
+        resolution_registry,
     )?;
     let canonical = raw
         .canonicalize()
@@ -3769,7 +3772,7 @@ fn read_ssh_config_file_from_root(
             path: requested_path(),
         })?;
     Ok(ReadSshConfigFileResponse {
-        cycle_key: ssh_config_cycle_key(&canonical, cycle_key_salt),
+        cycle_key: resolution_registry.remember(&canonical, cycle_key_salt),
         content,
     })
 }
@@ -3779,7 +3782,6 @@ fn read_ssh_config_file_from_root(
 struct GlobSshConfigFilesRequest {
     pattern: String,
     parent_cycle_key: Option<String>,
-    parent_path: Option<String>,
     relative_path: Option<String>,
 }
 
@@ -3820,27 +3822,51 @@ fn ssh_config_cycle_key(canonical: &Path, salt: &SshConfigCycleKeySalt) -> Strin
     BASE64_STANDARD.encode(hasher.finalize())
 }
 
+#[derive(Clone, Default)]
+struct SshConfigResolutionRegistry {
+    canonical_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
+}
+
+impl SshConfigResolutionRegistry {
+    fn remember(&self, canonical: &Path, salt: &SshConfigCycleKeySalt) -> String {
+        let cycle_key = ssh_config_cycle_key(canonical, salt);
+        self.canonical_paths
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(cycle_key.clone(), canonical.to_path_buf());
+        cycle_key
+    }
+
+    fn canonical_path(&self, cycle_key: &str) -> Option<PathBuf> {
+        self.canonical_paths
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(cycle_key)
+            .cloned()
+    }
+}
+
 fn resolve_ssh_config_path(
     requested_path: &str,
     parent_cycle_key: Option<&str>,
-    parent_path: Option<&str>,
     relative_path: Option<&str>,
     ssh_root: &Path,
     cycle_key_salt: &SshConfigCycleKeySalt,
+    resolution_registry: &SshConfigResolutionRegistry,
 ) -> Result<PathBuf, SshConfigCommandFailure> {
-    match (parent_cycle_key, parent_path, relative_path) {
-        (None, None, None) => Ok(expand_home(requested_path)),
-        (Some(parent_cycle_key), Some(parent_path), Some(relative_path)) => {
+    match (parent_cycle_key, relative_path) {
+        (None, None) => Ok(expand_home(requested_path)),
+        (Some(parent_cycle_key), Some(relative_path)) => {
             if relative_path.starts_with('~') || Path::new(relative_path).is_absolute() {
                 return Err(SshConfigCommandFailure::InvalidPath {
                     path: requested_path.to_string(),
                 });
             }
-            let parent_canonical = expand_home(parent_path).canonicalize().map_err(|_| {
-                SshConfigCommandFailure::PathUnavailable {
+            let parent_canonical = resolution_registry
+                .canonical_path(parent_cycle_key)
+                .ok_or_else(|| SshConfigCommandFailure::InvalidPath {
                     path: requested_path.to_string(),
-                }
-            })?;
+                })?;
             if !parent_canonical.starts_with(ssh_root)
                 || ssh_config_cycle_key(&parent_canonical, cycle_key_salt) != parent_cycle_key
             {
@@ -3903,11 +3929,13 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 async fn terminal_workspace_glob_ssh_config_files(
     request: GlobSshConfigFilesRequest,
     cycle_key_salt: State<'_, SshConfigCycleKeySalt>,
+    resolution_registry: State<'_, SshConfigResolutionRegistry>,
 ) -> Result<GlobSshConfigFilesResponse, SshConfigCommandFailure> {
     let requested_pattern = request.pattern.clone();
     let cycle_key_salt = cycle_key_salt.inner().clone();
+    let resolution_registry = resolution_registry.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        glob_ssh_config_files_blocking(&request, &cycle_key_salt)
+        glob_ssh_config_files_blocking(&request, &cycle_key_salt, &resolution_registry)
     })
     .await
     .map_err(|_| SshConfigCommandFailure::WorkerFailed {
@@ -3918,27 +3946,29 @@ async fn terminal_workspace_glob_ssh_config_files(
 fn glob_ssh_config_files_blocking(
     request: &GlobSshConfigFilesRequest,
     cycle_key_salt: &SshConfigCycleKeySalt,
+    resolution_registry: &SshConfigResolutionRegistry,
 ) -> Result<GlobSshConfigFilesResponse, SshConfigCommandFailure> {
     let ssh_root =
         canonical_ssh_config_root().ok_or_else(|| SshConfigCommandFailure::SshRootUnavailable {
             path: request.pattern.clone(),
         })?;
-    glob_ssh_config_files_from_root(request, &ssh_root, cycle_key_salt)
+    glob_ssh_config_files_from_root(request, &ssh_root, cycle_key_salt, resolution_registry)
 }
 
 fn glob_ssh_config_files_from_root(
     request: &GlobSshConfigFilesRequest,
     ssh_root: &std::path::Path,
     cycle_key_salt: &SshConfigCycleKeySalt,
+    resolution_registry: &SshConfigResolutionRegistry,
 ) -> Result<GlobSshConfigFilesResponse, SshConfigCommandFailure> {
     let requested_path = || request.pattern.clone();
     let expanded = resolve_ssh_config_path(
         &request.pattern,
         request.parent_cycle_key.as_deref(),
-        request.parent_path.as_deref(),
         request.relative_path.as_deref(),
         ssh_root,
         cycle_key_salt,
+        resolution_registry,
     )?;
     let file_pattern = expanded
         .file_name()
@@ -4009,7 +4039,7 @@ fn glob_ssh_config_files_from_root(
             Err(_) => continue,
         };
         matches.push(SshConfigGlobMatch {
-            cycle_key: ssh_config_cycle_key(&canonical, cycle_key_salt),
+            cycle_key: resolution_registry.remember(&canonical, cycle_key_salt),
             // The directory-entry name is the caller's glob expansion result,
             // not a resolved path. It keeps cycle diagnostics actionable without
             // exposing the canonical target of a symlink.
@@ -4031,7 +4061,7 @@ mod ssh_config_command_tests {
     use super::{
         glob_match, glob_ssh_config_files_blocking, glob_ssh_config_files_from_root,
         read_ssh_config_file_from_root, GlobSshConfigFilesRequest, ReadSshConfigFileRequest,
-        SshConfigCommandFailure, SshConfigCycleKeySalt,
+        SshConfigCommandFailure, SshConfigCycleKeySalt, SshConfigResolutionRegistry,
     };
     use std::{
         fs,
@@ -4056,7 +4086,6 @@ mod ssh_config_command_tests {
         ReadSshConfigFileRequest {
             path: path.into(),
             parent_cycle_key: None,
-            parent_path: None,
             relative_path: None,
         }
     }
@@ -4065,7 +4094,6 @@ mod ssh_config_command_tests {
         GlobSshConfigFilesRequest {
             pattern: pattern.into(),
             parent_cycle_key: None,
-            parent_path: None,
             relative_path: None,
         }
     }
@@ -4088,7 +4116,8 @@ mod ssh_config_command_tests {
         // cannot be canonicalized in this environment — both are errors).
         assert!(glob_ssh_config_files_blocking(
             &glob_request("/etc/*.conf"),
-            &SshConfigCycleKeySalt([7; 32])
+            &SshConfigCycleKeySalt([7; 32]),
+            &SshConfigResolutionRegistry::default(),
         )
         .is_err());
     }
@@ -4121,6 +4150,7 @@ mod ssh_config_command_tests {
             &read_request(&requested),
             &canonical_ssh_root,
             &SshConfigCycleKeySalt([7; 32]),
+            &SshConfigResolutionRegistry::default(),
         ) {
             Ok(_) => panic!("symlink escaping the SSH root must be rejected"),
             Err(failure) => failure,
@@ -4167,6 +4197,7 @@ mod ssh_config_command_tests {
             &glob_request(&requested_pattern),
             &canonical_ssh_root,
             &SshConfigCycleKeySalt([7; 32]),
+            &SshConfigResolutionRegistry::default(),
         ) {
             Ok(_) => panic!("glob parent escaping the SSH root must be rejected"),
             Err(failure) => failure,
@@ -4209,10 +4240,12 @@ mod ssh_config_command_tests {
         let canonical_ssh_root = fs::canonicalize(&ssh_root).expect("SSH root should canonicalize");
         let pattern = format!("{}/*.conf", visible_dir.to_string_lossy());
         let cycle_key_salt = SshConfigCycleKeySalt([7; 32]);
+        let resolution_registry = SshConfigResolutionRegistry::default();
         let response = glob_ssh_config_files_from_root(
             &glob_request(&pattern),
             &canonical_ssh_root,
             &cycle_key_salt,
+            &resolution_registry,
         )
         .expect("symlink targets inside the SSH root should resolve");
 
@@ -4228,6 +4261,7 @@ mod ssh_config_command_tests {
             &read_request(visible_target.to_string_lossy()),
             &canonical_ssh_root,
             &cycle_key_salt,
+            &resolution_registry,
         )
         .expect("direct reads should resolve the same symlink target");
         assert_eq!(direct.cycle_key, response.matches[0].cycle_key);
@@ -4239,11 +4273,11 @@ mod ssh_config_command_tests {
                     .to_string_lossy()
                     .to_string(),
                 parent_cycle_key: Some(response.matches[0].cycle_key.clone()),
-                parent_path: Some(visible_target.to_string_lossy().to_string()),
                 relative_path: Some("sibling.conf".to_string()),
             },
             &canonical_ssh_root,
             &cycle_key_salt,
+            &resolution_registry,
         )
         .expect("nested relative reads should use the canonical target directory");
         assert_eq!(nested.content, "Host sibling\n");
@@ -4251,6 +4285,78 @@ mod ssh_config_command_tests {
         let serialized = serde_json::to_string(&response).expect("response must serialize");
         assert!(!serialized.contains("\"path\""));
         assert!(!serialized.contains(canonical_sentinel));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nested_relative_reads_reuse_the_backend_canonical_context_at_every_level() {
+        let root = test_root("ssh-config-multi-hop");
+        let ssh_root = root.join("ssh-root");
+        let visible_dir = ssh_root.join("conf.d");
+        let targets_dir = ssh_root.join("targets");
+        fs::create_dir_all(&visible_dir).expect("visible glob directory should be created");
+        fs::create_dir(&targets_dir).expect("canonical targets directory should be created");
+
+        let target = targets_dir.join("a.conf");
+        let sibling = targets_dir.join("sibling.conf");
+        let deeper = targets_dir.join("deeper.conf");
+        fs::write(&target, "Include sibling.conf\n").expect("target config should be created");
+        fs::write(&sibling, "Include deeper.conf\n").expect("sibling config should be created");
+        fs::write(&deeper, "Host final-hop\n  HostName final.example.com\n")
+            .expect("deep config should be created");
+        symlink(&target, visible_dir.join("10.conf")).expect("fragment symlink should be created");
+
+        let canonical_ssh_root = fs::canonicalize(&ssh_root).expect("SSH root should canonicalize");
+        let cycle_key_salt = SshConfigCycleKeySalt([7; 32]);
+        let resolution_registry = SshConfigResolutionRegistry::default();
+        let glob = glob_ssh_config_files_from_root(
+            &glob_request(format!("{}/*.conf", visible_dir.to_string_lossy())),
+            &canonical_ssh_root,
+            &cycle_key_salt,
+            &resolution_registry,
+        )
+        .expect("the symlinked fragment should resolve");
+        assert_eq!(glob.matches.len(), 1);
+
+        let visible_sibling = visible_dir.join("sibling.conf");
+        assert!(!visible_sibling.exists());
+        let sibling_read = read_ssh_config_file_from_root(
+            &ReadSshConfigFileRequest {
+                path: visible_sibling.to_string_lossy().to_string(),
+                parent_cycle_key: Some(glob.matches[0].cycle_key.clone()),
+                relative_path: Some("sibling.conf".to_string()),
+            },
+            &canonical_ssh_root,
+            &cycle_key_salt,
+            &resolution_registry,
+        )
+        .expect("the first nested relative Include should resolve canonically");
+
+        let visible_deeper = visible_dir.join("deeper.conf");
+        assert!(!visible_deeper.exists());
+        let deeper_read = read_ssh_config_file_from_root(
+            &ReadSshConfigFileRequest {
+                path: visible_deeper.to_string_lossy().to_string(),
+                parent_cycle_key: Some(sibling_read.cycle_key.clone()),
+                relative_path: Some("deeper.conf".to_string()),
+            },
+            &canonical_ssh_root,
+            &cycle_key_salt,
+            &resolution_registry,
+        )
+        .expect("the second nested relative Include should reuse canonical context");
+        assert!(deeper_read.content.contains("Host final-hop"));
+
+        let serialized = format!(
+            "{}{}{}",
+            serde_json::to_string(&glob).expect("glob response must serialize"),
+            serde_json::to_string(&sibling_read).expect("sibling response must serialize"),
+            serde_json::to_string(&deeper_read).expect("deeper response must serialize"),
+        );
+        assert!(!serialized.contains("\"path\""));
+        assert!(!serialized.contains(&targets_dir.to_string_lossy().to_string()));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -4652,6 +4758,7 @@ fn main() {
         // tauri.conf.json#plugins.updater; the commands below drive it.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(new_ssh_config_cycle_key_salt())
+        .manage(SshConfigResolutionRegistry::default())
         .manage(NativeSessionRegistry::default())
         .manage(NativeForwardRegistry::default())
         .setup(|app| {

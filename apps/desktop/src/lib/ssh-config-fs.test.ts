@@ -21,7 +21,6 @@ it("returns native read identity and forwards canonical-relative context", async
   const { readSshConfigFile } = await import("./ssh-config-fs");
   const context = {
     parentCycleKey: "opaque-parent-key",
-    parentPath: "~/.ssh/conf.d/10.conf",
     relativePath: "sibling.conf",
   };
 

@@ -120,6 +120,9 @@ const SSH_CONFIG_GLOB_MAX_MATCHES = 256;
 // leaves the backend. It must not be derivable from a PID, time, or constant,
 // or cycle keys would let the renderer confirm guesses about canonical paths.
 const SSH_CONFIG_CYCLE_KEY_SALT = randomBytes(32);
+// Canonical paths stay backend-private. The opaque cycle identity doubles as
+// the lookup handle for resolving the next relative Include at any depth.
+const SSH_CONFIG_CANONICAL_PATHS = new Map();
 
 function sshConfigCycleKey(canonicalPath) {
   return createHash("sha256")
@@ -129,18 +132,21 @@ function sshConfigCycleKey(canonicalPath) {
     .digest("hex");
 }
 
+function rememberSshConfigPath(canonicalPath) {
+  const cycleKey = sshConfigCycleKey(canonicalPath);
+  SSH_CONFIG_CANONICAL_PATHS.set(cycleKey, canonicalPath);
+  return cycleKey;
+}
+
 async function resolveSshConfigPath(requestedPath, context, sshRoot) {
   const parentCycleKey = context?.parentCycleKey;
-  const parentPath = context?.parentPath;
   const relativePath = context?.relativePath;
-  const hasContext =
-    parentCycleKey !== undefined || parentPath !== undefined || relativePath !== undefined;
+  const hasContext = parentCycleKey !== undefined || relativePath !== undefined;
   if (!hasContext) {
     return expandHome(requestedPath);
   }
   if (
     typeof parentCycleKey !== "string" ||
-    typeof parentPath !== "string" ||
     typeof relativePath !== "string" ||
     relativePath.startsWith("/") ||
     relativePath.startsWith("~")
@@ -148,7 +154,10 @@ async function resolveSshConfigPath(requestedPath, context, sshRoot) {
     throw new Error("invalid relative Include context");
   }
 
-  const parentReal = await realpath(expandHome(parentPath));
+  const parentReal = SSH_CONFIG_CANONICAL_PATHS.get(parentCycleKey);
+  if (parentReal === undefined) {
+    throw new Error("relative Include context was rejected");
+  }
   const rootPrefix = sshRoot.endsWith("/") ? sshRoot : `${sshRoot}/`;
   if (
     (parentReal !== sshRoot && !parentReal.startsWith(rootPrefix)) ||
@@ -232,7 +241,7 @@ async function globSshConfigFiles(pattern, context) {
       continue;
     }
     matches.push({
-      cycleKey: sshConfigCycleKey(real),
+      cycleKey: rememberSshConfigPath(real),
       // This is the directory entry selected by the caller's final glob
       // component, not a resolved path or the target of a symlink.
       name,

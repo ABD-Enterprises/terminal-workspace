@@ -305,7 +305,6 @@ describe("resolveSshIncludes", () => {
     expect(text).toContain("Host leaf");
     expect(readFile).toHaveBeenCalledWith("~/.ssh/conf.d/nested/leaf", {
       parentCycleKey: "test-cycle:~/.ssh/conf.d/00-root",
-      parentPath: "~/.ssh/conf.d/00-root",
       relativePath: "nested/leaf",
     });
   });
@@ -395,9 +394,54 @@ describe("resolveSshIncludes", () => {
       "~/.ssh/conf.d/sibling.conf",
       {
         parentCycleKey: "canonical-target-a",
-        parentPath: "~/.ssh/conf.d/10.conf",
         relativePath: "sibling.conf",
       }
     );
+  });
+
+  it("resolves three relative levels beside a glob match's canonical symlink target", async () => {
+    const visibleFragment = "~/.ssh/conf.d/10.conf";
+    const symlinks = new Map([[visibleFragment, "~/.ssh/targets/a.conf"]]);
+    const files = new Map([
+      ["~/.ssh/targets/a.conf", "Include sibling.conf\n"],
+      ["~/.ssh/targets/sibling.conf", "Include deeper.conf\n"],
+      ["~/.ssh/targets/deeper.conf", "Host final-hop\n  HostName final.example.com\n"],
+    ]);
+    const canonicalByCycleKey = new Map<string, string>();
+    const readCanonical = (canonicalPath: string) => {
+      const content = files.get(canonicalPath);
+      if (content === undefined) throw new Error(`unexpected canonical path: ${canonicalPath}`);
+      const cycleKey = `test-cycle:${canonicalPath}`;
+      canonicalByCycleKey.set(cycleKey, canonicalPath);
+      return { cycleKey, content };
+    };
+    const globFiles: SshConfigGlobLister = async () => {
+      const canonical = symlinks.get(visibleFragment);
+      return canonical ? [{ ...readCanonical(canonical), name: "10.conf" }] : [];
+    };
+    const readFile = vi.fn<SshConfigFileReader>(async (_path, context) => {
+      if (!context) return null;
+      const parentCanonical = canonicalByCycleKey.get(context.parentCycleKey);
+      if (!parentCanonical) return null;
+      const parentDir = parentCanonical.slice(0, parentCanonical.lastIndexOf("/"));
+      return readCanonical(`${parentDir}/${context.relativePath}`);
+    });
+
+    const { text, skipped } = await resolveSshIncludes("Include conf.d/*\n", {
+      readFile,
+      globFiles,
+    });
+
+    expect(skipped).toEqual([]);
+    expect(text).toContain("Host final-hop");
+    expect(readFile).toHaveBeenCalledTimes(2);
+    expect(readFile).toHaveBeenNthCalledWith(1, "~/.ssh/conf.d/sibling.conf", {
+      parentCycleKey: "test-cycle:~/.ssh/targets/a.conf",
+      relativePath: "sibling.conf",
+    });
+    expect(readFile).toHaveBeenNthCalledWith(2, "~/.ssh/conf.d/deeper.conf", {
+      parentCycleKey: "test-cycle:~/.ssh/targets/sibling.conf",
+      relativePath: "deeper.conf",
+    });
   });
 });

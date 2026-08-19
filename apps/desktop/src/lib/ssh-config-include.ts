@@ -37,9 +37,8 @@ export interface SshConfigFileRead {
  * containing file without returning that canonical path to the renderer.
  */
 export interface SshConfigResolutionContext {
+  /** Backend-issued identity used to recover the containing file's canonical location. */
   parentCycleKey: string;
-  /** Caller-visible spelling of the containing file, used to re-open it safely. */
-  parentPath: string;
   relativePath: string;
 }
 
@@ -137,12 +136,11 @@ function isRelativePath(value: string): boolean {
 
 function resolutionContext(
   entry: string,
-  currentFile: { cycleKey: string; path: string } | undefined
+  currentFile: { cycleKey: string } | undefined
 ): SshConfigResolutionContext | undefined {
   if (!currentFile || !isRelativePath(entry)) return undefined;
   return {
     parentCycleKey: currentFile.cycleKey,
-    parentPath: currentFile.path,
     relativePath: entry,
   };
 }
@@ -151,7 +149,7 @@ async function expandText(
   text: string,
   options: ResolvedSshIncludesOptions,
   currentBaseDir: string,
-  currentFile: { cycleKey: string; path: string } | undefined,
+  currentFile: { cycleKey: string } | undefined,
   visited: Set<string>,
   depth: number,
   skipped: SshConfigImportSkip[]
@@ -244,7 +242,7 @@ async function expandText(
             matchEntry.content,
             options,
             dirnamePath(matchPath),
-            { cycleKey: matchEntry.cycleKey, path: matchPath },
+            { cycleKey: matchEntry.cycleKey },
             nextVisited,
             depth + 1,
             skipped
@@ -284,7 +282,7 @@ async function expandText(
         included.content,
         options,
         dirnamePath(normalized),
-        { cycleKey: included.cycleKey, path: normalized },
+        { cycleKey: included.cycleKey },
         nextVisited,
         depth + 1,
         skipped
