@@ -59,6 +59,11 @@ import {
   readJson,
   SFTP_UPLOAD_MAX_BYTES,
 } from "./backend-buffers.mjs";
+import {
+  resolveSshConfigPath,
+  SshConfigResolutionFailure,
+  SshConfigResolutionRegistry,
+} from "./ssh-config-resolution.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appRoot = normalize(join(__dirname, ".."));
@@ -116,6 +121,9 @@ function expandHome(pathname) {
 // exhaust the import.
 const SSH_CONFIG_MAX_BYTES = 1024 * 1024;
 const SSH_CONFIG_GLOB_MAX_MATCHES = 256;
+// The HTTP API has no import-session boundary, so keep only the 4,096 most
+// recently used canonical paths. Evicted keys fail as invalid resolution context.
+const SSH_CONFIG_RESOLUTION_REGISTRY = new SshConfigResolutionRegistry();
 
 function globToRegExp(pattern) {
   let source = "^";
@@ -142,9 +150,14 @@ function globToRegExp(pattern) {
  * stay under the canonical ~/.ssh root — anything outside is refused/dropped.
  * Only the final path component may be a glob.
  */
-async function globSshConfigFiles(pattern) {
+async function globSshConfigFiles(pattern, context) {
   const sshRoot = await realpath(join(os.homedir(), ".ssh"));
-  const expanded = expandHome(pattern);
+  const expanded = resolveSshConfigPath(
+    pattern,
+    context,
+    sshRoot,
+    SSH_CONFIG_RESOLUTION_REGISTRY
+  );
   const parent = dirname(expanded);
   const filePattern = basename(expanded);
 
@@ -189,13 +202,19 @@ async function globSshConfigFiles(pattern) {
     } catch {
       continue;
     }
-    matches.push({ path: real, content });
+    matches.push({
+      cycleKey: SSH_CONFIG_RESOLUTION_REGISTRY.remember(real),
+      // This is the directory entry selected by the caller's final glob
+      // component, not a resolved path or the target of a symlink.
+      name,
+      content,
+    });
     if (matches.length >= SSH_CONFIG_GLOB_MAX_MATCHES) {
       break;
     }
   }
 
-  matches.sort((left, right) => left.path.localeCompare(right.path));
+  matches.sort((left, right) => left.name.localeCompare(right.name));
   return { matches };
 }
 
@@ -1345,11 +1364,15 @@ const server = createServer(async (request, response) => {
   if (request.method === "POST" && url.pathname === "/api/backend/ssh-config/glob") {
     try {
       const body = await readJson(request);
-      const result = await globSshConfigFiles(body.pattern);
+      const result = await globSshConfigFiles(body.pattern, body);
       sendJson(response, 200, result);
     } catch (error) {
       // A refused/outside-~/.ssh pattern is a 400, not a 500.
-      respondError(response, error, 400);
+      if (error instanceof SshConfigResolutionFailure) {
+        sendJson(response, error.statusCode, error);
+      } else {
+        respondError(response, error, 400);
+      }
     }
     return;
   }
