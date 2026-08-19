@@ -70,6 +70,23 @@ export interface GenerateKeyPayload {
   type: KeyGenerationType;
 }
 
+export type KeyCommandOperation = "inspect" | "generate";
+
+export type KeyCommandFailure =
+  | { reason: "path-required" }
+  | { reason: "key-body-required" }
+  | { reason: "path-must-be-absolute"; path: string }
+  | { reason: "path-outside-allowed-roots"; path: string }
+  | { reason: "parent-directory-unavailable"; path: string }
+  | { reason: "path-already-exists"; path: string }
+  | { reason: "private-key-unreadable"; path: string }
+  | { reason: "private-key-write-failed"; path: string }
+  | { reason: "unsupported-key-type" }
+  | { reason: "ssh-keygen-unavailable"; operation: KeyCommandOperation; path: string }
+  | { reason: "ssh-keygen-failed"; operation: KeyCommandOperation; path: string }
+  | { reason: "invalid-key-metadata"; path: string }
+  | { reason: "worker-failed"; path: string };
+
 /**
  * T13: import a private key by pasting its body. The backend writes
  * the body to `path` with 0600 perms, then runs inspect and returns

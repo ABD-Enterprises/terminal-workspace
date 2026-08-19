@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatBackendFailure,
   formatCopyKeyToHostFailure,
   formatSnippetExecutionFailure,
 } from "./backend-failure-messages";
@@ -24,6 +25,31 @@ describe("backend failure messages", () => {
         failure: { reason: "public-key-unreadable", publicKeyPath: "~/.ssh/deploy.pub" },
       })
     ).toBe("Could not read public key at ~/.ssh/deploy.pub.");
+  });
+
+  it("formats structured key-command rejections from the caller's path", () => {
+    expect(
+      formatBackendFailure({
+        reason: "path-outside-allowed-roots",
+        path: "~/.ssh/../../shared/deploy",
+      })
+    ).toBe(
+      "Private key path ~/.ssh/../../shared/deploy is outside the approved user-owned locations."
+    );
+    expect(
+      formatBackendFailure({
+        reason: "ssh-keygen-failed",
+        operation: "inspect",
+        path: "~/.ssh/broken",
+      })
+    ).toBe("ssh-keygen could not inspect the private key at ~/.ssh/broken.");
+  });
+
+  it("preserves string and Error failures outside the typed key commands", () => {
+    expect(formatBackendFailure(new Error("Known-host scan failed"))).toBe(
+      "Known-host scan failed"
+    );
+    expect(formatBackendFailure("Copy worker failed")).toBe("Copy worker failed");
   });
 
   it("keeps the timeout budget, connection teardown, and rerun action", () => {

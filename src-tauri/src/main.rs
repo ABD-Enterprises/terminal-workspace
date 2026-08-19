@@ -506,6 +506,58 @@ struct KeyMetadata {
     public_key_path: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum KeyCommandOperation {
+    Inspect,
+    Generate,
+}
+
+/// #203: these value-returning commands deliberately keep Tauri's rejected-
+/// promise contract. Unlike `copy_key_to_host`, their success value is
+/// `KeyMetadata`, not an operation-outcome envelope, so an `ok: false` wrapper
+/// would add churn without changing the security boundary. Every rejection is
+/// instead represented by this serializable, renderer-formatted type.
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(tag = "reason", rename_all = "kebab-case")]
+enum KeyCommandFailure {
+    PathRequired,
+    KeyBodyRequired,
+    PathMustBeAbsolute {
+        path: String,
+    },
+    PathOutsideAllowedRoots {
+        path: String,
+    },
+    ParentDirectoryUnavailable {
+        path: String,
+    },
+    PathAlreadyExists {
+        path: String,
+    },
+    PrivateKeyUnreadable {
+        path: String,
+    },
+    PrivateKeyWriteFailed {
+        path: String,
+    },
+    UnsupportedKeyType,
+    SshKeygenUnavailable {
+        operation: KeyCommandOperation,
+        path: String,
+    },
+    SshKeygenFailed {
+        operation: KeyCommandOperation,
+        path: String,
+    },
+    InvalidKeyMetadata {
+        path: String,
+    },
+    WorkerFailed {
+        path: String,
+    },
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GenerateKeyRequest {
@@ -2700,19 +2752,25 @@ async fn terminal_workspace_backend_status() -> Result<BackendStatusResponse, St
 #[tauri::command]
 async fn terminal_workspace_inspect_private_key(
     request: KeyPathRequest,
-) -> Result<KeyMetadata, String> {
+) -> Result<KeyMetadata, KeyCommandFailure> {
+    let requested_path = request.path.clone();
     tauri::async_runtime::spawn_blocking(move || inspect_private_key(&request.path))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|_| KeyCommandFailure::WorkerFailed {
+            path: requested_path,
+        })?
 }
 
 #[tauri::command]
 async fn terminal_workspace_generate_private_key(
     request: GenerateKeyRequest,
-) -> Result<KeyMetadata, String> {
+) -> Result<KeyMetadata, KeyCommandFailure> {
+    let requested_path = request.path.clone();
     tauri::async_runtime::spawn_blocking(move || generate_key_pair(&request))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|_| KeyCommandFailure::WorkerFailed {
+            path: requested_path,
+        })?
 }
 
 #[derive(Debug, Deserialize)]
@@ -2728,12 +2786,15 @@ struct ImportPrivateKeyFromBodyRequest {
 #[tauri::command]
 async fn terminal_workspace_import_private_key_from_body(
     request: ImportPrivateKeyFromBodyRequest,
-) -> Result<KeyMetadata, String> {
+) -> Result<KeyMetadata, KeyCommandFailure> {
+    let requested_path = request.path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         import_private_key_from_body(&request.path, &request.body)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|_| KeyCommandFailure::WorkerFailed {
+        path: requested_path,
+    })?
 }
 
 // BackendHostConnection (the existing renderer-side struct) doesn't
@@ -2834,7 +2895,7 @@ fn copy_key_to_host_blocking(
     // inspect path uses.
     let pub_path_string = format!("{}.pub", request.private_key_path);
     let pub_path = expand_home(&pub_path_string);
-    if validate_user_owned_key_path(&pub_path).is_err() {
+    if validate_user_owned_key_path(&pub_path, &pub_path_string).is_err() {
         return CopyKeyToHostResponse::failure(CopyKeyToHostFailure::PublicKeyUnreadable {
             public_key_path: pub_path_string,
         });
