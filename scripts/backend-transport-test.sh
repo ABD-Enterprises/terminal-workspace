@@ -89,18 +89,18 @@ echo "fixture-payload" > "$FIXTURE_ROOT/sftproot/fixture-file.txt"
 # target that remains inside the throwaway ~/.ssh root. The real glob endpoint
 # must read it while keeping that target path out of its response.
 GLOB_CANONICAL_SENTINEL="GLOB_SUCCESS_CANONICAL_PATH_SENTINEL"
-mkdir -p "$FIXTURE_ROOT/home/.ssh/conf.d" \
-  "$FIXTURE_ROOT/home/.ssh/$GLOB_CANONICAL_SENTINEL"
+mkdir -p "$FIXTURE_ROOT/fixture-home/.ssh/conf.d" \
+  "$FIXTURE_ROOT/fixture-home/.ssh/$GLOB_CANONICAL_SENTINEL"
 echo "Host linked-fragment" > \
-  "$FIXTURE_ROOT/home/.ssh/$GLOB_CANONICAL_SENTINEL/shared.conf"
+  "$FIXTURE_ROOT/fixture-home/.ssh/$GLOB_CANONICAL_SENTINEL/shared.conf"
 echo "Host distinct-fragment" > \
-  "$FIXTURE_ROOT/home/.ssh/$GLOB_CANONICAL_SENTINEL/distinct.conf"
-ln -s "$FIXTURE_ROOT/home/.ssh/$GLOB_CANONICAL_SENTINEL/shared.conf" \
-  "$FIXTURE_ROOT/home/.ssh/conf.d/10-visible.conf"
-ln -s "$FIXTURE_ROOT/home/.ssh/$GLOB_CANONICAL_SENTINEL/shared.conf" \
-  "$FIXTURE_ROOT/home/.ssh/conf.d/20-alias.conf"
-ln -s "$FIXTURE_ROOT/home/.ssh/$GLOB_CANONICAL_SENTINEL/distinct.conf" \
-  "$FIXTURE_ROOT/home/.ssh/conf.d/30-distinct.conf"
+  "$FIXTURE_ROOT/fixture-home/.ssh/$GLOB_CANONICAL_SENTINEL/distinct.conf"
+ln -s "$FIXTURE_ROOT/fixture-home/.ssh/$GLOB_CANONICAL_SENTINEL/shared.conf" \
+  "$FIXTURE_ROOT/fixture-home/.ssh/conf.d/10-visible.conf"
+ln -s "$FIXTURE_ROOT/fixture-home/.ssh/$GLOB_CANONICAL_SENTINEL/shared.conf" \
+  "$FIXTURE_ROOT/fixture-home/.ssh/conf.d/20-alias.conf"
+ln -s "$FIXTURE_ROOT/fixture-home/.ssh/$GLOB_CANONICAL_SENTINEL/distinct.conf" \
+  "$FIXTURE_ROOT/fixture-home/.ssh/conf.d/30-distinct.conf"
 
 cat > "$FIXTURE_ROOT/sshd_config" <<EOF
 Port $SSH_PORT
@@ -138,7 +138,7 @@ export TERMSNIP_BACKEND_TOKEN="fixture-token-0123456789abcdef0123456789abcdef"
 export TERMSNIP_ALLOWED_ORIGINS="http://backend-fixture.termsnip.invalid"
 export TERMSNIP_BACKEND_PORT="$BACKEND_PORT"
 
-HOME="$FIXTURE_ROOT/home" TMPDIR="$FIXTURE_ROOT/tmp" node apps/desktop/server/backend.mjs \
+HOME="$FIXTURE_ROOT/fixture-home" TMPDIR="$FIXTURE_ROOT/tmp" node apps/desktop/server/backend.mjs \
   >"$FIXTURE_ROOT/backend.log" 2>&1 &
 BACKEND_PID=$!
 mkdir -p "$FIXTURE_ROOT/tmp"
