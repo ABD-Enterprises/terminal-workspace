@@ -4,6 +4,10 @@ import { dirname, join } from "node:path";
 
 export const SSH_CONFIG_RESOLUTION_MAX_ENTRIES = 4096;
 
+export function projectSshConfigResolutionFailure(error) {
+  return { reason: error.reason, path: error.path };
+}
+
 export class SshConfigResolutionFailure extends Error {
   constructor(path) {
     super("invalid SSH config resolution context");
@@ -14,7 +18,7 @@ export class SshConfigResolutionFailure extends Error {
   }
 
   toJSON() {
-    return { reason: this.reason, path: this.path };
+    return projectSshConfigResolutionFailure(this);
   }
 }
 

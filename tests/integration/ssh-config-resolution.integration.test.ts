@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  projectSshConfigResolutionFailure,
   resolveSshConfigPath,
   SshConfigResolutionFailure,
   SshConfigResolutionRegistry,
@@ -37,6 +38,12 @@ describe("Node SSH config resolution registry", () => {
         statusCode: 400,
       })
     );
+    (failure as SshConfigResolutionFailure & { secretValue: string }).secretValue =
+      "secret-value-that-must-not-reach-output";
+    expect(projectSshConfigResolutionFailure(failure)).toEqual({
+      reason: "invalid-path",
+      path: "/fixture/.ssh/visible/child.conf",
+    });
     expect(JSON.parse(JSON.stringify(failure))).toEqual({
       reason: "invalid-path",
       path: "/fixture/.ssh/visible/child.conf",

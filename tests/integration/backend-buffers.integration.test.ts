@@ -11,13 +11,19 @@ async function load() {
   return buffers;
 }
 
-function postForStatus(port: number, body: Buffer): Promise<number> {
+function postForResponse(port: number, body: Buffer): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const req = httpRequest(
       { host: "127.0.0.1", port, method: "POST", path: "/" },
       (res) => {
-        res.resume(); // drain the response body
-        resolve(res.statusCode ?? 0);
+        let responseBody = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          responseBody += chunk;
+        });
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, body: responseBody });
+        });
       }
     );
     req.on("error", reject);
@@ -38,7 +44,7 @@ describe("backend memory bounds", () => {
       } catch (error: unknown) {
         const status = (error as { statusCode?: number })?.statusCode ?? 500;
         res.writeHead(status);
-        res.end(String((error as Error)?.message ?? error));
+        res.end("Request body rejected");
       }
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -47,9 +53,15 @@ describe("backend memory bounds", () => {
     try {
       // 4 KiB body against a 1 KiB cap: the client must RECEIVE a 413, proving
       // the connection was not destroyed before the response was sent.
-      expect(await postForStatus(port, Buffer.alloc(4096, 0x61))).toBe(413);
+      expect(await postForResponse(port, Buffer.alloc(4096, 0x61))).toEqual({
+        status: 413,
+        body: "Request body rejected",
+      });
       // A within-limit JSON body still succeeds.
-      expect(await postForStatus(port, Buffer.from(JSON.stringify({ ok: true })))).toBe(200);
+      expect(await postForResponse(port, Buffer.from(JSON.stringify({ ok: true })))).toEqual({
+        status: 200,
+        body: '{"ok":true}',
+      });
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

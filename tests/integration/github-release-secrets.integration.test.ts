@@ -1,7 +1,17 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const { execFileSyncMock } = vi.hoisted(() => ({
+  execFileSyncMock: vi.fn(),
+}));
+
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+  execFileSync: execFileSyncMock,
+}));
+
 import {
   ALL_RELEASE_SECRET_NAMES,
   applyReleaseSecretsFromEnv,
@@ -13,6 +23,7 @@ import {
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  execFileSyncMock.mockReset();
   for (const directory of tempDirs.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -135,6 +146,39 @@ describe("github release secrets tooling", () => {
     ]);
     expect(applied).toHaveLength(result.appliedNames.length);
     expect(applied.map((entry) => entry.name)).toEqual(result.appliedNames);
+  });
+
+  it("passes secret values to the default gh adapter through stdin, never argv", () => {
+    const secretValue = "secret-value-that-must-not-reach-argv";
+    const calls: Array<{ args: string[]; input?: string }> = [];
+    execFileSyncMock.mockImplementation((_command, args, options) => {
+      calls.push({
+        args: args as string[],
+        input: (options as { input?: string }).input,
+      });
+      return "";
+    });
+
+    // Deliberately do not inject setSecret: this must cover the production
+    // adapter that constructs gh's argv and supplies its stdin.
+    applyReleaseSecretsFromEnv({
+      repo: "ABD-Enterprises/term-snip",
+      env: {
+        MACOS_CERTIFICATE_P12_BASE64: "ZmFrZS1wMTI=",
+        MACOS_CERTIFICATE_PASSWORD: secretValue,
+        MACOS_KEYCHAIN_PASSWORD: "keychain-password",
+        MACOS_SIGN_IDENTITY: "Developer ID Application: ABD Enterprises, Inc. (2R4WAH4R53)",
+        MACOS_NOTARY_KEY_ID: "ABC123DEF4",
+        MACOS_NOTARY_ISSUER: "11111111-2222-3333-4444-555555555555",
+        MACOS_NOTARY_KEY_BASE64: "ZmFrZS1wOA==",
+      },
+      detectIdentity: () => "",
+    });
+
+    const secretCall = calls.find(({ input }) => input === secretValue);
+    expect(secretCall).toBeDefined();
+    expect(secretCall?.args).not.toContain("--body");
+    expect(calls.flatMap(({ args }) => args)).not.toContain(secretValue);
   });
 
   it("supports dry-run application without invoking gh secret writes", () => {

@@ -271,7 +271,7 @@ export function applyReleaseSecretsFromEnv({
   env = process.env,
   dryRun = false,
   setSecret = (repoName, name, value) =>
-    runGh(["secret", "set", name, "--repo", repoName, "--body", value]),
+    runGh(["secret", "set", name, "--repo", repoName], value),
   detectIdentity = detectDeveloperIdIdentity,
   readBase64 = readFileBase64,
 } = {}) {

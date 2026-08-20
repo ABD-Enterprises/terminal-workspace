@@ -60,6 +60,7 @@ import {
   SFTP_UPLOAD_MAX_BYTES,
 } from "./backend-buffers.mjs";
 import {
+  projectSshConfigResolutionFailure,
   resolveSshConfigPath,
   SshConfigResolutionFailure,
   SshConfigResolutionRegistry,
@@ -1369,7 +1370,9 @@ const server = createServer(async (request, response) => {
     } catch (error) {
       // A refused/outside-~/.ssh pattern is a 400, not a 500.
       if (error instanceof SshConfigResolutionFailure) {
-        sendJson(response, error.statusCode, error);
+        // Only these documented client fields cross the HTTP boundary; any
+        // diagnostic properties added to the Error remain process-local.
+        sendJson(response, error.statusCode, projectSshConfigResolutionFailure(error));
       } else {
         respondError(response, error, 400);
       }
