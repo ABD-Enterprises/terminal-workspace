@@ -207,6 +207,37 @@ export function buildReleaseSecretAudit({
   };
 }
 
+function projectSecretReadiness(result) {
+  return {
+    present: result.present,
+    missingSigning: result.missingSigning,
+    notaryMode: result.notaryMode,
+    missingNotary: result.missingNotary,
+    ready: result.ready,
+  };
+}
+
+export function projectReleaseSecretAudit(audit) {
+  return {
+    repo: audit.repo,
+    github: projectSecretReadiness(audit.github),
+    local: projectSecretReadiness(audit.local),
+  };
+}
+
+export function projectLocalReleaseSecretValidation(result) {
+  return projectSecretReadiness(result);
+}
+
+export function projectReleaseSecretApplication(result) {
+  return {
+    repo: result.repo,
+    dryRun: result.dryRun,
+    notaryMode: result.notaryMode,
+    appliedNames: result.appliedNames,
+  };
+}
+
 export function validateLocalReleaseSecrets({
   env = process.env,
   detectIdentity = detectDeveloperIdIdentity,
@@ -271,7 +302,7 @@ export function applyReleaseSecretsFromEnv({
   env = process.env,
   dryRun = false,
   setSecret = (repoName, name, value) =>
-    runGh(["secret", "set", name, "--repo", repoName, "--body", value]),
+    runGh(["secret", "set", name, "--repo", repoName], value),
   detectIdentity = detectDeveloperIdIdentity,
   readBase64 = readFileBase64,
 } = {}) {
@@ -352,7 +383,7 @@ async function main() {
   if (options.command === "audit") {
     const audit = auditReleaseSecrets({ repo: options.repo });
     if (options.json) {
-      console.log(JSON.stringify(audit, null, 2));
+      console.log(JSON.stringify(projectReleaseSecretAudit(audit), null, 2));
     } else {
       printHumanAudit(audit);
     }
@@ -363,7 +394,7 @@ async function main() {
   if (options.command === "validate-env") {
     const result = validateLocalReleaseSecrets();
     if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
+      console.log(JSON.stringify(projectLocalReleaseSecretValidation(result), null, 2));
     } else {
       printHumanLocalValidation(result);
     }
@@ -377,7 +408,7 @@ async function main() {
       dryRun: options.dryRun,
     });
     if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
+      console.log(JSON.stringify(projectReleaseSecretApplication(result), null, 2));
     } else {
       console.log(
         `${result.dryRun ? "Would apply" : "Applied"} release secrets for ${result.repo}: ${result.appliedNames.join(", ")}`,
