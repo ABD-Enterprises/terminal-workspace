@@ -14,14 +14,9 @@ vi.mock("node:child_process", async (importOriginal) => ({
 
 import {
   ALL_RELEASE_SECRET_NAMES,
-  NOTARY_API_KEY_SECRET_NAMES,
-  NOTARY_APPLE_ID_SECRET_NAMES,
-  SIGNING_SECRET_NAMES,
   applyReleaseSecretsFromEnv,
   auditReleaseSecrets,
   parseSecretListOutput,
-  projectLocalReleaseSecretValidation,
-  projectReleaseSecretApplication,
   validateLocalReleaseSecrets,
 } from "../../scripts/github-release-secrets.mjs";
 
@@ -154,7 +149,7 @@ describe("github release secrets tooling", () => {
   });
 
   it("passes secret values to the default gh adapter through stdin, never argv", () => {
-    const sentinel = "secret-value-that-must-not-reach-argv";
+    const secretValue = "secret-value-that-must-not-reach-argv";
     const calls: Array<{ args: string[]; input?: string }> = [];
     execFileSyncMock.mockImplementation((_command, args, options) => {
       calls.push({
@@ -170,7 +165,7 @@ describe("github release secrets tooling", () => {
       repo: "ABD-Enterprises/term-snip",
       env: {
         MACOS_CERTIFICATE_P12_BASE64: "ZmFrZS1wMTI=",
-        MACOS_CERTIFICATE_PASSWORD: sentinel,
+        MACOS_CERTIFICATE_PASSWORD: secretValue,
         MACOS_KEYCHAIN_PASSWORD: "keychain-password",
         MACOS_SIGN_IDENTITY: "Developer ID Application: ABD Enterprises, Inc. (2R4WAH4R53)",
         MACOS_NOTARY_KEY_ID: "ABC123DEF4",
@@ -180,93 +175,10 @@ describe("github release secrets tooling", () => {
       detectIdentity: () => "",
     });
 
-    const sentinelCall = calls.find(({ input }) => input === sentinel);
-    expect(sentinelCall).toBeDefined();
-    expect(sentinelCall?.args).not.toContain("--body");
-    expect(calls.flatMap(({ args }) => args)).not.toContain(sentinel);
-  });
-
-  it("projects application reports without producer-only secret fields", () => {
-    const secretValue = "secret-value-that-must-not-reach-output";
-    const report = projectReleaseSecretApplication(
-      {
-        repo: "ABD-Enterprises/term-snip",
-        dryRun: false,
-        notaryMode: "api-key",
-        appliedNames: ["MACOS_CERTIFICATE_PASSWORD"],
-        secretValue,
-      },
-      "ABD-Enterprises/term-snip",
-      false,
-    );
-
-    expect(report).toEqual({
-      repo: "ABD-Enterprises/term-snip",
-      dryRun: false,
-      notaryMode: "api-key",
-      appliedNames: ["MACOS_CERTIFICATE_PASSWORD"],
-    });
-    expect(JSON.stringify(report)).not.toContain(secretValue);
-  });
-
-  it("reconstructs projected name lists from the static constants", () => {
-    // These stringify like the real names but are not identical to the static
-    // string primitives, so copying result elements makes the identity check fail.
-    const distinctString = (value: string) => Object(value) as string;
-    const notarySecretNames = [
-      ...NOTARY_API_KEY_SECRET_NAMES,
-      ...NOTARY_APPLE_ID_SECRET_NAMES,
-    ];
-    const localResultNames = {
-      present: SIGNING_SECRET_NAMES.map(distinctString),
-      missingSigning: [distinctString(SIGNING_SECRET_NAMES[0])],
-      missingNotary: notarySecretNames.map(distinctString),
-    };
-    const applicationResultNames = [
-      ...SIGNING_SECRET_NAMES,
-      ...NOTARY_API_KEY_SECRET_NAMES,
-    ].map(distinctString);
-
-    const validation = projectLocalReleaseSecretValidation({
-      ...localResultNames,
-      notaryMode: distinctString("missing"),
-      ready: false,
-    });
-    const application = projectReleaseSecretApplication(
-      {
-        repo: "ABD-Enterprises/term-snip",
-        dryRun: false,
-        notaryMode: distinctString("api-key"),
-        appliedNames: applicationResultNames,
-      },
-      "ABD-Enterprises/term-snip",
-      false,
-    );
-
-    const projectedLists = [
-      [validation.present, SIGNING_SECRET_NAMES, ALL_RELEASE_SECRET_NAMES],
-      [
-        validation.missingSigning,
-        [SIGNING_SECRET_NAMES[0]],
-        SIGNING_SECRET_NAMES,
-      ],
-      [validation.missingNotary, notarySecretNames, notarySecretNames],
-      [
-        application.appliedNames,
-        [...SIGNING_SECRET_NAMES, ...NOTARY_API_KEY_SECRET_NAMES],
-        ALL_RELEASE_SECRET_NAMES,
-      ],
-    ];
-    for (const [projectedNames, expectedNames, staticNames] of projectedLists) {
-      expect(projectedNames).toEqual(expectedNames);
-      expect(
-        projectedNames.every((name) =>
-          staticNames.some((staticName) => name === staticName),
-        ),
-      ).toBe(true);
-    }
-    expect(validation.notaryMode).toBe("missing");
-    expect(application.notaryMode).toBe("api-key");
+    const secretCall = calls.find(({ input }) => input === secretValue);
+    expect(secretCall).toBeDefined();
+    expect(secretCall?.args).not.toContain("--body");
+    expect(calls.flatMap(({ args }) => args)).not.toContain(secretValue);
   });
 
   it("supports dry-run application without invoking gh secret writes", () => {
