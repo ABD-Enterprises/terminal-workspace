@@ -31,6 +31,13 @@ export const ALL_RELEASE_SECRET_NAMES = [
   ...NOTARY_APPLE_ID_SECRET_NAMES,
 ];
 
+const NOTARY_SECRET_NAMES = [
+  ...NOTARY_API_KEY_SECRET_NAMES,
+  ...NOTARY_APPLE_ID_SECRET_NAMES,
+];
+
+const NOTARY_MODES = ["api-key", "apple-id", "missing"];
+
 function parseArgs(argv) {
   const [command = "audit", ...rest] = argv;
   const options = {
@@ -207,13 +214,28 @@ export function buildReleaseSecretAudit({
   };
 }
 
+function projectSecretNames(staticNames, resultNames) {
+  return staticNames.filter((staticName) =>
+    resultNames.some((resultName) => String(resultName) === staticName),
+  );
+}
+
+function projectNotaryMode(resultMode) {
+  return NOTARY_MODES.find((staticMode) => staticMode === String(resultMode)) ?? "missing";
+}
+
 function projectSecretReadiness(result) {
+  const present = projectSecretNames(ALL_RELEASE_SECRET_NAMES, result.present);
+  const missingSigning = projectSecretNames(SIGNING_SECRET_NAMES, result.missingSigning);
+  const notaryMode = projectNotaryMode(result.notaryMode);
+  const missingNotary = projectSecretNames(NOTARY_SECRET_NAMES, result.missingNotary);
+
   return {
-    present: result.present,
-    missingSigning: result.missingSigning,
-    notaryMode: result.notaryMode,
-    missingNotary: result.missingNotary,
-    ready: result.ready,
+    present,
+    missingSigning,
+    notaryMode,
+    missingNotary,
+    ready: result.ready === true,
   };
 }
 
@@ -229,12 +251,14 @@ export function projectLocalReleaseSecretValidation(result) {
   return projectSecretReadiness(result);
 }
 
-export function projectReleaseSecretApplication(result) {
+export function projectReleaseSecretApplication(result, repo, dryRun) {
+  const appliedNames = projectSecretNames(ALL_RELEASE_SECRET_NAMES, result.appliedNames);
+
   return {
-    repo: result.repo,
-    dryRun: result.dryRun,
-    notaryMode: result.notaryMode,
-    appliedNames: result.appliedNames,
+    repo,
+    dryRun: dryRun === true,
+    notaryMode: projectNotaryMode(result.notaryMode),
+    appliedNames,
   };
 }
 
@@ -403,12 +427,15 @@ async function main() {
   }
 
   if (options.command === "apply-env") {
+    const repo = resolveRepoName(options.repo);
     const result = applyReleaseSecretsFromEnv({
-      repo: options.repo,
+      repo,
       dryRun: options.dryRun,
     });
     if (options.json) {
-      console.log(JSON.stringify(projectReleaseSecretApplication(result), null, 2));
+      console.log(
+        JSON.stringify(projectReleaseSecretApplication(result, repo, options.dryRun), null, 2),
+      );
     } else {
       console.log(
         `${result.dryRun ? "Would apply" : "Applied"} release secrets for ${result.repo}: ${result.appliedNames.join(", ")}`,
