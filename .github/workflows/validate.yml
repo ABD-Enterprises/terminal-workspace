@@ -204,4 +204,4 @@ jobs:
       # lifecycle already runs in the validate:rust step above (those fixtures
       # are not #[ignore]).
       - name: Native SSH session lifecycle and reaper (sshd fixtures)
-        run: cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture -- --include-ignored
+        run: cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture -- --include-ignored --test-threads=1

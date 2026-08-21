@@ -86,7 +86,7 @@ if [[ "${TERMSNIP_RUN_SSH_FIXTURE:-0}" == "1" && "$(uname -s)" == "Darwin" ]]; t
   if command -v cargo >/dev/null 2>&1; then
     echo "[validate] localhost sshd transport and reaper fixtures"
     cargo test --manifest-path src-tauri/Cargo.toml \
-      localhost_ssh_transport_fixture -- --include-ignored
+      localhost_ssh_transport_fixture -- --include-ignored --test-threads=1
   else
     echo "[validate] localhost sshd fixture skipped (cargo not found on PATH)" >&2
   fi
