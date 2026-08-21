@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
-import { createReadStream } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -14,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { connect as connectNet, createServer as createNetServer } from "node:net";
-import { basename, dirname, extname, join, normalize, posix as posixPath } from "node:path";
+import { basename, dirname, join, normalize, posix as posixPath } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -30,11 +29,8 @@ import {
   describeServerListenError,
   shutdownBackend,
 } from "./backend-lifecycle.mjs";
-import {
-  resolvePathInsideRoot,
-  resolveRemotePath,
-  sanitizeFilename,
-} from "./backend-paths.mjs";
+import { resolveRemotePath, sanitizeFilename } from "./backend-paths.mjs";
+import { createStaticHandler } from "./backend-static.mjs";
 import {
   buildExecCommand,
   buildInteractiveShellCommand,
@@ -69,6 +65,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appRoot = normalize(join(__dirname, ".."));
 const distRoot = join(appRoot, "dist");
+const serveStatic = createStaticHandler({ root: distRoot });
 const port = Number.parseInt(process.env.TERMSNIP_BACKEND_PORT ?? "8790", 10);
 
 // Per-launch auth gate. The token is shared with the Tauri shell via env or a
@@ -89,14 +86,6 @@ function denyUnauthorized(response, decision) {
   response.writeHead(403, { "content-type": "application/json; charset=utf-8" });
   response.end(JSON.stringify({ error: "Unauthorized", reason: decision.reason }));
 }
-
-const mimeTypes = {
-  ".css": "text/css; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml",
-};
 
 const sessions = new Map();
 const FILE_TYPE_MASK = 0o170000;
@@ -1246,46 +1235,6 @@ async function scanKnownHost({ hostname, port }) {
   }
 
   return entries;
-}
-
-async function serveStatic(request, response) {
-  const requestedPath = new URL(request.url, "http://localhost").pathname;
-  const normalizedPath = requestedPath === "/" ? "/index.html" : requestedPath;
-  // #152(d): was `targetPath.startsWith(distRoot)`, a string prefix rather than
-  // a path one — `/app/dist-evil/x` starts with `/app/dist`.
-  const targetPath = resolvePathInsideRoot(distRoot, normalizedPath);
-
-  if (targetPath === null) {
-    response.writeHead(403);
-    response.end("Forbidden");
-    return;
-  }
-
-  try {
-    const fileStats = await stat(targetPath);
-    if (fileStats.isDirectory()) {
-      await serveStatic({ ...request, url: "/index.html" }, response);
-      return;
-    }
-
-    const extension = extname(targetPath);
-    response.writeHead(200, {
-      "Content-Type": mimeTypes[extension] ?? "application/octet-stream",
-    });
-    createReadStream(targetPath).pipe(response);
-  } catch {
-    const indexPath = join(distRoot, "index.html");
-    try {
-      await stat(indexPath);
-      response.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8",
-      });
-      createReadStream(indexPath).pipe(response);
-    } catch {
-      response.writeHead(404);
-      response.end("Build output not found. Run pnpm --filter desktop build first.");
-    }
-  }
 }
 
 const server = createServer(async (request, response) => {

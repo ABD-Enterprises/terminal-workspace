@@ -2,7 +2,13 @@
 // they can be unit-tested without the module binding a port on import — the
 // same reason backend-buffers.mjs, backend-responses.mjs and
 // backend-lifecycle.mjs live outside it.
+import { realpath } from "node:fs/promises";
 import { isAbsolute, join, normalize, relative, sep } from "node:path";
+
+function escapesRoot(root, targetPath) {
+  const pathFromRoot = relative(root, targetPath);
+  return pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot);
+}
 
 /**
  * #152(d): resolve `requestedPath` under `root`, or null if it escapes.
@@ -18,20 +24,39 @@ import { isAbsolute, join, normalize, relative, sep } from "node:path";
  * itself (relative is "") and rejects an absolute result, which is what
  * `relative()` returns when the two paths share no base at all.
  *
- * Honest scope note: no directly exploitable request was found today, because
- * `new URL(...).pathname` collapses ordinary `..` segments before this join
- * ever runs. This is defence in depth against that normalization changing or
- * another caller arriving without it — not a patch for a live exploit.
+ * #282: the component-aware check is still only lexical. A symlink under the
+ * root can point outside it without putting `..` in the request, so both paths
+ * must also be canonicalised and compared before the target is returned.
  */
-export function resolvePathInsideRoot(root, requestedPath) {
+export async function resolvePathInsideRoot(root, requestedPath) {
   const targetPath = normalize(join(root, requestedPath));
   const pathFromRoot = relative(root, targetPath);
 
-  if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
+  if (escapesRoot(root, targetPath)) {
     return null;
   }
 
-  return targetPath;
+  try {
+    // Do not cache either realpath: the build output may be replaced while the
+    // dev backend is running. Returning the canonical target also means the
+    // caller's stat/read operations do not follow the original link again.
+    const canonicalRoot = await realpath(root);
+    const canonicalTarget = await realpath(targetPath);
+
+    if (escapesRoot(canonicalRoot, canonicalTarget)) {
+      return null;
+    }
+
+    // Preserve the resolver's established root spelling while still returning
+    // a fully canonical path. No production request reaches this case because
+    // serveStatic rewrites "/" to "/index.html" first.
+    return pathFromRoot === "" && targetPath.endsWith(sep)
+      ? `${canonicalTarget}${sep}`
+      : canonicalTarget;
+  } catch {
+    // A missing target is intentionally indistinguishable from a refused one.
+    return null;
+  }
 }
 
 /**
