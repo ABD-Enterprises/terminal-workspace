@@ -197,8 +197,11 @@ jobs:
       # needs an unsandboxed sshd, which sandboxed local/dev envs lack). This
       # hosted macOS runner is a real machine, so run it explicitly to
       # exercise the SSH session lifecycle (create -> open stream -> I/O ->
-      # close) end-to-end on every PR. A failure fails Validate. The
-      # localShell / external-protocol session lifecycle already runs in the
-      # validate:rust step above (those fixtures are not #[ignore]).
-      - name: Native SSH session lifecycle (sshd fixture)
-        run: cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture_flow -- --include-ignored
+      # close) end-to-end on every PR. #292's ignored reaper regressions share
+      # this prefix so the same gate also proves that a later fixture startup
+      # cleans leaked sshds and roots without disturbing a live fixture. A
+      # failure fails Validate. The localShell / external-protocol session
+      # lifecycle already runs in the validate:rust step above (those fixtures
+      # are not #[ignore]).
+      - name: Native SSH session lifecycle and reaper (sshd fixtures)
+        run: cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture -- --include-ignored

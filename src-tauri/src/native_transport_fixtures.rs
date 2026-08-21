@@ -2,20 +2,36 @@ use super::*;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{
+    collections::HashSet,
     env,
     ffi::OsString,
     fs,
     io::{Read, Write},
     net::{Shutdown, TcpListener, TcpStream},
+    ops::Deref,
     path::{Path, PathBuf},
     process::{self, Child as ProcessChild, Command, Stdio},
+    sync::{Mutex as StdMutex, OnceLock},
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+#[cfg(target_os = "macos")]
+use std::{
+    ffi::{c_int, c_void},
+    os::unix::ffi::{OsStrExt, OsStringExt},
+    sync::atomic::{AtomicU64, Ordering},
 };
 use tokio::sync::mpsc::channel;
 
 const FIXTURE_TIMEOUT: Duration = Duration::from_secs(15);
 const FIXTURE_POLL_INTERVAL: Duration = Duration::from_millis(50);
+#[cfg(target_os = "macos")]
+const FIXTURE_REAPER_TIMEOUT: Duration = Duration::from_secs(5);
+const FIXTURE_OWNER_LOCK: &str = ".owner.lock";
+#[cfg(target_os = "macos")]
+const FIXTURE_REAPER_LOCK: &str = ".termsnip-native-transport-reaper.lock";
+#[cfg(target_os = "macos")]
+const TRANSPORT_FIXTURE_PREFIX: &str = "termsnip-native-transport-";
 
 struct TestSshd {
     child: ProcessChild,
@@ -44,12 +60,37 @@ impl Drop for TestHttpServer {
 }
 
 struct NativeTransportFixture {
-    _root: PathBuf,
     _jump_sshd: TestSshd,
     _target_sshd: TestSshd,
     direct_host: BackendHostConnection,
     jump_target_host: BackendHostConnection,
     http_server: TestHttpServer,
+    // Struct fields drop in declaration order. Keep the owner lock and root
+    // alive until both sshd children and the HTTP server have stopped.
+    _root: FixtureRoot,
+}
+
+struct FixtureRoot {
+    path: PathBuf,
+    _owner_lock: fs::File,
+}
+
+impl Deref for FixtureRoot {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl Drop for FixtureRoot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+        fixture_roots()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.path);
+    }
 }
 
 struct ScopedEnvVar {
@@ -183,17 +224,30 @@ impl NativeTransportFixture {
         };
 
         Self {
-            _root: root,
             _jump_sshd: jump_sshd,
             _target_sshd: target_sshd,
             direct_host,
             jump_target_host,
             http_server,
+            _root: root,
         }
     }
 }
 
-fn make_fixture_root(label: &str) -> PathBuf {
+fn fixture_roots() -> &'static StdMutex<HashSet<PathBuf>> {
+    static ROOTS: OnceLock<StdMutex<HashSet<PathBuf>>> = OnceLock::new();
+    ROOTS.get_or_init(|| StdMutex::new(HashSet::new()))
+}
+
+fn make_fixture_root(label: &str) -> FixtureRoot {
+    let mut active_roots = fixture_roots()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    #[cfg(target_os = "macos")]
+    let _reaper_lock = lock_fixture_reaper().expect("fixture reaper lock should be acquired");
+    #[cfg(target_os = "macos")]
+    sweep_fixture_roots_locked(&active_roots).expect("stale fixture roots should be swept");
+
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
@@ -203,7 +257,371 @@ fn make_fixture_root(label: &str) -> PathBuf {
         process::id()
     ));
     fs::create_dir_all(&root).expect("fixture root should be created");
-    root
+    let owner_lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join(FIXTURE_OWNER_LOCK))
+        .expect("fixture owner lock should be created");
+    if let Err(error) = owner_lock.lock() {
+        let _ = fs::remove_dir_all(&root);
+        panic!("fixture owner lock should be acquired: {error}");
+    }
+    active_roots.insert(root.clone());
+
+    FixtureRoot {
+        path: root,
+        _owner_lock: owner_lock,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn lock_fixture_reaper() -> std::io::Result<fs::File> {
+    let path = env::temp_dir().join(FIXTURE_REAPER_LOCK);
+    if let Ok(metadata) = fs::symlink_metadata(&path) {
+        if !metadata.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "fixture reaper lock is not a regular file",
+            ));
+        }
+    }
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.lock()?;
+    Ok(file)
+}
+
+#[cfg(target_os = "macos")]
+fn sweep_fixture_roots() -> std::io::Result<()> {
+    let active_roots = fixture_roots()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _reaper_lock = lock_fixture_reaper()?;
+    sweep_fixture_roots_locked(&active_roots)
+}
+
+#[cfg(target_os = "macos")]
+fn sweep_fixture_roots_locked(active_roots: &HashSet<PathBuf>) -> std::io::Result<()> {
+    let mut roots = fs::read_dir(env::temp_dir())?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false)
+                && entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(TRANSPORT_FIXTURE_PREFIX)
+        })
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    roots.sort();
+
+    for root in roots {
+        if active_roots.contains(&root) {
+            continue;
+        }
+        reap_fixture_root(&root)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn reap_fixture_root(root: &Path) -> std::io::Result<()> {
+    let owner_lock_path = root.join(FIXTURE_OWNER_LOCK);
+    let owner_lock = match fs::symlink_metadata(&owner_lock_path) {
+        Ok(metadata) if metadata.is_file() => Some(
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&owner_lock_path)?,
+        ),
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+
+    let Some(owner_lock) = owner_lock else {
+        // Pre-#292 roots have no owner lock. Their pid can prove only that
+        // something is alive, never that it is safe to signal, so retry later.
+        if embedded_sshd_pids(root).into_iter().any(process_exists) {
+            return Ok(());
+        }
+        if matching_sshd_processes(root)?.is_empty() {
+            remove_fixture_root(root)?;
+        }
+        return Ok(());
+    };
+
+    if owner_lock.try_lock().is_err() {
+        return Ok(());
+    }
+
+    terminate_matching_sshds(root)?;
+    if matching_sshd_processes(root)?.is_empty() && !has_uninspectable_live_embedded_pid(root) {
+        remove_fixture_root(root)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn remove_fixture_root(root: &Path) -> std::io::Result<()> {
+    match fs::remove_dir_all(root) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone)]
+struct SshdIdentity {
+    config_path: PathBuf,
+    log_path: PathBuf,
+}
+
+#[cfg(target_os = "macos")]
+impl SshdIdentity {
+    fn expected_argv(&self) -> Vec<OsString> {
+        vec![
+            OsString::from("/usr/sbin/sshd"),
+            OsString::from("-D"),
+            OsString::from("-f"),
+            self.config_path.as_os_str().to_owned(),
+            OsString::from("-E"),
+            self.log_path.as_os_str().to_owned(),
+        ]
+    }
+
+    fn listener_title_prefix(&self) -> OsString {
+        let mut prefix = OsString::from("sshd: /usr/sbin/sshd -D -f ");
+        prefix.push(&self.config_path);
+        prefix.push(" -E ");
+        prefix.push(&self.log_path);
+        prefix.push(" [listener] ");
+        prefix
+    }
+
+    fn matches_listener_argv(&self, argv: &[OsString]) -> bool {
+        argv.len() == 6
+            && argv[1..].iter().all(|arg| arg.is_empty())
+            && argv[0]
+                .as_bytes()
+                .starts_with(self.listener_title_prefix().as_bytes())
+    }
+
+    fn matches(&self, process: &ProcessArguments) -> bool {
+        process.executable == "/usr/sbin/sshd"
+            && (process.argv == self.expected_argv() || self.matches_listener_argv(&process.argv))
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Eq, PartialEq)]
+struct ProcessArguments {
+    executable: OsString,
+    argv: Vec<OsString>,
+}
+
+#[cfg(target_os = "macos")]
+fn sshd_identities(root: &Path) -> [SshdIdentity; 2] {
+    ["jump-sshd", "target-sshd"].map(|name| {
+        let root = root.join(name);
+        SshdIdentity {
+            config_path: root.join("sshd_config"),
+            log_path: root.join("sshd.log"),
+        }
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn embedded_sshd_pids(root: &Path) -> Vec<c_int> {
+    ["jump-sshd", "target-sshd"]
+        .into_iter()
+        .filter_map(|name| fs::read_to_string(root.join(name).join("sshd.pid")).ok())
+        .filter_map(|pid| pid.trim().parse::<c_int>().ok())
+        .filter(|pid| *pid > 0)
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn matching_sshd_processes(root: &Path) -> std::io::Result<Vec<(c_int, SshdIdentity)>> {
+    let identities = sshd_identities(root);
+    let output = Command::new("/bin/ps").args(["-axo", "pid="]).output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::other(
+            "could not enumerate fixture processes",
+        ));
+    }
+
+    let mut matches = Vec::new();
+    for pid in String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .filter_map(|pid| pid.parse::<c_int>().ok())
+    {
+        let Some(process) = process_arguments(pid) else {
+            continue;
+        };
+        for identity in &identities {
+            if identity.matches(&process) {
+                matches.push((pid, identity.clone()));
+                break;
+            }
+        }
+    }
+    Ok(matches)
+}
+
+#[cfg(target_os = "macos")]
+fn terminate_matching_sshds(root: &Path) -> std::io::Result<()> {
+    for (pid, identity) in matching_sshd_processes(root)? {
+        signal_if_matching(pid, &identity, 15);
+    }
+    if wait_for_matching_sshds_to_exit(root, FIXTURE_REAPER_TIMEOUT)? {
+        return Ok(());
+    }
+
+    for (pid, identity) in matching_sshd_processes(root)? {
+        signal_if_matching(pid, &identity, 9);
+    }
+    let _ = wait_for_matching_sshds_to_exit(root, FIXTURE_REAPER_TIMEOUT)?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn wait_for_matching_sshds_to_exit(root: &Path, timeout: Duration) -> std::io::Result<bool> {
+    let started_at = Instant::now();
+    while started_at.elapsed() < timeout {
+        if matching_sshd_processes(root)?.is_empty() {
+            return Ok(true);
+        }
+        thread::sleep(FIXTURE_POLL_INTERVAL);
+    }
+    Ok(matching_sshd_processes(root)?.is_empty())
+}
+
+#[cfg(target_os = "macos")]
+fn signal_if_matching(pid: c_int, identity: &SshdIdentity, signal: c_int) {
+    // Re-reading argv immediately before kill narrows, but cannot close, this
+    // check-then-signal race: the pid could still be recycled into an sshd
+    // using this fixture's nanosecond-unique config and log paths between the
+    // check and kill. macOS has no pidfd-style stable process handle.
+    if !process_arguments(pid)
+        .as_ref()
+        .is_some_and(|process| identity.matches(process))
+    {
+        return;
+    }
+    unsafe {
+        kill(pid, signal);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn has_uninspectable_live_embedded_pid(root: &Path) -> bool {
+    embedded_sshd_pids(root)
+        .into_iter()
+        .any(|pid| process_exists(pid) && process_arguments(pid).is_none())
+}
+
+#[cfg(target_os = "macos")]
+fn process_exists(pid: c_int) -> bool {
+    if unsafe { kill(pid, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() != Some(3)
+}
+
+#[cfg(target_os = "macos")]
+fn process_arguments(pid: c_int) -> Option<ProcessArguments> {
+    const CTL_KERN: c_int = 1;
+    const KERN_PROCARGS2: c_int = 49;
+    let mut mib = [CTL_KERN, KERN_PROCARGS2, pid];
+    let mut buffer = vec![0u8; process_arg_max()];
+    let mut buffer_len = buffer.len();
+    if unsafe {
+        sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as u32,
+            buffer.as_mut_ptr().cast(),
+            &mut buffer_len,
+            std::ptr::null_mut(),
+            0,
+        )
+    } != 0
+        || buffer_len < std::mem::size_of::<c_int>()
+    {
+        return None;
+    }
+    buffer.truncate(buffer_len);
+
+    let argc = c_int::from_ne_bytes(buffer[..std::mem::size_of::<c_int>()].try_into().ok()?);
+    if argc <= 0 {
+        return None;
+    }
+    let executable_start = std::mem::size_of::<c_int>();
+    let executable_end = buffer[executable_start..]
+        .iter()
+        .position(|byte| *byte == 0)?
+        + executable_start;
+    let executable = OsString::from_vec(buffer[executable_start..executable_end].to_vec());
+    let mut cursor = executable_end + 1;
+    while buffer.get(cursor) == Some(&0) {
+        cursor += 1;
+    }
+
+    let mut argv = Vec::with_capacity(argc as usize);
+    for _ in 0..argc {
+        let end = buffer[cursor..].iter().position(|byte| *byte == 0)? + cursor;
+        argv.push(OsString::from_vec(buffer[cursor..end].to_vec()));
+        cursor = end + 1;
+    }
+    Some(ProcessArguments { executable, argv })
+}
+
+#[cfg(target_os = "macos")]
+fn process_arg_max() -> usize {
+    const CTL_KERN: c_int = 1;
+    const KERN_ARGMAX: c_int = 8;
+    static ARG_MAX: OnceLock<usize> = OnceLock::new();
+    *ARG_MAX.get_or_init(|| {
+        let mut mib = [CTL_KERN, KERN_ARGMAX];
+        let mut value: c_int = 0;
+        let mut value_len = std::mem::size_of::<c_int>();
+        let result = unsafe {
+            sysctl(
+                mib.as_mut_ptr(),
+                mib.len() as u32,
+                (&mut value as *mut c_int).cast(),
+                &mut value_len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if result == 0 && value > 0 {
+            value as usize
+        } else {
+            262_144
+        }
+    })
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn kill(pid: c_int, signal: c_int) -> c_int;
+    fn sysctl(
+        name: *mut c_int,
+        name_len: u32,
+        old_value: *mut c_void,
+        old_len: *mut usize,
+        new_value: *mut c_void,
+        new_len: usize,
+    ) -> c_int;
 }
 
 fn reserve_port() -> u16 {
@@ -313,20 +731,27 @@ Subsystem sftp internal-sftp\n",
     )
     .expect("sshd config should be written");
 
-    let mut child = Command::new("/usr/sbin/sshd")
-        .arg("-D")
-        .arg("-f")
-        .arg(&config_path)
-        .arg("-E")
-        .arg(&log_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("sshd should spawn");
+    // Wrap the raw Child before any later operation can panic. Child does not
+    // kill on drop, while TestSshd does; during unwinding this local and any
+    // TestSshd already returned to NativeTransportFixture::new() drop before
+    // that function's first-created FixtureRoot removes the identifying files.
+    let mut sshd = TestSshd {
+        child: Command::new("/usr/sbin/sshd")
+            .arg("-D")
+            .arg("-f")
+            .arg(&config_path)
+            .arg("-E")
+            .arg(&log_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("sshd should spawn"),
+    };
 
     wait_for("fixture sshd to start", || {
-        if child
+        if sshd
+            .child
             .try_wait()
             .expect("sshd status should be readable")
             .is_some()
@@ -340,7 +765,7 @@ Subsystem sftp internal-sftp\n",
             .unwrap_or(false)
     });
 
-    TestSshd { child }
+    sshd
 }
 
 fn start_http_server() -> TestHttpServer {
@@ -1102,6 +1527,235 @@ fn native_external_protocol_runtime_fixture_flow() {
     assert!(mosh_output.contains("--ssh="));
     assert!(mosh_output.contains("password:"));
     assert!(mosh_output.contains("MOSH_AUTH:fixture-secret"));
+}
+
+#[cfg(target_os = "macos")]
+const FIXTURE_REAPER_HELPER_STATE: &str = "TERMSNIP_FIXTURE_REAPER_HELPER_STATE";
+// Libtest runs the two helper-spawning regressions in parallel. They share a
+// pid, and macOS can return the same timestamp to both threads, so the counter
+// is the part that makes their state channels distinct.
+#[cfg(target_os = "macos")]
+static FIXTURE_HELPER_STATE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(target_os = "macos")]
+struct FixtureHelper {
+    child: ProcessChild,
+    state_path: PathBuf,
+    root: PathBuf,
+    jump_pid: c_int,
+    target_pid: c_int,
+}
+
+#[cfg(target_os = "macos")]
+impl FixtureHelper {
+    fn spawn(test_filter: &str) -> Self {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let state_path = fixture_helper_state_path_at(suffix);
+        let mut child = Command::new(env::current_exe().expect("test executable should resolve"))
+            .arg(test_filter)
+            .arg("--ignored")
+            .arg("--nocapture")
+            .env(FIXTURE_REAPER_HELPER_STATE, &state_path)
+            .spawn()
+            .expect("fixture helper should spawn");
+
+        let started_at = Instant::now();
+        let (root, jump_pid, target_pid) = loop {
+            if let Ok(contents) = fs::read_to_string(&state_path) {
+                if let Some(state) = parse_fixture_helper_state(&contents) {
+                    break state;
+                }
+            }
+            if let Some(status) = child
+                .try_wait()
+                .expect("fixture helper status should be readable")
+            {
+                panic!("fixture helper exited before becoming ready: {status}");
+            }
+            if started_at.elapsed() >= FIXTURE_TIMEOUT {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("fixture helper did not become ready");
+            }
+            thread::sleep(FIXTURE_POLL_INTERVAL);
+        };
+
+        let helper = Self {
+            child,
+            state_path,
+            root,
+            jump_pid,
+            target_pid,
+        };
+        assert!(helper.root.exists(), "helper fixture root should exist");
+        helper.assert_sshd_is_live(helper.jump_pid, "jump-sshd");
+        helper.assert_sshd_is_live(helper.target_pid, "target-sshd");
+        helper
+    }
+
+    fn assert_sshd_is_live(&self, pid: c_int, name: &str) {
+        let root = self.root.join(name);
+        let identity = SshdIdentity {
+            config_path: root.join("sshd_config"),
+            log_path: root.join("sshd.log"),
+        };
+        let process = process_arguments(pid);
+        assert!(
+            process
+                .as_ref()
+                .is_some_and(|process| identity.matches(process)),
+            "helper {name} argv should match its fixture identity; got {process:?}"
+        );
+    }
+
+    fn sshd_is_live(&self, pid: c_int, name: &str) -> bool {
+        let root = self.root.join(name);
+        let identity = SshdIdentity {
+            config_path: root.join("sshd_config"),
+            log_path: root.join("sshd.log"),
+        };
+        process_arguments(pid)
+            .as_ref()
+            .is_some_and(|process| identity.matches(process))
+    }
+
+    fn kill_and_wait(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for FixtureHelper {
+    fn drop(&mut self) {
+        self.kill_and_wait();
+        let _ = sweep_fixture_roots();
+        let _ = fs::remove_file(&self.state_path);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn fixture_helper_state_path_at(nanos: u128) -> PathBuf {
+    let sequence = FIXTURE_HELPER_STATE_SEQ.fetch_add(1, Ordering::Relaxed);
+    env::temp_dir().join(format!(
+        "termsnip-fixture-reaper-helper-{}-{nanos}-{sequence}",
+        process::id()
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn parse_fixture_helper_state(contents: &str) -> Option<(PathBuf, c_int, c_int)> {
+    let mut lines = contents.lines();
+    let root = PathBuf::from(lines.next()?);
+    let jump_pid = lines.next()?.parse().ok()?;
+    let target_pid = lines.next()?.parse().ok()?;
+    Some((root, jump_pid, target_pid))
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn fixture_helper_state_paths_are_unique_when_clock_does_not_advance() {
+    let fixed_nanos = 1_234_567_890;
+    assert_ne!(
+        fixture_helper_state_path_at(fixed_nanos),
+        fixture_helper_state_path_at(fixed_nanos),
+        "helper state paths must remain unique when macOS returns the same timestamp"
+    );
+}
+
+#[cfg(target_os = "macos")]
+fn run_fixture_reaper_helper_if_requested() -> bool {
+    let Some(state_path) = env::var_os(FIXTURE_REAPER_HELPER_STATE) else {
+        return false;
+    };
+    let fixture = NativeTransportFixture::new();
+    fs::write(
+        state_path,
+        format!(
+            "{}\n{}\n{}\n",
+            fixture._root.to_string_lossy(),
+            fixture._jump_sshd.child.id(),
+            fixture._target_sshd.child.id()
+        ),
+    )
+    .expect("fixture helper state should be written");
+
+    loop {
+        thread::sleep(Duration::from_secs(60));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn make_unlocked_orphan_sentinel() -> PathBuf {
+    let _active_roots = fixture_roots()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _reaper_lock = lock_fixture_reaper().expect("fixture reaper lock should be acquired");
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let root = env::temp_dir().join(format!(
+        "{TRANSPORT_FIXTURE_PREFIX}sentinel-{}-{suffix}",
+        process::id()
+    ));
+    fs::create_dir_all(&root).expect("orphan sentinel root should be created");
+    fs::write(root.join(FIXTURE_OWNER_LOCK), []).expect("orphan owner lock should be created");
+    root
+}
+
+/// #292 negative control: without the startup sweep, SIGKILL leaves the root
+/// and both sshd identities alive, so all three post-sweep assertions fail.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires an unsandboxed localhost sshd runtime"]
+fn localhost_ssh_transport_fixture_reaps_orphaned_sshd_after_sigkill() {
+    if run_fixture_reaper_helper_if_requested() {
+        return;
+    }
+    let mut helper =
+        FixtureHelper::spawn("localhost_ssh_transport_fixture_reaps_orphaned_sshd_after_sigkill");
+    helper.kill_and_wait();
+
+    sweep_fixture_roots().expect("orphaned fixture should be swept");
+
+    assert!(!helper.sshd_is_live(helper.jump_pid, "jump-sshd"));
+    assert!(!helper.sshd_is_live(helper.target_pid, "target-sshd"));
+    assert!(
+        !helper.root.exists(),
+        "orphaned fixture root should be removed"
+    );
+}
+
+/// #292 negative control: without the startup sweep in make_fixture_root the
+/// sentinel remains. The live-root assertions also prevent a pid-only
+/// implementation from killing a sibling.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires an unsandboxed localhost sshd runtime"]
+fn localhost_ssh_transport_fixture_startup_reaps_orphan_and_spares_live_fixture() {
+    if run_fixture_reaper_helper_if_requested() {
+        return;
+    }
+    let helper = FixtureHelper::spawn(
+        "localhost_ssh_transport_fixture_startup_reaps_orphan_and_spares_live_fixture",
+    );
+    let sentinel = make_unlocked_orphan_sentinel();
+
+    let _startup_fixture = NativeTransportFixture::new();
+
+    assert!(
+        !sentinel.exists(),
+        "fixture startup should remove an unlocked orphan"
+    );
+    assert!(helper.root.exists(), "live fixture root should be spared");
+    assert!(helper.sshd_is_live(helper.jump_pid, "jump-sshd"));
+    assert!(helper.sshd_is_live(helper.target_pid, "target-sshd"));
 }
 
 /// #151: a throwaway durable TOFU store rooted outside the session temp dirs,
