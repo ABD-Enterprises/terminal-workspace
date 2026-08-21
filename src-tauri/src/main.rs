@@ -17,8 +17,8 @@ use std::{
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
+use getrandom::fill;
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -3811,7 +3811,7 @@ struct SshConfigCycleKeySalt([u8; 32]);
 
 fn new_ssh_config_cycle_key_salt() -> SshConfigCycleKeySalt {
     let mut salt = [0_u8; 32];
-    OsRng.fill_bytes(&mut salt);
+    fill(&mut salt).expect("failed to generate SSH config cycle-key salt");
     SshConfigCycleKeySalt(salt)
 }
 
