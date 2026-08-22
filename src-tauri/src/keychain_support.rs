@@ -27,6 +27,7 @@ pub(crate) fn run_security_command(args: &[&str]) -> Result<Output, String> {
 }
 
 const SECURITY_CHILD_CLEANUP_TIMEOUT: Duration = Duration::from_millis(500);
+const SECURITY_CHILD_CLEANUP_RETRY_TIMEOUT: Duration = Duration::from_secs(5);
 const SECURITY_CHILD_CLEANUP_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 trait SecurityChildControl {
@@ -48,15 +49,35 @@ enum SecurityChildCleanupEvent {
     KillFailed(String),
     PollFailed(String),
     Reaped,
+    RetryBudgetExhausted,
 }
 
-fn reap_security_child<C>(mut child: C, events: std::sync::mpsc::Sender<SecurityChildCleanupEvent>)
+fn retain_unreapable_security_child<C>(child: C)
 where
-    C: SecurityChildControl,
+    C: SecurityChildControl + Send + 'static,
+{
+    static UNREAPABLE_SECURITY_CHILDREN: std::sync::OnceLock<
+        std::sync::Mutex<Vec<Box<dyn SecurityChildControl + Send>>>,
+    > = std::sync::OnceLock::new();
+
+    let children = UNREAPABLE_SECURITY_CHILDREN.get_or_init(Default::default);
+    let mut children = children
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    children.push(Box::new(child));
+}
+
+fn reap_security_child<C>(
+    mut child: C,
+    events: std::sync::mpsc::Sender<SecurityChildCleanupEvent>,
+    retry_timeout: Duration,
+) where
+    C: SecurityChildControl + Send + 'static,
 {
     let mut termination_requested = false;
     let mut kill_error_reported = false;
     let mut poll_error_reported = false;
+    let retry_deadline = Instant::now() + retry_timeout;
 
     loop {
         match child.try_wait() {
@@ -86,7 +107,16 @@ where
             }
         }
 
-        thread::sleep(SECURITY_CHILD_CLEANUP_POLL_INTERVAL);
+        let remaining = retry_deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            // The process is still not confirmed dead, so dropping its handle
+            // would orphan it. Quarantine the handle for the rest of this app
+            // process, but stop polling so this worker can exit.
+            retain_unreapable_security_child(child);
+            let _ = events.send(SecurityChildCleanupEvent::RetryBudgetExhausted);
+            return;
+        }
+        thread::sleep(SECURITY_CHILD_CLEANUP_POLL_INTERVAL.min(remaining));
     }
 }
 
@@ -94,6 +124,7 @@ struct SecurityChildReaper<C> {
     child_sender: std::sync::mpsc::SyncSender<C>,
     event_receiver: std::sync::mpsc::Receiver<SecurityChildCleanupEvent>,
     thread: thread::JoinHandle<()>,
+    retry_timeout: Duration,
 }
 
 impl<C> SecurityChildReaper<C>
@@ -101,13 +132,17 @@ where
     C: SecurityChildControl + Send + 'static,
 {
     fn start() -> Result<Self, String> {
+        Self::start_with_retry_timeout(SECURITY_CHILD_CLEANUP_RETRY_TIMEOUT)
+    }
+
+    fn start_with_retry_timeout(retry_timeout: Duration) -> Result<Self, String> {
         let (child_sender, child_receiver) = std::sync::mpsc::sync_channel(1);
         let (event_sender, event_receiver) = std::sync::mpsc::channel();
         let thread = thread::Builder::new()
             .name("security-child-reaper".to_string())
             .spawn(move || {
                 if let Ok(child) = child_receiver.recv() {
-                    reap_security_child(child, event_sender);
+                    reap_security_child(child, event_sender, retry_timeout);
                 }
             })
             .map_err(|error| format!("Failed to start macOS security child reaper: {error}"))?;
@@ -116,6 +151,7 @@ where
             child_sender,
             event_receiver,
             thread,
+            retry_timeout,
         })
     }
 
@@ -124,6 +160,7 @@ where
             child_sender,
             event_receiver: _,
             thread,
+            retry_timeout: _,
         } = self;
         drop(child_sender);
         let _ = thread.join();
@@ -138,11 +175,13 @@ where
             child_sender,
             event_receiver,
             thread,
+            retry_timeout,
         } = self;
 
         // The receiver cannot disconnect here: its thread blocks on recv while
         // this sender remains alive. Once sent, that thread owns the Child until
-        // try_wait confirms it has been reaped.
+        // try_wait confirms it has been reaped or the bounded retry policy moves
+        // it into the no-retry quarantine.
         child_sender
             .send(child)
             .expect("security child reaper must remain available until it receives the child");
@@ -169,6 +208,19 @@ where
                         cleanup_errors.join("; ")
                     ));
                 }
+                Ok(SecurityChildCleanupEvent::RetryBudgetExhausted) => {
+                    let details = if cleanup_errors.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", cleanup_errors.join("; "))
+                    };
+                    return Err(format!(
+                        "macOS security child cleanup exhausted its {} ms retry budget{details}; \
+                         the child could not be reaped, so the reaper retained its handle in a \
+                         no-retry quarantine",
+                        retry_timeout.as_millis()
+                    ));
+                }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     let details = if cleanup_errors.is_empty() {
                         String::new()
@@ -177,8 +229,10 @@ where
                     };
                     return Err(format!(
                         "macOS security child cleanup was not confirmed within {} ms{details}; \
-                         the dedicated reaper retains the child handle and continues kill/try_wait retries",
-                        timeout.as_millis()
+                         the dedicated reaper retains the child handle and continues kill/try_wait \
+                         retries for at most {} ms total before moving it to a no-retry quarantine",
+                        timeout.as_millis(),
+                        retry_timeout.as_millis()
                     ));
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -462,7 +516,7 @@ mod tests {
     use std::os::unix::process::ExitStatusExt;
     use std::process::{ExitStatus, Output};
     use std::sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     };
 
@@ -620,6 +674,13 @@ mod tests {
         assert!(error.contains("kill failed: synthetic kill refusal"));
         assert!(error.contains("reaper retains the child handle"));
 
+        assert!(
+            matches!(
+                dropped_receiver.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Empty)
+            ),
+            "the child handle must still be retained before release"
+        );
         release.store(true, Ordering::SeqCst);
         dropped_receiver
             .recv_timeout(Duration::from_millis(500))
@@ -627,6 +688,71 @@ mod tests {
         cleanup
             .join()
             .expect("the bounded cleanup caller should exit");
+    }
+
+    struct PermanentlyUnkillableChild {
+        kill_attempts: Arc<AtomicUsize>,
+        dropped: std::sync::mpsc::SyncSender<()>,
+    }
+
+    impl SecurityChildControl for PermanentlyUnkillableChild {
+        fn kill(&mut self) -> io::Result<()> {
+            self.kill_attempts.fetch_add(1, Ordering::SeqCst);
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "synthetic permanent kill refusal",
+            ))
+        }
+
+        fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
+            Ok(None)
+        }
+    }
+
+    impl Drop for PermanentlyUnkillableChild {
+        fn drop(&mut self) {
+            let _ = self.dropped.send(());
+        }
+    }
+
+    #[test]
+    fn cleanup_stops_retrying_at_its_budget_without_dropping_the_child() {
+        let reaper = SecurityChildReaper::<PermanentlyUnkillableChild>::start_with_retry_timeout(
+            Duration::from_millis(50),
+        )
+        .expect("the child reaper should start");
+        let kill_attempts = Arc::new(AtomicUsize::new(0));
+        let (dropped_sender, dropped_receiver) = std::sync::mpsc::sync_channel(1);
+        let child = PermanentlyUnkillableChild {
+            kill_attempts: Arc::clone(&kill_attempts),
+            dropped: dropped_sender,
+        };
+
+        let error = reaper
+            .terminate_with_timeout(child, Duration::from_millis(500))
+            .expect_err("an unkillable child must exhaust the retry budget");
+        assert!(error.contains("exhausted its 50 ms retry budget"));
+        assert!(error.contains("kill failed: synthetic permanent kill refusal"));
+        assert!(error.contains("retained its handle in a no-retry quarantine"));
+
+        let attempts_at_bound = kill_attempts.load(Ordering::SeqCst);
+        assert!(
+            attempts_at_bound > 0,
+            "cleanup must attempt to kill the child"
+        );
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(
+            kill_attempts.load(Ordering::SeqCst),
+            attempts_at_bound,
+            "cleanup must stop retrying after the retry budget"
+        );
+        assert!(
+            matches!(
+                dropped_receiver.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Empty)
+            ),
+            "the no-retry quarantine must retain the unreaped child handle"
+        );
     }
 
     #[cfg(target_os = "macos")]
