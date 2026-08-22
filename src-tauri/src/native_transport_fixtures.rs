@@ -18,7 +18,10 @@ use std::{
 #[cfg(target_os = "macos")]
 use std::{
     ffi::{c_int, c_void},
-    os::unix::ffi::{OsStrExt, OsStringExt},
+    os::unix::{
+        ffi::{OsStrExt, OsStringExt},
+        fs::MetadataExt,
+    },
     sync::atomic::{AtomicU64, Ordering},
 };
 use tokio::sync::mpsc::channel;
@@ -32,6 +35,8 @@ const FIXTURE_OWNER_LOCK: &str = ".owner.lock";
 const FIXTURE_REAPER_LOCK: &str = ".termsnip-native-transport-reaper.lock";
 #[cfg(target_os = "macos")]
 const TRANSPORT_FIXTURE_PREFIX: &str = "termsnip-native-transport-";
+#[cfg(target_os = "macos")]
+const OPENSSH_CONCURRENT_WRITES: usize = 12;
 
 struct TestSshd {
     child: ProcessChild,
@@ -1071,10 +1076,375 @@ fn assert_native_trust_tooling(fixture: &NativeTransportFixture) {
 }
 
 #[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct KnownHostsFileState {
+    bytes: Vec<u8>,
+    device: u64,
+    inode: u64,
+    links: u64,
+    size: u64,
+}
+
+#[cfg(target_os = "macos")]
+impl KnownHostsFileState {
+    fn read(path: &Path) -> Self {
+        let bytes = fs::read(path).expect("known_hosts should be readable");
+        let metadata = fs::metadata(path).expect("known_hosts metadata should be readable");
+        Self {
+            bytes,
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            links: metadata.nlink(),
+            size: metadata.len(),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Eq, PartialEq)]
+struct KnownHostsRecord {
+    host: String,
+    algorithm: String,
+    key: String,
+}
+
+#[cfg(target_os = "macos")]
+fn parse_known_hosts_records(contents: &[u8]) -> Result<Vec<KnownHostsRecord>, String> {
+    let contents = std::str::from_utf8(contents)
+        .map_err(|error| format!("known_hosts was not UTF-8: {error}"))?;
+    contents
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| {
+            let line = line.trim();
+            !line.is_empty() && !line.starts_with('#')
+        })
+        .map(|(index, line)| {
+            let mut fields = line.split_whitespace();
+            let host = fields.next();
+            let algorithm = fields.next();
+            let key = fields.next();
+            if host.is_none() || algorithm.is_none() || key.is_none() || fields.next().is_some() {
+                return Err(format!(
+                    "known_hosts line {} was torn or malformed: {line:?}",
+                    index + 1
+                ));
+            }
+            Ok(KnownHostsRecord {
+                host: host.expect("checked above").to_string(),
+                algorithm: algorithm.expect("checked above").to_string(),
+                key: key.expect("checked above").to_string(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn trust_fixture_store(fixture: &NativeTransportFixture, label: &str) -> NativeHostKeyStore {
+    NativeHostKeyStore::new(&fixture._root.join(label)).expect("fixture trust store should open")
+}
+
+#[cfg(target_os = "macos")]
+fn write_trust_fixture_askpass(fixture: &NativeTransportFixture, label: &str) -> PathBuf {
+    let path = fixture._root.join(format!("askpass-{label}.sh"));
+    write_fixture_executable(&path, "#!/bin/sh\nprintf '%s\\n' 'fixture-passphrase'\n");
+    path
+}
+
+#[cfg(target_os = "macos")]
+fn run_openssh_accept_new(
+    host: &BackendHostConnection,
+    known_hosts_path: &Path,
+    askpass_path: &Path,
+    host_alias: &str,
+) -> Result<(), String> {
+    let destination = format!("{}@{}", host.username, host.hostname);
+    let output = Command::new("/usr/bin/ssh")
+        .arg("-F")
+        .arg("/dev/null")
+        .arg("-o")
+        .arg("BatchMode=no")
+        .arg("-o")
+        .arg("ConnectTimeout=15")
+        .arg("-o")
+        .arg("GlobalKnownHostsFile=/dev/null")
+        .arg("-o")
+        .arg(format!(
+            "UserKnownHostsFile={}",
+            known_hosts_path.to_string_lossy()
+        ))
+        .arg("-o")
+        .arg("UpdateHostKeys=no")
+        .arg("-o")
+        .arg("HashKnownHosts=no")
+        .arg("-o")
+        .arg("StrictHostKeyChecking=accept-new")
+        .arg("-o")
+        .arg(format!("HostKeyAlias={host_alias}"))
+        .arg("-o")
+        .arg("IdentitiesOnly=yes")
+        .arg("-o")
+        .arg("PreferredAuthentications=publickey")
+        .arg("-o")
+        .arg("RequestTTY=no")
+        .arg("-o")
+        .arg("LogLevel=ERROR")
+        .arg("-i")
+        .arg(&host.private_key_path)
+        .arg("-p")
+        .arg(host.port.to_string())
+        .arg(destination)
+        .arg("true")
+        .env("SSH_ASKPASS", askpass_path)
+        .env("SSH_ASKPASS_REQUIRE", "force")
+        .env("DISPLAY", "termsnip-native-trust-fixture")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("OpenSSH accept-new fixture failed to start: {error}"))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "OpenSSH accept-new fixture exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn assert_openssh_appended(phase: &str, before: &KnownHostsFileState, after: &KnownHostsFileState) {
+    let identity_unchanged = before.device == after.device && before.inode == after.inode;
+    let prefix_unchanged = after.bytes.starts_with(&before.bytes);
+    let size_grew = after.size > before.size;
+    let result = if identity_unchanged && prefix_unchanged && size_grew {
+        "append"
+    } else {
+        "replace-or-rewrite"
+    };
+    eprintln!(
+        "[native-trust] {phase}: result={result} st_dev={}->{} st_ino={}->{} nlink={}->{} size={}->{} prefix_equal={prefix_unchanged}",
+        before.device,
+        after.device,
+        before.inode,
+        after.inode,
+        before.links,
+        after.links,
+        before.size,
+        after.size,
+    );
+
+    assert_eq!(
+        after.device, before.device,
+        "{phase}: OpenSSH moved known_hosts to another device"
+    );
+    assert_eq!(
+        after.inode, before.inode,
+        "{phase}: OpenSSH replaced known_hosts instead of appending"
+    );
+    assert_eq!(before.links, 1, "{phase}: pre-write nlink must be one");
+    assert_eq!(after.links, 1, "{phase}: post-write nlink must be one");
+    assert!(size_grew, "{phase}: OpenSSH did not add a record");
+    assert!(
+        prefix_unchanged,
+        "{phase}: bytes present before OpenSSH ran did not survive verbatim"
+    );
+}
+
+#[cfg(target_os = "macos")]
 #[test]
-fn native_trust_tooling_fixture_flow() {
+fn native_trust_tooling_fixture_key_operations() {
     let fixture = NativeTransportFixture::new();
     assert_native_trust_tooling(&fixture);
+}
+
+/// #272 phase 1: distinguish append from path replacement using file identity.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires an unsandboxed localhost sshd runtime"]
+fn native_trust_tooling_fixture_openssh_preserves_file_identity() {
+    let fixture = NativeTransportFixture::new();
+    let store = trust_fixture_store(&fixture, "openssh-identity");
+    let host_a = "rust-identity.invalid";
+    let host_b = "openssh-identity.invalid";
+    let algorithm = fixture
+        .direct_host
+        .known_host_algorithm
+        .as_deref()
+        .expect("fixture should expose its host-key algorithm");
+    let key = fixture
+        .direct_host
+        .known_host_public_key
+        .as_deref()
+        .expect("fixture should expose its host key");
+    assert_eq!(
+        store
+            .verify_or_pin(host_a, algorithm, key)
+            .expect("Rust should seed host A"),
+        HostKeyVerdict::Pinned
+    );
+    let before = KnownHostsFileState::read(store.path());
+    let askpass = write_trust_fixture_askpass(&fixture, "identity");
+
+    // Anti-vacuity: never pass host B to Rust's writer. Only this real OpenSSH
+    // accept-new connection may create B's record in the shared file.
+    run_openssh_accept_new(&fixture.direct_host, store.path(), &askpass, host_b)
+        .expect("OpenSSH should connect and accept host B");
+
+    let after = KnownHostsFileState::read(store.path());
+    assert_openssh_appended("phase-1-file-identity", &before, &after);
+    let records = parse_known_hosts_records(&after.bytes).expect("all records should parse");
+    assert!(records.iter().any(|record| {
+        record.host == host_b && record.algorithm == algorithm && record.key == key
+    }));
+}
+
+/// #272 phase 2: prove a Rust-authored record survives OpenSSH byte-for-byte.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires an unsandboxed localhost sshd runtime"]
+fn native_trust_tooling_fixture_openssh_preserves_rust_pin_verbatim() {
+    let fixture = NativeTransportFixture::new();
+    let store = trust_fixture_store(&fixture, "openssh-prefix");
+    let host_a = "rust-prefix.invalid";
+    let host_b = "openssh-prefix.invalid";
+    let algorithm = fixture
+        .direct_host
+        .known_host_algorithm
+        .as_deref()
+        .expect("fixture should expose its host-key algorithm");
+    let key = fixture
+        .direct_host
+        .known_host_public_key
+        .as_deref()
+        .expect("fixture should expose its host key");
+    assert_eq!(
+        store
+            .verify_or_pin(host_a, algorithm, key)
+            .expect("Rust should seed host A"),
+        HostKeyVerdict::Pinned
+    );
+    let before = KnownHostsFileState::read(store.path());
+    assert_eq!(
+        before.bytes,
+        format!("{host_a} {algorithm} {key}\n").as_bytes()
+    );
+    let askpass = write_trust_fixture_askpass(&fixture, "prefix");
+
+    // Anti-vacuity: never pass host B to Rust's writer. If OpenSSH does not
+    // append it, no other code in this test can make the assertion below pass.
+    run_openssh_accept_new(&fixture.direct_host, store.path(), &askpass, host_b)
+        .expect("OpenSSH should connect and accept host B");
+
+    let after = KnownHostsFileState::read(store.path());
+    assert_openssh_appended("phase-2-verbatim-prefix", &before, &after);
+    let records = parse_known_hosts_records(&after.bytes).expect("all records should parse");
+    assert_eq!(
+        records,
+        vec![
+            KnownHostsRecord {
+                host: host_a.to_string(),
+                algorithm: algorithm.to_string(),
+                key: key.to_string(),
+            },
+            KnownHostsRecord {
+                host: host_b.to_string(),
+                algorithm: algorithm.to_string(),
+                key: key.to_string(),
+            },
+        ]
+    );
+}
+
+/// #272 phase 3: fixed-count stress of Rust and OpenSSH appenders. Scheduling
+/// may change record order, so pass/fail depends only on exact completed counts
+/// and parseable complete records, never timing or a claimed overlap window.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires an unsandboxed localhost sshd runtime"]
+fn native_trust_tooling_fixture_concurrent_appends_are_complete() {
+    let fixture = NativeTransportFixture::new();
+    let store_root = fixture._root.join("openssh-concurrent");
+    let store = NativeHostKeyStore::new(&store_root).expect("fixture trust store should open");
+    fs::write(store.path(), []).expect("known_hosts should be created before observation");
+    let before = KnownHostsFileState::read(store.path());
+    let askpass = write_trust_fixture_askpass(&fixture, "concurrent");
+    let host = fixture.direct_host.clone();
+    let expected_algorithm = host
+        .known_host_algorithm
+        .clone()
+        .expect("fixture should expose its host-key algorithm");
+    let expected_key = host
+        .known_host_public_key
+        .clone()
+        .expect("fixture should expose its host key");
+    let rust_algorithm = expected_algorithm.clone();
+    let rust_key = expected_key.clone();
+    let known_hosts_path = store.path().to_path_buf();
+    let openssh_known_hosts_path = known_hosts_path.clone();
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+
+    let rust_barrier = barrier.clone();
+    let rust_writer = thread::spawn(move || -> Result<usize, String> {
+        rust_barrier.wait();
+        let mut writes = 0;
+        for index in 0..OPENSSH_CONCURRENT_WRITES {
+            let host = format!("rust-concurrent-{index}.invalid");
+            match store.verify_or_pin(&host, &rust_algorithm, &rust_key)? {
+                HostKeyVerdict::Pinned => writes += 1,
+                verdict => return Err(format!("Rust did not pin {host}: {verdict:?}")),
+            }
+        }
+        Ok(writes)
+    });
+
+    let openssh_barrier = barrier;
+    let openssh_writer = thread::spawn(move || -> Result<usize, String> {
+        openssh_barrier.wait();
+        let mut writes = 0;
+        for index in 0..OPENSSH_CONCURRENT_WRITES {
+            let host_alias = format!("openssh-concurrent-{index}.invalid");
+            // Anti-vacuity: host aliases in this loop are never passed to
+            // NativeHostKeyStore; only OpenSSH can author these records.
+            run_openssh_accept_new(&host, &openssh_known_hosts_path, &askpass, &host_alias)?;
+            writes += 1;
+        }
+        Ok(writes)
+    });
+
+    let rust_writes = rust_writer
+        .join()
+        .expect("Rust writer thread should not panic")
+        .expect("Rust writer should complete every fixed iteration");
+    let openssh_writes = openssh_writer
+        .join()
+        .expect("OpenSSH writer thread should not panic")
+        .expect("OpenSSH writer should complete every fixed iteration");
+    let after = KnownHostsFileState::read(&known_hosts_path);
+    let records_result = parse_known_hosts_records(&after.bytes);
+    eprintln!(
+        "[native-trust] phase-3-concurrent: rust_writes={rust_writes} openssh_writes={openssh_writes} parseable={} fixed_iterations={OPENSSH_CONCURRENT_WRITES}",
+        records_result.is_ok()
+    );
+    assert_openssh_appended("phase-3-concurrent-file", &before, &after);
+    assert_eq!(rust_writes, OPENSSH_CONCURRENT_WRITES);
+    assert_eq!(openssh_writes, OPENSSH_CONCURRENT_WRITES);
+
+    let records = records_result.expect("every concurrent record should be complete and parseable");
+    assert_eq!(records.len(), OPENSSH_CONCURRENT_WRITES * 2);
+    let hosts = records
+        .iter()
+        .map(|record| record.host.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(hosts.len(), OPENSSH_CONCURRENT_WRITES * 2);
+    assert!(records
+        .iter()
+        .all(|record| record.algorithm == expected_algorithm && record.key == expected_key));
+    for index in 0..OPENSSH_CONCURRENT_WRITES {
+        assert!(hosts.contains(format!("rust-concurrent-{index}.invalid").as_str()));
+        assert!(hosts.contains(format!("openssh-concurrent-{index}.invalid").as_str()));
+    }
 }
 
 #[cfg(target_os = "macos")]
