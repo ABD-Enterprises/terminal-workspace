@@ -205,3 +205,10 @@ jobs:
       # are not #[ignore]).
       - name: Native SSH session lifecycle and reaper (sshd fixtures)
         run: cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture -- --include-ignored --test-threads=1
+
+      # #272: this is a version-bounded experiment, not product behavior. The
+      # fixture records the macOS/OpenSSH versions actually observed and proves
+      # append-compatible behavior only for those versions. Run it separately
+      # so the ignored OpenSSH phases cannot disappear inside the default suite.
+      - name: Native trust tooling (OpenSSH append experiment)
+        run: bash scripts/native-trust-tooling-test.sh
