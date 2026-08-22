@@ -622,7 +622,7 @@ mod tests {
 
     struct TemporarilyUnkillableChild {
         release: Arc<AtomicBool>,
-        dropped: std::sync::mpsc::SyncSender<()>,
+        dropped: std::sync::mpsc::SyncSender<bool>,
         fallback_exit: Instant,
     }
 
@@ -645,7 +645,7 @@ mod tests {
 
     impl Drop for TemporarilyUnkillableChild {
         fn drop(&mut self) {
-            let _ = self.dropped.send(());
+            let _ = self.dropped.send(self.release.load(Ordering::SeqCst));
         }
     }
 
@@ -682,9 +682,13 @@ mod tests {
             "the child handle must still be retained before release"
         );
         release.store(true, Ordering::SeqCst);
-        dropped_receiver
+        let released_before_drop = dropped_receiver
             .recv_timeout(Duration::from_millis(500))
             .expect("the retained child should be reaped and released once it exits");
+        assert!(
+            released_before_drop,
+            "the retained child must not be dropped before release"
+        );
         cleanup
             .join()
             .expect("the bounded cleanup caller should exit");
