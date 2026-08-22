@@ -26,9 +26,272 @@ pub(crate) fn run_security_command(args: &[&str]) -> Result<Output, String> {
         .map_err(|error| format!("Failed to run macOS security CLI: {error}"))
 }
 
-fn kill_and_reap_security_child(child: &mut std::process::Child) {
-    let _ = child.kill();
-    let _ = child.wait();
+const SECURITY_CHILD_CLEANUP_TIMEOUT: Duration = Duration::from_millis(500);
+const SECURITY_CHILD_CLEANUP_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+trait SecurityChildControl {
+    fn kill(&mut self) -> io::Result<()>;
+    fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>>;
+}
+
+impl SecurityChildControl for std::process::Child {
+    fn kill(&mut self) -> io::Result<()> {
+        std::process::Child::kill(self)
+    }
+
+    fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
+        std::process::Child::try_wait(self)
+    }
+}
+
+enum SecurityChildCleanupEvent {
+    KillFailed(String),
+    PollFailed(String),
+    Reaped,
+}
+
+fn reap_security_child<C>(mut child: C, events: std::sync::mpsc::Sender<SecurityChildCleanupEvent>)
+where
+    C: SecurityChildControl,
+{
+    let mut termination_requested = false;
+    let mut kill_error_reported = false;
+    let mut poll_error_reported = false;
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let _ = events.send(SecurityChildCleanupEvent::Reaped);
+                return;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                if !poll_error_reported {
+                    let _ = events.send(SecurityChildCleanupEvent::PollFailed(error.to_string()));
+                    poll_error_reported = true;
+                }
+            }
+        }
+
+        if !termination_requested {
+            match child.kill() {
+                Ok(()) => termination_requested = true,
+                Err(error) => {
+                    if !kill_error_reported {
+                        let _ =
+                            events.send(SecurityChildCleanupEvent::KillFailed(error.to_string()));
+                        kill_error_reported = true;
+                    }
+                }
+            }
+        }
+
+        thread::sleep(SECURITY_CHILD_CLEANUP_POLL_INTERVAL);
+    }
+}
+
+struct SecurityChildReaper<C> {
+    child_sender: std::sync::mpsc::SyncSender<C>,
+    event_receiver: std::sync::mpsc::Receiver<SecurityChildCleanupEvent>,
+    thread: thread::JoinHandle<()>,
+}
+
+impl<C> SecurityChildReaper<C>
+where
+    C: SecurityChildControl + Send + 'static,
+{
+    fn start() -> Result<Self, String> {
+        let (child_sender, child_receiver) = std::sync::mpsc::sync_channel(1);
+        let (event_sender, event_receiver) = std::sync::mpsc::channel();
+        let thread = thread::Builder::new()
+            .name("security-child-reaper".to_string())
+            .spawn(move || {
+                if let Ok(child) = child_receiver.recv() {
+                    reap_security_child(child, event_sender);
+                }
+            })
+            .map_err(|error| format!("Failed to start macOS security child reaper: {error}"))?;
+
+        Ok(Self {
+            child_sender,
+            event_receiver,
+            thread,
+        })
+    }
+
+    fn dismiss(self) {
+        let Self {
+            child_sender,
+            event_receiver: _,
+            thread,
+        } = self;
+        drop(child_sender);
+        let _ = thread.join();
+    }
+
+    fn terminate(self, child: C) -> Result<(), String> {
+        self.terminate_with_timeout(child, SECURITY_CHILD_CLEANUP_TIMEOUT)
+    }
+
+    fn terminate_with_timeout(self, child: C, timeout: Duration) -> Result<(), String> {
+        let Self {
+            child_sender,
+            event_receiver,
+            thread,
+        } = self;
+
+        // The receiver cannot disconnect here: its thread blocks on recv while
+        // this sender remains alive. Once sent, that thread owns the Child until
+        // try_wait confirms it has been reaped.
+        child_sender
+            .send(child)
+            .expect("security child reaper must remain available until it receives the child");
+        drop(child_sender);
+        drop(thread); // Detach so an unkillable child cannot block this caller.
+
+        let deadline = Instant::now() + timeout;
+        let mut cleanup_errors = Vec::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match event_receiver.recv_timeout(remaining) {
+                Ok(SecurityChildCleanupEvent::KillFailed(error)) => {
+                    cleanup_errors.push(format!("kill failed: {error}"));
+                }
+                Ok(SecurityChildCleanupEvent::PollFailed(error)) => {
+                    cleanup_errors.push(format!("try_wait failed: {error}"));
+                }
+                Ok(SecurityChildCleanupEvent::Reaped) => {
+                    if cleanup_errors.is_empty() {
+                        return Ok(());
+                    }
+                    return Err(format!(
+                        "macOS security child was reaped after cleanup errors: {}",
+                        cleanup_errors.join("; ")
+                    ));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    let details = if cleanup_errors.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", cleanup_errors.join("; "))
+                    };
+                    return Err(format!(
+                        "macOS security child cleanup was not confirmed within {} ms{details}; \
+                         the dedicated reaper retains the child handle and continues kill/try_wait retries",
+                        timeout.as_millis()
+                    ));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(
+                        "macOS security child reaper stopped before confirming the child was reaped"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn cleanup_security_child_error<C>(
+    error: String,
+    reaper: SecurityChildReaper<C>,
+    child: C,
+) -> String
+where
+    C: SecurityChildControl + Send + 'static,
+{
+    match reaper.terminate(child) {
+        Ok(()) => error,
+        Err(cleanup_error) => format!("{error}; {cleanup_error}"),
+    }
+}
+
+fn spawn_security_output_reader<R>(
+    stream_name: &str,
+    mut stream: R,
+) -> io::Result<thread::JoinHandle<io::Result<Vec<u8>>>>
+where
+    R: Read + Send + 'static,
+{
+    thread::Builder::new()
+        .name(format!("security-{stream_name}-reader"))
+        .spawn(move || {
+            let mut bytes = Vec::new();
+            stream.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        })
+}
+
+fn wait_for_security_child_output_with<W>(
+    mut child: std::process::Child,
+    reaper: SecurityChildReaper<std::process::Child>,
+    wait: W,
+) -> Result<Output, String>
+where
+    W: FnOnce(&mut std::process::Child) -> io::Result<std::process::ExitStatus>,
+{
+    let Some(stdout) = child.stdout.take() else {
+        return Err(cleanup_security_child_error(
+            "Failed to capture stdout from macOS security CLI".to_string(),
+            reaper,
+            child,
+        ));
+    };
+    let stdout_reader = match spawn_security_output_reader("stdout", stdout) {
+        Ok(reader) => reader,
+        Err(error) => {
+            return Err(cleanup_security_child_error(
+                format!("Failed to read stdout from macOS security CLI: {error}"),
+                reaper,
+                child,
+            ));
+        }
+    };
+
+    let Some(stderr) = child.stderr.take() else {
+        return Err(cleanup_security_child_error(
+            "Failed to capture stderr from macOS security CLI".to_string(),
+            reaper,
+            child,
+        ));
+    };
+    let stderr_reader = match spawn_security_output_reader("stderr", stderr) {
+        Ok(reader) => reader,
+        Err(error) => {
+            return Err(cleanup_security_child_error(
+                format!("Failed to read stderr from macOS security CLI: {error}"),
+                reaper,
+                child,
+            ));
+        }
+    };
+
+    let status = match wait(&mut child) {
+        Ok(status) => status,
+        Err(error) => {
+            return Err(cleanup_security_child_error(
+                format!("Failed to wait for macOS security CLI: {error}"),
+                reaper,
+                child,
+            ));
+        }
+    };
+    reaper.dismiss();
+
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| "macOS security stdout reader panicked".to_string())?
+        .map_err(|error| format!("Failed to read stdout from macOS security CLI: {error}"))?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| "macOS security stderr reader panicked".to_string())?
+        .map_err(|error| format!("Failed to read stderr from macOS security CLI: {error}"))?;
+
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 fn run_security_command_with_secret<F>(
@@ -39,22 +302,33 @@ fn run_security_command_with_secret<F>(
 where
     F: FnOnce(u32) -> Result<(), String>,
 {
-    let mut child = Command::new("/usr/bin/security")
+    // Start the reaper before the child so every post-spawn failure can transfer
+    // ownership instead of dropping a live Child handle.
+    let reaper = SecurityChildReaper::<std::process::Child>::start()?;
+    let mut child = match Command::new("/usr/bin/security")
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("Failed to run macOS security CLI: {error}"))?;
+    {
+        Ok(child) => child,
+        Err(error) => {
+            reaper.dismiss();
+            return Err(format!("Failed to run macOS security CLI: {error}"));
+        }
+    };
 
     if let Err(error) = before_write(child.id()) {
-        kill_and_reap_security_child(&mut child);
-        return Err(error);
+        return Err(cleanup_security_child_error(error, reaper, child));
     }
 
     let Some(mut stdin) = child.stdin.take() else {
-        kill_and_reap_security_child(&mut child);
-        return Err("Failed to open stdin for macOS security CLI".to_string());
+        return Err(cleanup_security_child_error(
+            "Failed to open stdin for macOS security CLI".to_string(),
+            reaper,
+            child,
+        ));
     };
 
     // The interactive form asks for the password and then confirmation.
@@ -65,16 +339,15 @@ where
         .and_then(|_| stdin.write_all(b"\n"))
     {
         drop(stdin);
-        kill_and_reap_security_child(&mut child);
-        return Err(format!(
-            "Failed to send secret to macOS security CLI: {error}"
+        return Err(cleanup_security_child_error(
+            format!("Failed to send secret to macOS security CLI: {error}"),
+            reaper,
+            child,
         ));
     }
     drop(stdin);
 
-    child
-        .wait_with_output()
-        .map_err(|error| format!("Failed to wait for macOS security CLI: {error}"))
+    wait_for_security_child_output_with(child, reaper, std::process::Child::wait)
 }
 
 /// The classified outcome of reading one keychain item. Callers can tell a
@@ -188,6 +461,15 @@ mod tests {
     use super::*;
     use std::os::unix::process::ExitStatusExt;
     use std::process::{ExitStatus, Output};
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+
+    unsafe extern "C" {
+        #[link_name = "kill"]
+        fn signal_process(pid: std::ffi::c_int, signal: std::ffi::c_int) -> std::ffi::c_int;
+    }
 
     #[cfg(target_os = "macos")]
     const KEYCHAIN_TEST_CHILD: &str = "TERMSNIP_KEYCHAIN_TEST_CHILD";
@@ -253,6 +535,98 @@ mod tests {
                 .expect_err("line-bearing keychain values must be rejected before spawning");
             assert_eq!(error, "Keychain secrets cannot contain line breaks");
         }
+    }
+
+    #[test]
+    fn wait_failure_kills_and_reaps_the_live_child() {
+        let reaper = SecurityChildReaper::<std::process::Child>::start()
+            .expect("the child reaper should start");
+        let child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("the lifecycle test child should start");
+        let pid = child.id();
+
+        let error = wait_for_security_child_output_with(child, reaper, |_| {
+            Err(io::Error::other("synthetic wait failure"))
+        })
+        .expect_err("the injected wait failure should be returned");
+
+        assert!(error.contains("synthetic wait failure"));
+        let signal_result = unsafe { signal_process(pid as std::ffi::c_int, 0) };
+        let signal_error = io::Error::last_os_error();
+        assert_eq!(signal_result, -1, "the failed-wait child is still live");
+        assert_eq!(
+            signal_error.raw_os_error(),
+            Some(3), // ESRCH on the Unix targets supported by this test module.
+            "the failed-wait child should have been killed and reaped"
+        );
+    }
+
+    struct TemporarilyUnkillableChild {
+        release: Arc<AtomicBool>,
+        dropped: std::sync::mpsc::SyncSender<()>,
+        fallback_exit: Instant,
+    }
+
+    impl SecurityChildControl for TemporarilyUnkillableChild {
+        fn kill(&mut self) -> io::Result<()> {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "synthetic kill refusal",
+            ))
+        }
+
+        fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
+            if self.release.load(Ordering::SeqCst) || Instant::now() >= self.fallback_exit {
+                Ok(Some(ExitStatus::from_raw(0)))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    impl Drop for TemporarilyUnkillableChild {
+        fn drop(&mut self) {
+            let _ = self.dropped.send(());
+        }
+    }
+
+    #[test]
+    fn cleanup_is_bounded_when_the_child_cannot_be_killed() {
+        let reaper = SecurityChildReaper::<TemporarilyUnkillableChild>::start()
+            .expect("the child reaper should start");
+        let release = Arc::new(AtomicBool::new(false));
+        let (dropped_sender, dropped_receiver) = std::sync::mpsc::sync_channel(1);
+        let child = TemporarilyUnkillableChild {
+            release: Arc::clone(&release),
+            dropped: dropped_sender,
+            fallback_exit: Instant::now() + Duration::from_secs(2),
+        };
+        let (result_sender, result_receiver) = std::sync::mpsc::sync_channel(1);
+
+        let cleanup = thread::spawn(move || {
+            let result = reaper.terminate_with_timeout(child, Duration::from_millis(50));
+            let _ = result_sender.send(result);
+        });
+        let result = result_receiver
+            .recv_timeout(Duration::from_millis(500))
+            .expect("cleanup should return at its bound instead of waiting for child exit");
+        let error = result.expect_err("an unconfirmed cleanup must fail closed");
+        assert!(error.contains("not confirmed within 50 ms"));
+        assert!(error.contains("kill failed: synthetic kill refusal"));
+        assert!(error.contains("reaper retains the child handle"));
+
+        release.store(true, Ordering::SeqCst);
+        dropped_receiver
+            .recv_timeout(Duration::from_millis(500))
+            .expect("the retained child should be reaped and released once it exits");
+        cleanup
+            .join()
+            .expect("the bounded cleanup caller should exit");
     }
 
     #[cfg(target_os = "macos")]
