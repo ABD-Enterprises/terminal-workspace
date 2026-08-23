@@ -1618,6 +1618,24 @@ fn validate_session_target(host: &BackendHostConnection) -> Result<(), String> {
     }
 }
 
+fn validate_connection_identity_key_path(requested_path: &str) -> Result<PathBuf, String> {
+    let resolved_path = expand_home(requested_path);
+    validate_user_owned_key_path(&resolved_path, requested_path).map_err(|error| match error {
+        KeyCommandFailure::PathRequired => "SSH private key path is required".to_string(),
+        KeyCommandFailure::PathMustBeAbsolute { .. } => {
+            "SSH private key path failed ownership validation: path must resolve to an absolute path"
+                .to_string()
+        }
+        KeyCommandFailure::PathOutsideAllowedRoots { path } => format!(
+            "SSH private key path failed ownership validation: not owned by the current user or outside the allowed roots: {path}"
+        ),
+        other => format!(
+            "SSH private key path failed ownership validation: {other:?}"
+        ),
+    })?;
+    Ok(resolved_path)
+}
+
 fn authenticate_native_session(
     session: &mut Session,
     host: &BackendHostConnection,
@@ -1630,7 +1648,7 @@ fn authenticate_native_session(
             .userauth_pubkey_file(
                 &host.username,
                 None,
-                &expand_home(&host.private_key_path),
+                &validate_connection_identity_key_path(&host.private_key_path)?,
                 if host.passphrase.is_empty() {
                     None
                 } else {
@@ -6107,6 +6125,23 @@ mod tests {
         host.known_host_algorithm = None;
         host.host_key_policy = Some("allowUnknown".to_string());
         assert!(validate_mosh_host(&host).is_ok());
+    }
+
+    #[test]
+    fn authenticate_native_session_refuses_unowned_identity_path() {
+        let mut host = minimal_ssh_host();
+        host.auth_method = "privateKey".to_string();
+        host.private_key_path = "~/../termsnip-validator-probe/id_ops".to_string();
+        host.passphrase = "secret".to_string();
+
+        let mut session = Session::new().expect("session handle should initialize");
+        let error = authenticate_native_session(&mut session, &host)
+            .expect_err("an identity path outside the ownership allowlist must be refused");
+
+        assert_eq!(
+            error,
+            "SSH private key path failed ownership validation: not owned by the current user or outside the allowed roots: ~/../termsnip-validator-probe/id_ops"
+        );
     }
 
     #[test]
