@@ -52,6 +52,28 @@ describe("update install progress", () => {
     expect(deriveUpdateInstallMessage(installing, "0.2.0")).toBe("Installing update…");
   });
 
+  it("does not let late download progress demote installing or failed states", () => {
+    const lateProgress = {
+      type: "progress" as const,
+      progress: { phase: "downloading" as const, downloaded: 90, total: 100 },
+    };
+    const installing = { phase: "installing" as const };
+    const failed = { phase: "failed" as const, reason: "signature mismatch" };
+
+    expect(reduceUpdateInstallProgress(installing, lateProgress)).toBe(installing);
+    expect(reduceUpdateInstallProgress(failed, lateProgress)).toBe(failed);
+  });
+
+  it("never decreases downloaded bytes", () => {
+    const current = { phase: "downloading" as const, downloaded: 60, total: 100 };
+    const regressed = reduceUpdateInstallProgress(current, {
+      type: "progress",
+      progress: { phase: "downloading", downloaded: 25, total: 100 },
+    });
+
+    expect(regressed).toEqual(current);
+  });
+
   it("surfaces the install failure reason", () => {
     const failed = reduceUpdateInstallProgress(INITIAL_UPDATE_INSTALL_PROGRESS, {
       type: "failed",

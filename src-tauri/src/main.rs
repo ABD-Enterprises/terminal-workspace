@@ -45,6 +45,11 @@ use native_transport::*;
 
 const SESSION_STREAM_EVENT_NAME: &str = "terminal_workspace://session-stream";
 const UPDATE_INSTALL_PROGRESS_EVENT_NAME: &str = "terminal_workspace://update-install-progress";
+/// #239: the updater calls back for every ~8-64 KiB network chunk. A 100 ms
+/// interval caps bridge serialization and React rendering at 10 updates/second,
+/// which is smooth for a progress bar without making work scale with chunk rate.
+/// The completed download bypasses this interval so the final state is never lost.
+const UPDATE_DOWNLOAD_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const KEYCHAIN_PASSWORD_SERVICE: &str = "com.termsnip.runtime.password";
 /// Per-host passphrase entry. Retained for backward compatibility (older
 /// builds wrote here) and as the migration source. New writes go to
@@ -3134,6 +3139,26 @@ enum UpdateInstallProgressEvent {
     Installing,
 }
 
+fn should_emit_update_download_progress(
+    downloaded: u64,
+    total: Option<u64>,
+    last_emitted: Option<(u64, Instant)>,
+    now: Instant,
+) -> bool {
+    if total.is_some_and(|total| total > 0 && downloaded >= total) {
+        return true;
+    }
+
+    match last_emitted {
+        None => true,
+        Some((last_downloaded, last_emitted_at)) => {
+            downloaded > last_downloaded
+                && now.saturating_duration_since(last_emitted_at)
+                    >= UPDATE_DOWNLOAD_PROGRESS_EMIT_INTERVAL
+        }
+    }
+}
+
 fn emit_update_install_progress_event(app: &AppHandle, event: UpdateInstallProgressEvent) {
     let phase = match &event {
         UpdateInstallProgressEvent::Downloading { .. } => "downloading",
@@ -3215,14 +3240,20 @@ async fn terminal_workspace_install_update_and_restart(
     let download_progress_app = app.clone();
     let install_progress_app = app.clone();
     let mut downloaded = 0_u64;
+    let mut last_progress_emit = None;
     update
         .download_and_install(
             move |chunk_length, total| {
                 downloaded = downloaded.saturating_add(chunk_length as u64);
-                emit_update_install_progress_event(
-                    &download_progress_app,
-                    UpdateInstallProgressEvent::Downloading { downloaded, total },
-                );
+                let now = Instant::now();
+                if should_emit_update_download_progress(downloaded, total, last_progress_emit, now)
+                {
+                    last_progress_emit = Some((downloaded, now));
+                    emit_update_install_progress_event(
+                        &download_progress_app,
+                        UpdateInstallProgressEvent::Downloading { downloaded, total },
+                    );
+                }
             },
             move || {
                 emit_update_install_progress_event(
@@ -5104,6 +5135,35 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn update_download_progress_throttle_suppresses_chunks_but_emits_completion() {
+        let started = Instant::now();
+        let total = Some(100_000);
+
+        assert!(should_emit_update_download_progress(
+            1_000, total, None, started
+        ));
+        let last_emitted = Some((1_000, started));
+        assert!(
+            !should_emit_update_download_progress(
+                65_000,
+                total,
+                last_emitted,
+                started + Duration::from_millis(99),
+            ),
+            "intermediate chunks inside the throttle interval must be suppressed"
+        );
+        assert!(
+            should_emit_update_download_progress(
+                100_000,
+                total,
+                last_emitted,
+                started + Duration::from_millis(99),
+            ),
+            "the completed download must emit even inside the throttle interval"
+        );
+    }
 
     static SQLITE_ROOT_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 

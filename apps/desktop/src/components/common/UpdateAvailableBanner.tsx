@@ -34,14 +34,27 @@ export type UpdateInstallProgressAction =
 export const INITIAL_UPDATE_INSTALL_PROGRESS: UpdateInstallProgressState = { phase: "idle" };
 
 export function reduceUpdateInstallProgress(
-  _state: UpdateInstallProgressState,
+  state: UpdateInstallProgressState,
   action: UpdateInstallProgressAction,
 ): UpdateInstallProgressState {
   switch (action.type) {
     case "started":
       return { phase: "downloading", downloaded: 0, total: null };
-    case "progress":
-      return action.progress;
+    case "progress": {
+      if (state.phase !== "idle" && state.phase !== "downloading") {
+        return state;
+      }
+      if (action.progress.phase === "installing") {
+        return state.phase === "downloading" ? action.progress : state;
+      }
+      if (state.phase === "idle") {
+        return action.progress;
+      }
+      return {
+        ...action.progress,
+        downloaded: Math.max(state.downloaded, action.progress.downloaded),
+      };
+    }
     case "failed":
       return { phase: "failed", reason: action.reason };
     case "reset":
