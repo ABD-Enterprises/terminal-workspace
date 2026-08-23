@@ -339,6 +339,43 @@ describe("#288: an idle download deadline cannot bound a drip-feeding peer", () 
     }
   });
 
+  it("fires at the ceiling exactly, not merely somewhere after it", async () => {
+    // A test that advances well past the ceiling proves only that the operation
+    // dies eventually. Pinning both sides of the boundary is what proves the
+    // clamp uses the remaining total rather than some longer interval.
+    vi.useFakeTimers();
+
+    try {
+      const IDLE = 1_000;
+      const TOTAL = 5_000;
+      let settled = false;
+
+      const pending = withDeadline(
+        IDLE,
+        async ({ resetDeadline }) => {
+          const drip = () => {
+            resetDeadline();
+            setTimeout(drip, IDLE * 0.9);
+          };
+          setTimeout(drip, IDLE * 0.9);
+          return new Promise(() => {});
+        },
+        { totalTimeoutMs: TOTAL },
+      );
+      pending.catch(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(TOTAL - 1);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).rejects.toBeInstanceOf(OperationTimeoutError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("still lets a slow but progressing transfer run past the ceiling when no ceiling is set", async () => {
     // NEGATIVE CONTROL. #182 chose an idle budget precisely so a large healthy
     // transfer survives. If the fix had been implemented by capping everything,
