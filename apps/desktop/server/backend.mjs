@@ -41,6 +41,7 @@ import {
   REMOTE_COMMAND_TIMEOUT_MS,
   SFTP_CONTROL_TIMEOUT_MS,
   SFTP_DOWNLOAD_IDLE_TIMEOUT_MS,
+  SFTP_DOWNLOAD_TOTAL_TIMEOUT_MS,
   SFTP_UPLOAD_TIMEOUT_MS,
   withDeadline,
 } from "./backend-deadline.mjs";
@@ -428,8 +429,13 @@ async function connectClient(host, setStage) {
  *
  * `timeoutMs` is per-operation because the workloads are not comparable — see
  * the constants in backend-deadline.mjs. `idle` is for the streamed download,
- * where a total budget would kill a large but perfectly healthy transfer;
+ * where a total budget ALONE would kill a large but perfectly healthy transfer;
  * callers there call `resetDeadline()` on observed progress.
+ *
+ * #288: `totalTimeoutMs` adds an optional ceiling on top of that idle budget.
+ * The two answer different questions — idle asks whether anything arrived
+ * recently, the ceiling asks how long this may run at all — and a drip-feeding
+ * peer defeats the first while the second still ends it.
  *
  * Teardown on timeout is LIFO and uses destroy(), not the graceful end() of the
  * happy path: a graceful close negotiates with a peer that has already proven
@@ -441,7 +447,7 @@ async function withSftp(host, options, callback) {
     callback = options;
     options = {};
   }
-  const { timeoutMs = SFTP_CONTROL_TIMEOUT_MS } = options;
+  const { timeoutMs = SFTP_CONTROL_TIMEOUT_MS, totalTimeoutMs } = options;
 
   return withDeadline(timeoutMs, async ({ onTimeout, resetDeadline }) => {
     const client = await connectClient(host);
@@ -466,7 +472,7 @@ async function withSftp(host, options, callback) {
     } finally {
       client.end();
     }
-  });
+  }, { totalTimeoutMs });
 }
 
 async function createSshSession(host) {
@@ -749,11 +755,17 @@ async function uploadRemoteFile(host, pathname, contentsBase64) {
 }
 
 async function sendRemoteFile(response, host, pathname) {
-  // #182: an IDLE deadline, not a total one. A large download that is slow but
-  // progressing must not be killed; only silence should end it.
+  // #182: an IDLE deadline, so a large download that is slow but progressing is
+  // not killed; only silence ends it.
+  // #288: plus an absolute ceiling, because "not idle" is a bar a hostile or
+  // broken peer clears by dripping one byte per interval forever. Idle bounds
+  // silence; the ceiling bounds the transfer.
   await withSftp(
     host,
-    { timeoutMs: SFTP_DOWNLOAD_IDLE_TIMEOUT_MS },
+    {
+      timeoutMs: SFTP_DOWNLOAD_IDLE_TIMEOUT_MS,
+      totalTimeoutMs: SFTP_DOWNLOAD_TOTAL_TIMEOUT_MS,
+    },
     async ({ sftp, onTimeout, resetDeadline }) => {
       const targetPath = resolveRemotePath(host.sftpRoot ?? "/", pathname);
       const fileStats = await new Promise((resolve, reject) => {

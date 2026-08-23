@@ -23,6 +23,25 @@ export const SFTP_CONTROL_TIMEOUT_MS = 30_000;
 export const SFTP_UPLOAD_TIMEOUT_MS = 222_000;
 export const SFTP_DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
 
+/**
+ * #288: the ceiling the idle budget cannot express.
+ *
+ * An idle deadline asks "has anything arrived recently", which a peer answers
+ * trivially by sending one byte just inside every interval — that transfer is
+ * never idle and so never dies, and the connection, the SFTP handle and the
+ * response are held for as long as the peer cares to drip. The idle timer is
+ * still the right primary bound (see above: a large but healthy transfer must
+ * survive), so this is an ADDITIONAL ceiling rather than a replacement.
+ *
+ * Argued from the workload like its siblings: at the same deliberately
+ * pessimistic 256 KiB/s used for the upload budget, 30 minutes covers roughly
+ * 460 MiB. This endpoint backs an interactive file browser, so a legitimate
+ * download here is orders of magnitude smaller than that — the ceiling is far
+ * enough above the real workload that it cannot cut a healthy transfer, while
+ * still bounding a drip-feeding peer to 30 minutes instead of forever.
+ */
+export const SFTP_DOWNLOAD_TOTAL_TIMEOUT_MS = 1_800_000;
+
 export class OperationTimeoutError extends Error {
   constructor(message, timeoutMs) {
     super(message);
@@ -57,7 +76,11 @@ export class OperationTimeoutError extends Error {
  *   throws or blocks must not prevent the ones after it, and none of them may
  *   delay the rejection.
  */
-export function withDeadline(timeoutMs, run) {
+export function withDeadline(timeoutMs, run, options = {}) {
+  // #288: an optional ABSOLUTE ceiling. Undefined keeps the pure-idle behaviour
+  // every other caller relies on.
+  const { totalTimeoutMs } = options;
+  const startedAt = Date.now();
   const cleanups = [];
   // #182: three states, not a boolean. `timedOut` must be distinguishable from
   // `completed`, because a cleanup registered AFTER the deadline fired has to
@@ -98,13 +121,36 @@ export function withDeadline(timeoutMs, run) {
    * alive must not be killed. Deliberately inert once the deadline has fired or
    * the operation finished: late progress cannot resurrect an expired budget.
    */
+  /**
+   * #288: arm the idle timer, clamped so it can never reach past the absolute
+   * ceiling. Clamping the SAME timer (rather than adding a second one) is what
+   * makes progress unable to outrun the ceiling: each reset can only ever move
+   * the deadline to `min(idle, whatever remains of the total)`, so a peer
+   * drip-feeding inside every idle interval still runs out of total budget.
+   */
+  function armTimer() {
+    let delay = timeoutMs;
+
+    if (totalTimeoutMs !== undefined) {
+      const remainingTotal = totalTimeoutMs - (Date.now() - startedAt);
+      if (remainingTotal <= 0) {
+        fire();
+        return;
+      }
+      delay = Math.min(delay, remainingTotal);
+    }
+
+    timer = setTimeout(fire, delay);
+    // Do not hold the event loop open purely for a pending deadline.
+    timer.unref?.();
+  }
+
   const resetDeadline = () => {
     if (state !== "active") {
       return;
     }
     clearTimeout(timer);
-    timer = setTimeout(fire, timeoutMs);
-    timer.unref?.();
+    armTimer();
   };
 
   const timeout = new Promise((_resolve, reject) => {
@@ -120,9 +166,7 @@ export function withDeadline(timeoutMs, run) {
         new OperationTimeoutError(`operation did not finish within ${timeoutMs}ms`, timeoutMs)
       );
     };
-    timer = setTimeout(fire, timeoutMs);
-    // Do not hold the event loop open purely for a pending deadline.
-    timer.unref?.();
+    armTimer();
   });
 
   return Promise.race([

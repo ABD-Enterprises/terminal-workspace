@@ -5,6 +5,7 @@ import {
   REMOTE_COMMAND_TIMEOUT_MS,
   SFTP_CONTROL_TIMEOUT_MS,
   SFTP_DOWNLOAD_IDLE_TIMEOUT_MS,
+  SFTP_DOWNLOAD_TOTAL_TIMEOUT_MS,
   SFTP_UPLOAD_TIMEOUT_MS,
   withDeadline,
 } from "../../apps/desktop/server/backend-deadline.mjs";
@@ -281,5 +282,117 @@ describe("#182: the SFTP budgets are distinct and argued", () => {
     // respondError honours a status the error carries (backend-responses.mjs).
     expect(error.statusCode).toBe(504);
     expect(REMOTE_COMMAND_TIMEOUT_MS).toBe(60_000);
+  });
+});
+
+
+// #288: an idle deadline asks "did anything arrive recently". A peer answers
+// that trivially by sending one byte just inside every interval, which is never
+// idle and so never dies. These tests pin the ceiling that ends it, and — just
+// as importantly — pin that the ceiling did NOT quietly replace the idle
+// budget's reason for existing.
+describe("#288: an idle download deadline cannot bound a drip-feeding peer", () => {
+  it("terminates a peer that reports progress just inside every idle interval", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const IDLE = 1_000;
+      const TOTAL = 5_000;
+      let progressReports = 0;
+
+      const pending = withDeadline(
+        IDLE,
+        async ({ resetDeadline }) => {
+          // The drip: progress at 90% of the idle interval, forever. Against an
+          // idle-only budget this operation is immortal.
+          const drip = () => {
+            progressReports += 1;
+            resetDeadline();
+            setTimeout(drip, IDLE * 0.9);
+          };
+          setTimeout(drip, IDLE * 0.9);
+
+          // Never settles on its own — only a deadline can end it.
+          return new Promise(() => {});
+        },
+        { totalTimeoutMs: TOTAL },
+      );
+
+      const assertion = expect(pending).rejects.toBeInstanceOf(OperationTimeoutError);
+
+      // Well past the ceiling, and past many idle intervals the drip reset.
+      await vi.advanceTimersByTimeAsync(TOTAL + IDLE);
+      await assertion;
+
+      // The control on the control: if the drip had not actually been resetting
+      // the deadline, this test would pass for the wrong reason — it would just
+      // be observing the ordinary idle timeout. Progress must have been
+      // reported more times than the idle budget would have tolerated.
+      expect(progressReports).toBeGreaterThan(TOTAL / IDLE);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still lets a slow but progressing transfer run past the ceiling when no ceiling is set", async () => {
+    // NEGATIVE CONTROL. #182 chose an idle budget precisely so a large healthy
+    // transfer survives. If the fix had been implemented by capping everything,
+    // this test goes red — which is the whole point of keeping it.
+    vi.useFakeTimers();
+
+    try {
+      const IDLE = 1_000;
+      let settle: (value: string) => void = () => {};
+
+      const pending = withDeadline(IDLE, async ({ resetDeadline }) => {
+        const drip = () => {
+          resetDeadline();
+          setTimeout(drip, IDLE * 0.9);
+        };
+        setTimeout(drip, IDLE * 0.9);
+
+        return new Promise<string>((resolve) => {
+          settle = resolve;
+        });
+      });
+
+      // No totalTimeoutMs: far beyond any ceiling, the transfer is still alive.
+      await vi.advanceTimersByTimeAsync(SFTP_DOWNLOAD_TOTAL_TIMEOUT_MS * 2);
+      settle("complete");
+
+      await expect(pending).resolves.toBe("complete");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets silence end the operation at the idle budget, not at the ceiling", async () => {
+    // The ceiling must be ADDITIONAL. If arming it had replaced the idle timer,
+    // a silent peer would be tolerated for the full ceiling instead of dying
+    // quickly, and this catches that regression.
+    vi.useFakeTimers();
+
+    try {
+      const IDLE = 1_000;
+      const TOTAL = 60_000;
+
+      const pending = withDeadline(IDLE, async () => new Promise(() => {}), {
+        totalTimeoutMs: TOTAL,
+      });
+      const assertion = expect(pending).rejects.toBeInstanceOf(OperationTimeoutError);
+
+      // Only just past the idle budget — nowhere near the ceiling.
+      await vi.advanceTimersByTimeAsync(IDLE + 50);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds the download endpoint's ceiling well above its idle budget", () => {
+    // A ceiling at or below the idle budget would silently convert the download
+    // into a total-budget operation and re-break what #182 fixed.
+    expect(SFTP_DOWNLOAD_TOTAL_TIMEOUT_MS).toBeGreaterThan(SFTP_DOWNLOAD_IDLE_TIMEOUT_MS);
+    expect(SFTP_DOWNLOAD_TOTAL_TIMEOUT_MS).toBe(1_800_000);
   });
 });
