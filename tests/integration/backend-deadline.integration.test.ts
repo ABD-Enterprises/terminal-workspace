@@ -324,6 +324,11 @@ describe("#288: an idle download deadline cannot bound a drip-feeding peer", () 
       await vi.advanceTimersByTimeAsync(TOTAL + IDLE);
       await assertion;
 
+      // The reported budget must be the one that actually expired: this error
+      // is rendered to the user as "did not finish within N seconds", and
+      // reporting the 1s idle value for an operation that ran 5s is a lie.
+      await expect(pending).rejects.toMatchObject({ timeoutMs: TOTAL });
+
       // The control on the control: if the drip had not actually been resetting
       // the deadline, this test would pass for the wrong reason — it would just
       // be observing the ordinary idle timeout. Progress must have been

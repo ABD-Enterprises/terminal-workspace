@@ -130,17 +130,22 @@ export function withDeadline(timeoutMs, run, options = {}) {
    */
   function armTimer() {
     let delay = timeoutMs;
+    // Which budget this arming will report if it expires.
+    let expiredMs = timeoutMs;
 
     if (totalTimeoutMs !== undefined) {
       const remainingTotal = totalTimeoutMs - (Date.now() - startedAt);
       if (remainingTotal <= 0) {
-        fire();
+        fire(totalTimeoutMs);
         return;
       }
-      delay = Math.min(delay, remainingTotal);
+      if (remainingTotal < delay) {
+        delay = remainingTotal;
+        expiredMs = totalTimeoutMs;
+      }
     }
 
-    timer = setTimeout(fire, delay);
+    timer = setTimeout(() => fire(expiredMs), delay);
     // Do not hold the event loop open purely for a pending deadline.
     timer.unref?.();
   }
@@ -154,7 +159,12 @@ export function withDeadline(timeoutMs, run, options = {}) {
   };
 
   const timeout = new Promise((_resolve, reject) => {
-    fire = () => {
+    // #288: the expired budget is a PARAMETER, because two different budgets can
+    // now end this operation. `error.timeoutMs` is rendered to the user as
+    // "did not finish within N seconds" (backend-command-operations.mjs), so a
+    // ceiling expiry that reported the idle value would tell someone whose
+    // download ran for 30 minutes that it timed out after 30 seconds.
+    fire = (expiredMs = timeoutMs) => {
       if (state !== "active") {
         return;
       }
@@ -163,7 +173,7 @@ export function withDeadline(timeoutMs, run, options = {}) {
         runCleanup(cleanup);
       }
       reject(
-        new OperationTimeoutError(`operation did not finish within ${timeoutMs}ms`, timeoutMs)
+        new OperationTimeoutError(`operation did not finish within ${expiredMs}ms`, expiredMs)
       );
     };
     armTimer();
