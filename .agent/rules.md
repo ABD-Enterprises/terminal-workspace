@@ -31,8 +31,13 @@ Windows shells:
 Startup:
 
 - If the branch contains a ticket id, run `orc current`. On `main` / `master` or with no ticket id, run `orc next`. For new work with no ticket, run `orc plan "<title>"`.
+- Sanctioned filing/grooming path: use `orc plan "<title>"` to file new repo work and the `refine-*` workflow to groom it. Do not open agent-authored implementation tickets with `gh issue create`, because that bypasses the ai-task contract and the `tier:` / `defect_origin:` labels ORC expects.
+- Recovery after `gh issue create`: keep the issue, run `orc refine-route --apply` to adopt any missing `ai/*` state, then finish the contract + `tier:` / `defect_origin:` labels through the `refine-*` workflow before any coder claims it. Human hand-filed issues remain allowed; this recovery step is only for agent-filed bypasses.
+- Queue semantics: pinned ready tickets pull first (max 3, GitHub-enforced).
+- Everything else is oldest-first, so promotion order is priority.
 - Confirm a coding backend is available before relying on the loop to implement; otherwise hand-author the change or provision a backend — do not silently treat hand-authoring as the configured-backend path.
 - Read ticket comments with `orc comments` and diffs with `orc diff` (lockfiles / generated / vendor stripped). Never re-fetch the raw thread or raw diff into the agent context.
+- Every autonomous batch ends with the standard records-derived report via `orc batch close`; set `.ai/config.json#continuity.handoff_anchor` to post that report to a fixed issue, or leave it unset for print-only.
 - Search before broad reads: use `rg` or targeted queries to locate the exact symbol/config/evidence, and read only the surrounding lines you need.
 
 Hard rules:
