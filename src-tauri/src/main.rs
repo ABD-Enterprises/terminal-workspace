@@ -44,6 +44,7 @@ use keychain_support::*;
 use native_transport::*;
 
 const SESSION_STREAM_EVENT_NAME: &str = "terminal_workspace://session-stream";
+const UPDATE_INSTALL_PROGRESS_EVENT_NAME: &str = "terminal_workspace://update-install-progress";
 const KEYCHAIN_PASSWORD_SERVICE: &str = "com.termsnip.runtime.password";
 /// Per-host passphrase entry. Retained for backward compatibility (older
 /// builds wrote here) and as the migration source. New writes go to
@@ -3126,6 +3127,23 @@ struct UpdateCheckResult {
     notes: Option<String>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(tag = "phase", rename_all = "camelCase")]
+enum UpdateInstallProgressEvent {
+    Downloading { downloaded: u64, total: Option<u64> },
+    Installing,
+}
+
+fn emit_update_install_progress_event(app: &AppHandle, event: UpdateInstallProgressEvent) {
+    let phase = match &event {
+        UpdateInstallProgressEvent::Downloading { .. } => "downloading",
+        UpdateInstallProgressEvent::Installing => "installing",
+    };
+    if let Err(error) = app.emit(UPDATE_INSTALL_PROGRESS_EVENT_NAME, event) {
+        eprintln!("warning: dropped '{phase}' update install progress event: {error}");
+    }
+}
+
 /// #86: auto-update check via tauri-plugin-updater. Queries the configured
 /// release endpoint (GitHub `latest.json`), verifies the update's signature
 /// against the embedded pubkey, and reports availability to the renderer's
@@ -3191,8 +3209,28 @@ async fn terminal_workspace_install_update_and_restart(
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "No update is available to install".to_string())?;
+
+    // #239: downloading can take tens of seconds, so report cumulative bytes
+    // while a total is known and explicitly switch phases before installation.
+    let download_progress_app = app.clone();
+    let install_progress_app = app.clone();
+    let mut downloaded = 0_u64;
     update
-        .download_and_install(|_downloaded, _total| {}, || {})
+        .download_and_install(
+            move |chunk_length, total| {
+                downloaded = downloaded.saturating_add(chunk_length as u64);
+                emit_update_install_progress_event(
+                    &download_progress_app,
+                    UpdateInstallProgressEvent::Downloading { downloaded, total },
+                );
+            },
+            move || {
+                emit_update_install_progress_event(
+                    &install_progress_app,
+                    UpdateInstallProgressEvent::Installing,
+                );
+            },
+        )
         .await
         .map_err(|error| error.to_string())?;
 
