@@ -27,6 +27,7 @@ ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 # guarantee — Apple can change them in a point release, so a macOS update could
 # break the windowing layer. Notarization and the hardened runtime are unaffected.
 tauri = { version = "2", features = ["macos-private-api"] }
-tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-sql = { version = "=2.4.0", features = ["sqlite"] } # #180: WAL bootstrap depends on private wrapper.rs path_mapper; re-check it before upgrading.
 tauri-plugin-updater = "2"
 tokio = { version = "1", features = ["macros", "sync"] }
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }

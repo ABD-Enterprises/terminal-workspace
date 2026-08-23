@@ -22,6 +22,8 @@ use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, Master
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
+use sqlx::{ConnectOptions, Connection};
 use ssh2::{Channel, Session};
 use tauri::menu::{AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
@@ -4840,8 +4842,84 @@ fn persistence_migrations() -> Vec<Migration> {
     }]
 }
 
+/// #180: mirrors `tauri-plugin-sql` 2.4.0's private `wrapper.rs::path_mapper`.
+/// Tests cover only this helper, not the plugin mapper, so re-check it before upgrading.
+fn termsnip_database_path(app_config_dir: &Path) -> io::Result<PathBuf> {
+    let relative_path = TERMSNIP_DATABASE_URL
+        .split_once(':')
+        .map(|(_, path)| path)
+        .ok_or_else(|| {
+            io::Error::other(format!(
+                "could not parse SQLite database URL {TERMSNIP_DATABASE_URL:?}"
+            ))
+        })?;
+
+    Ok(app_config_dir.join(relative_path))
+}
+
+async fn bootstrap_termsnip_database_wal(database_path: &Path) -> io::Result<()> {
+    let options = SqliteConnectOptions::new()
+        .filename(database_path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal);
+    let mut connection = options.connect().await.map_err(|error| {
+        io::Error::other(format!(
+            "could not open SQLite database {} for WAL bootstrap: {error}",
+            database_path.display()
+        ))
+    })?;
+    let observed_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+        .fetch_one(&mut connection)
+        .await
+        .map_err(|error| {
+            io::Error::other(format!(
+                "could not verify SQLite journal mode for {}: {error}",
+                database_path.display()
+            ))
+        })?;
+    connection.close().await.map_err(|error| {
+        io::Error::other(format!(
+            "could not close SQLite WAL bootstrap connection for {}: {error}",
+            database_path.display()
+        ))
+    })?;
+
+    if !observed_mode.eq_ignore_ascii_case("wal") {
+        return Err(io::Error::other(format!(
+            "SQLite database {} remained in {observed_mode:?} journal mode; expected WAL",
+            database_path.display()
+        )));
+    }
+
+    Ok(())
+}
+
+fn termsnip_wal_bootstrap_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("termsnip-wal-bootstrap")
+        .setup(|app, _api| {
+            let app_config_dir = app.path().app_config_dir().map_err(|error| {
+                io::Error::other(format!(
+                    "could not resolve app config directory for SQLite WAL bootstrap: {error}"
+                ))
+            })?;
+            fs::create_dir_all(&app_config_dir).map_err(|error| {
+                io::Error::other(format!(
+                    "could not create app config directory {} for SQLite WAL bootstrap: {error}",
+                    app_config_dir.display()
+                ))
+            })?;
+            let database_path = termsnip_database_path(&app_config_dir)?;
+            tauri::async_runtime::block_on(bootstrap_termsnip_database_wal(&database_path))?;
+            Ok(())
+        })
+        .build()
+}
+
 fn main() {
     tauri::Builder::default()
+        // #180: order is correctness-critical — bootstrap the file in WAL mode
+        // before tauri-plugin-sql preloads its pool and runs migrations.
+        .plugin(termsnip_wal_bootstrap_plugin())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations(TERMSNIP_DATABASE_URL, persistence_migrations())
@@ -4962,6 +5040,104 @@ mod tests {
     }
 
     use super::*;
+
+    static SQLITE_ROOT_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    struct SqliteTempRoot(PathBuf);
+
+    impl SqliteTempRoot {
+        fn new() -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos();
+            let seq = SQLITE_ROOT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let root = std::env::temp_dir().join(format!(
+                "tw-sqlite-wal-{}-{nanos}-{seq}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&root).expect("SQLite test root should be created");
+            Self(root)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for SqliteTempRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn sqlite_wal_supports_concurrent_writer_with_reader_snapshot() {
+        let root = SqliteTempRoot::new();
+        let database_path =
+            termsnip_database_path(root.path()).expect("database path should resolve");
+        bootstrap_termsnip_database_wal(&database_path)
+            .await
+            .expect("WAL bootstrap should succeed");
+
+        let default_options = SqliteConnectOptions::new().filename(&database_path);
+        let mut reader = default_options
+            .clone()
+            .connect()
+            .await
+            .expect("default reader connection should open");
+        let observed_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&mut reader)
+            .await
+            .expect("default reader should report its journal mode");
+        assert!(
+            observed_mode.eq_ignore_ascii_case("wal"),
+            "a new default connection should inherit WAL, observed {observed_mode:?}"
+        );
+
+        sqlx::query("CREATE TABLE wal_test (id INTEGER PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(&mut reader)
+            .await
+            .expect("test table should be created");
+        sqlx::query("INSERT INTO wal_test (id, value) VALUES (1, 'initial')")
+            .execute(&mut reader)
+            .await
+            .expect("test row should be inserted");
+
+        let mut writer = default_options
+            .connect()
+            .await
+            .expect("default writer connection should open");
+        let mut read_transaction = reader.begin().await.expect("read transaction should begin");
+        let initial: String = sqlx::query_scalar("SELECT value FROM wal_test WHERE id = 1")
+            .fetch_one(&mut *read_transaction)
+            .await
+            .expect("initial snapshot should be readable");
+        assert_eq!(initial, "initial");
+
+        sqlx::query("UPDATE wal_test SET value = 'updated' WHERE id = 1")
+            .execute(&mut writer)
+            .await
+            .expect("WAL writer should commit while the reader remains active");
+        let snapshot: String = sqlx::query_scalar("SELECT value FROM wal_test WHERE id = 1")
+            .fetch_one(&mut *read_transaction)
+            .await
+            .expect("reader snapshot should remain available");
+        assert_eq!(snapshot, "initial");
+
+        read_transaction
+            .commit()
+            .await
+            .expect("read transaction should commit");
+        let updated: String = sqlx::query_scalar("SELECT value FROM wal_test WHERE id = 1")
+            .fetch_one(&mut reader)
+            .await
+            .expect("fresh read should see the committed update");
+        assert_eq!(updated, "updated");
+
+        writer.close().await.expect("writer should close cleanly");
+        reader.close().await.expect("reader should close cleanly");
+    }
 
     /// A writer that never accepts data — models a stalled remote / full SSH
     /// window whose peer has stopped reading.
