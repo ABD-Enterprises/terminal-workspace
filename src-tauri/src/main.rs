@@ -4894,6 +4894,37 @@ async fn bootstrap_termsnip_database_wal(database_path: &Path) -> io::Result<()>
     Ok(())
 }
 
+async fn bootstrap_termsnip_database_wal_best_effort<Warn>(
+    app_config_dir: io::Result<PathBuf>,
+    report_warning: Warn,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    Warn: FnOnce(&str),
+{
+    let result = async {
+        let app_config_dir = app_config_dir?;
+        fs::create_dir_all(&app_config_dir).map_err(|error| {
+            io::Error::other(format!(
+                "could not create app config directory {} for SQLite WAL bootstrap: {error}",
+                app_config_dir.display()
+            ))
+        })?;
+        let database_path = termsnip_database_path(&app_config_dir)?;
+        bootstrap_termsnip_database_wal(&database_path).await
+    }
+    .await;
+
+    // #180: WAL can be unavailable on network or restricted filesystems. Before
+    // #180 the app still worked in SQLite's available mode, so availability wins.
+    if let Err(error) = result {
+        report_warning(&format!(
+            "warning: SQLite WAL bootstrap did not complete; continuing with SQLite's available journal mode: {error}"
+        ));
+    }
+
+    Ok(())
+}
+
 fn termsnip_wal_bootstrap_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("termsnip-wal-bootstrap")
         .setup(|app, _api| {
@@ -4901,16 +4932,11 @@ fn termsnip_wal_bootstrap_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> 
                 io::Error::other(format!(
                     "could not resolve app config directory for SQLite WAL bootstrap: {error}"
                 ))
-            })?;
-            fs::create_dir_all(&app_config_dir).map_err(|error| {
-                io::Error::other(format!(
-                    "could not create app config directory {} for SQLite WAL bootstrap: {error}",
-                    app_config_dir.display()
-                ))
-            })?;
-            let database_path = termsnip_database_path(&app_config_dir)?;
-            tauri::async_runtime::block_on(bootstrap_termsnip_database_wal(&database_path))?;
-            Ok(())
+            });
+            tauri::async_runtime::block_on(bootstrap_termsnip_database_wal_best_effort(
+                app_config_dir,
+                |warning| eprintln!("{warning}"),
+            ))
         })
         .build()
 }
@@ -5067,8 +5093,74 @@ mod tests {
 
     impl Drop for SqliteTempRoot {
         fn drop(&mut self) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+
+                if let Ok(metadata) = fs::metadata(&self.0) {
+                    let mut permissions = metadata.permissions();
+                    permissions.set_mode(0o700);
+                    let _ = fs::set_permissions(&self.0, permissions);
+                }
+            }
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sqlite_wal_bootstrap_is_best_effort_when_wal_is_unavailable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = SqliteTempRoot::new();
+        let database_path =
+            termsnip_database_path(root.path()).expect("database path should resolve");
+        let options = SqliteConnectOptions::new()
+            .filename(&database_path)
+            .create_if_missing(true);
+        let connection = options
+            .connect()
+            .await
+            .expect("default-mode database should be created");
+        connection
+            .close()
+            .await
+            .expect("default-mode connection should close cleanly");
+
+        let mut permissions = fs::metadata(root.path())
+            .expect("SQLite test root metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o500);
+        fs::set_permissions(root.path(), permissions)
+            .expect("SQLite test root should become read-only");
+
+        let permission_probe = root.path().join("permission-probe");
+        if fs::File::create(&permission_probe).is_ok() {
+            let _ = fs::remove_file(permission_probe);
+            eprintln!(
+                "Skipping WAL best-effort permission test; directory permissions are not enforced"
+            );
+            return;
+        }
+
+        let mut reported_warning = None;
+        let result =
+            bootstrap_termsnip_database_wal_best_effort(Ok(root.path().to_path_buf()), |warning| {
+                reported_warning = Some(warning.to_owned())
+            })
+            .await;
+
+        assert!(result.is_ok(), "WAL failure must not abort app startup");
+        let warning = reported_warning.expect("degraded WAL startup should report a warning");
+        assert!(
+            warning.contains(&database_path.display().to_string()),
+            "warning should identify the database path: {warning}"
+        );
+        assert!(
+            warning.contains("did not complete")
+                && warning.contains("continuing with SQLite's available journal mode"),
+            "warning must report degraded startup without claiming WAL success: {warning}"
+        );
     }
 
     #[tokio::test]
