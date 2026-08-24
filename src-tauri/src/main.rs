@@ -1033,6 +1033,18 @@ fn expand_home(pathname: &str) -> PathBuf {
     PathBuf::from(pathname)
 }
 
+fn key_command_failure_json(error: KeyCommandFailure) -> String {
+    serde_json::to_string(&error)
+        .unwrap_or_else(|serialization_error| format!("key command failure: {serialization_error}"))
+}
+
+fn validate_connection_identity_key_path(private_key_path: &str) -> Result<PathBuf, String> {
+    let resolved_path = expand_home(private_key_path);
+    validate_user_owned_key_path(&resolved_path, private_key_path)
+        .map_err(key_command_failure_json)?;
+    Ok(resolved_path)
+}
+
 fn resolve_command_path(candidates: &[&str]) -> Option<PathBuf> {
     for candidate in candidates {
         let candidate_path = PathBuf::from(candidate);
@@ -1315,7 +1327,7 @@ fn validate_mosh_host(host: &BackendHostConnection) -> Result<(), String> {
 fn build_mosh_ssh_command(
     host: &BackendHostConnection,
     known_hosts_path: Option<&PathBuf>,
-) -> String {
+) -> Result<String, String> {
     let mut arguments = vec![
         "/usr/bin/ssh".to_string(),
         "-p".to_string(),
@@ -1347,21 +1359,18 @@ fn build_mosh_ssh_command(
     }
 
     if host.auth_method == "privateKey" && !host.private_key_path.trim().is_empty() {
+        let private_key_path = validate_connection_identity_key_path(&host.private_key_path)?;
         arguments.push("-i".to_string());
-        arguments.push(
-            expand_home(&host.private_key_path)
-                .to_string_lossy()
-                .into_owned(),
-        );
+        arguments.push(private_key_path.to_string_lossy().into_owned());
         arguments.push("-o".to_string());
         arguments.push("IdentitiesOnly=yes".to_string());
     }
 
-    arguments
+    Ok(arguments
         .iter()
         .map(|argument| shell_quote(argument))
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" "))
 }
 
 fn build_external_command_session_spec(
@@ -1463,7 +1472,7 @@ fn build_external_command_session_spec(
             command.arg(format!("{}@{}", host.username, host.hostname));
             command.arg(format!(
                 "--ssh={}",
-                build_mosh_ssh_command(host, known_hosts_path.as_ref())
+                build_mosh_ssh_command(host, known_hosts_path.as_ref())?
             ));
             configure_command_environment(&mut command, host);
 
@@ -1737,18 +1746,21 @@ fn authenticate_native_session(
         "password" => session
             .userauth_password(&host.username, &host.password)
             .map_err(|error| error.to_string())?,
-        "privateKey" => session
-            .userauth_pubkey_file(
-                &host.username,
-                None,
-                &expand_home(&host.private_key_path),
-                if host.passphrase.is_empty() {
-                    None
-                } else {
-                    Some(host.passphrase.as_str())
-                },
-            )
-            .map_err(|error| error.to_string())?,
+        "privateKey" => {
+            let private_key_path = validate_connection_identity_key_path(&host.private_key_path)?;
+            session
+                .userauth_pubkey_file(
+                    &host.username,
+                    None,
+                    &private_key_path,
+                    if host.passphrase.is_empty() {
+                        None
+                    } else {
+                        Some(host.passphrase.as_str())
+                    },
+                )
+                .map_err(|error| error.to_string())?
+        }
         "none" => return Err("Host is configured without SSH auth".to_string()),
         _ => return Err(format!("Unsupported auth method: {}", host.auth_method)),
     }
@@ -6568,13 +6580,65 @@ mod tests {
             username: "ops".to_string(),
         };
         let known_hosts_path = PathBuf::from("/tmp/termsnip-known-hosts");
-        let ssh_command = build_mosh_ssh_command(&host, Some(&known_hosts_path));
+        let ssh_command = build_mosh_ssh_command(&host, Some(&known_hosts_path))
+            .expect("an allowlisted key path should build the ssh command");
 
         assert!(ssh_command.contains("/usr/bin/ssh"));
         assert!(ssh_command.contains("-p 60022"));
         assert!(ssh_command.contains("UserKnownHostsFile=/tmp/termsnip-known-hosts"));
         assert!(ssh_command.contains("StrictHostKeyChecking=yes"));
         assert!(ssh_command.contains("IdentitiesOnly=yes"));
+    }
+
+    fn refuses_unowned_identity_path(error: String, requested_path: &str) {
+        let failure: serde_json::Value =
+            serde_json::from_str(&error).expect("identity-path rejection should stay typed");
+        assert_eq!(
+            failure,
+            json!({
+                "reason": "path-outside-allowed-roots",
+                "path": requested_path,
+            })
+        );
+    }
+
+    #[test]
+    fn mosh_refuses_unowned_identity_path_before_building_ssh_argv() {
+        let host = BackendHostConnection {
+            agent_forwarding: false,
+            auth_method: "privateKey".to_string(),
+            environment: None,
+            host_key_policy: Some("allowUnknown".to_string()),
+            hostname: "ops.internal".to_string(),
+            jump_host: None,
+            known_host_algorithm: None,
+            known_host_public_key: None,
+            password: "".to_string(),
+            passphrase: "".to_string(),
+            port: 22,
+            private_key_path: "~/../termsnip-validator-probe/id_ops".to_string(),
+            protocol: "mosh".to_string(),
+            sftp_root: None,
+            username: "ops".to_string(),
+        };
+
+        let error = build_mosh_ssh_command(&host, None)
+            .expect_err("an unowned identity path must be refused before argv assembly");
+        refuses_unowned_identity_path(error, &host.private_key_path);
+    }
+
+    #[test]
+    fn ssh2_refuses_unowned_identity_path_before_authentication() {
+        let host = BackendHostConnection {
+            auth_method: "privateKey".to_string(),
+            private_key_path: "~/../termsnip-validator-probe/id_ops".to_string(),
+            passphrase: "passphrase".to_string(),
+            ..minimal_ssh_host()
+        };
+
+        let error = validate_connection_identity_key_path(&host.private_key_path)
+            .expect_err("an unowned identity path must be refused before ssh2 auth");
+        refuses_unowned_identity_path(error, &host.private_key_path);
     }
 
     #[test]
