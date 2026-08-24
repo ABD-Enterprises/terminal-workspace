@@ -1232,7 +1232,8 @@ pub(crate) fn run_sftp_batch_commands(
     // accumulates into an unbounded String anyway, so bounding only the channel
     // would not give this path a memory bound — that needs its own truncation
     // policy, not a channel size.
-    let (output_sender, output_receiver) = std::sync::mpsc::channel();
+    let (output_sender, output_receiver) =
+        std::sync::mpsc::sync_channel(NATIVE_SESSION_EVENT_CHANNEL_CAPACITY);
     spawn_jump_session_reader(
         reader,
         writer.clone(),
@@ -1385,7 +1386,41 @@ pub(crate) fn wait_for_sftp_prompt(
             });
         }
 
-        thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
+        let remaining = Duration::from_millis(NATIVE_SSH_CONTROL_READY_TIMEOUT_MS)
+            .saturating_sub(started_at.elapsed());
+        match output_receiver.recv_timeout(remaining) {
+            Ok(JumpSessionEvent::Output(output)) => {
+                captured_output.push_str(&decoder.decode(&output));
+                if let Some(prompt_output) =
+                    extract_sftp_prompt_output(&captured_output, pending_command)
+                {
+                    return Ok(prompt_output);
+                }
+            }
+            Ok(JumpSessionEvent::Error(error)) => {
+                captured_output.push_str(&decoder.finish());
+                captured_output.push_str(&error);
+                return Err(trim_ssh_output(&captured_output));
+            }
+            Ok(JumpSessionEvent::Eof) => {
+                captured_output.push_str(&decoder.finish());
+                let message = trim_ssh_output(&captured_output);
+                return Err(if message.is_empty() {
+                    "sftp exited before becoming ready".to_string()
+                } else {
+                    message
+                });
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                let message = trim_ssh_output(&captured_output);
+                return Err(if message.is_empty() {
+                    "sftp output stream disconnected unexpectedly".to_string()
+                } else {
+                    message
+                });
+            }
+        }
     }
 }
 
@@ -1432,9 +1467,11 @@ pub(crate) fn open_native_ssh_control_session(
             .try_clone_reader()
             .map_err(|error| error.to_string())?;
         let master = pair.master;
-        // #193: unbounded on purpose — see wait_for_sftp_prompt. This one stops
-        // consuming the moment the control session reports ready.
-        let (output_sender, output_receiver) = std::sync::mpsc::channel();
+        // #205: bounded like the live session event path. The ready loop now
+        // blocks on recv_timeout, so a producer that outruns it backpressures
+        // the PTY instead of queueing output here without limit.
+        let (output_sender, output_receiver) =
+            std::sync::mpsc::sync_channel(NATIVE_SESSION_EVENT_CHANNEL_CAPACITY);
         spawn_jump_session_reader(reader, writer, build_prompt_responses(host), output_sender);
 
         let started_at = Instant::now();
@@ -1490,7 +1527,21 @@ pub(crate) fn open_native_ssh_control_session(
                 Err(error) => return Err(error.to_string()),
             }
 
-            thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
+            let remaining = Duration::from_millis(NATIVE_SSH_CONTROL_READY_TIMEOUT_MS)
+                .saturating_sub(started_at.elapsed());
+            match output_receiver.recv_timeout(remaining.min(Duration::from_millis(50))) {
+                Ok(JumpSessionEvent::Output(output)) => {
+                    captured_output.push_str(&decoder.decode(&output));
+                }
+                Ok(JumpSessionEvent::Error(error)) => {
+                    captured_output.push_str(&decoder.finish());
+                    captured_output.push_str(&error);
+                    return Err(trim_ssh_output(&captured_output));
+                }
+                Ok(JumpSessionEvent::Eof) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+            }
         }
 
         Ok((

@@ -9,6 +9,7 @@ use std::{
     process::{Command, Output, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
+        mpsc::{self, Receiver, RecvTimeoutError, TryRecvError},
         Arc, Mutex, MutexGuard,
     },
     thread,
@@ -28,12 +29,7 @@ use ssh2::{Channel, Session};
 use tauri::menu::{AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_sql::{Migration, MigrationKind};
-use tokio::sync::mpsc::{
-    channel,
-    error::{TryRecvError, TrySendError},
-    Receiver, Sender,
-};
-
+use tokio::sync::mpsc::{channel, error::TrySendError, Sender};
 mod keychain_support;
 mod native_host_keys;
 mod native_transport;
@@ -234,6 +230,13 @@ impl OutputCoalescer {
         }
     }
 
+    fn next_flush_in(&self, now: Instant) -> Option<Duration> {
+        self.pending_since.map(|since| {
+            self.window
+                .saturating_sub(now.saturating_duration_since(since))
+        })
+    }
+
     /// Flush what decodes cleanly, keeping any truncated trailing character for
     /// the next chunk. Returns `None` when that leaves nothing to emit — a
     /// chunk consisting only of a partial character must not fire an empty
@@ -265,6 +268,13 @@ impl OutputCoalescer {
         }
     }
 }
+
+fn native_session_idle_wait(coalescer: &OutputCoalescer) -> Duration {
+    coalescer
+        .next_flush_in(Instant::now())
+        .unwrap_or(Duration::from_millis(NATIVE_OUTPUT_COALESCE_WINDOW_MS))
+}
+
 const NATIVE_SSH_CONTROL_READY_TIMEOUT_MS: u64 = 15_000;
 /// Bound the native ssh2 connect/handshake/blocking-IO phases. Without these a
 /// black-holed port (SYN dropped) or a server that completes TCP but stalls the
@@ -1979,7 +1989,7 @@ fn run_external_command_session_loop(
     session_id: String,
     state: Arc<Mutex<NativeSessionState>>,
     host: BackendHostConnection,
-    mut receiver: Receiver<NativeSessionCommand>,
+    receiver: Receiver<NativeSessionCommand>,
 ) {
     let mut cleanup_dir = None;
     let result = (|| -> Result<(), String> {
@@ -2133,7 +2143,31 @@ fn run_external_command_session_loop(
             }
 
             if !did_work && !should_close {
-                thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
+                match receiver.recv_timeout(native_session_idle_wait(&coalescer)) {
+                    Ok(NativeSessionCommand::Close) => {
+                        should_close = true;
+                    }
+                    Ok(NativeSessionCommand::Input(input)) => {
+                        if let Err(error) = write_jump_session_input(&writer, &input) {
+                            if let Some(flushed) = coalescer.finish() {
+                                emit_native_session_output(&app, &session_id, &state, flushed);
+                            }
+                            return Err(error);
+                        }
+                    }
+                    Ok(NativeSessionCommand::Resize { cols, rows }) => {
+                        if let Err(error) = resize_jump_session_pty(&mut master, cols, rows) {
+                            if let Some(flushed) = coalescer.finish() {
+                                emit_native_session_output(&app, &session_id, &state, flushed);
+                            }
+                            return Err(error);
+                        }
+                    }
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => {
+                        should_close = true;
+                    }
+                }
             }
         }
 
@@ -2187,7 +2221,7 @@ fn run_jump_host_session_loop(
     session_id: String,
     state: Arc<Mutex<NativeSessionState>>,
     host: BackendHostConnection,
-    mut receiver: Receiver<NativeSessionCommand>,
+    receiver: Receiver<NativeSessionCommand>,
 ) {
     let session_dir = match create_native_ssh_session_dir(&session_id) {
         Ok(path) => path,
@@ -2356,7 +2390,31 @@ fn run_jump_host_session_loop(
             }
 
             if !did_work && !should_close {
-                thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
+                match receiver.recv_timeout(native_session_idle_wait(&coalescer)) {
+                    Ok(NativeSessionCommand::Close) => {
+                        should_close = true;
+                    }
+                    Ok(NativeSessionCommand::Input(input)) => {
+                        if let Err(error) = write_jump_session_input(&writer, &input) {
+                            if let Some(flushed) = coalescer.finish() {
+                                emit_native_session_output(&app, &session_id, &state, flushed);
+                            }
+                            return Err(error);
+                        }
+                    }
+                    Ok(NativeSessionCommand::Resize { cols, rows }) => {
+                        if let Err(error) = resize_jump_session_pty(&mut master, cols, rows) {
+                            if let Some(flushed) = coalescer.finish() {
+                                emit_native_session_output(&app, &session_id, &state, flushed);
+                            }
+                            return Err(error);
+                        }
+                    }
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => {
+                        should_close = true;
+                    }
+                }
             }
         }
 
@@ -2502,7 +2560,7 @@ fn run_native_session_loop(
     state: Arc<Mutex<NativeSessionState>>,
     session: Session,
     mut channel: Channel,
-    mut receiver: Receiver<NativeSessionCommand>,
+    receiver: Receiver<NativeSessionCommand>,
 ) {
     // The direct-SSH connect already succeeded before this loop was spawned, so
     // the session is connected the moment we start. Emit it here (like the
@@ -2585,7 +2643,18 @@ fn run_native_session_loop(
         }
 
         if !did_work {
-            thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
+            match receiver.recv_timeout(native_session_idle_wait(&coalescer)) {
+                Ok(command) => match handle_native_session_command(&mut channel, command) {
+                    Ok(true) => break,
+                    Ok(false) => {}
+                    Err(error) => {
+                        emit_native_session_error(&app, &session_id, &state, error);
+                        break;
+                    }
+                },
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
         }
     }
 
@@ -4567,7 +4636,17 @@ async fn terminal_workspace_create_backend_session(
     // "connected" below could also overwrite the loop's terminal state on an
     // instant failure. Inserting first makes the loop's remove-on-exit correct,
     // and each loop now owns its own connected/disconnected transitions.
-    let (command_sender, command_receiver) = channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
+    let (command_sender, mut command_receiver_async) =
+        channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
+    let (relay_sender, command_receiver) =
+        mpsc::sync_channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
+    thread::spawn(move || {
+        while let Some(command) = command_receiver_async.blocking_recv() {
+            if relay_sender.send(command).is_err() {
+                break;
+            }
+        }
+    });
     insert_native_session(
         native_sessions.inner(),
         &session_id,
