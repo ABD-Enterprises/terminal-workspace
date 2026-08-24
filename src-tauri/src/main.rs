@@ -7,7 +7,10 @@ use std::{
     fs,
     io::{self, Read, Write},
     net::{TcpStream, ToSocketAddrs},
-    os::{fd::AsRawFd, unix::net::UnixStream},
+    os::{
+        fd::{AsRawFd, RawFd},
+        unix::net::UnixStream,
+    },
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     sync::{
@@ -292,10 +295,12 @@ struct PollFd {
 
 unsafe extern "C" {
     fn poll(fds: *mut PollFd, nfds: c_ulong, timeout: c_int) -> c_int;
+    fn shutdown(socket: c_int, how: c_int) -> c_int;
 }
 
 const POLLIN: c_short = 0x0001;
 const POLLOUT: c_short = 0x0004;
+const SHUT_RDWR: c_int = 2;
 
 enum NativeSessionWaitEvent {
     Command,
@@ -412,6 +417,7 @@ impl<T> LockRecover<T> for Mutex<T> {
 #[derive(Clone, Default)]
 struct NativeSessionRegistry {
     sessions: Arc<Mutex<HashMap<String, NativeSessionHandle>>>,
+    exit_handles: Arc<Mutex<HashMap<String, NativeSessionExitHandle>>>,
 }
 
 #[derive(Clone, Default)]
@@ -424,6 +430,14 @@ struct NativeSessionHandle {
     command_sender: Sender<NativeSessionCommand>,
     host: BackendHostConnection,
     state: Arc<Mutex<NativeSessionState>>,
+}
+
+#[derive(Clone, Default)]
+enum NativeSessionExitHandle {
+    #[default]
+    None,
+    Child(Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>),
+    SocketFd(RawFd),
 }
 
 #[derive(Clone)]
@@ -1506,12 +1520,18 @@ fn insert_native_session(
         .sessions
         .lock_recover()
         .insert(session_id.to_string(), handle);
+    registry
+        .exit_handles
+        .lock_recover()
+        .entry(session_id.to_string())
+        .or_insert(NativeSessionExitHandle::None);
 }
 
 fn remove_native_session(
     registry: &NativeSessionRegistry,
     session_id: &str,
 ) -> Option<NativeSessionHandle> {
+    registry.exit_handles.lock_recover().remove(session_id);
     registry.sessions.lock_recover().remove(session_id)
 }
 
@@ -1524,14 +1544,47 @@ fn live_native_session_count(registry: &NativeSessionRegistry) -> usize {
 }
 
 fn close_all_native_sessions(registry: &NativeSessionRegistry) {
-    let handles = registry
+    let session_ids = registry
         .sessions
         .lock_recover()
-        .values()
+        .keys()
         .cloned()
         .collect::<Vec<_>>();
-    for handle in handles {
-        let _ = handle.command_sender.try_send(NativeSessionCommand::Close);
+    for session_id in session_ids {
+        close_native_session_exit_handle(registry, &session_id);
+        if let Some(handle) = get_native_session(registry, &session_id) {
+            let _ = handle.command_sender.try_send(NativeSessionCommand::Close);
+        }
+    }
+}
+
+fn set_native_session_exit_handle(
+    registry: &NativeSessionRegistry,
+    session_id: &str,
+    exit_handle: NativeSessionExitHandle,
+) {
+    registry
+        .exit_handles
+        .lock_recover()
+        .insert(session_id.to_string(), exit_handle);
+}
+
+fn close_native_session_exit_handle(registry: &NativeSessionRegistry, session_id: &str) {
+    let exit_handle = registry
+        .exit_handles
+        .lock_recover()
+        .get(session_id)
+        .cloned()
+        .unwrap_or_default();
+    match exit_handle {
+        NativeSessionExitHandle::None => {}
+        NativeSessionExitHandle::Child(killer) => {
+            let mut killer = killer.lock_recover();
+            let _ = killer.kill();
+        }
+        NativeSessionExitHandle::SocketFd(fd) => unsafe {
+            let _ = shutdown(fd, SHUT_RDWR);
+        },
     }
 }
 
@@ -2145,6 +2198,11 @@ fn run_external_command_session_loop(
             .spawn_command(command)
             .map_err(|error| error.to_string())?;
         drop(pair.slave);
+        set_native_session_exit_handle(
+            &registry,
+            &session_id,
+            NativeSessionExitHandle::Child(Arc::new(Mutex::new(child.clone_killer()))),
+        );
 
         let writer = Arc::new(Mutex::new(
             pair.master
@@ -2391,6 +2449,11 @@ fn run_jump_host_session_loop(
             .spawn_command(command)
             .map_err(|error| error.to_string())?;
         drop(pair.slave);
+        set_native_session_exit_handle(
+            &registry,
+            &session_id,
+            NativeSessionExitHandle::Child(Arc::new(Mutex::new(child.clone_killer()))),
+        );
 
         let writer = Arc::new(Mutex::new(
             pair.master
@@ -4829,6 +4892,11 @@ async fn terminal_workspace_create_backend_session(
         // pre-inserted so a failed connect leaves no orphan, then report it.
         let connect_result = tauri::async_runtime::spawn_blocking(move || {
             let (session, channel) = connect_native_session(&host, host_key_store.as_ref())?;
+            set_native_session_exit_handle(
+                &native_registry,
+                &session_id_for_thread,
+                NativeSessionExitHandle::SocketFd(session.as_raw_fd()),
+            );
             thread::spawn(move || {
                 run_native_session_loop(
                     app_handle,
@@ -5338,12 +5406,14 @@ fn main() {
                 api.prevent_exit();
                 exit_in_progress.store(true, Ordering::SeqCst);
                 let app_handle = app.clone();
+                let exit_in_progress_for_thread = exit_in_progress.clone();
+                let forced_exit_for_thread = forced_exit.clone();
                 thread::spawn(move || {
                     drain_native_sessions_for_app_exit(
                         registry,
                         app_handle,
-                        exit_in_progress,
-                        forced_exit,
+                        exit_in_progress_for_thread,
+                        forced_exit_for_thread,
                     );
                 });
             }
