@@ -9,6 +9,7 @@ import {
   SFTP_UPLOAD_TIMEOUT_MS,
   withDeadline,
 } from "../../apps/desktop/server/backend-deadline.mjs";
+import { createWithSftp } from "../../apps/desktop/server/backend-sftp.mjs";
 
 // #182: ssh2 only bounds the INITIAL connect via readyTimeout. Once connected,
 // an exec against a host that is reachable but unresponsive never settled — and
@@ -436,5 +437,47 @@ describe("#288: an idle download deadline cannot bound a drip-feeding peer", () 
     // into a total-budget operation and re-break what #182 fixed.
     expect(SFTP_DOWNLOAD_TOTAL_TIMEOUT_MS).toBeGreaterThan(SFTP_DOWNLOAD_IDLE_TIMEOUT_MS);
     expect(SFTP_DOWNLOAD_TOTAL_TIMEOUT_MS).toBe(1_800_000);
+  });
+});
+
+describe("#323: withSftp threads the total timeout ceiling into the deadline", () => {
+  it("passes totalTimeoutMs through to withDeadline", async () => {
+    const sftp = { destroy: vi.fn() };
+    const client = {
+      destroy: vi.fn(),
+      end: vi.fn(),
+      sftp(callback: (error: Error | null, handle?: { destroy: () => void }) => void) {
+        callback(null, sftp);
+      },
+    };
+    const connectClient = vi.fn(async () => client);
+    let receivedOptions: { totalTimeoutMs?: number } | undefined;
+    const withDeadlineStub = vi.fn(async (_timeoutMs, operation, options) => {
+      receivedOptions = options;
+      return operation({
+        onTimeout: vi.fn(),
+        resetDeadline: vi.fn(),
+      });
+    });
+    const withSftp = createWithSftp({
+      connectClient,
+      withDeadline: withDeadlineStub,
+    });
+
+    await withSftp(
+      { hostname: "example.test" },
+      { timeoutMs: 1_000, totalTimeoutMs: 5_000 },
+      async () => "ok",
+    );
+
+    expect(withDeadlineStub).toHaveBeenCalledTimes(1);
+    expect(withDeadlineStub).toHaveBeenCalledWith(
+      1_000,
+      expect.any(Function),
+      { totalTimeoutMs: 5_000 },
+    );
+    expect(receivedOptions).toEqual({ totalTimeoutMs: 5_000 });
+    expect(connectClient).toHaveBeenCalledWith({ hostname: "example.test" });
+    expect(client.end).toHaveBeenCalledTimes(1);
   });
 });
