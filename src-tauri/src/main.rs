@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, TryRecvError},
         Arc, Mutex, MutexGuard,
     },
@@ -96,6 +96,7 @@ const NATIVE_SESSION_POLL_INTERVAL_MS: u64 = 10;
 /// fine. See write_all_with_deadline.
 const NATIVE_SESSION_WRITE_TIMEOUT_MS: u64 = 10_000;
 const NATIVE_SESSION_BUFFER_LIMIT: usize = 128;
+const APP_EXIT_SESSION_DRAIN_TIMEOUT_MS: u64 = 500;
 /// Terminal-output coalescing bounds. Without these, a fast producer
 /// (`yes`, `cat huge.log`) makes the session loop emit one Tauri event per
 /// ~4KB read — thousands/sec — flooding the webview's event queue and xterm
@@ -1520,6 +1521,34 @@ fn remove_native_session(
 /// length is the live count.
 fn live_native_session_count(registry: &NativeSessionRegistry) -> usize {
     registry.sessions.lock_recover().len()
+}
+
+fn close_all_native_sessions(registry: &NativeSessionRegistry) {
+    let handles = registry
+        .sessions
+        .lock_recover()
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+    for handle in handles {
+        let _ = handle.command_sender.try_send(NativeSessionCommand::Close);
+    }
+}
+
+fn drain_native_sessions_for_app_exit(
+    registry: NativeSessionRegistry,
+    app: AppHandle,
+    exit_in_progress: Arc<AtomicBool>,
+    forced_exit: Arc<AtomicBool>,
+) {
+    close_all_native_sessions(&registry);
+    let deadline = Instant::now() + Duration::from_millis(APP_EXIT_SESSION_DRAIN_TIMEOUT_MS);
+    while live_native_session_count(&registry) > 0 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
+    }
+    exit_in_progress.store(false, Ordering::SeqCst);
+    forced_exit.store(true, Ordering::SeqCst);
+    app.exit(0);
 }
 
 fn insert_native_forward(
@@ -5196,7 +5225,9 @@ fn termsnip_wal_bootstrap_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> 
 }
 
 fn main() {
-    tauri::Builder::default()
+    let exit_in_progress = Arc::new(AtomicBool::new(false));
+    let forced_exit = Arc::new(AtomicBool::new(false));
+    let app = tauri::Builder::default()
         // #180: order is correctness-critical — bootstrap the file in WAL mode
         // before tauri-plugin-sql preloads its pool and runs migrations.
         .plugin(termsnip_wal_bootstrap_plugin())
@@ -5284,8 +5315,40 @@ fn main() {
             terminal_workspace_check_for_updates,
             terminal_workspace_install_update_and_restart
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+    app.run({
+        let exit_in_progress = exit_in_progress.clone();
+        let forced_exit = forced_exit.clone();
+        move |app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if forced_exit.swap(false, Ordering::SeqCst) {
+                    return;
+                }
+                if exit_in_progress.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                    return;
+                }
+
+                let registry = app.state::<NativeSessionRegistry>().inner().clone();
+                if live_native_session_count(&registry) == 0 {
+                    return;
+                }
+
+                api.prevent_exit();
+                exit_in_progress.store(true, Ordering::SeqCst);
+                let app_handle = app.clone();
+                thread::spawn(move || {
+                    drain_native_sessions_for_app_exit(
+                        registry,
+                        app_handle,
+                        exit_in_progress,
+                        forced_exit,
+                    );
+                });
+            }
+        }
+    });
 }
 
 #[cfg(test)]
