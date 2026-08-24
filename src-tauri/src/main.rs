@@ -2,9 +2,12 @@
 
 use std::{
     collections::{HashMap, VecDeque},
-    env, fs,
+    env,
+    ffi::{c_int, c_short, c_ulong},
+    fs,
     io::{self, Read, Write},
     net::{TcpStream, ToSocketAddrs},
+    os::{fd::AsRawFd, unix::net::UnixStream},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     sync::{
@@ -275,6 +278,96 @@ fn native_session_idle_wait(coalescer: &OutputCoalescer) -> Duration {
         .unwrap_or(Duration::from_millis(NATIVE_OUTPUT_COALESCE_WINDOW_MS))
 }
 
+fn native_session_flush_deadline(coalescer: &OutputCoalescer) -> Option<Duration> {
+    coalescer.next_flush_in(Instant::now())
+}
+
+#[repr(C)]
+struct PollFd {
+    fd: c_int,
+    events: c_short,
+    revents: c_short,
+}
+
+unsafe extern "C" {
+    fn poll(fds: *mut PollFd, nfds: c_ulong, timeout: c_int) -> c_int;
+}
+
+const POLLIN: c_short = 0x0001;
+const POLLOUT: c_short = 0x0004;
+
+enum NativeSessionWaitEvent {
+    Command,
+    SessionIo,
+    Timeout,
+}
+
+impl NativeSessionCommandWakeReader {
+    fn pair() -> io::Result<(Self, NativeSessionCommandWakeWriter)> {
+        let (reader, writer) = UnixStream::pair()?;
+        reader.set_nonblocking(true)?;
+        writer.set_nonblocking(true)?;
+        Ok((Self { reader }, NativeSessionCommandWakeWriter { writer }))
+    }
+
+    fn drain(&mut self) {
+        let mut buffer = [0u8; 64];
+        loop {
+            match self.reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(_) => continue,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(_) => break,
+            }
+        }
+    }
+}
+
+impl NativeSessionCommandWakeWriter {
+    fn notify(&self) {
+        let _ = (&self.writer).write(&[1]);
+    }
+}
+
+fn wait_for_native_session_event(
+    session: &Session,
+    wake_reader: &mut NativeSessionCommandWakeReader,
+    timeout: Option<Duration>,
+) -> io::Result<NativeSessionWaitEvent> {
+    let session_events = match session.block_directions() {
+        ssh2::BlockDirections::Outbound => POLLOUT,
+        ssh2::BlockDirections::Both => POLLIN | POLLOUT,
+        _ => POLLIN,
+    };
+    let mut fds = [
+        PollFd {
+            fd: wake_reader.reader.as_raw_fd(),
+            events: POLLIN,
+            revents: 0,
+        },
+        PollFd {
+            fd: session.as_raw_fd(),
+            events: session_events,
+            revents: 0,
+        },
+    ];
+    let timeout_ms = timeout
+        .map(|duration| duration.as_millis().min(c_int::MAX as u128) as c_int)
+        .unwrap_or(-1);
+    let ready = unsafe { poll(fds.as_mut_ptr(), fds.len() as c_ulong, timeout_ms) };
+    if ready < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if ready == 0 {
+        return Ok(NativeSessionWaitEvent::Timeout);
+    }
+    if (fds[0].revents & POLLIN) != 0 {
+        wake_reader.drain();
+        return Ok(NativeSessionWaitEvent::Command);
+    }
+    Ok(NativeSessionWaitEvent::SessionIo)
+}
+
 const NATIVE_SSH_CONTROL_READY_TIMEOUT_MS: u64 = 15_000;
 /// Bound the native ssh2 connect/handshake/blocking-IO phases. Without these a
 /// black-holed port (SYN dropped) or a server that completes TCP but stalls the
@@ -384,6 +477,14 @@ struct NativeSshControlContext {
     config_path: PathBuf,
     session_dir: PathBuf,
     target_alias: String,
+}
+
+struct NativeSessionCommandWakeReader {
+    reader: UnixStream,
+}
+
+struct NativeSessionCommandWakeWriter {
+    writer: UnixStream,
 }
 
 #[derive(Serialize)]
@@ -2561,6 +2662,7 @@ fn run_native_session_loop(
     session: Session,
     mut channel: Channel,
     receiver: Receiver<NativeSessionCommand>,
+    mut wake_reader: NativeSessionCommandWakeReader,
 ) {
     // The direct-SSH connect already succeeded before this loop was spawned, so
     // the session is connected the moment we start. Emit it here (like the
@@ -2643,17 +2745,17 @@ fn run_native_session_loop(
         }
 
         if !did_work {
-            match receiver.recv_timeout(native_session_idle_wait(&coalescer)) {
-                Ok(command) => match handle_native_session_command(&mut channel, command) {
-                    Ok(true) => break,
-                    Ok(false) => {}
-                    Err(error) => {
-                        emit_native_session_error(&app, &session_id, &state, error);
-                        break;
-                    }
-                },
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
+            match wait_for_native_session_event(
+                &session,
+                &mut wake_reader,
+                native_session_flush_deadline(&coalescer),
+            ) {
+                Ok(NativeSessionWaitEvent::Command | NativeSessionWaitEvent::SessionIo) => {}
+                Ok(NativeSessionWaitEvent::Timeout) => {}
+                Err(error) => {
+                    emit_native_session_error(&app, &session_id, &state, error.to_string());
+                    break;
+                }
             }
         }
     }
@@ -4640,11 +4742,14 @@ async fn terminal_workspace_create_backend_session(
         channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
     let (relay_sender, command_receiver) =
         mpsc::sync_channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
+    let (wake_reader, wake_writer) = NativeSessionCommandWakeReader::pair()
+        .map_err(|error| format!("Failed to create native-session wake pipe: {error}"))?;
     thread::spawn(move || {
         while let Some(command) = command_receiver_async.blocking_recv() {
             if relay_sender.send(command).is_err() {
                 break;
             }
+            wake_writer.notify();
         }
     });
     insert_native_session(
@@ -4705,6 +4810,7 @@ async fn terminal_workspace_create_backend_session(
                     session,
                     channel,
                     command_receiver,
+                    wake_reader,
                 );
             });
             Ok::<(), String>(())
