@@ -6208,22 +6208,22 @@ mod tests {
             );
         }
 
-        let registry_for_closer = registry.clone();
-        let closer = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
-            remove_native_session(&registry_for_closer, "s1");
-            thread::sleep(Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS));
-            remove_native_session(&registry_for_closer, "s2");
-        });
+        let poll_interval = Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS);
+        let mut sessions_to_close = ["s1", "s2"].into_iter();
+        let mut sleep_calls = Vec::new();
 
         assert!(
-            drain_native_sessions_for_app_exit(
-                &registry,
-                Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS * 6),
-            ),
+            drain_native_sessions_for_app_exit_with_sleep(&registry, Duration::MAX, |duration| {
+                sleep_calls.push(duration);
+                let session_id = sessions_to_close
+                    .next()
+                    .expect("each sleep should advance one session close");
+                assert!(remove_native_session(&registry, session_id).is_some());
+            },),
             "the drain should complete once every session removes itself"
         );
-        closer.join().expect("closer thread should complete");
+        assert_eq!(sleep_calls, vec![poll_interval, poll_interval]);
+        assert!(sessions_to_close.next().is_none());
         assert_eq!(live_native_session_count(&registry), 0);
 
         for mut receiver in receivers {
@@ -6248,21 +6248,14 @@ mod tests {
             },
         );
 
-        let timeout = Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS * 3);
-        let started = Instant::now();
+        let mut sleep_calls = 0;
         assert!(
-            !drain_native_sessions_for_app_exit(&registry, timeout),
+            !drain_native_sessions_for_app_exit_with_sleep(&registry, Duration::ZERO, |_| {
+                sleep_calls += 1
+            },),
             "the drain must give up once the bounded deadline expires"
         );
-        let elapsed = started.elapsed();
-        assert!(
-            elapsed >= timeout,
-            "the drain should wait through the configured deadline; waited {elapsed:?}"
-        );
-        assert!(
-            elapsed < timeout + Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS * 2),
-            "the drain should stop promptly after the deadline; waited {elapsed:?}"
-        );
+        assert_eq!(sleep_calls, 0, "the drain must not sleep past its deadline");
         assert!(matches!(
             receiver.try_recv(),
             Ok(NativeSessionCommand::Close)
