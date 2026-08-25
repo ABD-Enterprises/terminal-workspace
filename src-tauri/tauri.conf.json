@@ -32,7 +32,7 @@
   },
   "plugins": {
     "sql": {
-      "preload": ["sqlite:termsnip.db"]
+      "preload": ["sqlite:terminalworkspace.db"]
     },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI5RkNDNzA0OTAxQzA5N0EKUldSNkNSeVFCTWY4dWQxL0x5MkFtYy9tcUU2QnB6QWprUU9nRDdkRHFjdnRXeGZFL05UUHBCMjAK",

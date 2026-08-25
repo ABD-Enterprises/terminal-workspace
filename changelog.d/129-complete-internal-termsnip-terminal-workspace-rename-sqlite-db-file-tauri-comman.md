@@ -1,0 +1,1 @@
+- [FIX] Rename the native SQLite database file to `terminalworkspace.db` with a one-time copy migration from `termsnip.db`. (#129)
