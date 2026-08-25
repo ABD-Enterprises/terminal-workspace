@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, TryRecvError},
         Arc, Mutex, MutexGuard,
     },
@@ -90,6 +90,12 @@ const NATIVE_SESSION_EVENT_CHANNEL_CAPACITY: usize = 16;
 /// not merely busy, and more buffering would only postpone saying so.
 const NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY: usize = 32;
 const NATIVE_SESSION_POLL_INTERVAL_MS: u64 = 10;
+/// Max time app quit waits for native session loops to observe a queued Close,
+/// reap their child process, and remove themselves from the live registry
+/// before quit is forced through anyway. The slowest loops poll commands every
+/// 10 ms, so 150 ms gives roughly 15 polls plus the local kill+wait bookkeeping
+/// already performed on Close, without turning Quit into a human-visible hang.
+const APP_EXIT_SESSION_DRAIN_TIMEOUT_MS: u64 = 150;
 /// Max time a write to an SSH channel may make NO progress before it is treated
 /// as a stalled remote and aborted, so it cannot wedge the session loop. This is
 /// an idle timeout — a slow-but-progressing transfer of any total duration is
@@ -416,6 +422,11 @@ struct NativeSessionRegistry {
 #[derive(Clone, Default)]
 struct NativeForwardRegistry {
     forwards: Arc<Mutex<HashMap<String, NativeForwardHandle>>>,
+}
+
+#[derive(Default)]
+struct AppExitDrainGuard {
+    in_progress: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -1529,6 +1540,44 @@ fn remove_native_session(
 /// length is the live count.
 fn live_native_session_count(registry: &NativeSessionRegistry) -> usize {
     registry.sessions.lock_recover().len()
+}
+
+fn drain_native_sessions_for_app_exit(registry: &NativeSessionRegistry, timeout: Duration) -> bool {
+    drain_native_sessions_for_app_exit_with_sleep(registry, timeout, thread::sleep)
+}
+
+fn drain_native_sessions_for_app_exit_with_sleep<F>(
+    registry: &NativeSessionRegistry,
+    timeout: Duration,
+    mut sleep: F,
+) -> bool
+where
+    F: FnMut(Duration),
+{
+    let live_handles: Vec<NativeSessionHandle> =
+        registry.sessions.lock_recover().values().cloned().collect();
+    for handle in live_handles {
+        let _ = handle.command_sender.try_send(NativeSessionCommand::Close);
+    }
+
+    if live_native_session_count(registry) == 0 {
+        return true;
+    }
+
+    let started = Instant::now();
+    let poll_interval = Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS);
+    loop {
+        if live_native_session_count(registry) == 0 {
+            return true;
+        }
+
+        let elapsed = started.elapsed();
+        if elapsed >= timeout {
+            return false;
+        }
+
+        sleep((timeout - elapsed).min(poll_interval));
+    }
 }
 
 fn insert_native_forward(
@@ -5208,7 +5257,7 @@ fn termsnip_wal_bootstrap_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> 
 }
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         // #180: order is correctness-critical — bootstrap the file in WAL mode
         // before tauri-plugin-sql preloads its pool and runs migrations.
         .plugin(termsnip_wal_bootstrap_plugin())
@@ -5224,6 +5273,7 @@ fn main() {
         .manage(SshConfigResolutionRegistry::default())
         .manage(NativeSessionRegistry::default())
         .manage(NativeForwardRegistry::default())
+        .manage(AppExitDrainGuard::default())
         .setup(|app| {
             // #151: resolve the durable host-key store once, through Tauri, so it
             // follows the bundle identifier and never lands in the per-session
@@ -5296,8 +5346,31 @@ fn main() {
             terminal_workspace_check_for_updates,
             terminal_workspace_install_update_and_restart
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                let exit_guard = app_handle.state::<AppExitDrainGuard>();
+                if exit_guard.in_progress.swap(true, Ordering::AcqRel) {
+                    return;
+                }
+
+                api.prevent_exit();
+                let native_sessions = app_handle.state::<NativeSessionRegistry>();
+                let drained = drain_native_sessions_for_app_exit(
+                    native_sessions.inner(),
+                    Duration::from_millis(APP_EXIT_SESSION_DRAIN_TIMEOUT_MS),
+                );
+                if !drained {
+                    eprintln!(
+                        "warning: timed out draining native sessions during app quit; forcing exit with {} sessions still registered",
+                        live_native_session_count(native_sessions.inner())
+                    );
+                }
+                app_handle.exit(code.unwrap_or(0));
+            }
+        });
 }
 
 #[cfg(test)]
@@ -6114,6 +6187,84 @@ mod tests {
         );
         // A second remove (a fast loop exit racing the failure cleanup) is safe.
         assert!(remove_native_session(&registry, "s1").is_none());
+    }
+
+    #[test]
+    fn drain_native_sessions_for_app_exit_waits_for_sessions_that_close() {
+        let registry = NativeSessionRegistry::default();
+        let mut receivers = Vec::new();
+        for session_id in ["s1", "s2"] {
+            let (command_sender, command_receiver) =
+                channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
+            receivers.push(command_receiver);
+            insert_native_session(
+                &registry,
+                session_id,
+                NativeSessionHandle {
+                    command_sender,
+                    host: minimal_ssh_host(),
+                    state: Arc::new(Mutex::new(NativeSessionState::default())),
+                },
+            );
+        }
+
+        let poll_interval = Duration::from_millis(NATIVE_SESSION_POLL_INTERVAL_MS);
+        let mut sessions_to_close = ["s1", "s2"].into_iter();
+        let mut sleep_calls = Vec::new();
+
+        assert!(
+            drain_native_sessions_for_app_exit_with_sleep(&registry, Duration::MAX, |duration| {
+                sleep_calls.push(duration);
+                let session_id = sessions_to_close
+                    .next()
+                    .expect("each sleep should advance one session close");
+                assert!(remove_native_session(&registry, session_id).is_some());
+            },),
+            "the drain should complete once every session removes itself"
+        );
+        assert_eq!(sleep_calls, vec![poll_interval, poll_interval]);
+        assert!(sessions_to_close.next().is_none());
+        assert_eq!(live_native_session_count(&registry), 0);
+
+        for mut receiver in receivers {
+            assert!(matches!(
+                receiver.try_recv(),
+                Ok(NativeSessionCommand::Close)
+            ));
+        }
+    }
+
+    #[test]
+    fn drain_native_sessions_for_app_exit_times_out_when_sessions_stay_live() {
+        let registry = NativeSessionRegistry::default();
+        let (command_sender, mut receiver) = channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
+        insert_native_session(
+            &registry,
+            "stuck",
+            NativeSessionHandle {
+                command_sender,
+                host: minimal_ssh_host(),
+                state: Arc::new(Mutex::new(NativeSessionState::default())),
+            },
+        );
+
+        let mut sleep_calls = 0;
+        assert!(
+            !drain_native_sessions_for_app_exit_with_sleep(&registry, Duration::ZERO, |_| {
+                sleep_calls += 1
+            },),
+            "the drain must give up once the bounded deadline expires"
+        );
+        assert_eq!(sleep_calls, 0, "the drain must not sleep past its deadline");
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(NativeSessionCommand::Close)
+        ));
+        assert_eq!(
+            live_native_session_count(&registry),
+            1,
+            "the registry stays live when the session never closes"
+        );
     }
 
     fn build_test_host_chain() -> BackendHostConnection {
