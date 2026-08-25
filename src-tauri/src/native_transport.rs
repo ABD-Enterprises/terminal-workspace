@@ -1859,6 +1859,11 @@ pub(crate) fn execute_native_snippet_target(
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    // Native snippets capture fd 2 from the local `/usr/bin/ssh` process.
+    // OpenSSH writes the remote command's stderr there AND may also write its
+    // own client diagnostics (for example first-use host-key warnings), so this
+    // field is intentionally recorded as possibly combined rather than
+    // pretending it is remote-only like the ssh2-backed Node path.
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code();
 
@@ -2418,6 +2423,253 @@ mod tests {
             sftp_root: None,
             username: "deploy".to_string(),
         }
+    }
+
+    fn conformance_fixture() -> Value {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri always has a parent")
+            .join("tests/fixtures/security-helper-conformance.json");
+        let raw = fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!("conformance fixture must be readable at {path:?}: {error}")
+        });
+        serde_json::from_str(&raw).expect("conformance fixture must be valid JSON")
+    }
+
+    #[test]
+    fn native_snippet_stderr_semantics_match_the_shared_corpus() {
+        let fixture = conformance_fixture();
+        let cases = fixture["snippetStderrSemantics"]
+            .as_array()
+            .expect("snippetStderrSemantics must be an array");
+        assert!(
+            !cases.is_empty(),
+            "snippetStderrSemantics must not be empty"
+        );
+
+        let native = cases
+            .iter()
+            .find(|case| case["backend"] == "native-snippet")
+            .expect("fixture must record native-snippet stderr semantics");
+        assert_eq!(
+            native["meaning"],
+            Value::String("possibly-combined".to_string())
+        );
+        assert_eq!(
+            native["includesClientDiagnostics"],
+            Value::Bool(true),
+            "native snippet stderr must stay recorded as a combined stream"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    struct LocalFixtureSshd {
+        child: process::Child,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl Drop for LocalFixtureSshd {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn reserve_fixture_port() -> u16 {
+        std::net::TcpListener::bind(("127.0.0.1", 0))
+            .expect("fixture listener should bind")
+            .local_addr()
+            .expect("fixture listener should expose its address")
+            .port()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn wait_for_fixture(mut condition: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if condition() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        panic!("fixture condition did not become true before the timeout");
+    }
+
+    #[cfg(target_os = "macos")]
+    fn generate_fixture_keypair(path: &Path, key_type: &str, passphrase: &str) {
+        let output = Command::new("/usr/bin/ssh-keygen")
+            .args([
+                "-q",
+                "-t",
+                key_type,
+                "-N",
+                passphrase,
+                "-f",
+                &path.to_string_lossy(),
+            ])
+            .output()
+            .expect("ssh-keygen should run");
+        assert!(
+            output.status.success(),
+            "ssh-keygen failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    fn spawn_local_fixture_sshd(
+        root: &Path,
+        port: u16,
+        username: &str,
+        authorized_keys: &Path,
+        host_key: &Path,
+    ) -> LocalFixtureSshd {
+        let config_path = root.join("sshd_config");
+        let log_path = root.join("sshd.log");
+        fs::write(
+            &config_path,
+            format!(
+                "Port {port}\n\
+ListenAddress 127.0.0.1\n\
+HostKey {}\n\
+PidFile {}\n\
+AuthorizedKeysFile {}\n\
+PasswordAuthentication no\n\
+KbdInteractiveAuthentication no\n\
+ChallengeResponseAuthentication no\n\
+UsePAM no\n\
+PubkeyAuthentication yes\n\
+PermitRootLogin no\n\
+AllowUsers {username}\n\
+StrictModes no\n\
+PrintMotd no\n\
+PermitTTY yes\n\
+AllowTcpForwarding yes\n\
+GatewayPorts yes\n\
+UseDNS no\n\
+LogLevel VERBOSE\n\
+Subsystem sftp internal-sftp\n",
+                host_key.to_string_lossy(),
+                root.join("sshd.pid").to_string_lossy(),
+                authorized_keys.to_string_lossy()
+            ),
+        )
+        .expect("sshd config should be written");
+
+        let mut sshd = LocalFixtureSshd {
+            child: Command::new("/usr/sbin/sshd")
+                .arg("-D")
+                .arg("-f")
+                .arg(&config_path)
+                .arg("-E")
+                .arg(&log_path)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("sshd should spawn"),
+        };
+        wait_for_fixture(|| {
+            if sshd
+                .child
+                .try_wait()
+                .expect("sshd status should be readable")
+                .is_some()
+            {
+                let log_output = fs::read_to_string(&log_path).unwrap_or_default();
+                panic!("fixture sshd exited early: {log_output}");
+            }
+            fs::read_to_string(&log_path)
+                .map(|output| {
+                    output.contains(&format!("Server listening on 127.0.0.1 port {port}"))
+                })
+                .unwrap_or(false)
+        });
+        sshd
+    }
+
+    /// Native snippets route through `/usr/bin/ssh`, so the captured stderr is
+    /// whatever OpenSSH writes to its own fd 2. A first-use `accept-new`
+    /// warning and the remote command's stderr therefore arrive as one stream.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires an unsandboxed localhost sshd runtime"]
+    fn localhost_ssh_transport_fixture_native_snippet_stderr_can_include_client_diagnostics() {
+        let root = test_root("native-snippet-stderr");
+        let sshd_root = root.join("sshd");
+        let durable_root = root.join("durable-known-hosts");
+        fs::create_dir_all(&sshd_root).expect("fixture sshd root should be created");
+        fs::create_dir_all(&durable_root).expect("durable known_hosts root should be created");
+        let username = env::var("USER").expect("USER should be set for fixture sshd");
+        let client_key_path = root.join("client_key");
+        let host_key_path = sshd_root.join("ssh_host_rsa_key");
+        let authorized_keys_path = sshd_root.join("authorized_keys");
+        generate_fixture_keypair(&client_key_path, "ed25519", "");
+        generate_fixture_keypair(&host_key_path, "rsa", "");
+        fs::copy(
+            format!("{}.pub", client_key_path.to_string_lossy()),
+            &authorized_keys_path,
+        )
+        .expect("authorized_keys should be copied");
+        let port = reserve_fixture_port();
+        let _sshd = spawn_local_fixture_sshd(
+            &sshd_root,
+            port,
+            &username,
+            &authorized_keys_path,
+            &host_key_path,
+        );
+
+        let store = crate::native_host_keys::NativeHostKeyStore::new(&durable_root)
+            .expect("durable known_hosts store should be created");
+        crate::native_host_keys::publish_durable_known_hosts_path(store.path().to_path_buf());
+        assert!(
+            !store.path().exists()
+                || fs::read_to_string(store.path())
+                    .expect("known_hosts should be readable when present")
+                    .trim()
+                    .is_empty(),
+            "fixture must start without a pinned key so accept-new can warn"
+        );
+
+        let mut host = test_host(&client_key_path, "");
+        host.hostname = "127.0.0.1".to_string();
+        host.port = u32::from(port);
+        host.username = username;
+        host.known_host_algorithm = None;
+        host.known_host_public_key = None;
+
+        let result = execute_native_snippet_target(
+            SnippetExecutionTarget {
+                host,
+                id: "direct".to_string(),
+                label: "Direct".to_string(),
+            },
+            "printf 'REMOTE_STDERR_SENTINEL\\n' >&2".to_string(),
+        );
+
+        assert!(
+            result.ok,
+            "fixture command should succeed; stderr was {:?}",
+            result.stderr
+        );
+        assert!(
+            result.stderr.contains("REMOTE_STDERR_SENTINEL"),
+            "stderr must contain the remote command output: {:?}",
+            result.stderr
+        );
+        assert!(
+            result.stderr.contains("Permanently added"),
+            "stderr must also contain the OpenSSH first-use warning: {:?}",
+            result.stderr
+        );
+        assert!(
+            fs::read_to_string(store.path())
+                .expect("known_hosts should be readable after accept-new")
+                .contains("[127.0.0.1]:"),
+            "accept-new should persist the host key it warned about"
+        );
     }
 
     #[test]

@@ -415,6 +415,30 @@
     "The groups below prove serialization agreement only. They do NOT prove that either backend can produce every value.",
     "reachableBy names the concrete response-producing paths that can reach each value. Native snippets use OpenSSH and cannot distinguish handshake or authentication failures, while native copy-key uses libssh2 and can."
   ],
+  "$snippetStderrSemanticsComment": [
+    "snippetStderrSemantics records what the `stderr` field means for each snippet backend, the same way reachableBy records which paths can emit each failure value.",
+    "Node snippets preserve remote stderr only; native snippets capture `/usr/bin/ssh` fd 2 and therefore may combine remote stderr with OpenSSH client diagnostics."
+  ],
+  "snippetStderrSemantics": [
+    {
+      "backend": "node-snippet",
+      "meaning": "remote-only",
+      "includesClientDiagnostics": false,
+      "reachableBy": [
+        "node-snippet"
+      ],
+      "why": "ssh2 exposes the remote channel's extended-data stderr separately from local client diagnostics"
+    },
+    {
+      "backend": "native-snippet",
+      "meaning": "possibly-combined",
+      "includesClientDiagnostics": true,
+      "reachableBy": [
+        "native-snippet"
+      ],
+      "why": "OpenSSH writes remote stderr and its own client warnings to the same fd 2 stream before the parent captures it"
+    }
+  ],
   "copyKeyFailures": [
     {
       "variant": "private-key-path-required",
