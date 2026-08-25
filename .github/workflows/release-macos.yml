@@ -183,3 +183,4 @@ jobs:
           if-no-files-found: error
           path: |
             artifacts/release
+          retention-days: 14
