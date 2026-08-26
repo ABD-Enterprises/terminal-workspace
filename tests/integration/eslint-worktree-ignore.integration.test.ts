@@ -26,13 +26,25 @@ describe("#267: eslint ignores orc worktree checkouts", () => {
     await writeFile(PROBE_FILE, "const unusedProbe: any = 1;\n", "utf8");
 
     try {
-      const eslint = new ESLint();
+      const eslint = new ESLint({
+        globInputPaths: false,
+        warnIgnored: true,
+      });
 
-      // eslint refuses a glob that resolves entirely to ignored files, and says
-      // so. That refusal is the assertion: the probe file exists and matches the
-      // glob, so the only way here is for the ignore to have taken effect.
-      await expect(eslint.lintFiles([".worktrees/**/*.ts"])).rejects.toThrow(
-        /All files matched by '\.worktrees\/\*\*\/\*\.ts' are ignored/
+      // Use a direct file probe so this assertion stays independent of the
+      // size of sibling worktrees and their node_modules trees.
+      const results = await eslint.lintFiles([PROBE_FILE]);
+
+      expect(results).toHaveLength(1);
+      expect(results[0]?.filePath).toMatch(/\.worktrees\/eslint-ignore-probe\/.*\/probe\.ts$/);
+      expect(results[0]?.warningCount).toBe(1);
+      expect(results[0]?.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringMatching(/^File ignored\b/),
+            severity: 1,
+          }),
+        ])
       );
     } finally {
       await rm(".worktrees/eslint-ignore-probe", { recursive: true, force: true });
