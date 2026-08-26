@@ -159,7 +159,7 @@ describe("Tauri SQLite persistence", () => {
 
   it("migrates localStorage payloads into SQLite and mirrors successful writes", async () => {
     const db = new FakeDatabase();
-    const { localStorage, persistence } = await loadPersistence(db);
+    const { load, localStorage, persistence } = await loadPersistence(db);
     const storage = persistence.createTermsnipStorage("terminal-workspace-hosts");
     localStorage.setItem("terminal-workspace-hosts", "local-payload");
 
