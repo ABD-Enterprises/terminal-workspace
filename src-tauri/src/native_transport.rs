@@ -1859,6 +1859,8 @@ pub(crate) fn execute_native_snippet_target(
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    // Native snippets capture `/usr/bin/ssh` fd 2, so this field may contain
+    // both the remote command's stderr and local OpenSSH client diagnostics.
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code();
 
@@ -2100,7 +2102,10 @@ mod tests {
     use super::*;
     #[cfg(unix)]
     use std::os::unix::fs::{symlink, PermissionsExt};
+    #[cfg(target_os = "macos")]
+    use std::os::unix::net::UnixListener;
     use std::{
+        net::TcpListener,
         process,
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -2420,6 +2425,149 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    struct FixtureSshd {
+        child: process::Child,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl Drop for FixtureSshd {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn fixture_port() -> u16 {
+        TcpListener::bind(("127.0.0.1", 0))
+            .expect("fixture port should bind")
+            .local_addr()
+            .expect("fixture listener should expose an address")
+            .port()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn wait_for_fixture(description: &str, mut predicate: impl FnMut() -> bool) {
+        let started_at = Instant::now();
+        while started_at.elapsed() < Duration::from_secs(15) {
+            if predicate() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        panic!("Timed out while waiting for {description}");
+    }
+
+    #[cfg(target_os = "macos")]
+    fn fixture_current_username() -> String {
+        env::var("USER").unwrap_or_else(|_| {
+            let output = Command::new("/usr/bin/id")
+                .arg("-un")
+                .output()
+                .expect("id -un should run");
+            assert!(
+                output.status.success(),
+                "id -un failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout)
+                .expect("id -un stdout should be utf8")
+                .trim()
+                .to_string()
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn fixture_public_key(path: &Path) -> (String, String) {
+        let contents = fs::read_to_string(path).expect("public key should be readable");
+        let mut parts = contents.split_whitespace();
+        (
+            parts
+                .next()
+                .expect("public key should include an algorithm")
+                .to_string(),
+            parts
+                .next()
+                .expect("public key should include a key blob")
+                .to_string(),
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    fn spawn_fixture_sshd(
+        root: &Path,
+        port: u16,
+        username: &str,
+        authorized_keys: &Path,
+        host_key: &Path,
+    ) -> FixtureSshd {
+        let config_path = root.join("sshd_config");
+        let log_path = root.join("sshd.log");
+        fs::write(
+            &config_path,
+            format!(
+                "Port {port}\n\
+ListenAddress 127.0.0.1\n\
+HostKey {}\n\
+PidFile {}\n\
+AuthorizedKeysFile {}\n\
+PasswordAuthentication no\n\
+KbdInteractiveAuthentication no\n\
+ChallengeResponseAuthentication no\n\
+UsePAM no\n\
+PubkeyAuthentication yes\n\
+PermitRootLogin no\n\
+AllowUsers {username}\n\
+StrictModes no\n\
+PrintMotd no\n\
+PermitTTY yes\n\
+AllowTcpForwarding no\n\
+GatewayPorts no\n\
+UseDNS no\n\
+LogLevel VERBOSE\n\
+Subsystem sftp internal-sftp\n",
+                host_key.to_string_lossy(),
+                root.join("sshd.pid").to_string_lossy(),
+                authorized_keys.to_string_lossy()
+            ),
+        )
+        .expect("fixture sshd config should be written");
+
+        let mut sshd = FixtureSshd {
+            child: Command::new("/usr/sbin/sshd")
+                .arg("-D")
+                .arg("-f")
+                .arg(&config_path)
+                .arg("-E")
+                .arg(&log_path)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("fixture sshd should spawn"),
+        };
+
+        wait_for_fixture("fixture sshd startup", || {
+            if sshd
+                .child
+                .try_wait()
+                .expect("fixture sshd status should be readable")
+                .is_some()
+            {
+                let log_output = fs::read_to_string(&log_path).unwrap_or_default();
+                panic!("fixture sshd exited early: {log_output}");
+            }
+            fs::read_to_string(&log_path)
+                .map(|output| {
+                    output.contains(&format!("Server listening on 127.0.0.1 port {port}"))
+                })
+                .unwrap_or(false)
+        });
+
+        sshd
+    }
+
     #[test]
     fn native_snippet_host_rejection_is_typed_without_validation_prose() {
         let sentinel = "TS_NATIVE_SNIPPET_VALIDATION_PROBE";
@@ -2442,6 +2590,90 @@ mod tests {
         );
         let serialized = serde_json::to_string(&result).expect("result must serialize");
         assert!(!serialized.contains(sentinel));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires an unsandboxed localhost sshd runtime"]
+    fn localhost_ssh_transport_fixture_native_snippet_stderr_is_possibly_combined() {
+        let root = test_root("native-stderr-mixed");
+        let server_root = root.join("sshd");
+        fs::create_dir_all(&server_root).expect("fixture sshd root should be created");
+
+        let client_key = root.join("client_ed25519");
+        generate_test_key(&client_key, "");
+        let client_public_key = fs::read_to_string(format!("{}.pub", client_key.to_string_lossy()))
+            .expect("client public key should be readable");
+        let authorized_keys = server_root.join("authorized_keys");
+        fs::write(&authorized_keys, client_public_key).expect("authorized_keys should be written");
+
+        let host_key = server_root.join("ssh_host_rsa_key");
+        generate_test_key(&host_key, "");
+        let (known_host_algorithm, known_host_public_key) = fixture_public_key(&PathBuf::from(
+            format!("{}.pub", host_key.to_string_lossy()),
+        ));
+        let port = fixture_port();
+        let username = fixture_current_username();
+        let _sshd = spawn_fixture_sshd(&server_root, port, &username, &authorized_keys, &host_key);
+
+        let host = BackendHostConnection {
+            agent_forwarding: false,
+            auth_method: "privateKey".to_string(),
+            environment: None,
+            host_key_policy: None,
+            hostname: "127.0.0.1".to_string(),
+            jump_host: None,
+            known_host_algorithm: Some(known_host_algorithm),
+            known_host_public_key: Some(known_host_public_key),
+            password: String::new(),
+            passphrase: String::new(),
+            port: u32::from(port),
+            private_key_path: client_key.to_string_lossy().into_owned(),
+            protocol: "ssh".to_string(),
+            sftp_root: None,
+            username,
+        };
+
+        let session_label = next_native_session_id();
+        let (context, mut child, master) = open_native_ssh_control_session(&host, &session_label)
+            .expect("control session should open");
+
+        let control_path = context.session_dir.join("control.sock");
+        fs::remove_file(&control_path).expect("fixture control socket should be removable");
+        let stale_listener =
+            UnixListener::bind(&control_path).expect("fixture should bind a stale control socket");
+        drop(stale_listener);
+
+        let output = run_native_ssh_command(
+            &context,
+            "printf 'REMOTE_STDERR_SENTINEL\\n' >&2; printf 'REMOTE_STDOUT_SENTINEL\\n'",
+        )
+        .expect("fixture command should still execute");
+
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(master);
+        let _ = fs::remove_dir_all(&context.session_dir);
+        let _ = fs::remove_dir_all(&root);
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        assert!(
+            stdout.contains("REMOTE_STDOUT_SENTINEL"),
+            "fixture must prove the remote command ran: {stdout}"
+        );
+        assert!(
+            stderr.contains("REMOTE_STDERR_SENTINEL"),
+            "fixture must prove remote stderr reached ssh fd 2: {stderr}"
+        );
+        assert!(
+            stderr.contains("Control socket connect(")
+                || stderr.contains("mux_client_")
+                || stderr.contains("No such file or directory")
+                || stderr.contains("Connection refused"),
+            "fixture must prove a local OpenSSH diagnostic shared the same stderr stream: {stderr}"
+        );
     }
 
     #[test]
