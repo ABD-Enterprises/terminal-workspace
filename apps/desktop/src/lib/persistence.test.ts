@@ -132,21 +132,22 @@ function serializeDeletions(deletions: Partial<VaultDeletionMap>) {
 
 async function loadPersistence(db: FakeDatabase, options: FakeDatabaseOptions = {}) {
   const localStorage = new MemoryStorage();
+  const loadMock = vi.fn(async () => {
+    if (options.failLoad) {
+      throw new Error("load failed");
+    }
+    return db;
+  });
   vi.stubGlobal("window", { localStorage });
   vi.doMock("./backend-runtime", () => ({ isTauriRuntime: () => true }));
   vi.doMock("@tauri-apps/plugin-sql", () => ({
     default: {
-      load: vi.fn(async () => {
-        if (options.failLoad) {
-          throw new Error("load failed");
-        }
-        return db;
-      }),
+      load: loadMock,
     },
   }));
 
   const persistence = await import("./persistence");
-  return { localStorage, persistence };
+  return { loadMock, localStorage, persistence };
 }
 
 describe("Tauri SQLite persistence", () => {
@@ -158,11 +159,12 @@ describe("Tauri SQLite persistence", () => {
 
   it("migrates localStorage payloads into SQLite and mirrors successful writes", async () => {
     const db = new FakeDatabase();
-    const { localStorage, persistence } = await loadPersistence(db);
+    const { loadMock, localStorage, persistence } = await loadPersistence(db);
     const storage = persistence.createTermsnipStorage("terminal-workspace-hosts");
     localStorage.setItem("terminal-workspace-hosts", "local-payload");
 
     await expect(storage.getItem("terminal-workspace-hosts")).resolves.toBe("local-payload");
+    expect(loadMock).toHaveBeenCalledWith("sqlite:terminalworkspace.db");
     expect(db.stores.get("hosts_store")).toBe("local-payload");
 
     await storage.setItem("terminal-workspace-hosts", "sqlite-payload");

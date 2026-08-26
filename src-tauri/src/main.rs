@@ -383,7 +383,8 @@ const NATIVE_SSH_CONTROL_READY_TIMEOUT_MS: u64 = 15_000;
 /// blocking channel reads (e.g. copy-key's read_to_string).
 const NATIVE_SSH_CONNECT_TIMEOUT_MS: u64 = 15_000;
 const NATIVE_SSH_IO_TIMEOUT_MS: u32 = 30_000;
-const TERMSNIP_DATABASE_URL: &str = "sqlite:termsnip.db";
+const TERMINAL_WORKSPACE_DATABASE_URL: &str = "sqlite:terminalworkspace.db";
+const LEGACY_DATABASE_URL: &str = "sqlite:termsnip.db";
 static SESSION_STREAM_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NATIVE_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NATIVE_FORWARD_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -5159,20 +5160,125 @@ fn persistence_migrations() -> Vec<Migration> {
 
 /// #180: mirrors `tauri-plugin-sql` 2.4.0's private `wrapper.rs::path_mapper`.
 /// Tests cover only this helper, not the plugin mapper, so re-check it before upgrading.
-fn termsnip_database_path(app_config_dir: &Path) -> io::Result<PathBuf> {
-    let relative_path = TERMSNIP_DATABASE_URL
+fn sqlite_database_path(app_config_dir: &Path, database_url: &str) -> io::Result<PathBuf> {
+    let relative_path = database_url
         .split_once(':')
         .map(|(_, path)| path)
         .ok_or_else(|| {
             io::Error::other(format!(
-                "could not parse SQLite database URL {TERMSNIP_DATABASE_URL:?}"
+                "could not parse SQLite database URL {database_url:?}"
             ))
         })?;
 
     Ok(app_config_dir.join(relative_path))
 }
 
-async fn bootstrap_termsnip_database_wal(database_path: &Path) -> io::Result<()> {
+fn terminal_workspace_database_path(app_config_dir: &Path) -> io::Result<PathBuf> {
+    sqlite_database_path(app_config_dir, TERMINAL_WORKSPACE_DATABASE_URL)
+}
+
+fn legacy_database_path(app_config_dir: &Path) -> io::Result<PathBuf> {
+    sqlite_database_path(app_config_dir, LEGACY_DATABASE_URL)
+}
+
+fn sqlite_sidecar_path(database_path: &Path, suffix: &str) -> PathBuf {
+    let mut sidecar_path = database_path.as_os_str().to_owned();
+    sidecar_path.push(suffix);
+    PathBuf::from(sidecar_path)
+}
+
+fn copy_optional_sqlite_sidecar(
+    legacy_path: &Path,
+    terminal_workspace_path: &Path,
+    suffix: &str,
+) -> io::Result<()> {
+    let legacy_sidecar_path = sqlite_sidecar_path(legacy_path, suffix);
+    let terminal_workspace_sidecar_path = sqlite_sidecar_path(terminal_workspace_path, suffix);
+
+    match fs::copy(&legacy_sidecar_path, &terminal_workspace_sidecar_path) {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            match fs::remove_file(&terminal_workspace_sidecar_path) {
+                Ok(()) => Ok(()),
+                Err(remove_error) if remove_error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(remove_error) => Err(io::Error::other(format!(
+                    "could not remove stale SQLite sidecar {}: {remove_error}",
+                    terminal_workspace_sidecar_path.display()
+                ))),
+            }
+        }
+        Err(error) => Err(io::Error::other(format!(
+            "could not copy SQLite sidecar {} to {}: {error}",
+            legacy_sidecar_path.display(),
+            terminal_workspace_sidecar_path.display()
+        ))),
+    }
+}
+
+fn migration_temp_database_path(terminal_workspace_path: &Path) -> PathBuf {
+    let mut temp_path = terminal_workspace_path.as_os_str().to_owned();
+    temp_path.push(".migrating");
+    PathBuf::from(temp_path)
+}
+
+fn copy_legacy_database_if_needed(app_config_dir: &Path) -> io::Result<()> {
+    let terminal_workspace_path = terminal_workspace_database_path(app_config_dir)?;
+    if terminal_workspace_path.exists() {
+        return Ok(());
+    }
+
+    let legacy_path = legacy_database_path(app_config_dir)?;
+    match fs::metadata(&legacy_path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => {
+            return Err(io::Error::other(format!(
+                "legacy SQLite database path {} is not a file",
+                legacy_path.display()
+            )));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(io::Error::other(format!(
+                "could not inspect legacy SQLite database {}: {error}",
+                legacy_path.display()
+            )));
+        }
+    }
+
+    for suffix in ["-wal", "-shm"] {
+        copy_optional_sqlite_sidecar(&legacy_path, &terminal_workspace_path, suffix)?;
+    }
+
+    let temp_path = migration_temp_database_path(&terminal_workspace_path);
+    match fs::remove_file(&temp_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(io::Error::other(format!(
+                "could not remove stale SQLite migration temp file {}: {error}",
+                temp_path.display()
+            )));
+        }
+    }
+    fs::copy(&legacy_path, &temp_path).map_err(|error| {
+        io::Error::other(format!(
+            "could not copy legacy SQLite database {} to temp file {}: {error}",
+            legacy_path.display(),
+            temp_path.display()
+        ))
+    })?;
+    fs::rename(&temp_path, &terminal_workspace_path).map_err(|error| {
+        io::Error::other(format!(
+            "could not install migrated SQLite database {} as {}: {error}",
+            temp_path.display(),
+            terminal_workspace_path.display()
+        ))
+    })?;
+
+    Ok(())
+}
+
+async fn bootstrap_terminal_workspace_database_wal(database_path: &Path) -> io::Result<()> {
     let options = SqliteConnectOptions::new()
         .filename(database_path)
         .create_if_missing(true)
@@ -5209,25 +5315,23 @@ async fn bootstrap_termsnip_database_wal(database_path: &Path) -> io::Result<()>
     Ok(())
 }
 
-async fn bootstrap_termsnip_database_wal_best_effort<Warn>(
+async fn bootstrap_terminal_workspace_database<Warn>(
     app_config_dir: io::Result<PathBuf>,
     report_warning: Warn,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     Warn: FnOnce(&str),
 {
-    let result = async {
-        let app_config_dir = app_config_dir?;
-        fs::create_dir_all(&app_config_dir).map_err(|error| {
-            io::Error::other(format!(
-                "could not create app config directory {} for SQLite WAL bootstrap: {error}",
-                app_config_dir.display()
-            ))
-        })?;
-        let database_path = termsnip_database_path(&app_config_dir)?;
-        bootstrap_termsnip_database_wal(&database_path).await
-    }
-    .await;
+    let app_config_dir = app_config_dir?;
+    fs::create_dir_all(&app_config_dir).map_err(|error| {
+        io::Error::other(format!(
+            "could not create app config directory {} for SQLite bootstrap: {error}",
+            app_config_dir.display()
+        ))
+    })?;
+    copy_legacy_database_if_needed(&app_config_dir)?;
+    let database_path = terminal_workspace_database_path(&app_config_dir)?;
+    let result = bootstrap_terminal_workspace_database_wal(&database_path).await;
 
     // #180: WAL can be unavailable on network or restricted filesystems. Before
     // #180 the app still worked in SQLite's available mode, so availability wins.
@@ -5240,15 +5344,15 @@ where
     Ok(())
 }
 
-fn termsnip_wal_bootstrap_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    tauri::plugin::Builder::new("termsnip-wal-bootstrap")
+fn terminal_workspace_database_bootstrap_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("terminal-workspace-database-bootstrap")
         .setup(|app, _api| {
             let app_config_dir = app.path().app_config_dir().map_err(|error| {
                 io::Error::other(format!(
-                    "could not resolve app config directory for SQLite WAL bootstrap: {error}"
+                    "could not resolve app config directory for SQLite bootstrap: {error}"
                 ))
             });
-            tauri::async_runtime::block_on(bootstrap_termsnip_database_wal_best_effort(
+            tauri::async_runtime::block_on(bootstrap_terminal_workspace_database(
                 app_config_dir,
                 |warning| eprintln!("{warning}"),
             ))
@@ -5260,10 +5364,10 @@ fn main() {
     let app = tauri::Builder::default()
         // #180: order is correctness-critical — bootstrap the file in WAL mode
         // before tauri-plugin-sql preloads its pool and runs migrations.
-        .plugin(termsnip_wal_bootstrap_plugin())
+        .plugin(terminal_workspace_database_bootstrap_plugin())
         .plugin(
             tauri_plugin_sql::Builder::default()
-                .add_migrations(TERMSNIP_DATABASE_URL, persistence_migrations())
+                .add_migrations(TERMINAL_WORKSPACE_DATABASE_URL, persistence_migrations())
                 .build(),
         )
         // #86: auto-updater. Endpoints + signing pubkey come from
@@ -5475,6 +5579,100 @@ mod tests {
         }
     }
 
+    #[test]
+    fn sqlite_legacy_database_copy_installs_sidecars_before_final_database() {
+        let root = SqliteTempRoot::new();
+        let legacy_path = legacy_database_path(root.path()).expect("legacy path should resolve");
+        let terminal_workspace_path =
+            terminal_workspace_database_path(root.path()).expect("current path should resolve");
+
+        fs::write(&legacy_path, "legacy-main").expect("legacy database should be written");
+        fs::write(sqlite_sidecar_path(&legacy_path, "-wal"), "legacy-wal")
+            .expect("legacy WAL should be written");
+        fs::write(sqlite_sidecar_path(&legacy_path, "-shm"), "legacy-shm")
+            .expect("legacy SHM should be written");
+
+        copy_legacy_database_if_needed(root.path()).expect("legacy database should migrate");
+
+        assert_eq!(
+            fs::read_to_string(&terminal_workspace_path)
+                .expect("current database should be installed"),
+            "legacy-main"
+        );
+        assert_eq!(
+            fs::read_to_string(sqlite_sidecar_path(&terminal_workspace_path, "-wal"))
+                .expect("current WAL sidecar should be copied"),
+            "legacy-wal"
+        );
+        assert_eq!(
+            fs::read_to_string(sqlite_sidecar_path(&terminal_workspace_path, "-shm"))
+                .expect("current SHM sidecar should be copied"),
+            "legacy-shm"
+        );
+        assert!(
+            legacy_path.exists(),
+            "legacy database must remain in place for rollback"
+        );
+    }
+
+    #[test]
+    fn sqlite_legacy_database_copy_retries_when_final_database_is_absent() {
+        let root = SqliteTempRoot::new();
+        let legacy_path = legacy_database_path(root.path()).expect("legacy path should resolve");
+        let terminal_workspace_path =
+            terminal_workspace_database_path(root.path()).expect("current path should resolve");
+        let temp_path = migration_temp_database_path(&terminal_workspace_path);
+
+        fs::write(&legacy_path, "legacy-main").expect("legacy database should be written");
+        fs::write(sqlite_sidecar_path(&legacy_path, "-wal"), "legacy-wal")
+            .expect("legacy WAL should be written");
+        fs::write(
+            sqlite_sidecar_path(&terminal_workspace_path, "-wal"),
+            "partial-wal",
+        )
+        .expect("interrupted WAL sidecar should be written");
+        fs::write(&temp_path, "partial-main").expect("interrupted temp DB should be written");
+
+        copy_legacy_database_if_needed(root.path())
+            .expect("legacy database should retry migration");
+
+        assert_eq!(
+            fs::read_to_string(&terminal_workspace_path)
+                .expect("current database should be installed"),
+            "legacy-main"
+        );
+        assert_eq!(
+            fs::read_to_string(sqlite_sidecar_path(&terminal_workspace_path, "-wal"))
+                .expect("current WAL sidecar should be overwritten"),
+            "legacy-wal"
+        );
+        assert!(
+            !temp_path.exists(),
+            "successful retry must remove the stale migration temp file"
+        );
+    }
+
+    #[test]
+    fn sqlite_legacy_database_copy_keeps_existing_current_database_authoritative() {
+        let root = SqliteTempRoot::new();
+        let legacy_path = legacy_database_path(root.path()).expect("legacy path should resolve");
+        let terminal_workspace_path =
+            terminal_workspace_database_path(root.path()).expect("current path should resolve");
+
+        fs::write(&legacy_path, "legacy-main").expect("legacy database should be written");
+        fs::write(&terminal_workspace_path, "current-main")
+            .expect("current database should be written");
+
+        copy_legacy_database_if_needed(root.path())
+            .expect("existing current database should be kept");
+
+        assert_eq!(
+            fs::read_to_string(&terminal_workspace_path)
+                .expect("current database should remain readable"),
+            "current-main"
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn sqlite_wal_bootstrap_is_best_effort_when_wal_is_unavailable() {
@@ -5482,7 +5680,7 @@ mod tests {
 
         let root = SqliteTempRoot::new();
         let database_path =
-            termsnip_database_path(root.path()).expect("database path should resolve");
+            terminal_workspace_database_path(root.path()).expect("database path should resolve");
         let options = SqliteConnectOptions::new()
             .filename(&database_path)
             .create_if_missing(true);
@@ -5513,7 +5711,7 @@ mod tests {
 
         let mut reported_warning = None;
         let result =
-            bootstrap_termsnip_database_wal_best_effort(Ok(root.path().to_path_buf()), |warning| {
+            bootstrap_terminal_workspace_database(Ok(root.path().to_path_buf()), |warning| {
                 reported_warning = Some(warning.to_owned())
             })
             .await;
@@ -5535,8 +5733,8 @@ mod tests {
     async fn sqlite_wal_supports_concurrent_writer_with_reader_snapshot() {
         let root = SqliteTempRoot::new();
         let database_path =
-            termsnip_database_path(root.path()).expect("database path should resolve");
-        bootstrap_termsnip_database_wal(&database_path)
+            terminal_workspace_database_path(root.path()).expect("database path should resolve");
+        bootstrap_terminal_workspace_database_wal(&database_path)
             .await
             .expect("WAL bootstrap should succeed");
 

@@ -1,0 +1,1 @@
+- [FIX] Rename the native SQLite database to `terminalworkspace.db` with a legacy copy migration. (#129)
