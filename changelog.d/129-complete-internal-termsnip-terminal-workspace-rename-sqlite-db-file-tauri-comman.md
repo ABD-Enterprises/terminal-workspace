@@ -1,1 +1,1 @@
-- [FIX] Rename the native SQLite database file to terminalworkspace.db with a one-release copy migration from termsnip.db. (#129)
+- [FIX] Rename the native SQLite database file to terminalworkspace.db with a crash-safe one-release copy migration from termsnip.db. (#129)

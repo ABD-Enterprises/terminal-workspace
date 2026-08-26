@@ -29,7 +29,7 @@ describe("demo ssh workflows", () => {
     const generatedKey = await generatePrivateKey({
       comment: "ops@demo",
       passphrase: "",
-      path: "~/.ssh/termsnip_demo",
+      path: "~/.ssh/terminal_workspace_demo",
       type: "rsa",
     });
 
@@ -37,7 +37,7 @@ describe("demo ssh workflows", () => {
     expect(importedKey.publicKeyPath).toBe("~/.ssh/id_ed25519.pub");
     expect(generatedKey.algorithm).toBe("RSA");
     expect(generatedKey.bits).toBe(4096);
-    expect(generatedKey.privateKeyPath).toBe("~/.ssh/termsnip_demo");
+    expect(generatedKey.privateKeyPath).toBe("~/.ssh/terminal_workspace_demo");
   });
 
   it("scans demo known hosts and returns deterministic snippet execution results", async () => {

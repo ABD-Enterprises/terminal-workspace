@@ -5197,17 +5197,36 @@ fn sqlite_sidecar_path(database_path: &Path, suffix: &str) -> io::Result<PathBuf
     Ok(database_path.with_file_name(sidecar_name))
 }
 
-fn copy_legacy_database_sidecar(
+fn sqlite_copy_temp_path(database_path: &Path) -> io::Result<PathBuf> {
+    let file_name = database_path.file_name().ok_or_else(|| {
+        io::Error::other(format!(
+            "could not derive SQLite copy temp path for {}",
+            database_path.display()
+        ))
+    })?;
+    let mut temp_name = file_name.to_os_string();
+    temp_name.push(".migration-copy");
+    Ok(database_path.with_file_name(temp_name))
+}
+
+fn sync_legacy_database_sidecar(
     legacy_path: &Path,
     terminal_workspace_path: &Path,
     suffix: &str,
 ) -> io::Result<()> {
     let legacy_sidecar = sqlite_sidecar_path(legacy_path, suffix)?;
-    if !legacy_sidecar.exists() {
-        return Ok(());
-    }
     let terminal_workspace_sidecar = sqlite_sidecar_path(terminal_workspace_path, suffix)?;
-    if terminal_workspace_sidecar.exists() {
+    if !legacy_sidecar.exists() {
+        match fs::remove_file(&terminal_workspace_sidecar) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(io::Error::other(format!(
+                    "could not remove stale SQLite sidecar {}: {error}",
+                    terminal_workspace_sidecar.display()
+                )));
+            }
+        }
         return Ok(());
     }
     fs::copy(&legacy_sidecar, &terminal_workspace_sidecar)
@@ -5219,6 +5238,38 @@ fn copy_legacy_database_sidecar(
                 terminal_workspace_sidecar.display()
             ))
         })
+}
+
+fn copy_legacy_database_main_last(
+    legacy_path: &Path,
+    terminal_workspace_path: &Path,
+) -> io::Result<()> {
+    let temp_path = sqlite_copy_temp_path(terminal_workspace_path)?;
+    match fs::remove_file(&temp_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(io::Error::other(format!(
+                "could not remove stale SQLite migration temp file {}: {error}",
+                temp_path.display()
+            )));
+        }
+    }
+    fs::copy(legacy_path, &temp_path).map_err(|error| {
+        io::Error::other(format!(
+            "could not copy legacy SQLite database {} to temporary path {}: {error}",
+            legacy_path.display(),
+            temp_path.display()
+        ))
+    })?;
+    fs::rename(&temp_path, terminal_workspace_path).map_err(|error| {
+        io::Error::other(format!(
+            "could not promote migrated SQLite database {} to {}: {error}",
+            temp_path.display(),
+            terminal_workspace_path.display()
+        ))
+    })?;
+    Ok(())
 }
 
 fn migrate_legacy_database_file(app_config_dir: &Path) -> io::Result<()> {
@@ -5238,17 +5289,9 @@ fn migrate_legacy_database_file(app_config_dir: &Path) -> io::Result<()> {
             ))
         })?;
     }
-    fs::copy(&legacy_path, &terminal_workspace_path)
-        .map(|_| ())
-        .map_err(|error| {
-            io::Error::other(format!(
-                "could not copy legacy SQLite database {} to {}: {error}",
-                legacy_path.display(),
-                terminal_workspace_path.display()
-            ))
-        })?;
-    copy_legacy_database_sidecar(&legacy_path, &terminal_workspace_path, "-wal")?;
-    copy_legacy_database_sidecar(&legacy_path, &terminal_workspace_path, "-shm")?;
+    sync_legacy_database_sidecar(&legacy_path, &terminal_workspace_path, "-wal")?;
+    sync_legacy_database_sidecar(&legacy_path, &terminal_workspace_path, "-shm")?;
+    copy_legacy_database_main_last(&legacy_path, &terminal_workspace_path)?;
     Ok(())
 }
 
@@ -5566,6 +5609,8 @@ mod tests {
         let legacy_shm = sqlite_sidecar_path(&legacy_path, "-shm").expect("legacy SHM path");
         let database_wal = sqlite_sidecar_path(&database_path, "-wal").expect("new WAL path");
         let database_shm = sqlite_sidecar_path(&database_path, "-shm").expect("new SHM path");
+        let database_copy_temp =
+            sqlite_copy_temp_path(&database_path).expect("new database copy temp path");
 
         fs::write(&legacy_path, b"legacy-db").expect("legacy database should be written");
         fs::write(&legacy_wal, b"legacy-wal").expect("legacy WAL should be written");
@@ -5608,6 +5653,34 @@ mod tests {
         assert_eq!(
             fs::read(&legacy_path).expect("legacy database should still remain"),
             b"changed-legacy-db"
+        );
+
+        fs::remove_file(&database_path).expect("new database should be removed");
+        fs::write(&database_wal, b"interrupted-wal").expect("partial WAL should be written");
+        fs::write(&database_shm, b"interrupted-shm").expect("partial SHM should be written");
+        fs::write(&database_copy_temp, b"interrupted-db")
+            .expect("partial database temp should be written");
+        fs::write(&legacy_path, b"retry-legacy-db").expect("legacy database should be rewritten");
+        fs::write(&legacy_wal, b"retry-legacy-wal").expect("legacy WAL should be rewritten");
+        fs::write(&legacy_shm, b"retry-legacy-shm").expect("legacy SHM should be rewritten");
+
+        migrate_legacy_database_file(root.path()).expect("migration should retry partial copy");
+
+        assert_eq!(
+            fs::read(&database_wal).expect("new WAL should be refreshed"),
+            b"retry-legacy-wal"
+        );
+        assert_eq!(
+            fs::read(&database_shm).expect("new SHM should be refreshed"),
+            b"retry-legacy-shm"
+        );
+        assert_eq!(
+            fs::read(&database_path).expect("new database should be promoted last"),
+            b"retry-legacy-db"
+        );
+        assert!(
+            !database_copy_temp.exists(),
+            "temporary database copy should not remain after promotion"
         );
     }
 
