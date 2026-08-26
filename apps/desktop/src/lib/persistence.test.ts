@@ -132,21 +132,22 @@ function serializeDeletions(deletions: Partial<VaultDeletionMap>) {
 
 async function loadPersistence(db: FakeDatabase, options: FakeDatabaseOptions = {}) {
   const localStorage = new MemoryStorage();
+  const load = vi.fn(async () => {
+    if (options.failLoad) {
+      throw new Error("load failed");
+    }
+    return db;
+  });
   vi.stubGlobal("window", { localStorage });
   vi.doMock("./backend-runtime", () => ({ isTauriRuntime: () => true }));
   vi.doMock("@tauri-apps/plugin-sql", () => ({
     default: {
-      load: vi.fn(async () => {
-        if (options.failLoad) {
-          throw new Error("load failed");
-        }
-        return db;
-      }),
+      load,
     },
   }));
 
   const persistence = await import("./persistence");
-  return { localStorage, persistence };
+  return { load, localStorage, persistence };
 }
 
 describe("Tauri SQLite persistence", () => {
@@ -163,6 +164,7 @@ describe("Tauri SQLite persistence", () => {
     localStorage.setItem("terminal-workspace-hosts", "local-payload");
 
     await expect(storage.getItem("terminal-workspace-hosts")).resolves.toBe("local-payload");
+    expect(load).toHaveBeenCalledWith("sqlite:terminalworkspace.db");
     expect(db.stores.get("hosts_store")).toBe("local-payload");
 
     await storage.setItem("terminal-workspace-hosts", "sqlite-payload");
