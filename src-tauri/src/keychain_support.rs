@@ -29,6 +29,9 @@ pub(crate) fn run_security_command(args: &[&str]) -> Result<Output, String> {
 const SECURITY_CHILD_CLEANUP_TIMEOUT: Duration = Duration::from_millis(500);
 const SECURITY_CHILD_CLEANUP_RETRY_TIMEOUT: Duration = Duration::from_secs(5);
 const SECURITY_CHILD_CLEANUP_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const SECURITY_CHILD_QUARANTINE_SWEEP_INTERVAL: Duration = Duration::from_millis(100);
+const SECURITY_CHILD_QUARANTINE_CAPACITY: usize = 32;
+const SECURITY_OUTPUT_READER_QUARANTINE_CAPACITY: usize = 64;
 
 trait SecurityChildControl {
     fn kill(&mut self) -> io::Result<()>;
@@ -49,22 +52,167 @@ enum SecurityChildCleanupEvent {
     KillFailed(String),
     PollFailed(String),
     Reaped,
-    RetryBudgetExhausted,
+    RetryBudgetExhausted { quarantined: bool },
 }
 
-fn retain_unreapable_security_child<C>(child: C)
-where
-    C: SecurityChildControl + Send + 'static,
-{
-    static UNREAPABLE_SECURITY_CHILDREN: std::sync::OnceLock<
-        std::sync::Mutex<Vec<Box<dyn SecurityChildControl + Send>>>,
-    > = std::sync::OnceLock::new();
+type SecurityOutputReader = thread::JoinHandle<io::Result<Vec<u8>>>;
 
-    let children = UNREAPABLE_SECURITY_CHILDREN.get_or_init(Default::default);
-    let mut children = children
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    children.push(Box::new(child));
+enum SecurityCleanupQuarantineItem {
+    Child {
+        child: Box<dyn SecurityChildControl + Send>,
+        retained: std::sync::mpsc::SyncSender<bool>,
+    },
+    OutputReader(SecurityOutputReader),
+}
+
+struct SecurityCleanupQuarantine {
+    sender: std::sync::mpsc::Sender<SecurityCleanupQuarantineItem>,
+}
+
+impl SecurityCleanupQuarantine {
+    fn start() -> Result<Self, String> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        thread::Builder::new()
+            .name("security-cleanup-quarantine".to_string())
+            .spawn(move || {
+                let mut children = Vec::new();
+                let mut readers = Vec::new();
+
+                loop {
+                    match receiver.recv_timeout(SECURITY_CHILD_QUARANTINE_SWEEP_INTERVAL) {
+                        Ok(SecurityCleanupQuarantineItem::Child { child, retained }) => {
+                            let was_retained = Self::push_child(&mut children, child);
+                            let _ = retained.send(was_retained);
+                            if !was_retained {
+                                emit_security_cleanup_notice(format!(
+                                    "macOS security child cleanup quarantine reached its {}-handle \
+                                     cap; dropping an additional unreapable child handle",
+                                    SECURITY_CHILD_QUARANTINE_CAPACITY
+                                ));
+                            }
+                        }
+                        Ok(SecurityCleanupQuarantineItem::OutputReader(reader)) => {
+                            if !Self::push_output_reader(&mut readers, reader) {
+                                emit_security_cleanup_notice(format!(
+                                    "macOS security output-reader quarantine reached its {}-reader \
+                                     cap; dropping an additional detached pipe reader",
+                                    SECURITY_OUTPUT_READER_QUARANTINE_CAPACITY
+                                ));
+                            }
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                            if children.is_empty() && readers.is_empty() {
+                                return;
+                            }
+                        }
+                    }
+
+                    Self::sweep_children(&mut children);
+                    Self::sweep_output_readers(&mut readers);
+                }
+            })
+            .map_err(|error| {
+                format!("Failed to start macOS security cleanup quarantine: {error}")
+            })?;
+
+        Ok(Self { sender })
+    }
+
+    fn global() -> &'static Self {
+        static QUARANTINE: std::sync::OnceLock<SecurityCleanupQuarantine> =
+            std::sync::OnceLock::new();
+        QUARANTINE.get_or_init(|| {
+            Self::start().expect("security cleanup quarantine must remain available")
+        })
+    }
+
+    fn quarantine_child<C>(&self, child: C) -> bool
+    where
+        C: SecurityChildControl + Send + 'static,
+    {
+        let (retained_sender, retained_receiver) = std::sync::mpsc::sync_channel(1);
+        self.sender
+            .send(SecurityCleanupQuarantineItem::Child {
+                child: Box::new(child),
+                retained: retained_sender,
+            })
+            .is_ok()
+            && retained_receiver.recv().unwrap_or(false)
+    }
+
+    fn quarantine_output_reader(&self, reader: SecurityOutputReader) {
+        let _ = self
+            .sender
+            .send(SecurityCleanupQuarantineItem::OutputReader(reader));
+    }
+
+    fn push_child(
+        children: &mut Vec<Box<dyn SecurityChildControl + Send>>,
+        child: Box<dyn SecurityChildControl + Send>,
+    ) -> bool {
+        Self::sweep_children(children);
+        if children.len() >= SECURITY_CHILD_QUARANTINE_CAPACITY {
+            false
+        } else {
+            children.push(child);
+            true
+        }
+    }
+
+    fn push_output_reader(
+        readers: &mut Vec<SecurityOutputReader>,
+        reader: SecurityOutputReader,
+    ) -> bool {
+        Self::sweep_output_readers(readers);
+        if readers.len() >= SECURITY_OUTPUT_READER_QUARANTINE_CAPACITY {
+            false
+        } else {
+            readers.push(reader);
+            true
+        }
+    }
+
+    fn sweep_children(children: &mut Vec<Box<dyn SecurityChildControl + Send>>) {
+        let mut index = 0;
+        while index < children.len() {
+            let mut remove = false;
+            match children[index].try_wait() {
+                Ok(Some(_)) => remove = true,
+                Ok(None) => {
+                    let _ = children[index].kill();
+                }
+                Err(error) => emit_security_cleanup_notice(format!(
+                    "macOS security child quarantine try_wait failed: {error}"
+                )),
+            }
+
+            if remove {
+                children.swap_remove(index);
+            } else {
+                index += 1;
+            }
+        }
+    }
+
+    fn sweep_output_readers(readers: &mut Vec<SecurityOutputReader>) {
+        let mut index = 0;
+        while index < readers.len() {
+            if readers[index].is_finished() {
+                if readers.swap_remove(index).join().is_err() {
+                    emit_security_cleanup_notice(
+                        "macOS security output reader panicked after detaching".to_string(),
+                    );
+                }
+            } else {
+                index += 1;
+            }
+        }
+    }
+}
+
+fn emit_security_cleanup_notice(message: String) {
+    eprintln!("{message}");
 }
 
 fn reap_security_child<C>(
@@ -112,8 +260,23 @@ fn reap_security_child<C>(
             // The process is still not confirmed dead, so dropping its handle
             // would orphan it. Quarantine the handle for the rest of this app
             // process, but stop polling so this worker can exit.
-            retain_unreapable_security_child(child);
-            let _ = events.send(SecurityChildCleanupEvent::RetryBudgetExhausted);
+            let quarantined = SecurityCleanupQuarantine::global().quarantine_child(child);
+            let notice = if quarantined {
+                format!(
+                    "macOS security child cleanup exhausted its {} ms retry budget; \
+                     the child moved into the bounded background quarantine for eventual reaping",
+                    retry_timeout.as_millis()
+                )
+            } else {
+                format!(
+                    "macOS security child cleanup exhausted its {} ms retry budget; \
+                     the bounded background quarantine was unavailable, so the unreaped child \
+                     handle was dropped",
+                    retry_timeout.as_millis()
+                )
+            };
+            emit_security_cleanup_notice(notice);
+            let _ = events.send(SecurityChildCleanupEvent::RetryBudgetExhausted { quarantined });
             return;
         }
         thread::sleep(SECURITY_CHILD_CLEANUP_POLL_INTERVAL.min(remaining));
@@ -208,16 +371,20 @@ where
                         cleanup_errors.join("; ")
                     ));
                 }
-                Ok(SecurityChildCleanupEvent::RetryBudgetExhausted) => {
+                Ok(SecurityChildCleanupEvent::RetryBudgetExhausted { quarantined }) => {
                     let details = if cleanup_errors.is_empty() {
                         String::new()
                     } else {
                         format!(" ({})", cleanup_errors.join("; "))
                     };
+                    let disposition = if quarantined {
+                        "the child moved into the bounded background quarantine for eventual reaping"
+                    } else {
+                        "the bounded background quarantine was unavailable, so the unreaped child handle was dropped"
+                    };
                     return Err(format!(
                         "macOS security child cleanup exhausted its {} ms retry budget{details}; \
-                         the child could not be reaped, so the reaper retained its handle in a \
-                         no-retry quarantine",
+                         {disposition}",
                         retry_timeout.as_millis()
                     ));
                 }
@@ -230,7 +397,8 @@ where
                     return Err(format!(
                         "macOS security child cleanup was not confirmed within {} ms{details}; \
                          the dedicated reaper retains the child handle and continues kill/try_wait \
-                         retries for at most {} ms total before moving it to a no-retry quarantine",
+                         retries for at most {} ms total before handing it to the bounded \
+                         background quarantine",
                         timeout.as_millis(),
                         retry_timeout.as_millis()
                     ));
@@ -260,10 +428,14 @@ where
     }
 }
 
+fn quarantine_security_output_reader(reader: SecurityOutputReader) {
+    SecurityCleanupQuarantine::global().quarantine_output_reader(reader);
+}
+
 fn spawn_security_output_reader<R>(
     stream_name: &str,
     mut stream: R,
-) -> io::Result<thread::JoinHandle<io::Result<Vec<u8>>>>
+) -> io::Result<SecurityOutputReader>
 where
     R: Read + Send + 'static,
 {
@@ -312,6 +484,7 @@ where
     let stderr_reader = match spawn_security_output_reader("stderr", stderr) {
         Ok(reader) => reader,
         Err(error) => {
+            quarantine_security_output_reader(stdout_reader);
             return Err(cleanup_security_child_error(
                 format!("Failed to read stderr from macOS security CLI: {error}"),
                 reaper,
@@ -323,6 +496,8 @@ where
     let status = match wait(&mut child) {
         Ok(status) => status,
         Err(error) => {
+            quarantine_security_output_reader(stdout_reader);
+            quarantine_security_output_reader(stderr_reader);
             return Err(cleanup_security_child_error(
                 format!("Failed to wait for macOS security CLI: {error}"),
                 reaper,
@@ -737,7 +912,7 @@ mod tests {
             .expect_err("an unkillable child must exhaust the retry budget");
         assert!(error.contains("exhausted its 50 ms retry budget"));
         assert!(error.contains("kill failed: synthetic permanent kill refusal"));
-        assert!(error.contains("retained its handle in a no-retry quarantine"));
+        assert!(error.contains("bounded background quarantine"));
 
         let attempts_at_bound = kill_attempts.load(Ordering::SeqCst);
         assert!(
@@ -755,7 +930,7 @@ mod tests {
                 dropped_receiver.try_recv(),
                 Err(std::sync::mpsc::TryRecvError::Empty)
             ),
-            "the no-retry quarantine must retain the unreaped child handle"
+            "the bounded background quarantine must retain the unreaped child handle"
         );
     }
 
