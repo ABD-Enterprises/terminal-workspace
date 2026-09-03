@@ -1,0 +1,55 @@
+name: CodeQL
+
+# #349: this repo's ruleset requires a status check whose context is exactly `CodeQL`.
+# Code scanning DEFAULT SETUP is not-configured, so nothing emitted that check and every PR
+# was permanently blocked — the check was ABSENT rather than failing, so auto-merge waited
+# on something that could never arrive.
+#
+# Two constraints make this file work, and breaking either produces a workflow that runs
+# green while unblocking nothing:
+#
+#   1. The emitted check context is the JOB NAME. The job below must stay named exactly
+#      `CodeQL`. Renaming it silently stops satisfying the ruleset.
+#   2. NO strategy.matrix. A matrix appends the matrix value to the job name, so the stock
+#      CodeQL template (which matrixes over languages) emits `Analyze (javascript)` etc.
+#      Languages are passed as a comma-separated list to init instead, keeping one job.
+#
+# Actions are SHA-pinned because the org sets `sha_pinning_required: true` (deffenda,
+# 2026-08-29). `github/codeql-action` is owned by the GitHub org, so it satisfies the
+# `allowed_actions: selected` allowlist via `github_owned_allowed`.
+#
+# NOTE: while this file exists, code scanning default setup cannot be re-enabled in the UI.
+# Delete it to go back to default setup.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  CodeQL:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # pinned, matches validate.yml
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@486fec2a3ea2626afcd8c7e9208b4f515078dd7e # codeql-bundle-v2.26.4
+        with:
+          # Matches the language set code scanning default setup had configured, so this
+          # restores prior coverage rather than quietly narrowing it.
+          languages: actions,javascript-typescript,rust
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@486fec2a3ea2626afcd8c7e9208b4f515078dd7e # codeql-bundle-v2.26.4
