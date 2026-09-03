@@ -690,6 +690,49 @@ enum KeyCommandFailure {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum IpcErrorCode {
+    AuthFailed,
+    ConnectionRefused,
+    HostKeyMismatch,
+    Internal,
+    InvalidInput,
+    KeychainUnavailable,
+    NotFound,
+    QueueFull,
+    StaleStream,
+    Timeout,
+    Unsupported,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IpcCommandError {
+    code: IpcErrorCode,
+    message: String,
+}
+
+impl IpcCommandError {
+    fn new(code: IpcErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+
+    #[cfg(test)]
+    fn contains(&self, pattern: &str) -> bool {
+        self.message.contains(pattern)
+    }
+}
+
+impl std::fmt::Display for IpcCommandError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GenerateKeyRequest {
@@ -1047,6 +1090,51 @@ fn expand_home(pathname: &str) -> PathBuf {
 fn key_command_failure_json(error: KeyCommandFailure) -> String {
     serde_json::to_string(&error)
         .unwrap_or_else(|serialization_error| format!("key command failure: {serialization_error}"))
+}
+
+fn classify_session_error_message(message: String) -> IpcCommandError {
+    let lower = message.to_ascii_lowercase();
+    let code = if lower.contains("timed out") {
+        IpcErrorCode::Timeout
+    } else if lower.contains("connection refused") {
+        IpcErrorCode::ConnectionRefused
+    } else if lower.contains("host key mismatch") || lower.contains("host key verification failed")
+    {
+        IpcErrorCode::HostKeyMismatch
+    } else if lower.contains("authentication failed") {
+        IpcErrorCode::AuthFailed
+    } else if lower.contains("queue is full") {
+        IpcErrorCode::QueueFull
+    } else if lower.contains("stale") {
+        IpcErrorCode::StaleStream
+    } else if lower.contains("not found") {
+        IpcErrorCode::NotFound
+    } else if lower.starts_with("unsupported")
+        || lower.contains("does not support")
+        || lower.contains("without ssh auth")
+    {
+        IpcErrorCode::Unsupported
+    } else if lower.contains("required")
+        || lower.contains("must")
+        || lower.contains("invalid")
+        || lower.contains("cannot start with")
+    {
+        IpcErrorCode::InvalidInput
+    } else {
+        IpcErrorCode::Internal
+    };
+    IpcCommandError::new(code, message)
+}
+
+fn session_invalid_input(message: impl Into<String>) -> IpcCommandError {
+    IpcCommandError::new(IpcErrorCode::InvalidInput, message)
+}
+
+fn keychain_command_error(message: String) -> IpcCommandError {
+    if message.contains("cannot contain line breaks") {
+        return IpcCommandError::new(IpcErrorCode::InvalidInput, message);
+    }
+    IpcCommandError::new(IpcErrorCode::KeychainUnavailable, message)
 }
 
 fn validate_connection_identity_key_path(private_key_path: &str) -> Result<PathBuf, String> {
@@ -1861,20 +1949,33 @@ fn connect_tcp_with_timeout(
     hostname: &str,
     port: u16,
     timeout: Duration,
-) -> Result<TcpStream, String> {
-    let addrs = (hostname, port)
-        .to_socket_addrs()
-        .map_err(|error| format!("could not resolve {hostname}:{port}: {error}"))?;
-    let mut last_error = format!("no addresses resolved for {hostname}:{port}");
+) -> Result<TcpStream, IpcCommandError> {
+    let addrs = (hostname, port).to_socket_addrs().map_err(|error| {
+        classify_session_error_message(format!("could not resolve {hostname}:{port}: {error}"))
+    })?;
+    let mut last_error =
+        session_invalid_input(format!("no addresses resolved for {hostname}:{port}"));
     for addr in addrs {
         match TcpStream::connect_timeout(&addr, timeout) {
             Ok(stream) => return Ok(stream),
-            Err(error) => last_error = error.to_string(),
+            Err(error) => {
+                last_error = match error.kind() {
+                    io::ErrorKind::TimedOut => IpcCommandError::new(
+                        IpcErrorCode::Timeout,
+                        format!("could not connect to {hostname}:{port}: {error}"),
+                    ),
+                    io::ErrorKind::ConnectionRefused => IpcCommandError::new(
+                        IpcErrorCode::ConnectionRefused,
+                        format!("could not connect to {hostname}:{port}: {error}"),
+                    ),
+                    _ => classify_session_error_message(format!(
+                        "could not connect to {hostname}:{port}: {error}"
+                    )),
+                };
+            }
         }
     }
-    Err(format!(
-        "could not connect to {hostname}:{port}: {last_error}"
-    ))
+    Err(last_error)
 }
 
 /// #151: the single host-key decision for the direct ssh2 path.
@@ -1892,17 +1993,23 @@ fn verify_native_host_key(
     session: &Session,
     host: &BackendHostConnection,
     store: &NativeHostKeyStore,
-) -> Result<(), String> {
-    let (actual_key, key_type) = session
-        .host_key()
-        .ok_or_else(|| "SSH server did not present a host key".to_string())?;
+) -> Result<(), IpcCommandError> {
+    let (actual_key, key_type) = session.host_key().ok_or_else(|| {
+        IpcCommandError::new(
+            IpcErrorCode::Internal,
+            "SSH server did not present a host key",
+        )
+    })?;
     let presented = BASE64_STANDARD.encode(actual_key);
 
     if let Some(expected_key) = host.known_host_public_key.as_ref() {
         if presented != *expected_key {
-            return Err(format!(
-                "Trusted host key mismatch for {}:{}.",
-                host.hostname, host.port
+            return Err(IpcCommandError::new(
+                IpcErrorCode::HostKeyMismatch,
+                format!(
+                    "Trusted host key mismatch for {}:{}.",
+                    host.hostname, host.port
+                ),
             ));
         }
         return Ok(());
@@ -1910,22 +2017,30 @@ fn verify_native_host_key(
 
     if host_requires_trusted_key(host) {
         // Defence in depth: validate_ssh_host already refuses this combination.
-        return Err(format!(
-            "Trusted host key required for {}:{} but none was provided. Scan and trust the host first.",
-            host.hostname, host.port
+        return Err(IpcCommandError::new(
+            IpcErrorCode::InvalidInput,
+            format!(
+                "Trusted host key required for {}:{} but none was provided. Scan and trust the host first.",
+                host.hostname, host.port
+            ),
         ));
     }
 
-    let algorithm = host_key_algorithm_name(key_type);
     let pattern = known_hosts_host_pattern(host);
-    match store.verify_or_pin(&pattern, algorithm, &presented)? {
+    match store
+        .verify_or_pin(&pattern, host_key_algorithm_name(key_type), &presented)
+        .map_err(classify_session_error_message)?
+    {
         HostKeyVerdict::Pinned | HostKeyVerdict::Matches => Ok(()),
-        HostKeyVerdict::Mismatch { .. } => Err(format!(
-            "Host key verification failed for {}:{}: the presented host key does not match the \
-             one first seen for this host. Credentials were not sent. This may indicate a \
-             machine-in-the-middle attack, or the host may have been rebuilt — re-scan and \
-             explicitly trust the replacement key before reconnecting.",
-            host.hostname, host.port
+        HostKeyVerdict::Mismatch { .. } => Err(IpcCommandError::new(
+            IpcErrorCode::HostKeyMismatch,
+            format!(
+                "Host key verification failed for {}:{}: the presented host key does not match the \
+                 one first seen for this host. Credentials were not sent. This may indicate a \
+                 machine-in-the-middle attack, or the host may have been rebuilt — re-scan and \
+                 explicitly trust the replacement key before reconnecting.",
+                host.hostname, host.port
+            ),
         )),
     }
 }
@@ -1948,9 +2063,9 @@ fn host_key_algorithm_name(key_type: ssh2::HostKeyType) -> &'static str {
 fn connect_native_session(
     host: &BackendHostConnection,
     store: &NativeHostKeyStore,
-) -> Result<(Session, Channel), String> {
-    let port =
-        u16::try_from(host.port).map_err(|_| "SSH port must be between 1 and 65535".to_string())?;
+) -> Result<(Session, Channel), IpcCommandError> {
+    let port = u16::try_from(host.port)
+        .map_err(|_| session_invalid_input("SSH port must be between 1 and 65535"))?;
     let tcp_stream = connect_tcp_with_timeout(
         &host.hostname,
         port,
@@ -1958,17 +2073,20 @@ fn connect_native_session(
     )?;
     let _ = tcp_stream.set_nodelay(true);
 
-    let mut session = Session::new().map_err(|error| error.to_string())?;
+    let mut session = Session::new()
+        .map_err(|error| IpcCommandError::new(IpcErrorCode::Internal, error.to_string()))?;
     session.set_tcp_stream(tcp_stream);
     // Bound handshake/auth (and any blocking channel IO before the loop switches
     // the session to non-blocking) so a stalled SSH banner cannot hang forever.
     session.set_timeout(NATIVE_SSH_IO_TIMEOUT_MS);
-    session.handshake().map_err(|error| error.to_string())?;
+    session
+        .handshake()
+        .map_err(|error| classify_session_error_message(error.to_string()))?;
 
     verify_native_host_key(&session, host, store)?;
 
-    authenticate_native_session(&mut session, host)?;
-    let channel = open_native_channel(&session, host)?;
+    authenticate_native_session(&mut session, host).map_err(classify_session_error_message)?;
+    let channel = open_native_channel(&session, host).map_err(classify_session_error_message)?;
     session.set_blocking(false);
 
     Ok((session, channel))
@@ -2857,9 +2975,9 @@ fn open_native_session_stream(
     app: &AppHandle,
     registry: &NativeSessionRegistry,
     session_id: &str,
-) -> Result<SessionStreamOpenResponse, String> {
+) -> Result<SessionStreamOpenResponse, IpcCommandError> {
     let handle = get_native_session(registry, session_id)
-        .ok_or_else(|| "Session stream not found".to_string())?;
+        .ok_or_else(|| IpcCommandError::new(IpcErrorCode::NotFound, "Session stream not found"))?;
 
     let (stream_id, connection_state, buffered_messages) = {
         let mut state = handle.state.lock_recover();
@@ -2908,14 +3026,17 @@ fn open_native_session_stream(
 fn send_native_session_stream(
     registry: &NativeSessionRegistry,
     request: SessionStreamSendRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcCommandError> {
     let handle = get_native_session(registry, &request.session_id)
-        .ok_or_else(|| "Session stream not found".to_string())?;
+        .ok_or_else(|| IpcCommandError::new(IpcErrorCode::NotFound, "Session stream not found"))?;
 
     let active_stream_id = handle.state.lock_recover().stream_id.clone();
 
     if active_stream_id.as_deref() != Some(request.stream_id.as_str()) {
-        return Err("Session stream is stale".to_string());
+        return Err(IpcCommandError::new(
+            IpcErrorCode::StaleStream,
+            "Session stream is stale",
+        ));
     }
 
     // #205: try_send, never blocking. Close and Resize are async commands that
@@ -2930,10 +3051,13 @@ fn send_native_session_stream(
         .command_sender
         .try_send(NativeSessionCommand::Input(request.data))
         .map_err(|error| match error {
-            TrySendError::Full(_) => {
-                "Session input queue is full; the session is not draining input".to_string()
+            TrySendError::Full(_) => IpcCommandError::new(
+                IpcErrorCode::QueueFull,
+                "Session input queue is full; the session is not draining input",
+            ),
+            TrySendError::Closed(_) => {
+                IpcCommandError::new(IpcErrorCode::NotFound, "Session stream is closed")
             }
-            TrySendError::Closed(_) => "Session stream is closed".to_string(),
         })?;
 
     Ok(BackendBooleanResponse {
@@ -3762,7 +3886,7 @@ async fn terminal_workspace_execute_snippet_on_hosts(
 #[tauri::command]
 async fn terminal_workspace_load_host_secrets(
     request: HostSecretsRequest,
-) -> Result<HostSecretsResponse, String> {
+) -> Result<HostSecretsResponse, IpcCommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let password = read_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id);
         let passphrase = read_keychain_secret(KEYCHAIN_PASSPHRASE_SERVICE, &request.host_id);
@@ -3784,24 +3908,26 @@ async fn terminal_workspace_load_host_secrets(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcCommandError::new(IpcErrorCode::Internal, error.to_string()))?
 }
 
 #[tauri::command]
 async fn terminal_workspace_store_host_secrets(
     request: StoreHostSecretsRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcCommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         store_keychain_secret(
             KEYCHAIN_PASSWORD_SERVICE,
             &request.host_id,
             &request.password,
-        )?;
+        )
+        .map_err(keychain_command_error)?;
         store_keychain_secret(
             KEYCHAIN_PASSPHRASE_SERVICE,
             &request.host_id,
             &request.passphrase,
-        )?;
+        )
+        .map_err(keychain_command_error)?;
 
         Ok(BackendBooleanResponse {
             ok: true,
@@ -3809,16 +3935,18 @@ async fn terminal_workspace_store_host_secrets(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcCommandError::new(IpcErrorCode::Internal, error.to_string()))?
 }
 
 #[tauri::command]
 async fn terminal_workspace_clear_host_secrets(
     request: HostSecretsRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcCommandError> {
     tauri::async_runtime::spawn_blocking(move || {
-        delete_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id)?;
-        delete_keychain_secret(KEYCHAIN_PASSPHRASE_SERVICE, &request.host_id)?;
+        delete_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id)
+            .map_err(keychain_command_error)?;
+        delete_keychain_secret(KEYCHAIN_PASSPHRASE_SERVICE, &request.host_id)
+            .map_err(keychain_command_error)?;
 
         Ok(BackendBooleanResponse {
             ok: true,
@@ -3826,7 +3954,7 @@ async fn terminal_workspace_clear_host_secrets(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcCommandError::new(IpcErrorCode::Internal, error.to_string()))?
 }
 
 /// Read the passphrase for a private key by SSH key fingerprint. Multiple
@@ -3836,8 +3964,8 @@ async fn terminal_workspace_clear_host_secrets(
 #[tauri::command]
 async fn terminal_workspace_load_key_passphrase(
     request: KeyPassphraseRequest,
-) -> Result<KeyPassphraseResponse, String> {
-    validate_key_fingerprint(&request.fingerprint)?;
+) -> Result<KeyPassphraseResponse, IpcCommandError> {
+    validate_key_fingerprint(&request.fingerprint).map_err(session_invalid_input)?;
     tauri::async_runtime::spawn_blocking(move || {
         Ok(KeyPassphraseResponse {
             passphrase: load_keychain_secret(
@@ -3848,43 +3976,46 @@ async fn terminal_workspace_load_key_passphrase(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcCommandError::new(IpcErrorCode::Internal, error.to_string()))?
+    .map_err(keychain_command_error)
 }
 
 #[tauri::command]
 async fn terminal_workspace_store_key_passphrase(
     request: StoreKeyPassphraseRequest,
-) -> Result<BackendBooleanResponse, String> {
-    validate_key_fingerprint(&request.fingerprint)?;
+) -> Result<BackendBooleanResponse, IpcCommandError> {
+    validate_key_fingerprint(&request.fingerprint).map_err(session_invalid_input)?;
     tauri::async_runtime::spawn_blocking(move || {
         store_keychain_secret(
             KEYCHAIN_KEY_PASSPHRASE_SERVICE,
             &request.fingerprint,
             &request.passphrase,
-        )?;
+        )
+        .map_err(keychain_command_error)?;
         Ok(BackendBooleanResponse {
             ok: true,
             pending: None,
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcCommandError::new(IpcErrorCode::Internal, error.to_string()))?
 }
 
 #[tauri::command]
 async fn terminal_workspace_clear_key_passphrase(
     request: KeyPassphraseRequest,
-) -> Result<BackendBooleanResponse, String> {
-    validate_key_fingerprint(&request.fingerprint)?;
+) -> Result<BackendBooleanResponse, IpcCommandError> {
+    validate_key_fingerprint(&request.fingerprint).map_err(session_invalid_input)?;
     tauri::async_runtime::spawn_blocking(move || {
-        delete_keychain_secret(KEYCHAIN_KEY_PASSPHRASE_SERVICE, &request.fingerprint)?;
+        delete_keychain_secret(KEYCHAIN_KEY_PASSPHRASE_SERVICE, &request.fingerprint)
+            .map_err(keychain_command_error)?;
         Ok(BackendBooleanResponse {
             ok: true,
             pending: None,
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcCommandError::new(IpcErrorCode::Internal, error.to_string()))?
 }
 
 /// Read the passphrase for a reusable Identity (P2-DM1 batch 3). Replaces
@@ -3894,8 +4025,8 @@ async fn terminal_workspace_clear_key_passphrase(
 #[tauri::command]
 async fn terminal_workspace_load_identity_passphrase(
     request: IdentityPassphraseRequest,
-) -> Result<IdentityPassphraseResponse, String> {
-    validate_identity_id(&request.identity_id)?;
+) -> Result<IdentityPassphraseResponse, IpcCommandError> {
+    validate_identity_id(&request.identity_id).map_err(session_invalid_input)?;
     tauri::async_runtime::spawn_blocking(move || {
         Ok(IdentityPassphraseResponse {
             passphrase: load_keychain_secret(
@@ -3906,43 +4037,46 @@ async fn terminal_workspace_load_identity_passphrase(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcCommandError::new(IpcErrorCode::Internal, error.to_string()))?
+    .map_err(keychain_command_error)
 }
 
 #[tauri::command]
 async fn terminal_workspace_store_identity_passphrase(
     request: StoreIdentityPassphraseRequest,
-) -> Result<BackendBooleanResponse, String> {
-    validate_identity_id(&request.identity_id)?;
+) -> Result<BackendBooleanResponse, IpcCommandError> {
+    validate_identity_id(&request.identity_id).map_err(session_invalid_input)?;
     tauri::async_runtime::spawn_blocking(move || {
         store_keychain_secret(
             KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE,
             &request.identity_id,
             &request.passphrase,
-        )?;
+        )
+        .map_err(keychain_command_error)?;
         Ok(BackendBooleanResponse {
             ok: true,
             pending: None,
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcCommandError::new(IpcErrorCode::Internal, error.to_string()))?
 }
 
 #[tauri::command]
 async fn terminal_workspace_clear_identity_passphrase(
     request: IdentityPassphraseRequest,
-) -> Result<BackendBooleanResponse, String> {
-    validate_identity_id(&request.identity_id)?;
+) -> Result<BackendBooleanResponse, IpcCommandError> {
+    validate_identity_id(&request.identity_id).map_err(session_invalid_input)?;
     tauri::async_runtime::spawn_blocking(move || {
-        delete_keychain_secret(KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE, &request.identity_id)?;
+        delete_keychain_secret(KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE, &request.identity_id)
+            .map_err(keychain_command_error)?;
         Ok(BackendBooleanResponse {
             ok: true,
             pending: None,
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcCommandError::new(IpcErrorCode::Internal, error.to_string()))?
 }
 
 #[derive(Deserialize)]
@@ -4767,14 +4901,17 @@ async fn terminal_workspace_create_backend_session(
     native_host_keys: State<'_, SharedNativeHostKeyStore>,
     app: AppHandle,
     request: CreateBackendSessionRequest,
-) -> Result<CreateSessionResponse, String> {
+) -> Result<CreateSessionResponse, IpcCommandError> {
     let host_key_store = native_host_keys.inner().clone();
-    validate_session_target(&request.host)?;
+    validate_session_target(&request.host).map_err(session_invalid_input)?;
 
     if !should_use_native_session(&request.host) {
-        return Err(format!(
-            "Native transport does not support {} sessions without credentials",
-            request.host.protocol
+        return Err(IpcCommandError::new(
+            IpcErrorCode::Unsupported,
+            format!(
+                "Native transport does not support {} sessions without credentials",
+                request.host.protocol
+            ),
         ));
     }
 
@@ -4803,8 +4940,12 @@ async fn terminal_workspace_create_backend_session(
         channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
     let (relay_sender, command_receiver) =
         mpsc::sync_channel(NATIVE_SESSION_COMMAND_CHANNEL_CAPACITY);
-    let (wake_reader, wake_writer) = NativeSessionCommandWakeReader::pair()
-        .map_err(|error| format!("Failed to create native-session wake pipe: {error}"))?;
+    let (wake_reader, wake_writer) = NativeSessionCommandWakeReader::pair().map_err(|error| {
+        IpcCommandError::new(
+            IpcErrorCode::Internal,
+            format!("Failed to create native-session wake pipe: {error}"),
+        )
+    })?;
     thread::spawn(move || {
         while let Some(command) = command_receiver_async.blocking_recv() {
             if relay_sender.send(command).is_err() {
@@ -4874,10 +5015,10 @@ async fn terminal_workspace_create_backend_session(
                     wake_reader,
                 );
             });
-            Ok::<(), String>(())
+            Ok::<(), IpcCommandError>(())
         })
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| IpcCommandError::new(IpcErrorCode::Internal, error.to_string()))
         .and_then(|inner| inner);
 
         if let Err(error) = connect_result {
@@ -4897,7 +5038,7 @@ async fn terminal_workspace_close_backend_session(
     native_sessions: State<'_, NativeSessionRegistry>,
     native_forwards: State<'_, NativeForwardRegistry>,
     request: SessionIdRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcCommandError> {
     if let Some(handle) = remove_native_session(native_sessions.inner(), &request.session_id) {
         close_native_forwards_for_session(native_forwards.inner(), &request.session_id);
         // #205: still fire-and-forget, and still correct on a bounded channel.
@@ -4912,14 +5053,17 @@ async fn terminal_workspace_close_backend_session(
         });
     }
 
-    Err("Session not found in native runtime".to_string())
+    Err(IpcCommandError::new(
+        IpcErrorCode::NotFound,
+        "Session not found in native runtime",
+    ))
 }
 
 #[tauri::command]
 async fn terminal_workspace_resize_backend_session(
     native_sessions: State<'_, NativeSessionRegistry>,
     request: ResizeBackendSessionRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcCommandError> {
     if let Some(handle) = get_native_session(native_sessions.inner(), &request.session_id) {
         handle
             .command_sender
@@ -4928,10 +5072,13 @@ async fn terminal_workspace_resize_backend_session(
                 rows: request.payload.rows,
             })
             .map_err(|error| match error {
-                TrySendError::Full(_) => {
-                    "Session input queue is full; the session is not draining input".to_string()
+                TrySendError::Full(_) => IpcCommandError::new(
+                    IpcErrorCode::QueueFull,
+                    "Session input queue is full; the session is not draining input",
+                ),
+                TrySendError::Closed(_) => {
+                    IpcCommandError::new(IpcErrorCode::NotFound, "Session stream is closed")
                 }
-                TrySendError::Closed(_) => "Session stream is closed".to_string(),
             })?;
 
         return Ok(BackendBooleanResponse {
@@ -4940,7 +5087,10 @@ async fn terminal_workspace_resize_backend_session(
         });
     }
 
-    Err("Session not found in native runtime".to_string())
+    Err(IpcCommandError::new(
+        IpcErrorCode::NotFound,
+        "Session not found in native runtime",
+    ))
 }
 
 #[tauri::command]
@@ -4948,7 +5098,7 @@ async fn terminal_workspace_open_backend_session_stream(
     app: AppHandle,
     native_sessions: State<'_, NativeSessionRegistry>,
     request: SessionStreamRequest,
-) -> Result<SessionStreamOpenResponse, String> {
+) -> Result<SessionStreamOpenResponse, IpcCommandError> {
     open_native_session_stream(&app, native_sessions.inner(), &request.session_id)
 }
 
@@ -4956,7 +5106,7 @@ async fn terminal_workspace_open_backend_session_stream(
 fn terminal_workspace_send_backend_session_stream(
     native_sessions: State<'_, NativeSessionRegistry>,
     request: SessionStreamSendRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcCommandError> {
     send_native_session_stream(native_sessions.inner(), request)
 }
 
@@ -5755,6 +5905,36 @@ mod tests {
         let result =
             connect_tcp_with_timeout("no-such-host.invalid", 22, Duration::from_millis(300));
         assert!(result.is_err(), "an unresolvable host must return Err");
+    }
+
+    #[test]
+    fn ipc_session_errors_expose_stable_codes() {
+        let timeout = classify_session_error_message("operation timed out".to_string());
+        let auth = classify_session_error_message("SSH authentication failed".to_string());
+        let mismatch =
+            classify_session_error_message("Trusted host key mismatch for host:22.".to_string());
+        let value = serde_json::to_value(&mismatch).expect("ipc error must serialize");
+
+        assert_eq!(timeout.code, IpcErrorCode::Timeout);
+        assert_eq!(auth.code, IpcErrorCode::AuthFailed);
+        assert_eq!(mismatch.code, IpcErrorCode::HostKeyMismatch);
+        assert_eq!(
+            value,
+            json!({
+                "code": "host-key-mismatch",
+                "message": "Trusted host key mismatch for host:22."
+            })
+        );
+    }
+
+    #[test]
+    fn keychain_errors_map_to_stable_codes() {
+        let unavailable = keychain_command_error("User interaction is not allowed.".to_string());
+        let invalid =
+            keychain_command_error("Keychain secrets cannot contain line breaks".to_string());
+
+        assert_eq!(unavailable.code, IpcErrorCode::KeychainUnavailable);
+        assert_eq!(invalid.code, IpcErrorCode::InvalidInput);
     }
 
     #[test]
