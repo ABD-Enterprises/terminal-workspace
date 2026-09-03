@@ -4,10 +4,25 @@ import type {
   BackendHostConnection,
   BackendStatusResponse,
   BackendTransportInfo,
+  CopyKeyToHostPayload,
+  CopyKeyToHostResponse,
+  CreateForwardPayload,
   CreateSessionResponse,
+  DownloadRemoteFileResponse,
+  GenerateKeyPayload,
+  ImportPrivateKeyFromBodyPayload,
+  KnownHostScanResult,
+  ListForwardsResponse,
+  ProtocolRuntimeStatusResponse,
   ResizeSessionPayload,
+  SftpDirectoryResponse,
+  SnippetExecutionResult,
+  SnippetExecutionTarget,
 } from "./backend-contract";
 import type { SessionConnectionState } from "../types/session";
+import type { PortForwardRecord } from "../types/forward";
+import type { HostProtocol } from "../types/host";
+import type { KeyMetadata } from "../types/key";
 
 interface TauriInternals {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
@@ -78,6 +93,57 @@ export interface SessionSocketLike {
   ): void;
   close: () => void;
   send: (data: string) => void;
+}
+
+export interface Backend {
+  getBackendStatus(): Promise<BackendStatusResponse>;
+  getProtocolRuntimeStatus(protocol: HostProtocol): Promise<ProtocolRuntimeStatusResponse>;
+  createBackendSession(host: BackendHostConnection): Promise<CreateSessionResponse>;
+  closeBackendSession(sessionId: string): Promise<BackendBooleanResponse>;
+  resizeBackendSession(
+    sessionId: string,
+    payload: ResizeSessionPayload
+  ): Promise<BackendBooleanResponse>;
+  listRemoteDirectory(
+    host: BackendHostConnection,
+    path: string
+  ): Promise<SftpDirectoryResponse>;
+  createRemoteDirectory(
+    host: BackendHostConnection,
+    path: string
+  ): Promise<{ ok: boolean; path: string }>;
+  renameRemoteEntry(
+    host: BackendHostConnection,
+    currentPath: string,
+    nextPath: string
+  ): Promise<{ ok: boolean; path: string }>;
+  deleteRemoteEntry(
+    host: BackendHostConnection,
+    path: string,
+    isDirectory: boolean
+  ): Promise<{ ok: boolean }>;
+  uploadRemoteFile(
+    host: BackendHostConnection,
+    remotePath: string,
+    file: File
+  ): Promise<{ ok: boolean; path: string }>;
+  downloadRemoteFile(
+    host: BackendHostConnection,
+    path: string
+  ): Promise<DownloadRemoteFileResponse>;
+  inspectPrivateKey(path: string): Promise<KeyMetadata>;
+  generatePrivateKey(payload: GenerateKeyPayload): Promise<KeyMetadata>;
+  importPrivateKeyFromBody(payload: ImportPrivateKeyFromBodyPayload): Promise<KeyMetadata>;
+  copyKeyToHost(payload: CopyKeyToHostPayload): Promise<CopyKeyToHostResponse>;
+  scanKnownHost(hostname: string, port: number): Promise<{ entries: KnownHostScanResult[] }>;
+  listLocalForwards(sessionId: string): Promise<ListForwardsResponse>;
+  createLocalForward(payload: CreateForwardPayload): Promise<PortForwardRecord>;
+  deleteLocalForward(forwardId: string): Promise<BackendBooleanResponse>;
+  executeSnippetOnHosts(
+    command: string,
+    targets: SnippetExecutionTarget[]
+  ): Promise<{ results: SnippetExecutionResult[] }>;
+  openBackendSessionSocket(sessionId: string): Promise<SessionSocketLike>;
 }
 
 /**

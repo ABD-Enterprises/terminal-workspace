@@ -5,9 +5,11 @@ import type { KeyMetadata } from "../types/key";
 import type {
   BackendBooleanResponse,
   BackendHostConnection,
+  BackendStatusResponse,
   CopyKeyToHostPayload,
   CopyKeyToHostResponse,
   CreateForwardPayload,
+  CreateSessionResponse,
   DownloadRemoteFileResponse,
   GenerateKeyPayload,
   ImportPrivateKeyFromBodyPayload,
@@ -22,12 +24,12 @@ import type {
 import {
   closeSession,
   createSession,
-  getSessionBackendStatus,
   invokeTauriCommand,
   isTauriRuntime,
   openSessionSocket,
   resizeSession,
 } from "./backend-runtime";
+import type { Backend } from "./backend-runtime";
 import {
   copyDemoKeyToHost,
   createDemoForward,
@@ -109,168 +111,102 @@ function encodeBase64(buffer: ArrayBuffer) {
   return btoa(binary);
 }
 
-export async function getBackendStatus() {
-  if (isDemoModeEnabled()) {
-    return { ok: true };
+function decodeBase64ToBytes(value: string) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
   }
 
-  return getSessionBackendStatus();
+  return bytes;
 }
 
-export async function getProtocolRuntimeStatus(protocol: HostProtocol) {
-  if (isDemoModeEnabled()) {
-    return {
-      available: true,
-      message: "Demo mode bypasses native protocol runtime checks.",
-      protocol,
-    } satisfies ProtocolRuntimeStatusResponse;
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<ProtocolRuntimeStatusResponse>("terminal_workspace_protocol_runtime_status", {
-      request: { protocol },
-    });
-  }
-
-  return {
-    available: protocol === "ssh",
-    installHint:
-      protocol === "ssh"
-        ? undefined
-        : "Open this host in the native macOS app to use its protocol runtime.",
-    message:
-      protocol === "ssh"
-        ? "SSH is available through the browser/backend transport."
-        : "This protocol requires the native macOS runtime.",
+const demoBackend: Backend = {
+  getBackendStatus: async () => ({ ok: true }),
+  getProtocolRuntimeStatus: async (protocol) => ({
+    available: true,
+    message: "Demo mode bypasses native protocol runtime checks.",
     protocol,
-  } satisfies ProtocolRuntimeStatusResponse;
-}
+  }),
+  createBackendSession: createSession,
+  closeBackendSession: closeSession,
+  resizeBackendSession: resizeSession,
+  listRemoteDirectory: listDemoRemoteDirectory,
+  createRemoteDirectory: createDemoRemoteDirectory,
+  renameRemoteEntry: renameDemoRemoteEntry,
+  deleteRemoteEntry: deleteDemoRemoteEntry,
+  uploadRemoteFile: uploadDemoRemoteFile,
+  downloadRemoteFile: downloadDemoRemoteFile,
+  inspectPrivateKey: inspectDemoPrivateKey,
+  generatePrivateKey: generateDemoPrivateKey,
+  importPrivateKeyFromBody: (payload) => importDemoPrivateKeyFromBody(payload),
+  copyKeyToHost: (payload) => copyDemoKeyToHost(payload),
+  scanKnownHost: scanDemoKnownHost,
+  listLocalForwards: listDemoForwards,
+  createLocalForward: createDemoForward,
+  deleteLocalForward: deleteDemoForward,
+  executeSnippetOnHosts: executeDemoSnippetOnHosts,
+  openBackendSessionSocket: openSessionSocket,
+};
 
-export async function createBackendSession(host: BackendHostConnection) {
-  return createSession(host);
-}
-
-export async function closeBackendSession(sessionId: string) {
-  return closeSession(sessionId);
-}
-
-export async function resizeBackendSession(sessionId: string, payload: ResizeSessionPayload) {
-  return resizeSession(sessionId, payload);
-}
-
-export async function listRemoteDirectory(host: BackendHostConnection, path: string) {
-  if (isDemoModeEnabled()) {
-    return listDemoRemoteDirectory(host, path);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<SftpDirectoryResponse>("terminal_workspace_sftp_list_directory", {
-      request: { host, path },
-    });
-  }
-
-  return backendFetch<SftpDirectoryResponse>("/api/backend/sftp/list", {
-    method: "POST",
-    body: JSON.stringify({ host, path }),
-  });
-}
-
-export async function createRemoteDirectory(host: BackendHostConnection, path: string) {
-  if (isDemoModeEnabled()) {
-    return createDemoRemoteDirectory(host, path);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<{ ok: boolean; path: string }>("terminal_workspace_sftp_create_directory", {
-      request: { host, path },
-    });
-  }
-
-  return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/mkdir", {
-    method: "POST",
-    body: JSON.stringify({ host, path }),
-  });
-}
-
-export async function renameRemoteEntry(
-  host: BackendHostConnection,
-  currentPath: string,
-  nextPath: string
-) {
-  if (isDemoModeEnabled()) {
-    return renameDemoRemoteEntry(host, currentPath, nextPath);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<{ ok: boolean; path: string }>("terminal_workspace_sftp_rename_entry", {
-      request: { host, currentPath, nextPath },
-    });
-  }
-
-  return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/rename", {
-    method: "POST",
-    body: JSON.stringify({ host, currentPath, nextPath }),
-  });
-}
-
-export async function deleteRemoteEntry(
-  host: BackendHostConnection,
-  path: string,
-  isDirectory: boolean
-) {
-  if (isDemoModeEnabled()) {
-    return deleteDemoRemoteEntry(host, path, isDirectory);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<{ ok: boolean }>("terminal_workspace_sftp_delete_entry", {
-      request: { host, path, isDirectory },
-    });
-  }
-
-  return backendFetch<{ ok: boolean }>("/api/backend/sftp/delete", {
-    method: "POST",
-    body: JSON.stringify({ host, path, isDirectory }),
-  });
-}
-
-export async function uploadRemoteFile(
-  host: BackendHostConnection,
-  remotePath: string,
-  file: File
-) {
-  if (isDemoModeEnabled()) {
-    return uploadDemoRemoteFile(host, remotePath, file);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<{ ok: boolean; path: string }>("terminal_workspace_sftp_upload_file", {
-      request: {
-        host,
-        path: remotePath,
-        filename: file.name,
-        contentsBase64: encodeBase64(await file.arrayBuffer()),
-      },
-    });
-  }
-
-  return backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/upload", {
-    method: "POST",
-    body: JSON.stringify({
-      host,
-      path: remotePath,
-      filename: file.name,
-      contentsBase64: encodeBase64(await file.arrayBuffer()),
+const tauriBackend: Backend = {
+  getBackendStatus: () =>
+    invokeTauriCommand<BackendStatusResponse>("terminal_workspace_backend_status"),
+  getProtocolRuntimeStatus: (protocol) =>
+    invokeTauriCommand<ProtocolRuntimeStatusResponse>(
+      "terminal_workspace_protocol_runtime_status",
+      {
+        request: { protocol },
+      }
+    ),
+  createBackendSession: (host) =>
+    invokeTauriCommand<CreateSessionResponse>("terminal_workspace_create_backend_session", {
+      request: { host },
     }),
-  });
-}
-
-export async function downloadRemoteFile(host: BackendHostConnection, path: string) {
-  if (isDemoModeEnabled()) {
-    return downloadDemoRemoteFile(host, path);
-  }
-
-  if (isTauriRuntime()) {
+  closeBackendSession: (sessionId) =>
+    invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_close_backend_session", {
+      request: { sessionId },
+    }),
+  resizeBackendSession: (sessionId, payload) =>
+    invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_resize_backend_session", {
+      request: { sessionId, payload },
+    }),
+  listRemoteDirectory: (host, path) =>
+    invokeTauriCommand<SftpDirectoryResponse>("terminal_workspace_sftp_list_directory", {
+      request: { host, path },
+    }),
+  createRemoteDirectory: (host, path) =>
+    invokeTauriCommand<{ ok: boolean; path: string }>(
+      "terminal_workspace_sftp_create_directory",
+      {
+        request: { host, path },
+      }
+    ),
+  renameRemoteEntry: (host, currentPath, nextPath) =>
+    invokeTauriCommand<{ ok: boolean; path: string }>(
+      "terminal_workspace_sftp_rename_entry",
+      {
+        request: { host, currentPath, nextPath },
+      }
+    ),
+  deleteRemoteEntry: (host, path, isDirectory) =>
+    invokeTauriCommand<{ ok: boolean }>("terminal_workspace_sftp_delete_entry", {
+      request: { host, path, isDirectory },
+    }),
+  uploadRemoteFile: async (host, remotePath, file) =>
+    invokeTauriCommand<{ ok: boolean; path: string }>(
+      "terminal_workspace_sftp_upload_file",
+      {
+        request: {
+          host,
+          path: remotePath,
+          filename: file.name,
+          contentsBase64: encodeBase64(await file.arrayBuffer()),
+        },
+      }
+    ),
+  downloadRemoteFile: async (host, path) => {
     const response = await invokeTauriCommand<{
       base64Body: string;
       contentDisposition?: string;
@@ -288,68 +224,243 @@ export async function downloadRemoteFile(host: BackendHostConnection, path: stri
       "download";
 
     return { blob, filename } satisfies DownloadRemoteFileResponse;
+  },
+  inspectPrivateKey: (path) =>
+    invokeTauriCommand<KeyMetadata>("terminal_workspace_inspect_private_key", {
+      request: { path },
+    }),
+  generatePrivateKey: (payload) =>
+    invokeTauriCommand<KeyMetadata>("terminal_workspace_generate_private_key", {
+      request: payload,
+    }),
+  importPrivateKeyFromBody: (payload) =>
+    invokeTauriCommand<KeyMetadata>("terminal_workspace_import_private_key_from_body", {
+      request: payload,
+    }),
+  copyKeyToHost: (payload) =>
+    invokeTauriCommand<CopyKeyToHostResponse>("terminal_workspace_copy_key_to_host", {
+      request: payload,
+    }),
+  scanKnownHost: (hostname, port) =>
+    invokeTauriCommand<{ entries: KnownHostScanResult[] }>(
+      "terminal_workspace_scan_known_host",
+      {
+        request: { hostname, port },
+      }
+    ),
+  listLocalForwards: (sessionId) =>
+    invokeTauriCommand<ListForwardsResponse>("terminal_workspace_list_session_forwards", {
+      request: { sessionId },
+    }),
+  createLocalForward: (payload) =>
+    invokeTauriCommand<PortForwardRecord>("terminal_workspace_create_forward", {
+      request: payload,
+    }),
+  deleteLocalForward: (forwardId) =>
+    invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_delete_forward", {
+      request: { forwardId },
+    }),
+  executeSnippetOnHosts: (command, targets) =>
+    invokeTauriCommand<{ results: SnippetExecutionResult[] }>(
+      "terminal_workspace_execute_snippet_on_hosts",
+      {
+        request: { command, targets },
+      }
+    ),
+  openBackendSessionSocket: openSessionSocket,
+};
+
+const httpBackend: Backend = {
+  getBackendStatus: () => backendFetch<BackendStatusResponse>("/api/backend/status"),
+  getProtocolRuntimeStatus: async (protocol) => ({
+    available: protocol === "ssh",
+    installHint:
+      protocol === "ssh"
+        ? undefined
+        : "Open this host in the native macOS app to use its protocol runtime.",
+    message:
+      protocol === "ssh"
+        ? "SSH is available through the browser/backend transport."
+        : "This protocol requires the native macOS runtime.",
+    protocol,
+  }),
+  createBackendSession: (host) =>
+    backendFetch<CreateSessionResponse>("/api/backend/sessions", {
+      method: "POST",
+      body: JSON.stringify({ host }),
+    }),
+  closeBackendSession: (sessionId) =>
+    backendFetch<BackendBooleanResponse>(`/api/backend/sessions/${sessionId}`, {
+      method: "DELETE",
+    }),
+  resizeBackendSession: (sessionId, payload) =>
+    backendFetch<BackendBooleanResponse>(`/api/backend/sessions/${sessionId}/resize`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  listRemoteDirectory: (host, path) =>
+    backendFetch<SftpDirectoryResponse>("/api/backend/sftp/list", {
+      method: "POST",
+      body: JSON.stringify({ host, path }),
+    }),
+  createRemoteDirectory: (host, path) =>
+    backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/mkdir", {
+      method: "POST",
+      body: JSON.stringify({ host, path }),
+    }),
+  renameRemoteEntry: (host, currentPath, nextPath) =>
+    backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/rename", {
+      method: "POST",
+      body: JSON.stringify({ host, currentPath, nextPath }),
+    }),
+  deleteRemoteEntry: (host, path, isDirectory) =>
+    backendFetch<{ ok: boolean }>("/api/backend/sftp/delete", {
+      method: "POST",
+      body: JSON.stringify({ host, path, isDirectory }),
+    }),
+  uploadRemoteFile: async (host, remotePath, file) =>
+    backendFetch<{ ok: boolean; path: string }>("/api/backend/sftp/upload", {
+      method: "POST",
+      body: JSON.stringify({
+        host,
+        path: remotePath,
+        filename: file.name,
+        contentsBase64: encodeBase64(await file.arrayBuffer()),
+      }),
+    }),
+  downloadRemoteFile: async (host, path) => {
+    const response = await backendBinaryFetch("/api/backend/sftp/download", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ host, path }),
+    });
+    const blob = await response.blob();
+    const header = response.headers.get("content-disposition");
+    const filename =
+      header?.match(/filename="?([^"]+)"?$/)?.[1] ??
+      path.split("/").filter(Boolean).slice(-1)[0] ??
+      "download";
+
+    return { blob, filename } satisfies DownloadRemoteFileResponse;
+  },
+  inspectPrivateKey: (path) =>
+    backendFetch<KeyMetadata>("/api/backend/keys/inspect", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    }),
+  generatePrivateKey: (payload) =>
+    backendFetch<KeyMetadata>("/api/backend/keys/generate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  importPrivateKeyFromBody: (payload) =>
+    backendFetch<KeyMetadata>("/api/backend/keys/import-from-body", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  copyKeyToHost: (payload) =>
+    backendFetch<CopyKeyToHostResponse>("/api/backend/keys/copy-to-host", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  scanKnownHost: (hostname, port) =>
+    backendFetch<{ entries: KnownHostScanResult[] }>("/api/backend/known-hosts/scan", {
+      method: "POST",
+      body: JSON.stringify({ hostname, port }),
+    }),
+  listLocalForwards: (sessionId) =>
+    backendFetch<ListForwardsResponse>(
+      `/api/backend/forwards?sessionId=${encodeURIComponent(sessionId)}`
+    ),
+  createLocalForward: (payload) =>
+    backendFetch<PortForwardRecord>("/api/backend/forwards", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteLocalForward: (forwardId) =>
+    backendFetch<BackendBooleanResponse>(`/api/backend/forwards/${forwardId}`, {
+      method: "DELETE",
+    }),
+  executeSnippetOnHosts: (command, targets) =>
+    backendFetch<{ results: SnippetExecutionResult[] }>("/api/backend/snippets/execute", {
+      method: "POST",
+      body: JSON.stringify({ command, targets }),
+    }),
+  openBackendSessionSocket: openSessionSocket,
+};
+
+function getBackend() {
+  if (isDemoModeEnabled()) {
+    return demoBackend;
   }
 
-  const response = await backendBinaryFetch("/api/backend/sftp/download", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ host, path }),
-  });
-  const blob = await response.blob();
-  const header = response.headers.get("content-disposition");
-  const filename =
-    header?.match(/filename="?([^"]+)"?$/)?.[1] ??
-    path.split("/").filter(Boolean).slice(-1)[0] ??
-    "download";
-
-  return { blob, filename } satisfies DownloadRemoteFileResponse;
+  return isTauriRuntime() ? tauriBackend : httpBackend;
 }
 
-function decodeBase64ToBytes(value: string) {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
+export async function getBackendStatus() {
+  return getBackend().getBackendStatus();
+}
 
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
+export async function getProtocolRuntimeStatus(protocol: HostProtocol) {
+  return getBackend().getProtocolRuntimeStatus(protocol);
+}
 
-  return bytes;
+export async function createBackendSession(host: BackendHostConnection) {
+  return getBackend().createBackendSession(host);
+}
+
+export async function closeBackendSession(sessionId: string) {
+  return getBackend().closeBackendSession(sessionId);
+}
+
+export async function resizeBackendSession(sessionId: string, payload: ResizeSessionPayload) {
+  return getBackend().resizeBackendSession(sessionId, payload);
+}
+
+export async function listRemoteDirectory(host: BackendHostConnection, path: string) {
+  return getBackend().listRemoteDirectory(host, path);
+}
+
+export async function createRemoteDirectory(host: BackendHostConnection, path: string) {
+  return getBackend().createRemoteDirectory(host, path);
+}
+
+export async function renameRemoteEntry(
+  host: BackendHostConnection,
+  currentPath: string,
+  nextPath: string
+) {
+  return getBackend().renameRemoteEntry(host, currentPath, nextPath);
+}
+
+export async function deleteRemoteEntry(
+  host: BackendHostConnection,
+  path: string,
+  isDirectory: boolean
+) {
+  return getBackend().deleteRemoteEntry(host, path, isDirectory);
+}
+
+export async function uploadRemoteFile(
+  host: BackendHostConnection,
+  remotePath: string,
+  file: File
+) {
+  return getBackend().uploadRemoteFile(host, remotePath, file);
+}
+
+export async function downloadRemoteFile(host: BackendHostConnection, path: string) {
+  return getBackend().downloadRemoteFile(host, path);
 }
 
 export async function inspectPrivateKey(path: string) {
-  if (isDemoModeEnabled()) {
-    return inspectDemoPrivateKey(path);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<KeyMetadata>("terminal_workspace_inspect_private_key", {
-      request: { path },
-    });
-  }
-
-  return backendFetch<KeyMetadata>("/api/backend/keys/inspect", {
-    method: "POST",
-    body: JSON.stringify({ path }),
-  });
+  return getBackend().inspectPrivateKey(path);
 }
 
 export async function generatePrivateKey(payload: GenerateKeyPayload) {
-  if (isDemoModeEnabled()) {
-    return generateDemoPrivateKey(payload);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<KeyMetadata>("terminal_workspace_generate_private_key", {
-      request: payload,
-    });
-  }
-
-  return backendFetch<KeyMetadata>("/api/backend/keys/generate", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return getBackend().generatePrivateKey(payload);
 }
 
 /**
@@ -358,20 +469,7 @@ export async function generatePrivateKey(payload: GenerateKeyPayload) {
  * client-side in lib/private-key-validation.ts before we get here.
  */
 export async function importPrivateKeyFromBody(payload: ImportPrivateKeyFromBodyPayload) {
-  if (isDemoModeEnabled()) {
-    return importDemoPrivateKeyFromBody(payload);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<KeyMetadata>("terminal_workspace_import_private_key_from_body", {
-      request: payload,
-    });
-  }
-
-  return backendFetch<KeyMetadata>("/api/backend/keys/import-from-body", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return getBackend().importPrivateKeyFromBody(payload);
 }
 
 /**
@@ -381,108 +479,29 @@ export async function importPrivateKeyFromBody(payload: ImportPrivateKeyFromBody
  * session itself.
  */
 export async function copyKeyToHost(payload: CopyKeyToHostPayload) {
-  if (isDemoModeEnabled()) {
-    return copyDemoKeyToHost(payload);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<CopyKeyToHostResponse>("terminal_workspace_copy_key_to_host", {
-      request: payload,
-    });
-  }
-
-  return backendFetch<CopyKeyToHostResponse>("/api/backend/keys/copy-to-host", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return getBackend().copyKeyToHost(payload);
 }
 
 export async function scanKnownHost(hostname: string, port: number) {
-  if (isDemoModeEnabled()) {
-    return scanDemoKnownHost(hostname, port);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<{ entries: KnownHostScanResult[] }>("terminal_workspace_scan_known_host", {
-      request: { hostname, port },
-    });
-  }
-
-  return backendFetch<{ entries: KnownHostScanResult[] }>("/api/backend/known-hosts/scan", {
-    method: "POST",
-    body: JSON.stringify({ hostname, port }),
-  });
+  return getBackend().scanKnownHost(hostname, port);
 }
 
 export async function listLocalForwards(sessionId: string) {
-  if (isDemoModeEnabled()) {
-    return listDemoForwards(sessionId);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<ListForwardsResponse>("terminal_workspace_list_session_forwards", {
-      request: { sessionId },
-    });
-  }
-
-  return backendFetch<ListForwardsResponse>(
-    `/api/backend/forwards?sessionId=${encodeURIComponent(sessionId)}`
-  );
+  return getBackend().listLocalForwards(sessionId);
 }
 
 export async function createLocalForward(payload: CreateForwardPayload) {
-  if (isDemoModeEnabled()) {
-    return createDemoForward(payload);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<PortForwardRecord>("terminal_workspace_create_forward", {
-      request: payload,
-    });
-  }
-
-  return backendFetch<PortForwardRecord>("/api/backend/forwards", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return getBackend().createLocalForward(payload);
 }
 
 export async function deleteLocalForward(forwardId: string) {
-  if (isDemoModeEnabled()) {
-    return deleteDemoForward(forwardId);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_delete_forward", {
-      request: { forwardId },
-    });
-  }
-
-  return backendFetch<BackendBooleanResponse>(`/api/backend/forwards/${forwardId}`, {
-    method: "DELETE",
-  });
+  return getBackend().deleteLocalForward(forwardId);
 }
 
 export async function executeSnippetOnHosts(command: string, targets: SnippetExecutionTarget[]) {
-  if (isDemoModeEnabled()) {
-    return executeDemoSnippetOnHosts(command, targets);
-  }
-
-  if (isTauriRuntime()) {
-    return invokeTauriCommand<{ results: SnippetExecutionResult[] }>(
-      "terminal_workspace_execute_snippet_on_hosts",
-      {
-        request: { command, targets },
-      }
-    );
-  }
-
-  return backendFetch<{ results: SnippetExecutionResult[] }>("/api/backend/snippets/execute", {
-    method: "POST",
-    body: JSON.stringify({ command, targets }),
-  });
+  return getBackend().executeSnippetOnHosts(command, targets);
 }
 
 export async function openBackendSessionSocket(sessionId: string) {
-  return openSessionSocket(sessionId);
+  return getBackend().openBackendSessionSocket(sessionId);
 }
