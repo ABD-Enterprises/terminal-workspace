@@ -1859,6 +1859,10 @@ pub(crate) fn execute_native_snippet_target(
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    // Native snippets capture `/usr/bin/ssh` fd 2 directly. That usually
+    // carries the remote command's stderr, but OpenSSH client diagnostics share
+    // the same pipe when the client emits them, so the field's provenance is
+    // "ssh process stderr" rather than "remote stderr only".
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code();
 
@@ -2400,6 +2404,136 @@ mod tests {
         );
     }
 
+    fn sshd_available() -> bool {
+        PathBuf::from("/usr/sbin/sshd").exists()
+    }
+
+    fn reserve_port() -> Result<u16, std::io::Error> {
+        std::net::TcpListener::bind(("127.0.0.1", 0))
+            .and_then(|listener| listener.local_addr().map(|address| address.port()))
+    }
+
+    fn wait_for_fixture(label: &str, mut ready: impl FnMut() -> bool) {
+        let timeout = Duration::from_secs(15);
+        let poll_interval = Duration::from_millis(50);
+        let started = Instant::now();
+        loop {
+            if ready() {
+                return;
+            }
+            assert!(
+                started.elapsed() < timeout,
+                "{label} did not become ready within {:?}",
+                timeout
+            );
+            thread::sleep(poll_interval);
+        }
+    }
+
+    fn parse_public_key(path: &Path) -> (String, String) {
+        let contents = fs::read_to_string(path).expect("public key should be readable");
+        let mut parts = contents.split_whitespace();
+        let algorithm = parts
+            .next()
+            .expect("public key should include an algorithm")
+            .to_string();
+        let public_key = parts
+            .next()
+            .expect("public key should include a key blob")
+            .to_string();
+        (algorithm, public_key)
+    }
+
+    fn generate_fixture_keypair(path: &Path, passphrase: Option<&str>) {
+        let output = Command::new("/usr/bin/ssh-keygen")
+            .args([
+                "-q",
+                "-t",
+                "ed25519",
+                "-C",
+                "termsnip-native-stderr-fixture",
+                "-N",
+                passphrase.unwrap_or(""),
+                "-f",
+                &path.to_string_lossy(),
+            ])
+            .output()
+            .expect("ssh-keygen should run");
+        assert!(
+            output.status.success(),
+            "ssh-keygen failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn spawn_stderr_fixture_sshd(
+        root: &Path,
+        port: u16,
+        username: &str,
+        authorized_keys: &Path,
+        host_key: &Path,
+    ) -> process::Child {
+        let config_path = root.join("sshd_config");
+        let log_path = root.join("sshd.log");
+        fs::write(
+            &config_path,
+            format!(
+                "Port {port}\n\
+ListenAddress 127.0.0.1\n\
+HostKey {}\n\
+PidFile {}\n\
+AuthorizedKeysFile {}\n\
+PasswordAuthentication no\n\
+KbdInteractiveAuthentication no\n\
+ChallengeResponseAuthentication no\n\
+UsePAM no\n\
+PubkeyAuthentication yes\n\
+PermitRootLogin no\n\
+AllowUsers {username}\n\
+StrictModes no\n\
+PrintMotd no\n\
+PermitTTY yes\n\
+UseDNS no\n\
+LogLevel VERBOSE\n",
+                host_key.to_string_lossy(),
+                root.join("sshd.pid").to_string_lossy(),
+                authorized_keys.to_string_lossy()
+            ),
+        )
+        .expect("sshd config should be written");
+
+        let mut sshd = Command::new("/usr/sbin/sshd")
+            .arg("-D")
+            .arg("-f")
+            .arg(&config_path)
+            .arg("-E")
+            .arg(&log_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("sshd should spawn");
+
+        wait_for_fixture("fixture sshd", || {
+            if sshd
+                .try_wait()
+                .expect("sshd status should be readable")
+                .is_some()
+            {
+                let log_output = fs::read_to_string(&log_path).unwrap_or_default();
+                panic!("fixture sshd exited early: {log_output}");
+            }
+
+            fs::read_to_string(&log_path)
+                .map(|output| {
+                    output.contains(&format!("Server listening on 127.0.0.1 port {port}"))
+                })
+                .unwrap_or(false)
+        });
+
+        sshd
+    }
+
     fn test_host(private_key_path: &Path, passphrase: &str) -> BackendHostConnection {
         BackendHostConnection {
             agent_forwarding: false,
@@ -2418,6 +2552,110 @@ mod tests {
             sftp_root: None,
             username: "deploy".to_string(),
         }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    #[ignore = "requires an unsandboxed localhost sshd runtime"]
+    fn localhost_ssh_transport_fixture_native_snippet_stderr_can_mix_remote_and_client_output() {
+        assert!(sshd_available(), "fixture requires /usr/sbin/sshd");
+        assert!(
+            ssh_keygen_available(),
+            "fixture requires /usr/bin/ssh-keygen"
+        );
+
+        let root = test_root("native-stderr-fixture");
+        let client_key_path = root.join("client_key");
+        let host_key_path = root.join("ssh_host_ed25519_key");
+        let authorized_keys_path = root.join("authorized_keys");
+        let username = std::env::var("USER").expect("USER should be set for localhost sshd");
+        let port = match reserve_port() {
+            Ok(port) => port,
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("skipping localhost stderr fixture in this sandbox: {error}");
+                let _ = fs::remove_dir_all(&root);
+                return;
+            }
+            Err(error) => panic!("fixture port should bind: {error}"),
+        };
+        let remote_stderr_marker = "REMOTE_STDERR_PROBE_299";
+
+        generate_fixture_keypair(&client_key_path, Some(""));
+        generate_fixture_keypair(&host_key_path, Some(""));
+        fs::write(
+            &authorized_keys_path,
+            fs::read_to_string(format!("{}.pub", client_key_path.to_string_lossy()))
+                .expect("client public key should be readable"),
+        )
+        .expect("authorized_keys should be written");
+        let (known_host_algorithm, known_host_public_key) = parse_public_key(&PathBuf::from(
+            format!("{}.pub", host_key_path.to_string_lossy()),
+        ));
+
+        let mut sshd = spawn_stderr_fixture_sshd(
+            &root,
+            port,
+            &username,
+            &authorized_keys_path,
+            &host_key_path,
+        );
+        let host = BackendHostConnection {
+            agent_forwarding: false,
+            auth_method: "privateKey".to_string(),
+            environment: None,
+            host_key_policy: None,
+            hostname: "127.0.0.1".to_string(),
+            jump_host: None,
+            known_host_algorithm: Some(known_host_algorithm),
+            known_host_public_key: Some(known_host_public_key),
+            password: String::new(),
+            passphrase: String::new(),
+            port: u32::from(port),
+            private_key_path: client_key_path.to_string_lossy().into_owned(),
+            protocol: "ssh".to_string(),
+            sftp_root: None,
+            username,
+        };
+
+        let session_result =
+            with_native_ssh_control_session(&host, &next_native_session_id(), |context| {
+                let mut ssh = Command::new("/usr/bin/ssh");
+                ssh.arg("-v")
+                    .arg("-F")
+                    .arg(&context.config_path)
+                    .arg("-o")
+                    .arg("RequestTTY=no")
+                    .arg(&context.target_alias)
+                    .arg(format!(
+                        "sh -lc {}",
+                        shell_single_quote(&format!("printf '%s\\n' '{remote_stderr_marker}' >&2"))
+                    ));
+                match run_command_with_timeout(
+                    ssh,
+                    Duration::from_millis(NATIVE_SNIPPET_COMMAND_TIMEOUT_MS),
+                ) {
+                    Ok(TimedCommand::Completed(output)) => Ok(output),
+                    Ok(TimedCommand::TimedOut) => Err("fixture ssh command timed out".to_string()),
+                    Err(error) => Err(error),
+                }
+            });
+
+        let _ = sshd.kill();
+        let _ = sshd.wait();
+        let _ = fs::remove_dir_all(&root);
+
+        let output = session_result.expect("fixture ssh command should succeed");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(remote_stderr_marker),
+            "captured stderr must contain the remote command's stderr: {stderr}"
+        );
+        assert!(
+            stderr.contains("debug1:")
+                || stderr.contains("mux_client_")
+                || stderr.contains("Authenticated to "),
+            "captured stderr must also contain an OpenSSH client diagnostic: {stderr}"
+        );
     }
 
     #[test]
