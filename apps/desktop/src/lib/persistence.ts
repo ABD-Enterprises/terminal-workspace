@@ -3,10 +3,9 @@ import type { StateStorage } from "zustand/middleware";
 import { isTauriRuntime } from "./backend-runtime";
 import type { VaultDeletionMap } from "../store/vault-sync-store";
 
-// #115: the SQLite database file name is deliberately left as-is (renaming
-// it needs a native file migration, which is out of scope for this data-only
-// pass). Only the localStorage key namespace moves to `terminal-workspace-*`.
-const DATABASE_URL = "sqlite:termsnip.db";
+// #129: the native startup path copies the legacy termsnip.db database to this
+// file before tauri-plugin-sql opens it.
+const DATABASE_URL = "sqlite:terminalworkspace.db";
 
 // #115: persisted-store localStorage keys moved from the legacy `termsnip-*`
 // namespace to `terminal-workspace-*`. `getLocalStorageItem` forward-migrates
