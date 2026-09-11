@@ -63,21 +63,36 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          version: 10.33.0
-
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-          cache: pnpm
+
+      # Org Actions policy (allowed_actions: selected) rejects pnpm/action-setup
+      # and dtolnay/rust-toolchain; validate.yml already moved to corepack +
+      # rustup (#350). Mirror that here so the release job does not
+      # startup_failure at the next tag.
+      - name: Enable corepack pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack install
+          echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+          pnpm --version
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.PNPM_STORE_PATH }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          toolchain: stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo --version
+          rustc --version
 
       - name: Bootstrap repo
         run: npm run setup
