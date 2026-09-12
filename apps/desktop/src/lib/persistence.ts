@@ -35,9 +35,16 @@ const DELETION_KINDS = ["hosts", "keys", "snippets", "knownHosts", "identities"]
 
 type PersistedStoreName = keyof typeof STORE_TABLES;
 type DeletionKind = (typeof DELETION_KINDS)[number];
+type LogLevel = "error" | "warn";
 
 interface StorePayloadRow {
   payload: string;
+}
+
+function writeFrontendLog(level: LogLevel, message: string) {
+  void import("@tauri-apps/plugin-log")
+    .then((logger) => logger[level](message))
+    .catch(() => undefined);
 }
 
 interface DeletionRow {
@@ -215,7 +222,7 @@ async function removeNativeDeletionItem() {
 
 function logPersistenceFallback(action: string, name: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  console.warn(`[termsnip] SQLite persistence ${action} failed for ${name}: ${message}`);
+  writeFrontendLog("warn", `[termsnip] SQLite persistence ${action} failed for ${name}: ${message}`);
 }
 
 // #146: a write/remove that fails must fail LOUDLY and must NOT shadow-write
@@ -224,7 +231,8 @@ function logPersistenceFallback(action: string, name: string, error: unknown) {
 // SQLite rows on read. Log at error level and let the caller re-throw.
 function logPersistenceError(action: string, name: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(
+  writeFrontendLog(
+    "error",
     `[termsnip] SQLite persistence ${action} failed for ${name}; not shadow-writing localStorage (SQLite is the source of truth): ${message}`
   );
 }

@@ -17,6 +17,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-log": "^2.9.1",
     "@tauri-apps/plugin-sql": "^2.4.1",
     "@xterm/addon-fit": "^0.11.0",
     "react": "^19.2.8",

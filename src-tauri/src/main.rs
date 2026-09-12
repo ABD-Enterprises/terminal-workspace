@@ -407,7 +407,7 @@ impl<T> LockRecover<T> for Mutex<T> {
             // Only fires on the poisoned path, so the happy path is unchanged
             // and this never spams. Surface it so the original panic that
             // poisoned the lock stays observable instead of being swallowed.
-            eprintln!(
+            log::warn!(
                 "warning: recovered from a poisoned session-registry lock; a prior panic left it poisoned — continuing with recovered state"
             );
             poisoned.into_inner()
@@ -1050,6 +1050,24 @@ fn key_command_failure_json(error: KeyCommandFailure) -> String {
         .unwrap_or_else(|serialization_error| format!("key command failure: {serialization_error}"))
 }
 
+fn key_command_failure_reason(error: &KeyCommandFailure) -> &'static str {
+    match error {
+        KeyCommandFailure::PathRequired => "path-required",
+        KeyCommandFailure::KeyBodyRequired => "key-body-required",
+        KeyCommandFailure::PathMustBeAbsolute { .. } => "path-must-be-absolute",
+        KeyCommandFailure::PathOutsideAllowedRoots { .. } => "path-outside-allowed-roots",
+        KeyCommandFailure::ParentDirectoryUnavailable { .. } => "parent-directory-unavailable",
+        KeyCommandFailure::PathAlreadyExists { .. } => "path-already-exists",
+        KeyCommandFailure::PrivateKeyUnreadable { .. } => "private-key-unreadable",
+        KeyCommandFailure::PrivateKeyWriteFailed { .. } => "private-key-write-failed",
+        KeyCommandFailure::UnsupportedKeyType => "unsupported-key-type",
+        KeyCommandFailure::SshKeygenUnavailable { .. } => "ssh-keygen-unavailable",
+        KeyCommandFailure::SshKeygenFailed { .. } => "ssh-keygen-failed",
+        KeyCommandFailure::InvalidKeyMetadata { .. } => "invalid-key-metadata",
+        KeyCommandFailure::WorkerFailed { .. } => "worker-failed",
+    }
+}
+
 fn validate_connection_identity_key_path(private_key_path: &str) -> Result<PathBuf, String> {
     let resolved_path = expand_home(private_key_path);
     validate_user_owned_key_path(&resolved_path, private_key_path)
@@ -1506,7 +1524,7 @@ fn emit_session_stream_event(app: &AppHandle, event: SessionStreamEvent) {
     // adds no allocation on the hot output path.
     let kind = event.kind;
     if let Err(error) = app.emit(SESSION_STREAM_EVENT_NAME, event) {
-        eprintln!("warning: dropped '{kind}' session stream event: {error}");
+        log::warn!("warning: dropped '{kind}' session stream event: {error}");
     }
 }
 
@@ -2997,11 +3015,18 @@ async fn terminal_workspace_inspect_private_key(
     request: KeyPathRequest,
 ) -> Result<KeyMetadata, KeyCommandFailure> {
     let requested_path = request.path.clone();
-    tauri::async_runtime::spawn_blocking(move || inspect_private_key(&request.path))
+    let result = tauri::async_runtime::spawn_blocking(move || inspect_private_key(&request.path))
         .await
         .map_err(|_| KeyCommandFailure::WorkerFailed {
             path: requested_path,
-        })?
+        })?;
+    if let Err(error) = &result {
+        log::warn!(
+            "private key inspection failed: {}",
+            key_command_failure_reason(error)
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -3009,11 +3034,18 @@ async fn terminal_workspace_generate_private_key(
     request: GenerateKeyRequest,
 ) -> Result<KeyMetadata, KeyCommandFailure> {
     let requested_path = request.path.clone();
-    tauri::async_runtime::spawn_blocking(move || generate_key_pair(&request))
+    let result = tauri::async_runtime::spawn_blocking(move || generate_key_pair(&request))
         .await
         .map_err(|_| KeyCommandFailure::WorkerFailed {
             path: requested_path,
-        })?
+        })?;
+    if let Err(error) = &result {
+        log::warn!(
+            "private key generation failed: {}",
+            key_command_failure_reason(error)
+        );
+    }
+    result
 }
 
 #[derive(Debug, Deserialize)]
@@ -3031,13 +3063,20 @@ async fn terminal_workspace_import_private_key_from_body(
     request: ImportPrivateKeyFromBodyRequest,
 ) -> Result<KeyMetadata, KeyCommandFailure> {
     let requested_path = request.path.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         import_private_key_from_body(&request.path, &request.body)
     })
     .await
     .map_err(|_| KeyCommandFailure::WorkerFailed {
         path: requested_path,
-    })?
+    })?;
+    if let Err(error) = &result {
+        log::warn!(
+            "private key import failed: {}",
+            key_command_failure_reason(error)
+        );
+    }
+    result
 }
 
 // BackendHostConnection (the existing renderer-side struct) doesn't
@@ -3398,7 +3437,7 @@ fn emit_update_install_progress_event(app: &AppHandle, event: UpdateInstallProgr
         UpdateInstallProgressEvent::Installing => "installing",
     };
     if let Err(error) = app.emit(UPDATE_INSTALL_PROGRESS_EVENT_NAME, event) {
-        eprintln!("warning: dropped '{phase}' update install progress event: {error}");
+        log::warn!("warning: dropped '{phase}' update install progress event: {error}");
     }
 }
 
@@ -5423,7 +5462,7 @@ fn terminal_workspace_wal_bootstrap_plugin<R: Runtime>() -> tauri::plugin::Tauri
             });
             tauri::async_runtime::block_on(bootstrap_terminal_workspace_database_wal_best_effort(
                 app_config_dir,
-                |warning| eprintln!("{warning}"),
+                |warning| log::warn!("{warning}"),
             ))
         })
         .build()
@@ -5431,6 +5470,19 @@ fn terminal_workspace_wal_bootstrap_plugin<R: Runtime>() -> tauri::plugin::Tauri
 
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("terminal-workspace".to_string()),
+                    }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                ])
+                .level(log::LevelFilter::Info)
+                .max_file_size(1_048_576)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                .build(),
+        )
         // #180: order is correctness-critical — bootstrap the file in WAL mode
         // before tauri-plugin-sql preloads its pool and runs migrations.
         .plugin(terminal_workspace_wal_bootstrap_plugin())
@@ -5474,7 +5526,7 @@ fn main() {
             app.on_menu_event(move |_app_handle, event| {
                 let id_str = event.id().0.clone();
                 if let Err(error) = event_handle.emit(MENU_EVENT_NAME, id_str.clone()) {
-                    eprintln!("[termsnip] failed to forward menu event {id_str}: {error}");
+                    log::warn!("[termsnip] failed to forward menu event {id_str}: {error}");
                 }
             });
             Ok(())
@@ -5536,7 +5588,7 @@ fn main() {
                     Duration::from_millis(APP_EXIT_SESSION_DRAIN_TIMEOUT_MS),
                 );
                 if !drained {
-                    eprintln!(
+                    log::warn!(
                         "warning: timed out draining native sessions during app quit; forcing exit with {} sessions still registered",
                         live_native_session_count(native_sessions.inner())
                     );
@@ -5957,7 +6009,7 @@ mod tests {
         let permission_probe = root.path().join("permission-probe");
         if fs::File::create(&permission_probe).is_ok() {
             let _ = fs::remove_file(permission_probe);
-            eprintln!(
+            log::warn!(
                 "Skipping WAL best-effort permission test; directory permissions are not enforced"
             );
             return;
@@ -7409,7 +7461,7 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
     #[test]
     fn public_known_host_scan_smoke() {
         let Ok(hostname) = env::var("TERMSNIP_PUBLIC_SCAN_HOST") else {
-            eprintln!("Skipping public known-host scan smoke; TERMSNIP_PUBLIC_SCAN_HOST is unset");
+            log::warn!("Skipping public known-host scan smoke; TERMSNIP_PUBLIC_SCAN_HOST is unset");
             return;
         };
         let port = env::var("TERMSNIP_PUBLIC_SCAN_PORT")

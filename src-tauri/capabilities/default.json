@@ -9,6 +9,7 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-set-title",
+    "log:default",
     "sql:allow-load",
     "sql:allow-select",
     "sql:allow-execute"
