@@ -5328,15 +5328,16 @@ async fn bootstrap_terminal_workspace_database_wal_best_effort<Warn>(
 where
     Warn: FnOnce(&str),
 {
+    let app_config_dir = app_config_dir?;
+    fs::create_dir_all(&app_config_dir).map_err(|error| {
+        io::Error::other(format!(
+            "could not create app config directory {} for SQLite WAL bootstrap: {error}",
+            app_config_dir.display()
+        ))
+    })?;
+    migrate_legacy_database(&app_config_dir)?;
+
     let result = async {
-        let app_config_dir = app_config_dir?;
-        fs::create_dir_all(&app_config_dir).map_err(|error| {
-            io::Error::other(format!(
-                "could not create app config directory {} for SQLite WAL bootstrap: {error}",
-                app_config_dir.display()
-            ))
-        })?;
-        migrate_legacy_database(&app_config_dir)?;
         let database_path = terminal_workspace_database_path(&app_config_dir)?;
         bootstrap_terminal_workspace_database_wal(&database_path).await
     }
@@ -5722,6 +5723,44 @@ mod tests {
         assert!(
             !terminal_workspace_temp_path.exists(),
             "temp file should be renamed away after successful migration"
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_wal_bootstrap_fails_startup_when_legacy_migration_fails() {
+        let root = SqliteTempRoot::new();
+        let legacy_path = legacy_database_path(root.path()).expect("legacy path should resolve");
+        let terminal_workspace_path =
+            terminal_workspace_database_path(root.path()).expect("database path should resolve");
+        let terminal_workspace_wal =
+            sqlite_database_sidecar_path(&terminal_workspace_path, "wal").expect("new wal path");
+        fs::write(&legacy_path, b"legacy-main").expect("legacy database should be written");
+        fs::write(
+            sqlite_database_sidecar_path(&legacy_path, "wal").expect("legacy wal path"),
+            b"legacy-wal",
+        )
+        .expect("legacy WAL sidecar should be written");
+        fs::create_dir(&terminal_workspace_wal)
+            .expect("directory should block sidecar copy at the destination path");
+
+        let mut reported_warning = None;
+        let result = bootstrap_terminal_workspace_database_wal_best_effort(
+            Ok(root.path().to_path_buf()),
+            |warning| reported_warning = Some(warning.to_owned()),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "legacy migration failures must abort before SQL preload can create an empty database"
+        );
+        assert!(
+            !terminal_workspace_path.exists(),
+            "new database guard must not be created when legacy migration fails"
+        );
+        assert!(
+            reported_warning.is_none(),
+            "legacy migration failure is fatal, not a degraded WAL warning"
         );
     }
 
