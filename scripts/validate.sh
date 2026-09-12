@@ -82,18 +82,22 @@ fi
 # a helper process to reproduce leaked sshds, then prove a later fixture startup
 # reaps the orphan without disturbing a live fixture. The shared name prefix
 # keeps those leak regressions in this same real-sshd gate.
-if [[ "${TERMSNIP_RUN_SSH_FIXTURE:-0}" == "1" && "$(uname -s)" == "Darwin" ]]; then
+if [[ "${TERMSNIP_RUN_SSH_FIXTURE:-0}" == "1" && "$(uname -s)" != "Windows_NT" ]]; then
   if command -v cargo >/dev/null 2>&1; then
     echo "[validate] localhost sshd transport and reaper fixtures"
-    cargo test --manifest-path src-tauri/Cargo.toml \
-      localhost_ssh_transport_fixture -- --include-ignored --test-threads=1
+    cargo test --manifest-path src-tauri/Cargo.toml native_trust_tooling_fixture_openssh -- --include-ignored --test-threads=1
+    cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture_flow -- --include-ignored --test-threads=1
+    cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture_reaps -- --include-ignored --test-threads=1
+    cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture_startup -- --include-ignored --test-threads=1
+    cargo test --manifest-path src-tauri/Cargo.toml test_allow_unknown_tofu -- --include-ignored --test-threads=1
+    cargo test --manifest-path src-tauri/Cargo.toml test_require_trusted -- --include-ignored --test-threads=1
   else
     echo "[validate] localhost sshd fixture skipped (cargo not found on PATH)" >&2
   fi
-elif [[ "$(uname -s)" == "Darwin" ]]; then
+elif [[ "$(uname -s)" != "Windows_NT" ]]; then
   echo "[validate] localhost sshd transport fixture skipped (set TERMSNIP_RUN_SSH_FIXTURE=1 to include — required for changes to the PTY readers, session loops, or native_transport capture loops)"
 else
-  echo "[validate] localhost sshd transport fixture skipped (macOS only — the native crate ships on macOS)"
+  echo "[validate] localhost sshd transport fixture skipped (Unix only — needs a local sshd)"
 fi
 
 # #226: Rust advisory scan. src-tauri/audit.toml described an "enforcing
