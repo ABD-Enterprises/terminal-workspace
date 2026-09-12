@@ -216,7 +216,14 @@ async function removeNativeDeletionItem() {
 
 function logPersistenceFallback(action: string, name: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  console.warn(`[termsnip] SQLite persistence ${action} failed for ${name}: ${message}`);
+  const logMessage = `[termsnip] SQLite persistence ${action} failed for ${name}: ${message}`;
+  if (isTauriRuntime()) {
+    void import("@tauri-apps/plugin-log")
+      .then(({ warn }) => warn(logMessage))
+      .catch(() => undefined);
+  } else {
+    console.warn(logMessage);
+  }
 }
 
 // #146: a write/remove that fails must fail LOUDLY and must NOT shadow-write
@@ -225,9 +232,14 @@ function logPersistenceFallback(action: string, name: string, error: unknown) {
 // SQLite rows on read. Log at error level and let the caller re-throw.
 function logPersistenceError(action: string, name: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(
-    `[termsnip] SQLite persistence ${action} failed for ${name}; not shadow-writing localStorage (SQLite is the source of truth): ${message}`
-  );
+  const logMessage = `[termsnip] SQLite persistence ${action} failed for ${name}; not shadow-writing localStorage (SQLite is the source of truth): ${message}`;
+  if (isTauriRuntime()) {
+    void import("@tauri-apps/plugin-log")
+      .then(({ error }) => error(logMessage))
+      .catch(() => undefined);
+  } else {
+    console.error(logMessage);
+  }
 }
 
 /**

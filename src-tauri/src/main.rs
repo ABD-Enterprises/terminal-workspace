@@ -22,6 +22,7 @@ use std::{
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use getrandom::fill;
+use log::{info, warn};
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -31,6 +32,7 @@ use sqlx::{ConnectOptions, Connection};
 use ssh2::{Channel, Session};
 use tauri::menu::{AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tokio::sync::mpsc::{channel, error::TrySendError, Sender};
 mod keychain_support;
@@ -406,7 +408,7 @@ impl<T> LockRecover<T> for Mutex<T> {
             // Only fires on the poisoned path, so the happy path is unchanged
             // and this never spams. Surface it so the original panic that
             // poisoned the lock stays observable instead of being swallowed.
-            eprintln!(
+            warn!(
                 "warning: recovered from a poisoned session-registry lock; a prior panic left it poisoned — continuing with recovered state"
             );
             poisoned.into_inner()
@@ -1505,7 +1507,7 @@ fn emit_session_stream_event(app: &AppHandle, event: SessionStreamEvent) {
     // adds no allocation on the hot output path.
     let kind = event.kind;
     if let Err(error) = app.emit(SESSION_STREAM_EVENT_NAME, event) {
-        eprintln!("warning: dropped '{kind}' session stream event: {error}");
+        warn!("warning: dropped '{kind}' session stream event: {error}");
     }
 }
 
@@ -3397,7 +3399,7 @@ fn emit_update_install_progress_event(app: &AppHandle, event: UpdateInstallProgr
         UpdateInstallProgressEvent::Installing => "installing",
     };
     if let Err(error) = app.emit(UPDATE_INSTALL_PROGRESS_EVENT_NAME, event) {
-        eprintln!("warning: dropped '{phase}' update install progress event: {error}");
+        warn!("warning: dropped '{phase}' update install progress event: {error}");
     }
 }
 
@@ -5250,7 +5252,7 @@ fn termsnip_wal_bootstrap_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> 
             });
             tauri::async_runtime::block_on(bootstrap_termsnip_database_wal_best_effort(
                 app_config_dir,
-                |warning| eprintln!("{warning}"),
+                |warning| warn!("{warning}"),
             ))
         })
         .build()
@@ -5258,6 +5260,17 @@ fn termsnip_wal_bootstrap_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> 
 
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .max_file_size(1_000_000)
+                .rotation_strategy(RotationStrategy::KeepSome(5))
+                .targets([
+                    Target::new(TargetKind::LogDir { file_name: None }),
+                    Target::new(TargetKind::Webview),
+                    Target::new(TargetKind::Stdout),
+                ])
+                .build(),
+        )
         // #180: order is correctness-critical — bootstrap the file in WAL mode
         // before tauri-plugin-sql preloads its pool and runs migrations.
         .plugin(termsnip_wal_bootstrap_plugin())
@@ -5301,9 +5314,10 @@ fn main() {
             app.on_menu_event(move |_app_handle, event| {
                 let id_str = event.id().0.clone();
                 if let Err(error) = event_handle.emit(MENU_EVENT_NAME, id_str.clone()) {
-                    eprintln!("[termsnip] failed to forward menu event {id_str}: {error}");
+                    warn!("[termsnip] failed to forward menu event {id_str}: {error}");
                 }
             });
+            info!("[termsnip] app setup completed");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -5363,7 +5377,7 @@ fn main() {
                     Duration::from_millis(APP_EXIT_SESSION_DRAIN_TIMEOUT_MS),
                 );
                 if !drained {
-                    eprintln!(
+                    warn!(
                         "warning: timed out draining native sessions during app quit; forcing exit with {} sessions still registered",
                         live_native_session_count(native_sessions.inner())
                     );

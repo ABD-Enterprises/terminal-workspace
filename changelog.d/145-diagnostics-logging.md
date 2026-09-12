@@ -1,0 +1,1 @@
+- [FEATURE] Add packaged desktop log files for frontend and native diagnostics. (#145)

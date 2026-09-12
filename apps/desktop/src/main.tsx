@@ -3,10 +3,22 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { ErrorBoundary, installGlobalRejectionHandler } from "./components/ErrorBoundary";
+import { isTauriRuntime } from "./lib/backend-runtime";
 import { ensureIdentitiesMigrated } from "./store/identities-store";
 import "./styles/globals.css";
 
 const queryClient = new QueryClient();
+
+if (isTauriRuntime()) {
+  import("@tauri-apps/plugin-log")
+    .then(({ attachConsole, info }) =>
+      attachConsole().then(() => info("[termsnip] frontend log bridge attached"))
+    )
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[termsnip] failed to attach frontend log bridge: ${message}`);
+    });
+}
 
 // Surface otherwise-lost promise rejections (e.g. fire-and-forget IPC calls)
 // instead of letting them vanish silently.
