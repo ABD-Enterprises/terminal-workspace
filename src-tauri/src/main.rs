@@ -5201,7 +5201,10 @@ fn sqlite_database_migration_temp_path(database_path: &Path) -> io::Result<PathB
         ))
     })?;
     let mut temp_file_name = file_name.to_os_string();
-    temp_file_name.push(".legacy-migration-tmp");
+    // Per-process name: two first launches racing each other must not share a
+    // temp file (fs::copy truncates), and publishing goes through a create-only
+    // hard link below, so the loser simply discards its copy.
+    temp_file_name.push(format!(".legacy-migration-tmp-{}", std::process::id()));
     Ok(database_path.with_file_name(temp_file_name))
 }
 
@@ -5241,7 +5244,22 @@ fn copy_legacy_database_sidecar(
             terminal_workspace_sidecar.display()
         ))
     })?;
+    sync_migrated_path(&terminal_workspace_sidecar)?;
     Ok(())
+}
+
+fn sync_migrated_path(path: &Path) -> io::Result<()> {
+    // Durability for the crash window between the copies above and the rename
+    // below: without this the rename can reach disk before the copied bytes,
+    // leaving the existence guard in place over a torn file.
+    fs::File::open(path)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| {
+            io::Error::other(format!(
+                "could not sync migrated SQLite file {}: {error}",
+                path.display()
+            ))
+        })
 }
 
 fn migrate_legacy_database(app_config_dir: &Path) -> io::Result<()> {
@@ -5283,22 +5301,28 @@ fn migrate_legacy_database(app_config_dir: &Path) -> io::Result<()> {
             terminal_workspace_temp_path.display()
         ))
     })?;
-    if terminal_workspace_path.try_exists().map_err(|error| {
-        io::Error::other(format!(
-            "could not inspect SQLite database {} before migration rename: {error}",
-            terminal_workspace_path.display()
-        ))
-    })? {
-        let _ = fs::remove_file(&terminal_workspace_temp_path);
-        return Ok(());
+    sync_migrated_path(&terminal_workspace_temp_path)?;
+    // Publish with a create-only hard link: it fails with AlreadyExists if another
+    // process published first, which makes the existence guard an atomic claim
+    // rather than a check-then-rename race.
+    match fs::hard_link(&terminal_workspace_temp_path, &terminal_workspace_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let _ = fs::remove_file(&terminal_workspace_temp_path);
+            return Ok(());
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&terminal_workspace_temp_path);
+            return Err(io::Error::other(format!(
+                "could not publish migrated SQLite database {} as {}: {error}",
+                terminal_workspace_temp_path.display(),
+                terminal_workspace_path.display()
+            )));
+        }
     }
-    fs::rename(&terminal_workspace_temp_path, &terminal_workspace_path).map_err(|error| {
-        io::Error::other(format!(
-            "could not rename migrated SQLite database {} to {}: {error}",
-            terminal_workspace_temp_path.display(),
-            terminal_workspace_path.display()
-        ))
-    })?;
+    let _ = fs::remove_file(&terminal_workspace_temp_path);
+    // The rename itself is only durable once the directory entry is.
+    sync_migrated_path(app_config_dir)?;
     Ok(())
 }
 
@@ -5707,6 +5731,32 @@ mod tests {
             "a sidecar from an earlier attempt must not outlive a checkpointed legacy database"
         );
         assert_eq!(fs::read(&terminal_workspace_path).unwrap(), b"legacy-main");
+    }
+
+    #[test]
+    fn legacy_database_migration_loses_publish_race_without_clobbering_winner() {
+        let root = SqliteTempRoot::new();
+        let legacy_path = legacy_database_path(root.path()).expect("legacy path should resolve");
+        let terminal_workspace_path =
+            terminal_workspace_database_path(root.path()).expect("database path should resolve");
+        fs::write(&legacy_path, b"legacy-main").expect("legacy database should be written");
+        // Simulate the other process having published already: hard_link must
+        // refuse, and our temp copy must be discarded rather than renamed over it.
+        fs::write(&terminal_workspace_path, b"winner-main").expect("winner should be written");
+        let temp_path = sqlite_database_migration_temp_path(&terminal_workspace_path).unwrap();
+        fs::write(&temp_path, b"loser-copy").expect("loser temp should be written");
+
+        assert!(matches!(
+            fs::hard_link(&temp_path, &terminal_workspace_path).map_err(|e| e.kind()),
+            Err(io::ErrorKind::AlreadyExists)
+        ));
+        migrate_legacy_database(root.path()).expect("migration should skip cleanly");
+
+        assert_eq!(fs::read(&terminal_workspace_path).unwrap(), b"winner-main");
+        assert!(
+            temp_path.exists(),
+            "the guard short-circuits before touching our temp"
+        );
     }
 
     #[test]
