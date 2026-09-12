@@ -628,7 +628,6 @@ fn process_arguments(pid: c_int) -> Option<ProcessArguments> {
     let cmdline = fs::read(format!("/proc/{pid}/cmdline")).ok()?;
     let argv = cmdline
         .split(|byte| *byte == 0)
-        .filter(|arg| !arg.is_empty())
         .map(|arg| OsString::from_vec(arg.to_vec()))
         .collect::<Vec<_>>();
     if argv.is_empty() {

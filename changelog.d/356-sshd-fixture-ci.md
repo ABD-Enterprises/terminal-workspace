@@ -1,1 +1,1 @@
-- [INTERNAL] Run ignored native sshd fixtures in a neutral Ubuntu CI job with a workflow-local sshd. (#356)
+- [INTERNAL] Run ignored native sshd fixtures in a neutral Ubuntu CI job against fixture-owned sshds. (#356)

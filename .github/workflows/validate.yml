@@ -287,60 +287,9 @@ jobs:
           mkdir -p apps/desktop/dist
           printf '<!doctype html><title>native ssh fixture</title>\n' > apps/desktop/dist/index.html
 
-      - name: Start loopback sshd fixture
-        shell: bash
-        run: |
-          set -euo pipefail
-          SSHD_ROOT="$RUNNER_TEMP/termsnip-ci-sshd"
-          mkdir -p "$SSHD_ROOT"
-          ssh-keygen -t ed25519 -q -N '' -f "$SSHD_ROOT/ssh_host_ed25519_key"
-          ssh-keygen -t ed25519 -q -N '' -f "$SSHD_ROOT/client_key"
-          cp "$SSHD_ROOT/client_key.pub" "$SSHD_ROOT/authorized_keys"
-          chmod 600 "$SSHD_ROOT"/client_key "$SSHD_ROOT"/authorized_keys
-          PORT="$(python3 -c 'import socket; sock = socket.socket(); sock.bind(("127.0.0.1", 0)); print(sock.getsockname()[1]); sock.close()')"
-          USERNAME="$(id -un)"
-          {
-            echo "Port $PORT"
-            echo "ListenAddress 127.0.0.1"
-            echo "HostKey $SSHD_ROOT/ssh_host_ed25519_key"
-            echo "PidFile $SSHD_ROOT/sshd.pid"
-            echo "AuthorizedKeysFile $SSHD_ROOT/authorized_keys"
-            echo "PasswordAuthentication no"
-            echo "KbdInteractiveAuthentication no"
-            echo "ChallengeResponseAuthentication no"
-            echo "UsePAM no"
-            echo "PubkeyAuthentication yes"
-            echo "StrictModes no"
-            echo "PermitRootLogin no"
-            echo "AllowUsers $USERNAME"
-            echo "PrintMotd no"
-            echo "PermitTTY yes"
-            echo "AllowTcpForwarding yes"
-            echo "GatewayPorts yes"
-            echo "UseDNS no"
-            echo "LogLevel VERBOSE"
-            echo "Subsystem sftp internal-sftp"
-          } > "$SSHD_ROOT/sshd_config"
-          /usr/sbin/sshd -D -f "$SSHD_ROOT/sshd_config" -E "$SSHD_ROOT/sshd.log" &
-          echo "TERMSNIP_CI_SSHD_PID=$!" >> "$GITHUB_ENV"
-          for _ in {1..100}; do
-            if grep -q "Server listening on 127.0.0.1 port $PORT" "$SSHD_ROOT/sshd.log" 2>/dev/null; then
-              break
-            fi
-            sleep 0.05
-          done
-          grep "Server listening on 127.0.0.1 port $PORT" "$SSHD_ROOT/sshd.log"
-          /usr/bin/ssh -F /dev/null \
-            -o BatchMode=yes \
-            -o GlobalKnownHostsFile=/dev/null \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -i "$SSHD_ROOT/client_key" \
-            -p "$PORT" \
-            "$USERNAME@127.0.0.1" true
-
       - name: Run ignored native sshd fixtures
         env:
+          TMPDIR: ${{ runner.temp }}
           TERMSNIP_RUN_SSH_FIXTURE: "1"
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml native_trust_tooling_fixture_openssh -- --include-ignored --test-threads=1
@@ -349,12 +298,3 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture_startup -- --include-ignored --test-threads=1
           cargo test --manifest-path src-tauri/Cargo.toml test_allow_unknown_tofu -- --include-ignored --test-threads=1
           cargo test --manifest-path src-tauri/Cargo.toml test_require_trusted -- --include-ignored --test-threads=1
-
-      - name: Stop loopback sshd fixture
-        if: always()
-        shell: bash
-        run: |
-          if [[ -n "${TERMSNIP_CI_SSHD_PID:-}" ]]; then
-            kill "$TERMSNIP_CI_SSHD_PID" >/dev/null 2>&1 || true
-            wait "$TERMSNIP_CI_SSHD_PID" >/dev/null 2>&1 || true
-          fi
