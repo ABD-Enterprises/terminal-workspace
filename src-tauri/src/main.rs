@@ -5193,6 +5193,18 @@ fn sqlite_database_sidecar_path(database_path: &Path, suffix: &str) -> io::Resul
     Ok(database_path.with_file_name(sidecar_file_name))
 }
 
+fn sqlite_database_migration_temp_path(database_path: &Path) -> io::Result<PathBuf> {
+    let file_name = database_path.file_name().ok_or_else(|| {
+        io::Error::other(format!(
+            "could not derive SQLite migration temp path for {}",
+            database_path.display()
+        ))
+    })?;
+    let mut temp_file_name = file_name.to_os_string();
+    temp_file_name.push(".legacy-migration-tmp");
+    Ok(database_path.with_file_name(temp_file_name))
+}
+
 fn copy_legacy_database_sidecar(
     legacy_path: &Path,
     terminal_workspace_path: &Path,
@@ -5240,13 +5252,32 @@ fn migrate_legacy_database(app_config_dir: &Path) -> io::Result<()> {
     }
 
     // #129: create the main database file last. Its presence is the idempotence
-    // guard, so a crash before this copy retries and refreshes any sidecars.
+    // guard, so copy into a stable temp file first and rename into place only
+    // after any sidecars are already available.
     copy_legacy_database_sidecar(&legacy_path, &terminal_workspace_path, "wal")?;
     copy_legacy_database_sidecar(&legacy_path, &terminal_workspace_path, "shm")?;
-    fs::copy(&legacy_path, &terminal_workspace_path).map_err(|error| {
+    let terminal_workspace_temp_path =
+        sqlite_database_migration_temp_path(&terminal_workspace_path)?;
+    fs::copy(&legacy_path, &terminal_workspace_temp_path).map_err(|error| {
         io::Error::other(format!(
-            "could not copy legacy SQLite database {} to {}: {error}",
+            "could not copy legacy SQLite database {} to migration temp file {}: {error}",
             legacy_path.display(),
+            terminal_workspace_temp_path.display()
+        ))
+    })?;
+    if terminal_workspace_path.try_exists().map_err(|error| {
+        io::Error::other(format!(
+            "could not inspect SQLite database {} before migration rename: {error}",
+            terminal_workspace_path.display()
+        ))
+    })? {
+        let _ = fs::remove_file(&terminal_workspace_temp_path);
+        return Ok(());
+    }
+    fs::rename(&terminal_workspace_temp_path, &terminal_workspace_path).map_err(|error| {
+        io::Error::other(format!(
+            "could not rename migrated SQLite database {} to {}: {error}",
+            terminal_workspace_temp_path.display(),
             terminal_workspace_path.display()
         ))
     })?;
@@ -5667,6 +5698,30 @@ mod tests {
         assert_eq!(
             fs::read(&terminal_workspace_path).expect("new database should be readable"),
             b"legacy-main"
+        );
+    }
+
+    #[test]
+    fn legacy_database_migration_recovers_from_interrupted_main_temp_copy() {
+        let root = SqliteTempRoot::new();
+        let legacy_path = legacy_database_path(root.path()).expect("legacy path should resolve");
+        let terminal_workspace_path =
+            terminal_workspace_database_path(root.path()).expect("database path should resolve");
+        let terminal_workspace_temp_path =
+            sqlite_database_migration_temp_path(&terminal_workspace_path).expect("new temp path");
+        fs::write(&legacy_path, b"legacy-main").expect("legacy database should be written");
+        fs::write(&terminal_workspace_temp_path, b"stale-main")
+            .expect("stale migration temp file should model an interrupted prior attempt");
+
+        migrate_legacy_database(root.path()).expect("legacy database should migrate");
+
+        assert_eq!(
+            fs::read(&terminal_workspace_path).expect("new database should be readable"),
+            b"legacy-main"
+        );
+        assert!(
+            !terminal_workspace_temp_path.exists(),
+            "temp file should be renamed away after successful migration"
         );
     }
 
