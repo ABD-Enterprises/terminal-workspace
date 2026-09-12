@@ -23,7 +23,6 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use getrandom::fill;
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
@@ -33,14 +32,18 @@ use tauri::menu::{AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, Subm
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tokio::sync::mpsc::{channel, error::TrySendError, Sender};
+mod ipc_types;
 mod keychain_support;
 mod native_host_keys;
 mod native_transport;
+mod sftp;
 
 use crate::native_host_keys::{HostKeyVerdict, NativeHostKeyStore, SharedNativeHostKeyStore};
 
+use ipc_types::*;
 use keychain_support::*;
 use native_transport::*;
+use sftp::*;
 
 const SESSION_STREAM_EVENT_NAME: &str = "terminal_workspace://session-stream";
 const UPDATE_INSTALL_PROGRESS_EVENT_NAME: &str = "terminal_workspace://update-install-progress";
@@ -499,47 +502,6 @@ struct NativeSessionCommandWakeWriter {
     writer: UnixStream,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BackendTransportInfo {
-    backend_base_url: String,
-    session_bridge: &'static str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BackendStatusResponse {
-    ok: bool,
-    backend_base_url: String,
-    transport: &'static str,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BackendHostConnection {
-    agent_forwarding: bool,
-    auth_method: String,
-    environment: Option<HashMap<String, String>>,
-    /// "requireTrusted" or "allowUnknown". Optional for backward compatibility
-    /// with renderer builds that pre-date the contract change. When absent or
-    /// "requireTrusted" we refuse to connect without a known_host_public_key.
-    /// See docs/parity-and-hardening-review.md §3.S-1.
-    #[serde(default)]
-    host_key_policy: Option<String>,
-    hostname: String,
-    jump_host: Option<Box<BackendHostConnection>>,
-    known_host_algorithm: Option<String>,
-    known_host_public_key: Option<String>,
-    password: String,
-    passphrase: String,
-    port: u32,
-    private_key_path: String,
-    #[serde(default = "default_backend_protocol")]
-    protocol: String,
-    sftp_root: Option<String>,
-    username: String,
-}
-
 fn host_requires_trusted_key(host: &BackendHostConnection) -> bool {
     // Default to "requireTrusted" when absent for the same secure-by-default
     // reason the TS layer flipped its default. Only an explicit "allowUnknown"
@@ -555,393 +517,11 @@ fn default_backend_protocol() -> String {
     "ssh".to_string()
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateBackendSessionRequest {
-    host: BackendHostConnection,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateSessionResponse {
-    session_id: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionIdRequest {
-    session_id: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ResizeSessionPayload {
-    cols: u16,
-    rows: u16,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ResizeBackendSessionRequest {
-    session_id: String,
-    payload: ResizeSessionPayload,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteFileEntry {
-    kind: String,
-    modified_at: Option<String>,
-    name: String,
-    path: String,
-    permissions: Option<String>,
-    size: u64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SftpDirectoryResponse {
-    entries: Vec<RemoteFileEntry>,
-    path: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct KeyPathRequest {
-    path: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProtocolRuntimeStatusRequest {
-    protocol: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProtocolRuntimeStatusResponse {
-    available: bool,
-    client: Option<String>,
-    install_hint: Option<String>,
-    message: String,
-    protocol: String,
-    resolved_path: Option<String>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct KeyMetadata {
-    algorithm: String,
-    bits: u32,
-    fingerprint: String,
-    comment: String,
-    private_key_path: String,
-    public_key_path: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-enum KeyCommandOperation {
-    Inspect,
-    Generate,
-}
-
 /// #203: these value-returning commands deliberately keep Tauri's rejected-
 /// promise contract. Unlike `copy_key_to_host`, their success value is
 /// `KeyMetadata`, not an operation-outcome envelope, so an `ok: false` wrapper
 /// would add churn without changing the security boundary. Every rejection is
 /// instead represented by this serializable, renderer-formatted type.
-#[derive(Debug, PartialEq, Serialize)]
-#[serde(tag = "reason", rename_all = "kebab-case")]
-enum KeyCommandFailure {
-    PathRequired,
-    KeyBodyRequired,
-    PathMustBeAbsolute {
-        path: String,
-    },
-    PathOutsideAllowedRoots {
-        path: String,
-    },
-    ParentDirectoryUnavailable {
-        path: String,
-    },
-    PathAlreadyExists {
-        path: String,
-    },
-    PrivateKeyUnreadable {
-        path: String,
-    },
-    PrivateKeyWriteFailed {
-        path: String,
-    },
-    UnsupportedKeyType,
-    SshKeygenUnavailable {
-        operation: KeyCommandOperation,
-        path: String,
-    },
-    SshKeygenFailed {
-        operation: KeyCommandOperation,
-        path: String,
-    },
-    InvalidKeyMetadata {
-        path: String,
-    },
-    WorkerFailed {
-        path: String,
-    },
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GenerateKeyRequest {
-    comment: String,
-    passphrase: String,
-    path: String,
-    #[serde(rename = "type")]
-    key_type: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct KnownHostScanRequest {
-    hostname: String,
-    port: u16,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct KnownHostScanResult {
-    algorithm: String,
-    fingerprint: String,
-    hostname: String,
-    port: u16,
-    public_key: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct KnownHostScanResponse {
-    entries: Vec<KnownHostScanResult>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BackendPathResponse {
-    ok: bool,
-    path: String,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PortForwardRecord {
-    created_at: String,
-    direction: String,
-    id: String,
-    local_host: String,
-    local_port: u16,
-    remote_host: String,
-    remote_port: u16,
-    session_id: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ListForwardsResponse {
-    forwards: Vec<PortForwardRecord>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SftpPathRequest {
-    host: BackendHostConnection,
-    path: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SftpRenameRequest {
-    current_path: String,
-    host: BackendHostConnection,
-    next_path: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SftpDeleteRequest {
-    host: BackendHostConnection,
-    is_directory: bool,
-    path: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SftpUploadRequest {
-    contents_base64: String,
-    filename: String,
-    host: BackendHostConnection,
-    path: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateForwardPayload {
-    direction: String,
-    local_host: String,
-    local_port: u16,
-    remote_host: String,
-    remote_port: u16,
-    session_id: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ForwardIdRequest {
-    forward_id: String,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SnippetExecutionTarget {
-    host: BackendHostConnection,
-    id: String,
-    label: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-enum SshFailureStage {
-    Configuration,
-    Connect,
-    SessionInitialization,
-    Handshake,
-    HostKeyVerification,
-    Authentication,
-    ChannelOpen,
-    ExecRequest,
-    OutputRead,
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-#[serde(tag = "reason", rename_all = "kebab-case")]
-enum RemoteCommandFailure {
-    SshFailed {
-        stage: SshFailureStage,
-    },
-    TimedOut {
-        #[serde(rename = "timeoutSeconds")]
-        timeout_seconds: u64,
-    },
-    WorkerFailed,
-    RemoteCommandExited {
-        #[serde(rename = "exitCode")]
-        exit_code: Option<i32>,
-    },
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SnippetExecutionResult {
-    target_id: String,
-    label: String,
-    ok: bool,
-    stdout: String,
-    stderr: String,
-    exit_code: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    failure: Option<RemoteCommandFailure>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SnippetExecutionRequest {
-    command: String,
-    targets: Vec<SnippetExecutionTarget>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SnippetExecutionResponse {
-    results: Vec<SnippetExecutionResult>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BackendBooleanResponse {
-    ok: bool,
-    pending: Option<bool>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BackendBinaryResponse {
-    base64_body: String,
-    content_disposition: Option<String>,
-    content_type: Option<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct HostSecretsRequest {
-    host_id: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoreHostSecretsRequest {
-    host_id: String,
-    password: String,
-    passphrase: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct HostSecretsResponse {
-    password: String,
-    passphrase: String,
-    /// True when the keychain was locked or access was denied (as opposed to
-    /// the secret simply being absent). Lets the renderer branch on a stable
-    /// signal — surface an error / prompt for the secret — instead of parsing
-    /// an opaque error string or treating a locked keychain as "no secret".
-    keychain_unavailable: bool,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct KeyPassphraseRequest {
-    fingerprint: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoreKeyPassphraseRequest {
-    fingerprint: String,
-    passphrase: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct KeyPassphraseResponse {
-    passphrase: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct IdentityPassphraseRequest {
-    identity_id: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoreIdentityPassphraseRequest {
-    identity_id: String,
-    passphrase: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct IdentityPassphraseResponse {
-    passphrase: String,
-}
 
 /// Reject identity ids that are obviously empty / malformed. The renderer
 /// only forwards UUIDs from the persisted identities store; this guard
@@ -981,38 +561,6 @@ fn validate_key_fingerprint(fingerprint: &str) -> Result<(), String> {
         return Err("Key fingerprint algorithm and value must both be non-empty".to_string());
     }
     Ok(())
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionStreamRequest {
-    session_id: String,
-    stream_id: Option<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionStreamSendRequest {
-    data: String,
-    session_id: String,
-    stream_id: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionStreamOpenResponse {
-    ok: bool,
-    stream_id: String,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionStreamEvent {
-    data: Option<String>,
-    kind: &'static str,
-    message: Option<String>,
-    session_id: String,
-    stream_id: String,
 }
 
 fn next_session_stream_id() -> String {
@@ -1744,7 +1292,7 @@ fn should_use_native_session(host: &BackendHostConnection) -> bool {
     }
 }
 
-fn validate_ssh_host(host: &BackendHostConnection) -> Result<(), String> {
+pub(crate) fn validate_ssh_host(host: &BackendHostConnection) -> Result<(), String> {
     if host.protocol != "ssh" {
         return Err(format!(
             "Unsupported SSH transport protocol: {}",
@@ -3048,13 +2596,6 @@ async fn terminal_workspace_generate_private_key(
     result
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ImportPrivateKeyFromBodyRequest {
-    path: String,
-    body: String,
-}
-
 /// M01 / #83: paste-from-clipboard private key import. Writes the
 /// pasted body to disk with 0600 perms, then runs inspect to surface
 /// the same KeyMetadata shape as the path-only import.
@@ -3082,39 +2623,6 @@ async fn terminal_workspace_import_private_key_from_body(
 // BackendHostConnection (the existing renderer-side struct) doesn't
 // derive Debug — adding it here directly would touch a lot of unrelated
 // fields. Just drop the Debug derive on this request struct.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CopyKeyToHostRequest {
-    private_key_path: String,
-    host: BackendHostConnection,
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-#[serde(tag = "reason", rename_all = "kebab-case")]
-enum CopyKeyToHostFailure {
-    PrivateKeyPathRequired,
-    TargetHostRequired,
-    PublicKeyUnreadable {
-        #[serde(rename = "publicKeyPath")]
-        public_key_path: String,
-    },
-    PublicKeyEmpty {
-        #[serde(rename = "publicKeyPath")]
-        public_key_path: String,
-    },
-    RemoteCommandFailed {
-        hostname: String,
-        command: RemoteCommandFailure,
-    },
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CopyKeyToHostResponse {
-    ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    failure: Option<CopyKeyToHostFailure>,
-}
 
 impl CopyKeyToHostResponse {
     fn success() -> Self {
@@ -3347,12 +2855,6 @@ async fn terminal_workspace_copy_key_to_host(
     Ok(copy_key_to_host_join_response(&hostname, result))
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SetDockBadgeRequest {
-    count: i64,
-}
-
 /// M03 / #85: macOS dock badge for the active session count. Tauri 2
 /// surfaces this as `WebviewWindow::set_badge_count(Option<i64>)`. A
 /// `count` of 0 (or negative) clears the badge.
@@ -3374,42 +2876,15 @@ async fn terminal_workspace_set_dock_badge(
     Ok(())
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UpdateCheckRequest {}
-
 /// #148: `app.restart()` tears down every live SSH session. Installing used to
 /// do that with no warning, so an update accepted from the banner could drop a
 /// half-finished remote command. The install command now refuses while sessions
 /// are open unless the caller has confirmed with the user and set `force`.
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct InstallUpdateRequest {
-    #[serde(default)]
-    force: bool,
-}
 
 /// Marker the renderer matches on to tell "you have N live sessions" apart from
 /// any other install failure. Kept in sync with LIVE_SESSIONS_MARKER in
 /// apps/desktop/src/lib/auto-update.ts.
 const LIVE_SESSIONS_REFUSAL_MARKER: &str = "live-sessions:";
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UpdateCheckResult {
-    available: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    notes: Option<String>,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(tag = "phase", rename_all = "camelCase")]
-enum UpdateInstallProgressEvent {
-    Downloading { downloaded: u64, total: Option<u64> },
-    Installing,
-}
 
 fn should_emit_update_download_progress(
     downloaded: u64,
@@ -3563,200 +3038,6 @@ async fn terminal_workspace_scan_known_host(
     tauri::async_runtime::spawn_blocking(move || scan_known_host(&request))
         .await
         .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn terminal_workspace_sftp_list_directory(
-    request: SftpPathRequest,
-) -> Result<SftpDirectoryResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        validate_ssh_host(&request.host)?;
-        let target_path = resolve_remote_path(
-            request.host.sftp_root.as_deref().unwrap_or("/"),
-            &request.path,
-        );
-        let output =
-            with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-                run_sftp_batch_commands(
-                    &request.host,
-                    context,
-                    &[format!("@ls -la {}", escape_sftp_argument(&target_path))],
-                )
-            })?;
-
-        Ok(SftpDirectoryResponse {
-            entries: parse_sftp_directory_listing(&target_path, &output),
-            path: target_path,
-        })
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn terminal_workspace_sftp_create_directory(
-    request: SftpPathRequest,
-) -> Result<BackendPathResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        validate_ssh_host(&request.host)?;
-        let target_path = resolve_remote_path(
-            request.host.sftp_root.as_deref().unwrap_or("/"),
-            &request.path,
-        );
-        with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-            run_sftp_batch_commands(
-                &request.host,
-                context,
-                &[format!("@mkdir {}", escape_sftp_argument(&target_path))],
-            )
-            .map(|_| BackendPathResponse {
-                ok: true,
-                path: target_path.clone(),
-            })
-        })
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn terminal_workspace_sftp_rename_entry(
-    request: SftpRenameRequest,
-) -> Result<BackendPathResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        validate_ssh_host(&request.host)?;
-        let source_path = resolve_remote_path(
-            request.host.sftp_root.as_deref().unwrap_or("/"),
-            &request.current_path,
-        );
-        let target_path = resolve_remote_path(
-            request.host.sftp_root.as_deref().unwrap_or("/"),
-            &request.next_path,
-        );
-        with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-            run_sftp_batch_commands(
-                &request.host,
-                context,
-                &[format!(
-                    "@rename {} {}",
-                    escape_sftp_argument(&source_path),
-                    escape_sftp_argument(&target_path)
-                )],
-            )
-            .map(|_| BackendPathResponse {
-                ok: true,
-                path: target_path.clone(),
-            })
-        })
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn terminal_workspace_sftp_delete_entry(
-    request: SftpDeleteRequest,
-) -> Result<BackendBooleanResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        validate_ssh_host(&request.host)?;
-        let target_path = resolve_remote_path(
-            request.host.sftp_root.as_deref().unwrap_or("/"),
-            &request.path,
-        );
-        with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-            run_sftp_batch_commands(
-                &request.host,
-                context,
-                &[format!(
-                    "@{} {}",
-                    if request.is_directory { "rmdir" } else { "rm" },
-                    escape_sftp_argument(&target_path)
-                )],
-            )
-            .map(|_| BackendBooleanResponse {
-                ok: true,
-                pending: None,
-            })
-        })
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn terminal_workspace_sftp_upload_file(
-    request: SftpUploadRequest,
-) -> Result<BackendPathResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        validate_ssh_host(&request.host)?;
-        let target_path = resolve_remote_path(
-            request.host.sftp_root.as_deref().unwrap_or("/"),
-            &request.path,
-        );
-        let contents = BASE64_STANDARD
-            .decode(request.contents_base64.as_bytes())
-            .map_err(|error| error.to_string())?;
-        with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-            let upload_path = context
-                .session_dir
-                .join(format!("upload-{}", sanitize_filename(&request.filename)));
-            fs::write(&upload_path, &contents).map_err(|error| error.to_string())?;
-            run_sftp_batch_commands(
-                &request.host,
-                context,
-                &[format!(
-                    "@put {} {}",
-                    escape_sftp_argument(&upload_path.to_string_lossy()),
-                    escape_sftp_argument(&target_path)
-                )],
-            )
-            .map(|_| BackendPathResponse {
-                ok: true,
-                path: target_path.clone(),
-            })
-        })
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn terminal_workspace_sftp_download_file(
-    request: SftpPathRequest,
-) -> Result<BackendBinaryResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        validate_ssh_host(&request.host)?;
-        let target_path = resolve_remote_path(
-            request.host.sftp_root.as_deref().unwrap_or("/"),
-            &request.path,
-        );
-        with_native_ssh_control_session(&request.host, &next_native_session_id(), |context| {
-            let filename = sanitize_filename(
-                target_path
-                    .rsplit('/')
-                    .find(|segment| !segment.is_empty())
-                    .unwrap_or("download"),
-            );
-            let download_path = context.session_dir.join(format!("download-{filename}"));
-            run_sftp_batch_commands(
-                &request.host,
-                context,
-                &[format!(
-                    "@get {} {}",
-                    escape_sftp_argument(&target_path),
-                    escape_sftp_argument(&download_path.to_string_lossy())
-                )],
-            )?;
-            let bytes = fs::read(download_path).map_err(|error| error.to_string())?;
-            Ok(BackendBinaryResponse {
-                base64_body: BASE64_STANDARD.encode(bytes),
-                content_disposition: Some(format!("attachment; filename=\"{filename}\"")),
-                content_type: Some("application/octet-stream".to_string()),
-            })
-        })
-    })
-    .await
-    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -3985,39 +3266,11 @@ async fn terminal_workspace_clear_identity_passphrase(
     .map_err(|error| error.to_string())?
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReadSshConfigFileRequest {
-    path: String,
-    parent_cycle_key: Option<String>,
-    relative_path: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ReadSshConfigFileResponse {
-    cycle_key: String,
-    content: String,
-}
-
 /// #300: SSH-config commands use a sibling failure type rather than
 /// `KeyCommandFailure`. The two families share the kebab-case `reason` wire
 /// convention and retain only the caller's path spelling, but reusing the key
 /// enum would make `worker-failed` render as a private-key operation. That
 /// sentence is actively wrong for Include reads and globs.
-#[derive(Debug, PartialEq, Serialize)]
-#[serde(tag = "reason", rename_all = "kebab-case")]
-enum SshConfigCommandFailure {
-    SshRootUnavailable { path: String },
-    InvalidPath { path: String },
-    PathUnavailable { path: String },
-    PathOutsideSshRoot { path: String },
-    PathNotRegularFile { path: String },
-    SizeLimitExceeded { path: String },
-    ReadFailed { path: String },
-    GlobInDirectoryComponent { path: String },
-    WorkerFailed { path: String },
-}
 
 /// Read a single OpenSSH config file from the user's ~/.ssh/ tree. Used by
 /// the renderer's Include-directive preprocessor (issue #28). The path
@@ -4118,28 +3371,6 @@ fn read_ssh_config_file_from_root(
         cycle_key: resolution_registry.remember(&canonical, cycle_key_salt),
         content,
     })
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GlobSshConfigFilesRequest {
-    pattern: String,
-    parent_cycle_key: Option<String>,
-    relative_path: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SshConfigGlobMatch {
-    cycle_key: String,
-    name: String,
-    content: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GlobSshConfigFilesResponse {
-    matches: Vec<SshConfigGlobMatch>,
 }
 
 /// Defensive cap on how many files one glob may expand to, so a pathological
@@ -5538,12 +4769,12 @@ fn main() {
             terminal_workspace_inspect_private_key,
             terminal_workspace_generate_private_key,
             terminal_workspace_scan_known_host,
-            terminal_workspace_sftp_list_directory,
-            terminal_workspace_sftp_create_directory,
-            terminal_workspace_sftp_rename_entry,
-            terminal_workspace_sftp_delete_entry,
-            terminal_workspace_sftp_upload_file,
-            terminal_workspace_sftp_download_file,
+            sftp::terminal_workspace_sftp_list_directory,
+            sftp::terminal_workspace_sftp_create_directory,
+            sftp::terminal_workspace_sftp_rename_entry,
+            sftp::terminal_workspace_sftp_delete_entry,
+            sftp::terminal_workspace_sftp_upload_file,
+            sftp::terminal_workspace_sftp_download_file,
             terminal_workspace_list_session_forwards,
             terminal_workspace_create_forward,
             terminal_workspace_delete_forward,
@@ -5606,6 +4837,7 @@ mod native_transport_fixtures;
 
 #[cfg(test)]
 mod tests {
+    use crate::sftp::*;
     /// #151: the two copy-key refusal tests exercise validation that happens
     /// BEFORE any connect, so they never reach the store. A throwaway one keeps
     /// them honest about that rather than mocking the type away.
