@@ -5328,13 +5328,28 @@ async fn bootstrap_terminal_workspace_database_wal_best_effort<Warn>(
 where
     Warn: FnOnce(&str),
 {
-    let app_config_dir = app_config_dir?;
-    fs::create_dir_all(&app_config_dir).map_err(|error| {
-        io::Error::other(format!(
-            "could not create app config directory {} for SQLite WAL bootstrap: {error}",
-            app_config_dir.display()
-        ))
-    })?;
+    // Directory resolution/creation stays best-effort exactly as before #129:
+    // on a restricted filesystem the app still ran in SQLite's available mode.
+    let app_config_dir = match app_config_dir.and_then(|app_config_dir| {
+        fs::create_dir_all(&app_config_dir).map_err(|error| {
+            io::Error::other(format!(
+                "could not create app config directory {} for SQLite WAL bootstrap: {error}",
+                app_config_dir.display()
+            ))
+        })?;
+        Ok(app_config_dir)
+    }) {
+        Ok(app_config_dir) => app_config_dir,
+        Err(error) => {
+            report_warning(&format!(
+                "warning: SQLite WAL bootstrap did not complete; continuing with SQLite's available journal mode: {error}"
+            ));
+            return Ok(());
+        }
+    };
+    // #129: the legacy-database migration is NOT best-effort. If it fails, startup
+    // must stop here — otherwise tauri-plugin-sql creates an empty database and the
+    // presence guard skips the legacy copy forever (silent data loss).
     migrate_legacy_database(&app_config_dir)?;
 
     let result = async {
@@ -5723,6 +5738,27 @@ mod tests {
         assert!(
             !terminal_workspace_temp_path.exists(),
             "temp file should be renamed away after successful migration"
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_wal_bootstrap_stays_best_effort_when_config_dir_is_unresolvable() {
+        let mut reported_warning = None;
+        let result = bootstrap_terminal_workspace_database_wal_best_effort(
+            Err(io::Error::other("no app config directory")),
+            |warning| reported_warning = Some(warning.to_owned()),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "an unresolvable config directory degrades to available journal mode, as before #129"
+        );
+        assert!(
+            reported_warning
+                .as_deref()
+                .is_some_and(|warning| warning.contains("no app config directory")),
+            "the degradation must be reported, not silent"
         );
     }
 
