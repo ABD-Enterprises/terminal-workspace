@@ -5321,8 +5321,10 @@ fn migrate_legacy_database(app_config_dir: &Path) -> io::Result<()> {
         }
     }
     let _ = fs::remove_file(&terminal_workspace_temp_path);
-    // The rename itself is only durable once the directory entry is.
-    sync_migrated_path(app_config_dir)?;
+    // The directory entry is what makes the publish durable. Best-effort: some
+    // platforms cannot open a directory for sync (Windows), and a missing
+    // directory fsync degrades durability, not correctness.
+    let _ = sync_migrated_path(app_config_dir);
     Ok(())
 }
 
