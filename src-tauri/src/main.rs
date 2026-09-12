@@ -5211,15 +5211,29 @@ fn copy_legacy_database_sidecar(
     suffix: &str,
 ) -> io::Result<()> {
     let legacy_sidecar = sqlite_database_sidecar_path(legacy_path, suffix)?;
+    let terminal_workspace_sidecar = sqlite_database_sidecar_path(terminal_workspace_path, suffix)?;
     if !legacy_sidecar.try_exists().map_err(|error| {
         io::Error::other(format!(
             "could not inspect legacy SQLite sidecar {}: {error}",
             legacy_sidecar.display()
         ))
     })? {
+        // A sidecar left by an earlier interrupted attempt must not outlive a
+        // legacy database that has since been checkpointed: stale WAL frames or
+        // a stale journal next to a fresh main file are exactly what SQLite
+        // must never see on first open.
+        match fs::remove_file(&terminal_workspace_sidecar) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(io::Error::other(format!(
+                    "could not remove stale SQLite sidecar {}: {error}",
+                    terminal_workspace_sidecar.display()
+                )));
+            }
+        }
         return Ok(());
     }
-    let terminal_workspace_sidecar = sqlite_database_sidecar_path(terminal_workspace_path, suffix)?;
     fs::copy(&legacy_sidecar, &terminal_workspace_sidecar).map_err(|error| {
         io::Error::other(format!(
             "could not copy legacy SQLite sidecar {} to {}: {error}",
@@ -5254,6 +5268,10 @@ fn migrate_legacy_database(app_config_dir: &Path) -> io::Result<()> {
     // #129: create the main database file last. Its presence is the idempotence
     // guard, so copy into a stable temp file first and rename into place only
     // after any sidecars are already available.
+    // -journal too: if the legacy database was left in rollback mode (WAL
+    // bootstrap is best-effort), a hot journal carries the rollback of an
+    // interrupted transaction and must travel with the main file.
+    copy_legacy_database_sidecar(&legacy_path, &terminal_workspace_path, "journal")?;
     copy_legacy_database_sidecar(&legacy_path, &terminal_workspace_path, "wal")?;
     copy_legacy_database_sidecar(&legacy_path, &terminal_workspace_path, "shm")?;
     let terminal_workspace_temp_path =
@@ -5660,6 +5678,38 @@ mod tests {
     }
 
     #[test]
+    fn legacy_database_migration_copies_rollback_journal_and_removes_stale_sidecars() {
+        let root = SqliteTempRoot::new();
+        let legacy_path = legacy_database_path(root.path()).expect("legacy path should resolve");
+        let terminal_workspace_path =
+            terminal_workspace_database_path(root.path()).expect("database path should resolve");
+        fs::write(&legacy_path, b"legacy-main").expect("legacy database should be written");
+        fs::write(
+            sqlite_database_sidecar_path(&legacy_path, "journal").expect("legacy journal path"),
+            b"legacy-journal",
+        )
+        .expect("legacy rollback journal should be written");
+        // An earlier interrupted attempt left a WAL next to the target, and the
+        // legacy database has since been checkpointed (no legacy WAL any more).
+        let stale_wal =
+            sqlite_database_sidecar_path(&terminal_workspace_path, "wal").expect("new wal path");
+        fs::write(&stale_wal, b"stale-wal").expect("stale WAL should be written");
+
+        migrate_legacy_database(root.path()).expect("legacy database should migrate");
+
+        assert_eq!(
+            fs::read(sqlite_database_sidecar_path(&terminal_workspace_path, "journal").unwrap())
+                .expect("journal should be copied"),
+            b"legacy-journal"
+        );
+        assert!(
+            !stale_wal.exists(),
+            "a sidecar from an earlier attempt must not outlive a checkpointed legacy database"
+        );
+        assert_eq!(fs::read(&terminal_workspace_path).unwrap(), b"legacy-main");
+    }
+
+    #[test]
     fn legacy_database_migration_skips_when_new_database_exists() {
         let root = SqliteTempRoot::new();
         let legacy_path = legacy_database_path(root.path()).expect("legacy path should resolve");
@@ -5759,6 +5809,31 @@ mod tests {
                 .as_deref()
                 .is_some_and(|warning| warning.contains("no app config directory")),
             "the degradation must be reported, not silent"
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_wal_bootstrap_stays_best_effort_when_config_dir_cannot_be_created() {
+        let root = SqliteTempRoot::new();
+        let blocker = root.path().join("not-a-directory");
+        fs::write(&blocker, b"file").expect("blocking file should be written");
+
+        let mut reported_warning = None;
+        let result = bootstrap_terminal_workspace_database_wal_best_effort(
+            Ok(blocker.join("app-config")),
+            |warning| reported_warning = Some(warning.to_owned()),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "create_dir_all failure degrades, as before #129"
+        );
+        assert!(
+            reported_warning
+                .as_deref()
+                .is_some_and(|warning| warning.contains("could not create app config directory")),
+            "the degradation must be reported"
         );
     }
 
