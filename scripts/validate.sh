@@ -85,12 +85,9 @@ fi
 if [[ "${TERMSNIP_RUN_SSH_FIXTURE:-0}" == "1" && "$(uname -s)" != "Windows_NT" ]]; then
   if command -v cargo >/dev/null 2>&1; then
     echo "[validate] localhost sshd transport and reaper fixtures"
-    cargo test --manifest-path src-tauri/Cargo.toml native_trust_tooling_fixture_openssh -- --include-ignored --test-threads=1
-    cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture_flow -- --include-ignored --test-threads=1
-    cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture_reaps -- --include-ignored --test-threads=1
-    cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture_startup -- --include-ignored --test-threads=1
-    cargo test --manifest-path src-tauri/Cargo.toml test_allow_unknown_tofu -- --include-ignored --test-threads=1
-    cargo test --manifest-path src-tauri/Cargo.toml test_require_trusted -- --include-ignored --test-threads=1
+    # Every #[ignore]d test in the fixtures module, by module path rather than by name,
+    # so a renamed or added fixture cannot silently drop out of CI (#363 review).
+    cargo test --manifest-path src-tauri/Cargo.toml native_transport_fixtures:: -- --ignored --test-threads=1
   else
     echo "[validate] localhost sshd fixture skipped (cargo not found on PATH)" >&2
   fi
