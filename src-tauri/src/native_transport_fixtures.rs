@@ -411,12 +411,16 @@ impl SshdIdentity {
         prefix
     }
 
+    /// After setproctitle, /proc/<pid>/cmdline carries only the title (observed
+    /// on ubuntu-latest: `["sshd: … [listener] 0 of 10-100 startups"]`); some
+    /// kernels also expose the original argv slots as NUL-filled empties. Accept
+    /// both: a matching title followed by nothing but empties.
     fn matches_listener_argv(&self, argv: &[OsString]) -> bool {
-        argv.len() == 6
-            && argv[1..].iter().all(|arg| arg.is_empty())
-            && argv[0]
+        argv.first().is_some_and(|title| {
+            title
                 .as_bytes()
                 .starts_with(self.listener_title_prefix().as_bytes())
+        }) && argv[1..].iter().all(|arg| arg.is_empty())
     }
 
     fn matches(&self, process: &ProcessArguments) -> bool {
@@ -626,14 +630,53 @@ fn process_arguments(pid: c_int) -> Option<ProcessArguments> {
         .ok()?
         .into_os_string();
     let cmdline = fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-    let argv = cmdline
-        .split(|byte| *byte == 0)
-        .map(|arg| OsString::from_vec(arg.to_vec()))
-        .collect::<Vec<_>>();
+    let argv = argv_from_proc_cmdline(&cmdline);
     if argv.is_empty() {
         return None;
     }
     Some(ProcessArguments { executable, argv })
+}
+
+/// Split `/proc/<pid>/cmdline` into argv. Every argument is NUL-terminated, so
+/// the final NUL yields one trailing empty element that is not an argument and
+/// must be dropped — but ONLY that one: a process that rewrote its title via
+/// setproctitle (sshd's `sshd: … [listener]` form) leaves its original argv
+/// slots NUL-filled, and those interior empties are what
+/// `SshdIdentity::matches_listener_argv` counts.
+#[cfg(target_os = "linux")]
+fn argv_from_proc_cmdline(cmdline: &[u8]) -> Vec<OsString> {
+    let mut argv = cmdline
+        .split(|byte| *byte == 0)
+        .map(|arg| OsString::from_vec(arg.to_vec()))
+        .collect::<Vec<_>>();
+    if argv.last().is_some_and(|arg| arg.is_empty()) {
+        argv.pop();
+    }
+    argv
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod proc_cmdline_tests {
+    use super::argv_from_proc_cmdline;
+
+    #[test]
+    fn drops_only_the_terminating_nul() {
+        let argv = argv_from_proc_cmdline(b"/usr/sbin/sshd\0-D\0-f\0/x/sshd_config\0");
+        assert_eq!(argv.len(), 4);
+        assert_eq!(argv[3], "/x/sshd_config");
+    }
+
+    #[test]
+    fn keeps_setproctitle_padding_slots() {
+        // title overwrote argv[0]; the 5 original slots are NUL-filled; final NUL terminates.
+        let argv = argv_from_proc_cmdline(b"sshd: /usr/sbin/sshd -D [listener] \0\0\0\0\0\0");
+        assert_eq!(argv.len(), 6);
+        assert!(argv[1..].iter().all(|arg| arg.is_empty()));
+        // ubuntu-latest form: title only.
+        let argv =
+            argv_from_proc_cmdline(b"sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups\0");
+        assert_eq!(argv.len(), 1);
+    }
 }
 
 #[cfg(target_os = "macos")]
