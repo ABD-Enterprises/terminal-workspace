@@ -561,6 +561,9 @@ export function useTerminalPaneLifecycle({
           return;
         }
 
+        // Terminal failure: make sure no retry armed by an earlier failure can
+        // still fire behind the error state.
+        clearReconnectTimer();
         terminal.writeln(`\r\n${protocolLabel} connect failed.`);
         terminal.writeln(`\r\n${friendly}`);
         if (raw && raw !== classified.message) {
