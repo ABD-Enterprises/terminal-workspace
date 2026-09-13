@@ -30,10 +30,10 @@ function loadDefaultCapability(): Capability {
 describe("src-tauri/capabilities/default.json", () => {
   // #236: the table is now the COMPLETE census of ACL-controlled Tauri commands
   // this renderer can reach. Verified by scanning apps/desktop/src for every
-  // @tauri-apps import: only three modules are reachable (api/event and
-  // api/window via dynamic import, plugin-sql), and only these five distinct IPC
-  // calls exist. Custom `terminal_workspace_*` commands are NOT ACL-gated by this
-  // file — no capability grants them today and the app works.
+  // @tauri-apps import: only four modules are reachable (api/event and
+  // api/window via dynamic import, plugin-log, plugin-sql), and only these seven
+  // distinct IPC calls exist. Custom `terminal_workspace_*` commands are NOT
+  // ACL-gated by this file — no capability grants them today and the app works.
   const REQUIRED: Array<{ command: string; permission: string; callSite: string }> = [
     {
       command: "event.listen",
@@ -49,6 +49,16 @@ describe("src-tauri/capabilities/default.json", () => {
       command: "window.setTitle",
       permission: "core:window:allow-set-title",
       callSite: "apps/desktop/src/components/layout/AppShell.tsx",
+    },
+    {
+      command: "log.attachConsole",
+      permission: "log:default",
+      callSite: "apps/desktop/src/main.tsx",
+    },
+    {
+      command: "log.warn/error",
+      permission: "log:default",
+      callSite: "apps/desktop/src/lib/persistence.ts",
     },
     {
       command: "Database.load",

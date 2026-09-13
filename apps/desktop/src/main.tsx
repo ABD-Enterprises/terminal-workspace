@@ -11,6 +11,9 @@ const queryClient = new QueryClient();
 // Surface otherwise-lost promise rejections (e.g. fire-and-forget IPC calls)
 // instead of letting them vanish silently.
 installGlobalRejectionHandler();
+void import("@tauri-apps/plugin-log")
+  .then(({ attachConsole }) => attachConsole())
+  .catch(() => undefined);
 
 // Run the host→identity auto-migration once per session as soon as the
 // stores have hydrated. Idempotent and self-healing — see

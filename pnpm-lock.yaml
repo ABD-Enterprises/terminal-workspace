@@ -43,6 +43,9 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
+      '@tauri-apps/plugin-log':
+        specifier: ^2.9.1
+        version: 2.9.1
       '@tauri-apps/plugin-sql':
         specifier: ^2.4.1
         version: 2.4.1
@@ -474,6 +477,9 @@ packages:
 
   '@tauri-apps/api@2.11.1':
     resolution: {integrity: sha512-M2FPuYND2m+wh5hfW9ZpSdxMPdEJovPBWwoHJmwUpysTYNHaOkVFN419m/K0LIgjb/7KU2vBgsUepJWugQCvAA==}
+
+  '@tauri-apps/plugin-log@2.9.1':
+    resolution: {integrity: sha512-8dYNEQOgZcIEqeFtHAsOIGLoptm+j94270Jf2MrGS/zbsYNd4C8DKyOdeYggAyE3ugwr12mTefIfC8lVVEhdlg==}
 
   '@tauri-apps/plugin-sql@2.4.1':
     resolution: {integrity: sha512-w9fImJ2XaCLFEj+kLbs8nO/Idq89mpjl//Bm37JZo8AugbaVzaW5iHTjjcozHjtLgjb0IAQjYromv0YpzDOFkA==}
@@ -1786,6 +1792,10 @@ snapshots:
       react: 19.2.8
 
   '@tauri-apps/api@2.11.1': {}
+
+  '@tauri-apps/plugin-log@2.9.1':
+    dependencies:
+      '@tauri-apps/api': 2.11.1
 
   '@tauri-apps/plugin-sql@2.4.1':
     dependencies:
