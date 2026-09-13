@@ -1,1 +1,0 @@
-- [FEATURE] Add packaged-app diagnostics logging with rotating Tauri log files. (#145)

@@ -1,1 +1,0 @@
-- [FIX] A host-key mismatch on connect no longer triggers automatic reconnect attempts; the pane stays disconnected with the re-scan hint until the host is explicitly re-trusted. (#373)

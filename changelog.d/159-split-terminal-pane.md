@@ -1,1 +1,0 @@
-- [INTERNAL] Split TerminalPane lifecycle and viewport safeguards into sibling modules. (#159)

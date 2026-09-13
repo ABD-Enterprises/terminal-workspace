@@ -1,7 +1,7 @@
 {
   "name": "terminal-workspace",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A local-first macOS SSH client — hosts, sessions, SFTP, keys, snippets, and forwarding in a native macOS shell.",
   "license": "Apache-2.0",
   "repository": {
