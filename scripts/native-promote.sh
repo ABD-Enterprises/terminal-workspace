@@ -158,6 +158,13 @@ const feed = {
 };
 fs.writeFileSync(process.env.UPDATER_LATEST_JSON, `${JSON.stringify(feed, null, 2)}\n`);
 NODE
+  # #379: prove the feed is usable by an installed copy — the .sig must pair
+  # with the pubkey compiled into the app, and latest.json must describe this
+  # exact tarball — before anything is uploaded.
+  node "$ROOT_DIR/scripts/verify-updater-signature.mjs" \
+    --tarball "$UPDATER_TARBALL_PATH" --sig "$UPDATER_SIG_PATH" \
+    --tauri-conf "$ROOT_DIR/src-tauri/tauri.conf.json" \
+    --latest-json "$UPDATER_LATEST_JSON" --version "$VERSION"
   echo "  updater tarball: $UPDATER_TARBALL_PATH"
   echo "  updater latest.json: $UPDATER_LATEST_JSON"
 elif [[ "${REQUIRE_UPDATER_ARTIFACTS:-0}" == "1" ]]; then

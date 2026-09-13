@@ -7,6 +7,10 @@ MANIFEST_PATH="$ROOT_DIR/artifacts/release/latest-macos-release.json"
 : "${MACOS_SIGN_MODE:=require}"
 export MACOS_SIGN_MODE
 
+# #379: refuse to build a release whose npm/Cargo versions disagree with the
+# tauri.conf.json version the bundle is about to be labelled with.
+node "$ROOT_DIR/scripts/check-version-consistency.mjs"
+
 bash "$ROOT_DIR/scripts/native-bundle.sh"
 
 if [[ ! -f "$MANIFEST_PATH" ]]; then
