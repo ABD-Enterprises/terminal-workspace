@@ -4539,6 +4539,12 @@ fn sync_migrated_path(path: &Path) -> io::Result<()> {
         })
 }
 
+/// Concurrency note (#362): the single-instance plugin registered first in
+/// `main` turns away a second launch before it reaches this function, which
+/// removes the ordinary way two first launches could overlap. It is not
+/// airtight (its check is connect-then-bind), so the create-only `hard_link`
+/// publish below remains the guard that makes a simultaneous pair safe: the
+/// loser sees AlreadyExists and discards its copy (PR #358 review).
 fn migrate_legacy_database(app_config_dir: &Path) -> io::Result<()> {
     let terminal_workspace_path = terminal_workspace_database_path(app_config_dir)?;
     if terminal_workspace_path.try_exists().map_err(|error| {
@@ -4708,6 +4714,21 @@ fn terminal_workspace_wal_bootstrap_plugin<R: Runtime>() -> tauri::plugin::Tauri
 
 fn main() {
     let app = tauri::Builder::default()
+        // #362: must be the FIRST plugin. A second launch (`open -n`, a direct
+        // binary exec, a script) is redirected here and exits before the log,
+        // WAL-bootstrap and SQL plugins run. Defence in depth, not the guard:
+        // the plugin's macOS check is connect-then-bind (a truly simultaneous
+        // pair can both pass, and the /tmp socket is per-identifier, not
+        // per-user), so the migration keeps its own atomic publish (#358) and
+        // LaunchServices keeps serialising bundle launches. argv/cwd are
+        // ignored on purpose — the app has no file/URL open handling yet.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
