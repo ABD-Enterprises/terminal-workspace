@@ -1,0 +1,1 @@
+- [INTERNAL] Split SettingsPage.tsx (1163 lines) into SettingsPreferencesSection and SettingsTrustPolicySection; page is now under 600 lines with no behaviour change. (#159 slice, #366)
