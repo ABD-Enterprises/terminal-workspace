@@ -8,16 +8,21 @@
 //   2. latest.json disagrees with the artifacts (wrong version, a signature that
 //      is not the tarball's, a url naming a different file).
 //
-// Tauri's updater uses minisign. A .sig is:
-//     untrusted comment: ...
-//     base64( "ED" | key_id[8] | ed25519_sig[64] )
-//     trusted comment: ...
-//     base64( global_sig[64] )
-// "ED" (prehashed) means the ed25519 signature is over BLAKE2b-512(file).
-// The pubkey in tauri.conf.json is base64 of the whole minisign .pub file:
-//     untrusted comment: ...
-//     base64( "Ed" | key_id[8] | pk[32] )
-// Node's crypto has both primitives, so no minisign binary is needed.
+// Tauri's updater (tauri-plugin-updater, via minisign-verify) does exactly
+// this, and this gate mirrors it line for line so a pass here means the app
+// will accept the update:
+//   1. latest.json#platforms.<target>.signature is base64 of the WHOLE
+//      minisign signature text — which is also what `tauri signer sign`
+//      writes into <file>.sig — so the .sig is decoded once before parsing.
+//   2. The text has four lines: untrusted comment; base64("ED"|key_id[8]|
+//      sig[64]); "trusted comment: ..."; base64(global_sig[64]).
+//   3. "ED" (prehashed) means sig is ed25519 over BLAKE2b-512(file).
+//   4. The key id must equal the pubkey's; the global signature must verify
+//      over sig || trusted-comment-text (without the "trusted comment: "
+//      prefix). The pubkey in tauri.conf.json is base64 of the whole minisign
+//      .pub file: untrusted comment; base64("Ed"|key_id[8]|pk[32]).
+// Legacy non-prehashed ("Ed") signatures are accepted by the app but refused
+// here: nothing current produces them and refusing is the safe direction.
 //
 // Usage: verify-updater-signature.mjs --tarball <path> --sig <path> \
 //          [--pubkey-b64 <b64> | --tauri-conf <path>] [--latest-json <path>] [--version <v>]
@@ -30,7 +35,7 @@ import { fileURLToPath } from "node:url";
 
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 
-function base64Line(text, label) {
+function nonComment(text, label) {
   const line = text
     .split("\n")
     .map((l) => l.trim())
@@ -41,34 +46,66 @@ function base64Line(text, label) {
 
 export function parsePublicKey(pubkeyB64) {
   const fileText = Buffer.from(pubkeyB64, "base64").toString("utf8");
-  const raw = base64Line(fileText, "public key");
+  const raw = nonComment(fileText, "public key");
   if (raw.length !== 42) throw new Error(`public key: expected 42 bytes, got ${raw.length}`);
   const alg = raw.subarray(0, 2).toString("latin1");
   if (alg !== "Ed") throw new Error(`public key: unexpected algorithm ${JSON.stringify(alg)}`);
   return { keyId: raw.subarray(2, 10), publicKey: raw.subarray(10, 42) };
 }
 
-export function parseSignature(sigText) {
-  const raw = base64Line(sigText, "signature");
-  if (raw.length !== 74) throw new Error(`signature: expected 74 bytes, got ${raw.length}`);
-  const alg = raw.subarray(0, 2).toString("latin1");
-  if (alg !== "ED") throw new Error(`signature: expected prehashed 'ED', got ${JSON.stringify(alg)}`);
-  return { keyId: raw.subarray(2, 10), signature: raw.subarray(10, 74) };
+/**
+ * The .sig file as written by `tauri signer sign` is base64 of the minisign
+ * text (that is what latest.json carries verbatim). Accept that, and — for
+ * hand-made or minisign-CLI files — the raw four-line text as well.
+ */
+export function minisignTextFromSigFile(sigFileText) {
+  const trimmed = sigFileText.trim();
+  if (trimmed.startsWith("untrusted comment:")) return trimmed;
+  const decoded = Buffer.from(trimmed, "base64").toString("utf8");
+  if (!decoded.startsWith("untrusted comment:")) {
+    throw new Error("signature file is neither base64(minisign text) nor minisign text");
+  }
+  return decoded;
 }
 
-/** Throws with a reason when the tarball's .sig was not made by the pubkey's key. */
+/** Mirrors minisign_verify::Signature::decode: exactly four lines, strict shapes. */
+export function parseSignature(minisignText) {
+  const lines = minisignText.split("\n").map((l) => l.replace(/\r$/, ""));
+  if (lines.length < 4) throw new Error(`signature: expected 4 lines, got ${lines.length}`);
+  const [untrusted, sigB64, trustedLine, globalB64] = lines;
+  if (!untrusted.startsWith("untrusted comment:")) throw new Error("signature: line 1 is not an untrusted comment");
+  const raw = Buffer.from(sigB64, "base64");
+  if (raw.length !== 74) throw new Error(`signature: expected 74 bytes, got ${raw.length}`);
+  if (!trustedLine.startsWith("trusted comment: ")) throw new Error("signature: line 3 is not a trusted comment");
+  const globalSig = Buffer.from(globalB64, "base64");
+  if (globalSig.length !== 64) throw new Error(`signature: global signature expected 64 bytes, got ${globalSig.length}`);
+  const alg = raw.subarray(0, 2).toString("latin1");
+  if (alg !== "ED") throw new Error(`signature: expected prehashed 'ED', got ${JSON.stringify(alg)} (legacy signatures are refused)`);
+  return {
+    keyId: raw.subarray(2, 10),
+    signature: raw.subarray(10, 74),
+    trustedComment: trustedLine.slice("trusted comment: ".length),
+    globalSignature: globalSig,
+  };
+}
+
+/** Throws with a reason when the app would not accept this .sig for this tarball. */
 export function verifyTarballSignature({ tarball, sigText, pubkeyB64 }) {
   const pub = parsePublicKey(pubkeyB64);
-  const sig = parseSignature(sigText);
+  const sig = parseSignature(minisignTextFromSigFile(sigText));
   if (!pub.keyId.equals(sig.keyId)) {
     throw new Error(
       `updater key mismatch: the signature was made with key id ${sig.keyId.toString("hex")} but the app trusts ${pub.keyId.toString("hex")} — installed copies would reject this update`
     );
   }
-  const prehash = createHash("blake2b512").update(tarball).digest();
   const key = createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, pub.publicKey]), format: "der", type: "spki" });
+  const prehash = createHash("blake2b512").update(tarball).digest();
   if (!cryptoVerify(null, prehash, key, sig.signature)) {
     throw new Error("updater signature does not verify against the app's pubkey (tampered tarball or wrong key)");
+  }
+  const globalMessage = Buffer.concat([sig.signature, Buffer.from(sig.trustedComment, "utf8")]);
+  if (!cryptoVerify(null, globalMessage, key, sig.globalSignature)) {
+    throw new Error("updater global signature (over signature + trusted comment) does not verify — the app would reject this .sig");
   }
 }
 
@@ -80,7 +117,8 @@ export function verifyLatestJson({ latestJsonText, sigText, tarballName, version
   }
   const platform = feed.platforms?.["darwin-aarch64"];
   if (!platform) throw new Error("latest.json has no platforms.darwin-aarch64 entry");
-  if (platform.signature !== sigText.trim()) throw new Error("latest.json signature is not the tarball's .sig");
+  // The app base64-decodes this field, so it must be the .sig file content exactly.
+  if (platform.signature !== sigText.trim()) throw new Error("latest.json signature is not the tarball's .sig content");
   if (!platform.url || basename(new URL(platform.url).pathname) !== tarballName) {
     throw new Error(`latest.json url ${JSON.stringify(platform.url)} does not name the tarball ${tarballName}`);
   }

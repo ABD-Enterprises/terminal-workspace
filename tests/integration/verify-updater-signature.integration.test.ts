@@ -18,13 +18,25 @@ function minisignPair() {
   const keyId = randomBytes(8);
   const pubFile = `untrusted comment: minisign public key: test\n${Buffer.concat([Buffer.from("Ed"), keyId, rawPk]).toString("base64")}\n`;
   const pubkeyB64 = Buffer.from(pubFile, "utf8").toString("base64");
-  const signFile = (bytes: Buffer, id: Buffer = keyId) => {
+  /** Minisign text exactly as minisign/tauri produce it (four lines). */
+  const minisignText = (bytes: Buffer, id: Buffer = keyId, opts: { breakGlobal?: boolean; dropGlobal?: boolean } = {}) => {
     const prehash = createHash("blake2b512").update(bytes).digest();
     const sig = cryptoSign(null, prehash, privateKey);
-    const globalSig = cryptoSign(null, Buffer.concat([sig, Buffer.from("trusted comment: t")]), privateKey);
-    return `untrusted comment: signature from test key\n${Buffer.concat([Buffer.from("ED"), id, sig]).toString("base64")}\ntrusted comment: t\n${globalSig.toString("base64")}\n`;
+    const trusted = "timestamp:1700000000\tfile:app.tar.gz";
+    let globalSig = cryptoSign(null, Buffer.concat([sig, Buffer.from(trusted, "utf8")]), privateKey);
+    if (opts.breakGlobal) globalSig = Buffer.from(globalSig.map((b, i) => (i === 3 ? b ^ 0xff : b)));
+    const lines = [
+      "untrusted comment: signature from tauri secret key",
+      Buffer.concat([Buffer.from("ED"), id, sig]).toString("base64"),
+      `trusted comment: ${trusted}`,
+      globalSig.toString("base64"),
+    ];
+    return `${(opts.dropGlobal ? lines.slice(0, 2) : lines).join("\n")}\n`;
   };
-  return { pubkeyB64, keyId, signFile };
+  /** What `tauri signer sign` writes to <file>.sig: base64 of the text. */
+  const signFile = (bytes: Buffer, id?: Buffer, opts?: { breakGlobal?: boolean; dropGlobal?: boolean }) =>
+    Buffer.from(minisignText(bytes, id, opts), "utf8").toString("base64");
+  return { pubkeyB64, keyId, signFile, minisignText };
 }
 
 describe("verify-updater-signature (#379)", () => {
@@ -40,6 +52,17 @@ describe("verify-updater-signature (#379)", () => {
     const other = minisignPair();
     expect(() => verifyTarballSignature({ tarball, sigText: other.signFile(tarball), pubkeyB64: trusted.pubkeyB64 })).toThrow(
       /updater key mismatch/
+    );
+  });
+
+  it("accepts the raw four-line text too, and rejects a missing or forged global signature", () => {
+    const { pubkeyB64, signFile, minisignText } = minisignPair();
+    expect(() => verifyTarballSignature({ tarball, sigText: minisignText(tarball), pubkeyB64 })).not.toThrow();
+    expect(() => verifyTarballSignature({ tarball, sigText: signFile(tarball, undefined, { dropGlobal: true }), pubkeyB64 })).toThrow(
+      /expected 4 lines/
+    );
+    expect(() => verifyTarballSignature({ tarball, sigText: signFile(tarball, undefined, { breakGlobal: true }), pubkeyB64 })).toThrow(
+      /global signature/
     );
   });
 
