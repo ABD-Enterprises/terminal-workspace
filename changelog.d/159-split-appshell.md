@@ -1,0 +1,1 @@
+- [INTERNAL] Split AppShell.tsx (1095 lines): command-palette state/rows into useCommandPaletteRows and the palette dialog into CommandPaletteDialog; shell is now under 600 lines with no behaviour change. (#159 slice, #367)
