@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifySshError } from "./ssh-error-classifier";
+import { categoryFromErrorCode, classifySshError } from "./ssh-error-classifier";
 
 describe("classifySshError", () => {
   it("classifies 'All configured authentication methods failed' as auth_failed", () => {
@@ -61,5 +61,35 @@ describe("classifySshError", () => {
     expect(classifySshError(undefined).category).toBe("unknown");
     expect(classifySshError(null).category).toBe("unknown");
     expect(classifySshError(undefined).message).toBeTruthy();
+  });
+
+  describe("typed IpcError objects (#203)", () => {
+    it("reads a timeout code before any prose rule", () => {
+      const result = classifySshError({ code: "timeout", message: "could not connect to h:22: x" });
+      expect(result.category).toBe("timeout");
+      expect(result.raw).toBe("could not connect to h:22: x");
+    });
+
+    it("reads auth_failed from the code even when the message would not match", () => {
+      const result = classifySshError({ code: "auth_failed", message: "SSH authentication failed" });
+      expect(result.category).toBe("auth_failed");
+      expect(result.hint).toBeTruthy();
+    });
+
+    it("falls back to prose rules for an unknown or internal code", () => {
+      expect(categoryFromErrorCode({ code: "internal", message: "x" })).toBeNull();
+      expect(categoryFromErrorCode({ code: "banana", message: "x" })).toBeNull();
+      const result = classifySshError({
+        code: "internal",
+        message: "Host key verification failed for example.com",
+      });
+      expect(result.category).toBe("host_key_mismatch");
+    });
+
+    it("ignores non-object and code-less inputs", () => {
+      expect(categoryFromErrorCode("timeout")).toBeNull();
+      expect(categoryFromErrorCode(null)).toBeNull();
+      expect(categoryFromErrorCode({ message: "x" })).toBeNull();
+    });
   });
 });

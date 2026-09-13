@@ -32,6 +32,7 @@ use tauri::menu::{AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, Subm
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tokio::sync::mpsc::{channel, error::TrySendError, Sender};
+mod ipc_error;
 mod ipc_types;
 mod keychain_support;
 mod native_host_keys;
@@ -40,6 +41,7 @@ mod sftp;
 
 use crate::native_host_keys::{HostKeyVerdict, NativeHostKeyStore, SharedNativeHostKeyStore};
 
+use ipc_error::{classify_transport_error, IpcError, IpcErrorCode};
 use ipc_types::*;
 use keychain_support::*;
 use native_transport::*;
@@ -1352,11 +1354,11 @@ fn validate_session_target(host: &BackendHostConnection) -> Result<(), String> {
 fn authenticate_native_session(
     session: &mut Session,
     host: &BackendHostConnection,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     match host.auth_method.as_str() {
         "password" => session
             .userauth_password(&host.username, &host.password)
-            .map_err(|error| error.to_string())?,
+            .map_err(IpcError::from)?,
         "privateKey" => {
             let private_key_path = validate_connection_identity_key_path(&host.private_key_path)?;
             session
@@ -1370,16 +1372,24 @@ fn authenticate_native_session(
                         Some(host.passphrase.as_str())
                     },
                 )
-                .map_err(|error| error.to_string())?
+                .map_err(IpcError::from)?
         }
-        "none" => return Err("Host is configured without SSH auth".to_string()),
-        _ => return Err(format!("Unsupported auth method: {}", host.auth_method)),
+        "none" => return Err(IpcError::internal("Host is configured without SSH auth")),
+        _ => {
+            return Err(IpcError::internal(format!(
+                "Unsupported auth method: {}",
+                host.auth_method
+            )))
+        }
     }
 
     if session.authenticated() {
         Ok(())
     } else {
-        Err("SSH authentication failed".to_string())
+        Err(IpcError::new(
+            IpcErrorCode::AuthFailed,
+            "SSH authentication failed",
+        ))
     }
 }
 
@@ -1423,20 +1433,30 @@ fn connect_tcp_with_timeout(
     hostname: &str,
     port: u16,
     timeout: Duration,
-) -> Result<TcpStream, String> {
-    let addrs = (hostname, port)
-        .to_socket_addrs()
-        .map_err(|error| format!("could not resolve {hostname}:{port}: {error}"))?;
-    let mut last_error = format!("no addresses resolved for {hostname}:{port}");
+) -> Result<TcpStream, IpcError> {
+    let addrs = (hostname, port).to_socket_addrs().map_err(|error| {
+        IpcError::new(
+            IpcErrorCode::DnsFailure,
+            format!("could not resolve {hostname}:{port}: {error}"),
+        )
+    })?;
+    let mut last_error: Option<io::Error> = None;
     for addr in addrs {
         match TcpStream::connect_timeout(&addr, timeout) {
             Ok(stream) => return Ok(stream),
-            Err(error) => last_error = error.to_string(),
+            Err(error) => last_error = Some(error),
         }
     }
-    Err(format!(
-        "could not connect to {hostname}:{port}: {last_error}"
-    ))
+    match last_error {
+        Some(error) => Err(IpcError::new(
+            classify_transport_error(&error),
+            format!("could not connect to {hostname}:{port}: {error}"),
+        )),
+        None => Err(IpcError::new(
+            IpcErrorCode::DnsFailure,
+            format!("could not connect to {hostname}:{port}: no addresses resolved for {hostname}:{port}"),
+        )),
+    }
 }
 
 /// #151: the single host-key decision for the direct ssh2 path.
@@ -1454,17 +1474,20 @@ fn verify_native_host_key(
     session: &Session,
     host: &BackendHostConnection,
     store: &NativeHostKeyStore,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let (actual_key, key_type) = session
         .host_key()
-        .ok_or_else(|| "SSH server did not present a host key".to_string())?;
+        .ok_or_else(|| IpcError::internal("SSH server did not present a host key"))?;
     let presented = BASE64_STANDARD.encode(actual_key);
 
     if let Some(expected_key) = host.known_host_public_key.as_ref() {
         if presented != *expected_key {
-            return Err(format!(
-                "Trusted host key mismatch for {}:{}.",
-                host.hostname, host.port
+            return Err(IpcError::new(
+                IpcErrorCode::HostKeyMismatch,
+                format!(
+                    "Trusted host key mismatch for {}:{}.",
+                    host.hostname, host.port
+                ),
             ));
         }
         return Ok(());
@@ -1472,22 +1495,25 @@ fn verify_native_host_key(
 
     if host_requires_trusted_key(host) {
         // Defence in depth: validate_ssh_host already refuses this combination.
-        return Err(format!(
+        return Err(IpcError::internal(format!(
             "Trusted host key required for {}:{} but none was provided. Scan and trust the host first.",
             host.hostname, host.port
-        ));
+        )));
     }
 
     let algorithm = host_key_algorithm_name(key_type);
     let pattern = known_hosts_host_pattern(host);
     match store.verify_or_pin(&pattern, algorithm, &presented)? {
         HostKeyVerdict::Pinned | HostKeyVerdict::Matches => Ok(()),
-        HostKeyVerdict::Mismatch { .. } => Err(format!(
-            "Host key verification failed for {}:{}: the presented host key does not match the \
-             one first seen for this host. Credentials were not sent. This may indicate a \
-             machine-in-the-middle attack, or the host may have been rebuilt — re-scan and \
-             explicitly trust the replacement key before reconnecting.",
-            host.hostname, host.port
+        HostKeyVerdict::Mismatch { .. } => Err(IpcError::new(
+            IpcErrorCode::HostKeyMismatch,
+            format!(
+                "Host key verification failed for {}:{}: the presented host key does not match the \
+                 one first seen for this host. Credentials were not sent. This may indicate a \
+                 machine-in-the-middle attack, or the host may have been rebuilt — re-scan and \
+                 explicitly trust the replacement key before reconnecting.",
+                host.hostname, host.port
+            ),
         )),
     }
 }
@@ -1510,9 +1536,9 @@ fn host_key_algorithm_name(key_type: ssh2::HostKeyType) -> &'static str {
 fn connect_native_session(
     host: &BackendHostConnection,
     store: &NativeHostKeyStore,
-) -> Result<(Session, Channel), String> {
-    let port =
-        u16::try_from(host.port).map_err(|_| "SSH port must be between 1 and 65535".to_string())?;
+) -> Result<(Session, Channel), IpcError> {
+    let port = u16::try_from(host.port)
+        .map_err(|_| IpcError::internal("SSH port must be between 1 and 65535"))?;
     let tcp_stream = connect_tcp_with_timeout(
         &host.hostname,
         port,
@@ -1520,12 +1546,12 @@ fn connect_native_session(
     )?;
     let _ = tcp_stream.set_nodelay(true);
 
-    let mut session = Session::new().map_err(|error| error.to_string())?;
+    let mut session = Session::new().map_err(IpcError::from)?;
     session.set_tcp_stream(tcp_stream);
     // Bound handshake/auth (and any blocking channel IO before the loop switches
     // the session to non-blocking) so a stalled SSH banner cannot hang forever.
     session.set_timeout(NATIVE_SSH_IO_TIMEOUT_MS);
-    session.handshake().map_err(|error| error.to_string())?;
+    session.handshake().map_err(IpcError::from)?;
 
     verify_native_host_key(&session, host, store)?;
 
@@ -4018,15 +4044,15 @@ async fn terminal_workspace_create_backend_session(
     native_host_keys: State<'_, SharedNativeHostKeyStore>,
     app: AppHandle,
     request: CreateBackendSessionRequest,
-) -> Result<CreateSessionResponse, String> {
+) -> Result<CreateSessionResponse, IpcError> {
     let host_key_store = native_host_keys.inner().clone();
     validate_session_target(&request.host)?;
 
     if !should_use_native_session(&request.host) {
-        return Err(format!(
+        return Err(IpcError::internal(format!(
             "Native transport does not support {} sessions without credentials",
             request.host.protocol
-        ));
+        )));
     }
 
     let session_id = next_native_session_id();
@@ -4125,10 +4151,10 @@ async fn terminal_workspace_create_backend_session(
                     wake_reader,
                 );
             });
-            Ok::<(), String>(())
+            Ok::<(), IpcError>(())
         })
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| IpcError::internal(error.to_string()))
         .and_then(|inner| inner);
 
         if let Err(error) = connect_result {
@@ -4148,7 +4174,7 @@ async fn terminal_workspace_close_backend_session(
     native_sessions: State<'_, NativeSessionRegistry>,
     native_forwards: State<'_, NativeForwardRegistry>,
     request: SessionIdRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcError> {
     if let Some(handle) = remove_native_session(native_sessions.inner(), &request.session_id) {
         close_native_forwards_for_session(native_forwards.inner(), &request.session_id);
         // #205: still fire-and-forget, and still correct on a bounded channel.
@@ -4163,14 +4189,14 @@ async fn terminal_workspace_close_backend_session(
         });
     }
 
-    Err("Session not found in native runtime".to_string())
+    Err(IpcError::internal("Session not found in native runtime"))
 }
 
 #[tauri::command]
 async fn terminal_workspace_resize_backend_session(
     native_sessions: State<'_, NativeSessionRegistry>,
     request: ResizeBackendSessionRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcError> {
     if let Some(handle) = get_native_session(native_sessions.inner(), &request.session_id) {
         handle
             .command_sender
@@ -4191,7 +4217,7 @@ async fn terminal_workspace_resize_backend_session(
         });
     }
 
-    Err("Session not found in native runtime".to_string())
+    Err(IpcError::internal("Session not found in native runtime"))
 }
 
 #[tauri::command]
@@ -4199,23 +4225,24 @@ async fn terminal_workspace_open_backend_session_stream(
     app: AppHandle,
     native_sessions: State<'_, NativeSessionRegistry>,
     request: SessionStreamRequest,
-) -> Result<SessionStreamOpenResponse, String> {
+) -> Result<SessionStreamOpenResponse, IpcError> {
     open_native_session_stream(&app, native_sessions.inner(), &request.session_id)
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 fn terminal_workspace_send_backend_session_stream(
     native_sessions: State<'_, NativeSessionRegistry>,
     request: SessionStreamSendRequest,
-) -> Result<BackendBooleanResponse, String> {
-    send_native_session_stream(native_sessions.inner(), request)
+) -> Result<BackendBooleanResponse, IpcError> {
+    send_native_session_stream(native_sessions.inner(), request).map_err(IpcError::from)
 }
 
 #[tauri::command]
 fn terminal_workspace_close_backend_session_stream(
     native_sessions: State<'_, NativeSessionRegistry>,
     request: SessionStreamRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcError> {
     if let Some(response) = close_native_session_stream(native_sessions.inner(), request.clone()) {
         return Ok(response);
     }
