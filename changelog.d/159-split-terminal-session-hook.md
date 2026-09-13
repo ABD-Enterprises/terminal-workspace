@@ -1,0 +1,1 @@
+- [INTERNAL] Split terminal pane session behavior into focused hooks for lifecycle, runtime status, queued commands, and search. (#159)
