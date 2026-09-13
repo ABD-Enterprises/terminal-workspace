@@ -1,0 +1,1 @@
+- [INTERNAL] Split IPC DTOs into `ipc_types.rs` and the SFTP command family into `sftp.rs`; `main.rs` shrinks by ~700 lines with no invoke() name or payload change. (#355)
