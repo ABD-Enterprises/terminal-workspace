@@ -69,6 +69,8 @@ build_notary_auth_args() {
 
   if [[ -n "$NOTARY_APPLE_ID" && -n "$NOTARY_APP_PASSWORD" && -n "$NOTARY_TEAM_ID" ]]; then
     NOTARY_AUTH_MODE="apple-id"
+    # notarytool has no stdin/env form for --password; prefer the API-key or
+    # keychain-profile modes above. secret-argv-known: #378
     auth_args_ref=(--apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_APP_PASSWORD" --team-id "$NOTARY_TEAM_ID")
     return
   fi

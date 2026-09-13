@@ -164,6 +164,9 @@ pub enum KeyCommandFailure {
         path: String,
     },
     UnsupportedKeyType,
+    /// #319: the passphrase travels to ssh-keygen through an askpass prompt,
+    /// which reads one line; a newline would split it across the two prompts.
+    PassphraseContainsNewline,
     SshKeygenUnavailable {
         operation: KeyCommandOperation,
         path: String,

@@ -45,6 +45,8 @@ function keyCommandFailureMessage(error: unknown) {
       return pathFailure(failure) ? `Could not write private key at ${failure.path}.` : undefined;
     case "unsupported-key-type":
       return "Choose an ED25519, ECDSA, or RSA key type.";
+    case "passphrase-contains-newline":
+      return "The passphrase cannot contain a line break.";
     case "ssh-keygen-unavailable":
       if (!pathFailure(failure)) {
         return undefined;

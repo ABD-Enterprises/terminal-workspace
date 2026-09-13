@@ -82,6 +82,7 @@ export type KeyCommandFailure =
   | { reason: "private-key-unreadable"; path: string }
   | { reason: "private-key-write-failed"; path: string }
   | { reason: "unsupported-key-type" }
+  | { reason: "passphrase-contains-newline" }
   | { reason: "ssh-keygen-unavailable"; operation: KeyCommandOperation; path: string }
   | { reason: "ssh-keygen-failed"; operation: KeyCommandOperation; path: string }
   | { reason: "invalid-key-metadata"; path: string }

@@ -606,6 +606,7 @@ fn key_command_failure_reason(error: &KeyCommandFailure) -> &'static str {
         KeyCommandFailure::PrivateKeyUnreadable { .. } => "private-key-unreadable",
         KeyCommandFailure::PrivateKeyWriteFailed { .. } => "private-key-write-failed",
         KeyCommandFailure::UnsupportedKeyType => "unsupported-key-type",
+        KeyCommandFailure::PassphraseContainsNewline => "passphrase-contains-newline",
         KeyCommandFailure::SshKeygenUnavailable { .. } => "ssh-keygen-unavailable",
         KeyCommandFailure::SshKeygenFailed { .. } => "ssh-keygen-failed",
         KeyCommandFailure::InvalidKeyMetadata { .. } => "invalid-key-metadata",

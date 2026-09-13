@@ -428,6 +428,10 @@ pub(crate) fn generate_key_pair(
         return Err(KeyCommandFailure::UnsupportedKeyType);
     }
 
+    if request.passphrase.contains(['\n', '\r']) {
+        return Err(KeyCommandFailure::PassphraseContainsNewline);
+    }
+
     let resolved_path = expand_home(&request.path);
     validate_user_owned_key_path(&resolved_path, &request.path)?;
     if let Some(parent) = resolved_path.parent() {
@@ -449,8 +453,6 @@ pub(crate) fn generate_key_pair(
         key_type.clone(),
         "-f".to_string(),
         resolved_path_string.clone(),
-        "-N".to_string(),
-        request.passphrase.clone(),
         "-C".to_string(),
         request.comment.clone(),
     ];
@@ -461,9 +463,119 @@ pub(crate) fn generate_key_pair(
         args.splice(3..3, ["-b".to_string(), "521".to_string()]);
     }
 
-    run_ssh_keygen(&args, KeyCommandOperation::Generate, &request.path)?;
+    // #319: the passphrase must never be on argv (`ps` exposes it to every
+    // local process). An empty passphrase is a literal `-N ""`; a real one is
+    // handed to ssh-keygen through SSH_ASKPASS from a 0600 file in a private
+    // session dir, the same way the rekey path (`prepare_native_identity_file`)
+    // already does it. ssh-keygen asks twice ("enter" / "again"); the askpass
+    // script prints the same file both times.
+    if request.passphrase.is_empty() {
+        args.push("-N".to_string());
+        args.push(String::new());
+        run_ssh_keygen(&args, KeyCommandOperation::Generate, &request.path)?;
+    } else {
+        let askpass = StagedAskpass::stage("keygen", &request.passphrase).map_err(|_| {
+            KeyCommandFailure::SshKeygenFailed {
+                operation: KeyCommandOperation::Generate,
+                path: request.path.clone(),
+            }
+        })?;
+        let result = run_ssh_keygen_with_askpass(
+            &args,
+            &askpass,
+            KeyCommandOperation::Generate,
+            &request.path,
+        );
+        askpass.scrub();
+        result?;
+    }
 
     inspect_private_key_at(&resolved_path, &request.path)
+}
+
+/// A passphrase staged for `SSH_ASKPASS`: a 0600 file holding the secret and a
+/// 0700 script that prints it, both inside a fresh 0700 session directory that
+/// is removed by `scrub`.
+struct StagedAskpass {
+    session_dir: PathBuf,
+    pass_path: PathBuf,
+    script_path: PathBuf,
+    passphrase_len: usize,
+}
+
+impl StagedAskpass {
+    fn stage(label: &str, passphrase: &str) -> Result<Self, String> {
+        let session_dir = create_native_ssh_session_dir(label)?;
+        let pass_path = session_dir.join("pass");
+        let script_path = session_dir.join("askpass.sh");
+        let staged = Self {
+            session_dir,
+            pass_path,
+            script_path,
+            passphrase_len: passphrase.len(),
+        };
+        if let Err(error) = write_private_file(&staged.pass_path, passphrase.as_bytes(), 0o600) {
+            staged.scrub();
+            return Err(format!("failed to stage passphrase: {error}"));
+        }
+        // `cat` the file rather than embedding the secret in the script body,
+        // so the script itself can be read without leaking it.
+        let body = format!(
+            "#!/bin/sh\nexec /bin/cat -- {}\n",
+            shell_single_quote(&staged.pass_path.to_string_lossy())
+        );
+        if let Err(error) = write_private_file(&staged.script_path, body, 0o700) {
+            staged.scrub();
+            return Err(format!("failed to stage askpass: {error}"));
+        }
+        Ok(staged)
+    }
+
+    /// Overwrite then unlink the passphrase, remove the script and the dir.
+    /// Idempotent: `Drop` calls it too, so an unwind (a panic while waiting
+    /// on ssh-keygen) cannot leave the plaintext file behind.
+    fn scrub(&self) {
+        if self.pass_path.exists() {
+            scrub_passphrase_file(&self.pass_path, self.passphrase_len);
+        }
+        let _ = fs::remove_file(&self.script_path);
+        let _ = fs::remove_dir_all(&self.session_dir);
+    }
+}
+
+impl Drop for StagedAskpass {
+    fn drop(&mut self) {
+        self.scrub();
+    }
+}
+
+fn run_ssh_keygen_with_askpass(
+    args: &[String],
+    askpass: &StagedAskpass,
+    operation: KeyCommandOperation,
+    requested_path: &str,
+) -> Result<String, KeyCommandFailure> {
+    let output = Command::new("/usr/bin/ssh-keygen")
+        .args(args)
+        .env("SSH_ASKPASS", &askpass.script_path)
+        // Prefer the askpass even with a TTY attached (OpenSSH >= 8.4).
+        .env("SSH_ASKPASS_REQUIRE", "force")
+        // ssh-keygen only consults SSH_ASKPASS when DISPLAY is set.
+        .env("DISPLAY", ":0")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|_| KeyCommandFailure::SshKeygenUnavailable {
+            operation,
+            path: requested_path.to_string(),
+        })?;
+    let stdout = trim_ssh_output(&String::from_utf8_lossy(&output.stdout));
+    if !output.status.success() {
+        return Err(KeyCommandFailure::SshKeygenFailed {
+            operation,
+            path: requested_path.to_string(),
+        });
+    }
+    Ok(stdout)
 }
 
 pub(crate) fn compute_public_key_fingerprint(public_key: &str) -> Result<String, String> {
@@ -2194,6 +2306,90 @@ mod tests {
             .join(format!("termsnip-native-test-{}", test_suffix(label)));
         fs::create_dir_all(&root).expect("test root should be created");
         root
+    }
+
+    /// #319: the generated key must be encrypted with the requested passphrase
+    /// even though the passphrase never appears on ssh-keygen's argv. Proven by
+    /// asking ssh-keygen for the public key: the right passphrase succeeds, a
+    /// wrong one is refused. (The `-P` here is a test literal, not a secret.)
+    #[test]
+    fn generated_key_is_encrypted_with_passphrase_supplied_via_askpass() {
+        let root = test_root("keygen-askpass");
+        let key_path = root.join("id_ed25519");
+        let passphrase = "askpass-fixture-passphrase";
+        generate_key_pair(&GenerateKeyRequest {
+            comment: "termsnip-askpass-test".to_string(),
+            passphrase: passphrase.to_string(),
+            path: key_path.to_string_lossy().into_owned(),
+            key_type: "ed25519".to_string(),
+        })
+        .expect("key generation with a passphrase should succeed");
+
+        let with_right = Command::new("/usr/bin/ssh-keygen")
+            .args(["-y", "-P", passphrase, "-f", &key_path.to_string_lossy()])
+            .output()
+            .expect("ssh-keygen should run");
+        assert!(
+            with_right.status.success(),
+            "the requested passphrase must unlock the key: {}",
+            String::from_utf8_lossy(&with_right.stderr)
+        );
+        let with_wrong = Command::new("/usr/bin/ssh-keygen")
+            .args([
+                "-y",
+                "-P",
+                "not-the-passphrase",
+                "-f",
+                &key_path.to_string_lossy(),
+            ])
+            .output()
+            .expect("ssh-keygen should run");
+        assert!(
+            !with_wrong.status.success(),
+            "a wrong passphrase must be refused, so the key really is encrypted"
+        );
+
+        // Nothing from generate_key_pair's staging may survive: no session dir
+        // under the shared root still holds an askpass script (the name is
+        // unique to this staging shape; identity staging uses `*-askpass.sh`).
+        let leftovers: Vec<PathBuf> = fs::read_dir(native_ssh_session_root().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(NATIVE_SSH_DIR_PREFIX)
+            })
+            .map(|entry| entry.path().join("askpass.sh"))
+            .filter(|script| script.exists())
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "staged askpass must be scrubbed: {leftovers:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// #319: the staging is cleaned up on every path, including an unwind.
+    #[test]
+    fn staged_askpass_is_scrubbed_on_drop_and_on_panic() {
+        let staged = StagedAskpass::stage("keygen-drop-probe", "probe").expect("stage");
+        let (dir, pass) = (staged.session_dir.clone(), staged.pass_path.clone());
+        assert!(pass.exists());
+        drop(staged);
+        assert!(!pass.exists(), "passphrase file must be unlinked on drop");
+        assert!(!dir.exists(), "session dir must be removed on drop");
+
+        let staged = StagedAskpass::stage("keygen-panic-probe", "probe").expect("stage");
+        let (dir, pass) = (staged.session_dir.clone(), staged.pass_path.clone());
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _hold = staged;
+            panic!("simulated failure while ssh-keygen runs");
+        }));
+        assert!(unwound.is_err());
+        assert!(!pass.exists(), "passphrase file must be unlinked on unwind");
+        assert!(!dir.exists(), "session dir must be removed on unwind");
     }
 
     /// #274: uniqueness must come from the counter, not the clock.
