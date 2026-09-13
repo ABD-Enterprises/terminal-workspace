@@ -43,6 +43,7 @@ use crate::native_host_keys::{HostKeyVerdict, NativeHostKeyStore, SharedNativeHo
 use ipc_types::*;
 use keychain_support::*;
 use native_transport::*;
+#[cfg(test)]
 use sftp::*;
 
 const SESSION_STREAM_EVENT_NAME: &str = "terminal_workspace://session-stream";
@@ -516,12 +517,6 @@ fn host_requires_trusted_key(host: &BackendHostConnection) -> bool {
 fn default_backend_protocol() -> String {
     "ssh".to_string()
 }
-
-/// #203: these value-returning commands deliberately keep Tauri's rejected-
-/// promise contract. Unlike `copy_key_to_host`, their success value is
-/// `KeyMetadata`, not an operation-outcome envelope, so an `ok: false` wrapper
-/// would add churn without changing the security boundary. Every rejection is
-/// instead represented by this serializable, renderer-formatted type.
 
 /// Reject identity ids that are obviously empty / malformed. The renderer
 /// only forwards UUIDs from the persisted identities store; this guard
@@ -2620,10 +2615,6 @@ async fn terminal_workspace_import_private_key_from_body(
     result
 }
 
-// BackendHostConnection (the existing renderer-side struct) doesn't
-// derive Debug — adding it here directly would touch a lot of unrelated
-// fields. Just drop the Debug derive on this request struct.
-
 impl CopyKeyToHostResponse {
     fn success() -> Self {
         Self {
@@ -2875,11 +2866,6 @@ async fn terminal_workspace_set_dock_badge(
     }
     Ok(())
 }
-
-/// #148: `app.restart()` tears down every live SSH session. Installing used to
-/// do that with no warning, so an update accepted from the banner could drop a
-/// half-finished remote command. The install command now refuses while sessions
-/// are open unless the caller has confirmed with the user and set `force`.
 
 /// Marker the renderer matches on to tell "you have N live sessions" apart from
 /// any other install failure. Kept in sync with LIVE_SESSIONS_MARKER in
@@ -3265,12 +3251,6 @@ async fn terminal_workspace_clear_identity_passphrase(
     .await
     .map_err(|error| error.to_string())?
 }
-
-/// #300: SSH-config commands use a sibling failure type rather than
-/// `KeyCommandFailure`. The two families share the kebab-case `reason` wire
-/// convention and retain only the caller's path spelling, but reusing the key
-/// enum would make `worker-failed` render as a private-key operation. That
-/// sentence is actively wrong for Include reads and globs.
 
 /// Read a single OpenSSH config file from the user's ~/.ssh/ tree. Used by
 /// the renderer's Include-directive preprocessor (issue #28). The path
@@ -4837,7 +4817,6 @@ mod native_transport_fixtures;
 
 #[cfg(test)]
 mod tests {
-    use crate::sftp::*;
     /// #151: the two copy-key refusal tests exercise validation that happens
     /// BEFORE any connect, so they never reach the store. A throwaway one keeps
     /// them honest about that rather than mocking the type away.

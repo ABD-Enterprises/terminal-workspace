@@ -135,6 +135,11 @@ pub enum KeyCommandOperation {
     Generate,
 }
 
+/// #203: these value-returning commands deliberately keep Tauri's rejected-
+/// promise contract. Unlike `copy_key_to_host`, their success value is
+/// `KeyMetadata`, not an operation-outcome envelope, so an `ok: false` wrapper
+/// would add churn without changing the security boundary. Every rejection is
+/// instead represented by this serializable, renderer-formatted type.
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(tag = "reason", rename_all = "kebab-case")]
 pub enum KeyCommandFailure {
@@ -466,6 +471,9 @@ pub struct ImportPrivateKeyFromBodyRequest {
     pub body: String,
 }
 
+// BackendHostConnection (the existing renderer-side struct) doesn't
+// derive Debug — adding it here directly would touch a lot of unrelated
+// fields. Just drop the Debug derive on this request struct.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyKeyToHostRequest {
@@ -510,6 +518,10 @@ pub struct SetDockBadgeRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCheckRequest {}
 
+/// #148: `app.restart()` tears down every live SSH session. Installing used to
+/// do that with no warning, so an update accepted from the banner could drop a
+/// half-finished remote command. The install command now refuses while sessions
+/// are open unless the caller has confirmed with the user and set `force`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallUpdateRequest {
@@ -549,6 +561,11 @@ pub struct ReadSshConfigFileResponse {
     pub content: String,
 }
 
+/// #300: SSH-config commands use a sibling failure type rather than
+/// `KeyCommandFailure`. The two families share the kebab-case `reason` wire
+/// convention and retain only the caller's path spelling, but reusing the key
+/// enum would make `worker-failed` render as a private-key operation. That
+/// sentence is actively wrong for Include reads and globs.
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(tag = "reason", rename_all = "kebab-case")]
 pub enum SshConfigCommandFailure {
