@@ -44,20 +44,23 @@ export function useCommandPaletteRows() {
     closeCommandPalette();
   };
 
-
+  // Reset selection when the result set changes so the highlight never points
+  // at a row that no longer exists.
+  //
+  // #257: this was a useEffect on [paletteQuery], which fired on every keystroke
+  // and cost a second render pass each time. React's documented way to adjust
+  // state when an input changes is to do it during render — the component
+  // re-renders immediately without painting the intermediate state, so there is
+  // no cascade. See https://react.dev/learn/you-might-not-need-an-effect.
   const [previousPaletteQuery, setPreviousPaletteQuery] = useState(paletteQuery);
   if (paletteQuery !== previousPaletteQuery) {
     setPreviousPaletteQuery(paletteQuery);
     setPaletteSelectedIndex(0);
   }
 
-  // ---- Native menu wiring -------------------------------------------------
-  // The macOS application menu emits `terminal_workspace://menu-event` with a string
-  // payload like "menu:nav-hosts". We translate each id into the same actions
-  // that the in-app keyboard / palette already wire up. Browser preview has
-  // no native menu, so this listener simply does not fire.
-  // See parity-and-hardening-plan.md P1-UX4.
-
+  // T09: fuzzy + acronym match. We score each candidate's combined
+  // haystack against the query and sort high-score-first. Empty query
+  // shows everything in its natural order.
   const trimmedQuery = paletteQuery.trim();
 
   const matchingSections = trimmedQuery
@@ -322,10 +325,6 @@ export function useCommandPaletteRows() {
   const handleRowEnter = () => {
     paletteRows[clampedSelectedIndex]?.run();
   };
-
-  // #112: mark the document for the native shell so macOS-only chrome
-  // (window vibrancy, traffic-light inset, translucent sidebar) is applied
-  // via CSS only under Tauri — the browser build stays visually identical.
 
   return {
     paletteQuery,

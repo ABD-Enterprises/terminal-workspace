@@ -7,7 +7,7 @@ import { useHostsStore } from "../../store/hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
 import { hostSupportsSftp, hostSupportsTrustedKeys } from "../../types/host";
 
-import { useCommandPaletteRows } from "./use-command-palette-rows";
+import type { useCommandPaletteRows } from "./use-command-palette-rows";
 
 type CommandPaletteDialogProps = ReturnType<typeof useCommandPaletteRows>;
 

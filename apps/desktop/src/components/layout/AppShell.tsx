@@ -62,25 +62,22 @@ export function AppShell() {
       // #257: this effect's primary job is the DOM focus — synchronising with an
       // external system, exactly what effects are for. The index reset rides
       // along because it must happen on open, and it is not redundant with the
-      // query-change reset below: openCommandPalette only flips the open flag
+      // query-change reset in useCommandPaletteRows: openCommandPalette only flips the open flag
       // (store/app-store.ts), so a palette closed with a query still in it
       // reopens with that query unchanged and no query-change to react to.
       // Runs once per open, not per keystroke.
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- rides with the DOM focus this effect exists for
       setPaletteSelectedIndex(0);
       inputRef.current?.focus();
     }
-  }, [commandPaletteOpen]);
+  }, [commandPaletteOpen, inputRef, setPaletteSelectedIndex]);
 
-  // Reset selection when the result set changes so the highlight never points
-  // at a row that no longer exists.
-  //
-  // #257: this was a useEffect on [paletteQuery], which fired on every keystroke
-  // and cost a second render pass each time. React's documented way to adjust
-  // state when an input changes is to do it during render — the component
-  // re-renders immediately without painting the intermediate state, so there is
-  // no cascade. See https://react.dev/learn/you-might-not-need-an-effect.
   const setWorkspaceDensity = useAppStore((state) => state.setWorkspaceDensity);
+  // ---- Native menu wiring -------------------------------------------------
+  // The macOS application menu emits `terminal_workspace://menu-event` with a string
+  // payload like "menu:nav-hosts". We translate each id into the same actions
+  // that the in-app keyboard / palette already wire up. Browser preview has
+  // no native menu, so this listener simply does not fire.
+  // See parity-and-hardening-plan.md P1-UX4.
   useEffect(() => {
     if (!isTauriRuntime()) {
       return;
@@ -333,11 +330,12 @@ export function AppShell() {
     sectionShortcutsEnabled,
     selectSessionTab,
     sessionTabs,
+    setPaletteQuery,
   ]);
 
-  // T09: fuzzy + acronym match. We score each candidate's combined
-  // haystack against the query and sort high-score-first. Empty query
-  // shows everything in its natural order.
+  // #112: mark the document for the native shell so macOS-only chrome
+  // (window vibrancy, traffic-light inset, translucent sidebar) is applied
+  // via CSS only under Tauri — the browser build stays visually identical.
   useEffect(() => {
     if (isTauriRuntime()) {
       document.documentElement.setAttribute("data-tauri", "");
