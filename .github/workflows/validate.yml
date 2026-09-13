@@ -243,3 +243,55 @@ jobs:
       # so the ignored OpenSSH phases cannot disappear inside the default suite.
       - name: Native trust tooling (OpenSSH append experiment)
         run: bash scripts/native-trust-tooling-test.sh
+
+  native-ssh-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache cargo registry
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/git/db
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Setup Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo --version
+          rustc --version
+
+      - name: Install Linux native dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libwebkit2gtk-4.1-dev \
+            openssh-client \
+            openssh-server \
+            patchelf
+          sudo mkdir -p /run/sshd
+
+      - name: Create frontendDist placeholder
+        run: |
+          mkdir -p apps/desktop/dist
+          printf '<!doctype html><title>native ssh fixture</title>\n' > apps/desktop/dist/index.html
+
+      - name: Run ignored native sshd fixtures
+        env:
+          TMPDIR: ${{ runner.temp }}
+          TERMSNIP_RUN_SSH_FIXTURE: "1"
+        run: |
+          # Every #[ignore]d test in the fixtures module, by module path rather than by name,
+          # so a renamed or added fixture cannot silently drop out of CI (#363 review).
+          cargo test --manifest-path src-tauri/Cargo.toml native_transport_fixtures:: -- --ignored --test-threads=1
