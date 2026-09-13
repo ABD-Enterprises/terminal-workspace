@@ -1,0 +1,1 @@
+- [INTERNAL] Split terminal pane lifecycle wiring into focused session helpers with hook-level tests. (#375)
