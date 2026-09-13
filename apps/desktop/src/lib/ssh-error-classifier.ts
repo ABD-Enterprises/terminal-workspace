@@ -101,7 +101,6 @@ const KNOWN_CATEGORIES: readonly SshErrorCategory[] = [
   "timeout",
   "refused",
   "dns_failure",
-  "unknown",
 ];
 
 /**
@@ -140,7 +139,11 @@ export function classifySshError(error: unknown): ClassifiedSshError {
   const raw = rawMessage(error);
   const coded = categoryFromErrorCode(error);
   if (coded !== null) {
-    const rule = RULES.find((candidate) => candidate.category === coded);
+    // Prefer the most specific rule of that category (one whose prose pattern
+    // also matches), then fall back to the category's first rule.
+    const rule =
+      RULES.find((candidate) => candidate.category === coded && candidate.match.test(raw)) ??
+      RULES.find((candidate) => candidate.category === coded);
     return {
       category: coded,
       message: rule?.message ?? "Connection failed.",
