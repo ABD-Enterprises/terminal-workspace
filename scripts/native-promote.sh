@@ -189,11 +189,18 @@ ARCHIVE_BASENAME="$(basename "$ZIP_PATH")"
 ARCHIVE_SHA256="$(shasum -a 256 "$ZIP_PATH" | awk '{print $1}')"
 printf "%s  %s\n" "$ARCHIVE_SHA256" "$ARCHIVE_BASENAME" >"$CHECKSUM_PATH"
 
-VERSION="$VERSION" CHANNEL="$CHANNEL" RELEASE_NOTES_PATH="$RELEASE_NOTES_PATH" VERSIONED_MANIFEST_PATH="$VERSIONED_MANIFEST_PATH" node <<'NODE'
+# Operator-written notes for this version, when present, lead the release page;
+# the generated provenance block follows them.
+HUMAN_NOTES_PATH="$ROOT_DIR/docs/releases/v$VERSION.md"
+VERSION="$VERSION" CHANNEL="$CHANNEL" RELEASE_NOTES_PATH="$RELEASE_NOTES_PATH" VERSIONED_MANIFEST_PATH="$VERSIONED_MANIFEST_PATH" HUMAN_NOTES_PATH="$HUMAN_NOTES_PATH" node <<'NODE'
 const fs = require("node:fs");
 
 const manifest = JSON.parse(fs.readFileSync(process.env.VERSIONED_MANIFEST_PATH, "utf8"));
+const humanNotes = fs.existsSync(process.env.HUMAN_NOTES_PATH)
+  ? fs.readFileSync(process.env.HUMAN_NOTES_PATH, "utf8").trim()
+  : "";
 const lines = [
+  ...(humanNotes ? [humanNotes, "", "---", ""] : []),
   `# Terminal Workspace ${process.env.CHANNEL} release ${process.env.VERSION}`,
   "",
   `- Commit: ${manifest.commit ?? "unknown"}`,
