@@ -1,1 +1,0 @@
-- [FIX] Enforce a single running app instance: launching the app again focuses the existing window instead of starting a second process that could race the database migration or the keychain reaper. (#362)

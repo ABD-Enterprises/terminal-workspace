@@ -51,7 +51,7 @@ export function insertRelease(changelog, section) {
   const tail = nextRelease >= 0 ? rest.slice(nextRelease + 1) : "";
   const unreleased = [marker, ""];
   for (const label of LABELS) unreleased.push(`### [${label}]`, "", "- None.", "");
-  return `${changelog.slice(0, at)}${unreleased.join("\n")}${section}\n${tail}`;
+  return `${changelog.slice(0, at)}${unreleased.join("\n")}\n${section}\n${tail}`;
 }
 
 const invokedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
