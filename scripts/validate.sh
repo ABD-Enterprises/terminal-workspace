@@ -12,6 +12,12 @@ bash ./scripts/effort-guard.sh
 echo "[validate] version consistency"
 node ./scripts/check-version-consistency.mjs
 
+# #319: no secret value on any process argv, in any of the three languages that
+# build command lines here. Runs before the dependency check on purpose: it
+# needs only node, so a fresh clone gets the finding first.
+echo "[validate] secret-argv check"
+node ./scripts/secret-argv-check.mjs
+
 if [[ ! -x "./node_modules/.bin/eslint" || ! -x "./node_modules/.bin/vitest" || ! -x "./node_modules/.bin/playwright" ]]; then
   echo "[validate] dependencies are missing; run npm run setup before validation." >&2
   exit 1

@@ -1,0 +1,1 @@
+- [SECURITY] Key generation no longer passes the new passphrase to ssh-keygen on argv (it is handed over via SSH_ASKPASS from a 0600 file, like the rekey path), and `scripts/secret-argv-check.mjs` now gates every command line the repo builds — shell, Node and Rust — so the next secret-on-argv instance fails validation instead of shipping. (#319)
