@@ -15,6 +15,7 @@ import { canRestoreSessionWithoutPrompt, ensureRuntimeSecrets } from "../../lib/
 import { buildMockCommandResponse, buildTerminalIntro, formatPrompt } from "../../lib/terminal";
 import { type TerminalAnsiPalette } from "../../lib/terminal-themes";
 import { classifySshError } from "../../lib/ssh-error-classifier";
+import { shouldScheduleReconnect } from "./connect-failure-policy";
 import { type HostRecord } from "../../types/host";
 import { type SessionConnectionState, type SessionPane, type SessionTransport } from "../../types/session";
 
@@ -548,11 +549,21 @@ export function useTerminalPaneLifecycle({
           : classified.message;
 
         clearBackendSession();
-        if (connectedOnceRef.current || reconnectOnRestoreRef.current) {
+        // #373: a host-key mismatch is terminal until the user re-trusts the
+        // host; every other failure keeps the existing retry policy.
+        if (
+          shouldScheduleReconnect(classified.category, {
+            connectedOnce: connectedOnceRef.current,
+            reconnectOnRestore: reconnectOnRestoreRef.current,
+          })
+        ) {
           scheduleReconnect(`${protocolLabel} connect failed: ${friendly}`);
           return;
         }
 
+        // Terminal failure: make sure no retry armed by an earlier failure can
+        // still fire behind the error state.
+        clearReconnectTimer();
         terminal.writeln(`\r\n${protocolLabel} connect failed.`);
         terminal.writeln(`\r\n${friendly}`);
         if (raw && raw !== classified.message) {
