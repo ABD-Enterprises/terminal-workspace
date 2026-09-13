@@ -62,6 +62,40 @@ for (const asset of assets) {
 NODE
 )
 
+# #379: a release tag that disagrees with the promoted manifest publishes a
+# mislabelled release (and latest.json would advertise a different version than
+# the tag it lives under). Refuse rather than trust the caller.
+if [[ "$RELEASE_TAG" != "v$VERSION" ]]; then
+  echo "ERROR: RELEASE_TAG '$RELEASE_TAG' does not match the promoted version 'v$VERSION'." >&2
+  exit 1
+fi
+
+# #241 / #379: every content gate runs BEFORE the GitHub release exists, so a
+# failure cannot leave an empty or half-populated release behind under the tag.
+# Promotion emits latest.json, a signed .app.tar.gz and its .sig only when the
+# signing key is present; this script uploads whatever it is handed. Between the
+# two, a release could publish successfully with a dead update feed — which is
+# exactly what happened to v0.1.0 (#224). Checked here as well as in promotion
+# because the two run as separate steps: promotion can be re-run, skipped, or its
+# output staged from elsewhere, so publish is the last point where the release
+# contents are known.
+if [[ "${REQUIRE_UPDATER_ARTIFACTS:-0}" == "1" ]]; then
+  SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+  bash "$SCRIPT_DIR/verify-updater-artifacts.sh" "${ASSET_PATHS[@]}"
+  UPDATER_TARBALL=""
+  for asset in "${ASSET_PATHS[@]}"; do
+    [[ "$asset" == *.app.tar.gz ]] && UPDATER_TARBALL="$asset"
+  done
+  UPDATER_LATEST=""
+  for asset in "${ASSET_PATHS[@]}"; do
+    [[ "$(basename "$asset")" == "latest.json" ]] && UPDATER_LATEST="$asset"
+  done
+  node "$SCRIPT_DIR/verify-updater-signature.mjs" \
+    --tarball "$UPDATER_TARBALL" --sig "$UPDATER_TARBALL.sig" \
+    --tauri-conf "$SCRIPT_DIR/../src-tauri/tauri.conf.json" \
+    --latest-json "$UPDATER_LATEST" --version "$VERSION"
+fi
+
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "Dry-run GitHub release publish"
   echo "  version: $VERSION"
@@ -109,18 +143,6 @@ if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1;
   fi
 
   "${create_args[@]}"
-fi
-
-# #241: verify the updater triplet is actually in the asset list before publishing.
-# Promotion emits latest.json, a signed .app.tar.gz and its .sig only when the
-# signing key is present; this script uploads whatever it is handed. Between the
-# two, a release could publish successfully with a dead update feed — which is
-# exactly what happened to v0.1.0 (#224). Checked here as well as in promotion
-# because the two run as separate steps: promotion can be re-run, skipped, or its
-# output staged from elsewhere, so publish is the last point where the release
-# contents are known.
-if [[ "${REQUIRE_UPDATER_ARTIFACTS:-0}" == "1" ]]; then
-  bash "$(dirname "${BASH_SOURCE[0]}")/verify-updater-artifacts.sh" "${ASSET_PATHS[@]}"
 fi
 
 gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber "${ASSET_PATHS[@]}"

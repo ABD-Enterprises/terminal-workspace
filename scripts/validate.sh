@@ -7,6 +7,11 @@ cd "$ROOT"
 echo "[validate] effort guard"
 bash ./scripts/effort-guard.sh
 
+# #379: the five version sources must agree; the bundle and latest.json follow
+# tauri.conf.json and a stale npm/Cargo copy would ship mislabelled metadata.
+echo "[validate] version consistency"
+node ./scripts/check-version-consistency.mjs
+
 if [[ ! -x "./node_modules/.bin/eslint" || ! -x "./node_modules/.bin/vitest" || ! -x "./node_modules/.bin/playwright" ]]; then
   echo "[validate] dependencies are missing; run npm run setup before validation." >&2
   exit 1

@@ -25,6 +25,18 @@
 - Local notarized distribution is complete in this branch, and CI release publishing is now
   implemented but not yet executed with repository secrets.
 
+## Release Gates (#379)
+
+- `node scripts/check-version-consistency.mjs` — `package.json`, `apps/desktop/package.json`,
+  `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and the `terminal-workspace` entry in
+  `src-tauri/Cargo.lock` must carry the same version. Runs in `validate` and `native:release:check`.
+- `node scripts/verify-updater-signature.mjs` — the promoted `.app.tar.gz.sig` must verify (minisign
+  ED / BLAKE2b-512 / ed25519, key id match) against `plugins.updater.pubkey` in `tauri.conf.json`,
+  and `latest.json` must name that tarball, carry that signature and the release version. Runs in
+  `native:promote` right after signing and in `native:publish` (dry-run included) before the GitHub
+  release is created, so a wrong key or a stale feed can never leave a mislabelled release behind.
+- `native:publish` refuses a `RELEASE_TAG` that is not `v<manifest.version>`.
+
 ## Required Checks Before Shipping
 
 - `npm run native:check`
