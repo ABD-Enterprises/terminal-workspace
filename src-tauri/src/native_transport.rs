@@ -428,6 +428,10 @@ pub(crate) fn generate_key_pair(
         return Err(KeyCommandFailure::UnsupportedKeyType);
     }
 
+    if request.passphrase.contains(['\n', '\r']) {
+        return Err(KeyCommandFailure::PassphraseContainsNewline);
+    }
+
     let resolved_path = expand_home(&request.path);
     validate_user_owned_key_path(&resolved_path, &request.path)?;
     if let Some(parent) = resolved_path.parent() {

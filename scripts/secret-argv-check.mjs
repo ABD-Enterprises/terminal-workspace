@@ -122,10 +122,13 @@ function pairsOnLine(line, nextLine, following) {
     // statement — the value is whatever the NEXT .arg/.push statement carries,
     // even with blank or comment lines in between.
     if (new RegExp(`\\.(arg|push)\\(["']${esc}["'](?:\\.to_string\\(\\)|\\.to_owned\\(\\))?\\);\\s*$`).test(line) && following) {
+      // Unrelated statements may sit between the option and its value; take
+      // the FIRST later .arg/.push (a different command in between would be a
+      // suppressible false positive, which is the safe direction).
       for (const candidate of following) {
-        if (/^\s*$/.test(candidate) || /^\s*\/\//.test(candidate)) continue;
         const m = candidate.match(/\.(?:arg|push)\(([^)]*)\);/);
-        if (m) pairs.push({ option, tools, why, value: m[1], shape: "statement-next" });
+        if (!m) continue;
+        pairs.push({ option, tools, why, value: m[1], shape: "statement-next" });
         break;
       }
     }

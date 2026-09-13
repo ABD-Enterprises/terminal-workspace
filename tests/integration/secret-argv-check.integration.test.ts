@@ -105,6 +105,17 @@ describe("secret-argv-check (#319)", () => {
       "}",
     ].join("\n");
     expect(run({ "src-tauri/src/q.rs": argRs }).code).toBe(1);
+    const interleaved = [
+      "fn go(pw: &str) {",
+      '    let mut c = Command::new("/usr/bin/security");',
+      '    c.arg("unlock-keychain");',
+      '    c.arg("-p");',
+      "    let attempts = 1;",
+      "    log::debug!(\"unlocking {attempts}\");",
+      "    c.arg(pw);",
+      "}",
+    ].join("\n");
+    expect(run({ "src-tauri/src/s.rs": interleaved }).code).toBe(1);
     const fmtRs = 'fn go(p: &str) { let a = format!("--password={}", p); run_notarytool(&[a]); }\n';
     expect(run({ "src-tauri/src/r.rs": fmtRs }).code).toBe(1);
     const tpl = 'export function f(pw) { return execFile("gh", ["secret", "set", "X", `--body=${pw}`]); }\n';
