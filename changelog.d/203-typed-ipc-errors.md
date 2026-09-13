@@ -1,0 +1,1 @@
+- [FEATURE] Typed IPC errors, slice 1: the six backend-session commands reject with `{ code, message }` (`IpcError`), classified at the TCP/handshake/auth/host-key boundary; the renderer branches on the code before falling back to prose matching. (#203)

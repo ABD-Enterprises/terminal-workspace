@@ -94,8 +94,63 @@ const RULES: ClassifierRule[] = [
   },
 ];
 
+const KNOWN_CATEGORIES: readonly SshErrorCategory[] = [
+  "auth_failed",
+  "host_key_mismatch",
+  "network_unreachable",
+  "timeout",
+  "refused",
+  "dns_failure",
+];
+
+/**
+ * #203: commands migrated to the typed `IpcError` reject with `{ code, message }`
+ * where `code` is one of the category names above. Read that first — it is a
+ * stable contract — and only fall back to the prose rules for the commands
+ * still returning bare strings. Returns null when there is no usable code.
+ */
+export function categoryFromErrorCode(error: unknown): SshErrorCategory | null {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return null;
+  }
+  const code = (error as { code: unknown }).code;
+  if (typeof code !== "string") {
+    return null;
+  }
+  // The backend's catch-all is "internal"; treat it like an unclassified string
+  // so the prose rules still get a chance at the message text.
+  if (code === "internal") {
+    return null;
+  }
+  return (KNOWN_CATEGORIES as readonly string[]).includes(code) ? (code as SshErrorCategory) : null;
+}
+
+function rawMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message: unknown }).message ?? "");
+  }
+  return String(error ?? "");
+}
+
 export function classifySshError(error: unknown): ClassifiedSshError {
-  const raw = error instanceof Error ? error.message : String(error ?? "");
+  const raw = rawMessage(error);
+  const coded = categoryFromErrorCode(error);
+  if (coded !== null) {
+    // Prefer the most specific rule of that category (one whose prose pattern
+    // also matches), then fall back to the category's first rule.
+    const rule =
+      RULES.find((candidate) => candidate.category === coded && candidate.match.test(raw)) ??
+      RULES.find((candidate) => candidate.category === coded);
+    return {
+      category: coded,
+      message: rule?.message ?? "Connection failed.",
+      hint: rule?.hint,
+      raw,
+    };
+  }
   const trimmed = raw.trim();
   if (!trimmed) {
     return {

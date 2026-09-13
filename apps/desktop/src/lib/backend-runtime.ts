@@ -259,7 +259,14 @@ export function buildBrowserSessionSocketUrl(
 }
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) {
+    return error.message;
+  }
+  // #203: migrated commands reject with a typed { code, message } object.
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message: unknown }).message ?? "");
+  }
+  return String(error);
 }
 
 async function openBrowserSessionSocket(sessionId: string) {
