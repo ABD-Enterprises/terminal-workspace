@@ -68,8 +68,48 @@ describe("secret-argv-check (#319)", () => {
 
   it("honours secret-argv-ok and reports secret-argv-known as non-blocking", () => {
     expect(run({ "scripts/h.sh": '# secret-argv-ok: value is a public policy id\nssh-keygen -N "$NOT_A_SECRET" -f k\n' }).code).toBe(0);
-    const known = run({ "scripts/i.sh": 'xcrun notarytool submit --password "$PW" x.zip # secret-argv-known: #378\n' });
+    const allow = JSON.stringify([{ file: "scripts/i.sh", option: "--password", ticket: 378, expires: "2099-01-01" }]);
+    const marker = 'xcrun notarytool submit --password "$PW" x.zip # secret-argv-known: #378\n';
+    const known = run({ "scripts/i.sh": marker, "scripts/secret-argv-known.json": allow });
     expect(known.code).toBe(0);
     expect(known.out).toMatch(/known secret on argv .* tracked by #378/);
+    // the marker alone is not an exemption — the reviewed allowlist entry is
+    const unlisted = run({ "scripts/i.sh": marker });
+    expect(unlisted.code).toBe(1);
+    expect(unlisted.out).toMatch(/has no entry in scripts\/secret-argv-known\.json/);
+    const expired = run({ "scripts/i.sh": marker, "scripts/secret-argv-known.json": allow.replace("2099-01-01", "2020-01-01") });
+    expect(expired.code).toBe(1);
+    expect(expired.out).toMatch(/expired 2020-01-01/);
+  });
+
+  it("catches cross-statement .arg/.push and glued option=value shapes (adversarial)", () => {
+    const pushRs = [
+      "fn go(pass: String) {",
+      "    let mut args = Vec::new();",
+      '    args.push("-N".to_string());',
+      "    // comment between the statements",
+      "",
+      "    args.push(pass);",
+      "    run_ssh_keygen(&args);",
+      "}",
+    ].join("\n");
+    const push = run({ "src-tauri/src/p.rs": pushRs });
+    expect(push.code).toBe(1);
+    expect(push.out).toMatch(/p\.rs:3: `-N pass`/);
+    const argRs = [
+      "fn go(pw: &str) {",
+      '    let mut c = Command::new("/usr/bin/security");',
+      '    c.arg("create-keychain");',
+      '    c.arg("-p");',
+      "    c.arg(pw);",
+      "}",
+    ].join("\n");
+    expect(run({ "src-tauri/src/q.rs": argRs }).code).toBe(1);
+    const fmtRs = 'fn go(p: &str) { let a = format!("--password={}", p); run_notarytool(&[a]); }\n';
+    expect(run({ "src-tauri/src/r.rs": fmtRs }).code).toBe(1);
+    const tpl = 'export function f(pw) { return execFile("gh", ["secret", "set", "X", `--body=${pw}`]); }\n';
+    expect(run({ "scripts/t.mjs": tpl }).code).toBe(1);
+    const concat = 'export function f(pw) { return spawn("ssh-keygen", ["-t", "ed25519", "-N" + pw]); }\n';
+    expect(run({ "scripts/u.mjs": concat }).code).toBe(1);
   });
 });

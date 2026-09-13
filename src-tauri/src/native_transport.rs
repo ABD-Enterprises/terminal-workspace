@@ -528,12 +528,20 @@ impl StagedAskpass {
     }
 
     /// Overwrite then unlink the passphrase, remove the script and the dir.
+    /// Idempotent: `Drop` calls it too, so an unwind (a panic while waiting
+    /// on ssh-keygen) cannot leave the plaintext file behind.
     fn scrub(&self) {
         if self.pass_path.exists() {
             scrub_passphrase_file(&self.pass_path, self.passphrase_len);
         }
         let _ = fs::remove_file(&self.script_path);
         let _ = fs::remove_dir_all(&self.session_dir);
+    }
+}
+
+impl Drop for StagedAskpass {
+    fn drop(&mut self) {
+        self.scrub();
     }
 }
 
@@ -2337,16 +2345,47 @@ mod tests {
             "a wrong passphrase must be refused, so the key really is encrypted"
         );
 
-        // Nothing from the staging must survive: the session dir is removed and
-        // with it the passphrase file. (The dir name is random, so check the
-        // staged file names directly rather than the directory listing.)
-        let staged = StagedAskpass::stage("keygen-scrub-probe", "probe").expect("stage");
+        // Nothing from generate_key_pair's staging may survive: no session dir
+        // under the shared root still holds an askpass script (the name is
+        // unique to this staging shape; identity staging uses `*-askpass.sh`).
+        let leftovers: Vec<PathBuf> = fs::read_dir(native_ssh_session_root().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(NATIVE_SSH_DIR_PREFIX)
+            })
+            .map(|entry| entry.path().join("askpass.sh"))
+            .filter(|script| script.exists())
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "staged askpass must be scrubbed: {leftovers:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// #319: the staging is cleaned up on every path, including an unwind.
+    #[test]
+    fn staged_askpass_is_scrubbed_on_drop_and_on_panic() {
+        let staged = StagedAskpass::stage("keygen-drop-probe", "probe").expect("stage");
         let (dir, pass) = (staged.session_dir.clone(), staged.pass_path.clone());
         assert!(pass.exists());
-        staged.scrub();
-        assert!(!pass.exists(), "passphrase file must be unlinked");
-        assert!(!dir.exists(), "session dir must be removed");
-        let _ = fs::remove_dir_all(&root);
+        drop(staged);
+        assert!(!pass.exists(), "passphrase file must be unlinked on drop");
+        assert!(!dir.exists(), "session dir must be removed on drop");
+
+        let staged = StagedAskpass::stage("keygen-panic-probe", "probe").expect("stage");
+        let (dir, pass) = (staged.session_dir.clone(), staged.pass_path.clone());
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _hold = staged;
+            panic!("simulated failure while ssh-keygen runs");
+        }));
+        assert!(unwound.is_err());
+        assert!(!pass.exists(), "passphrase file must be unlinked on unwind");
+        assert!(!dir.exists(), "session dir must be removed on unwind");
     }
 
     /// #274: uniqueness must come from the counter, not the clock.

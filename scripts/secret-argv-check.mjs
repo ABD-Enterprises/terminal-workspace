@@ -49,6 +49,7 @@ export const SECRET_OPTIONS = [
 
 const SUPPRESS = /secret-argv-ok:\s*\S/;
 const KNOWN = /secret-argv-known:\s*#\d+/;
+const KNOWN_ALLOWLIST = "scripts/secret-argv-known.json";
 
 function isRustTestFile(name) {
   return /_fixtures\.rs$|_tests\.rs$/.test(name);
@@ -94,7 +95,7 @@ function isLiteral(value) {
  * uses: shell words (`-N "$X"` / `--body=$X`), JS/Rust array elements
  * (`"-N", value` / `"-N".to_string(), value`), and Rust `.arg("-N").arg(value)`.
  */
-function pairsOnLine(line, nextLine) {
+function pairsOnLine(line, nextLine, following) {
   const pairs = [];
   for (const { option, tools, why } of SECRET_OPTIONS) {
     const esc = option.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -117,10 +118,25 @@ function pairsOnLine(line, nextLine) {
     for (const m of line.matchAll(new RegExp(`\\.arg\\(["']${esc}["']\\)\\s*\\.arg\\(([^)]*)\\)`, "g"))) {
       pairs.push({ option, tools, why, value: m[1], shape: "builder" });
     }
-    // Rust builder: command.arg("-N");\n command.arg(value);
-    if (new RegExp(`\\.arg\\(["']${esc}["']\\);\\s*$`).test(line) && nextLine !== undefined) {
-      const m = nextLine.match(/\.arg\(([^)]*)\);/);
-      if (m) pairs.push({ option, tools, why, value: m[1], shape: "builder-next" });
+    // Rust builder / Vec: `.arg("-N");` or `.push("-N".to_string());` as its own
+    // statement — the value is whatever the NEXT .arg/.push statement carries,
+    // even with blank or comment lines in between.
+    if (new RegExp(`\\.(arg|push)\\(["']${esc}["'](?:\\.to_string\\(\\)|\\.to_owned\\(\\))?\\);\\s*$`).test(line) && following) {
+      for (const candidate of following) {
+        if (/^\s*$/.test(candidate) || /^\s*\/\//.test(candidate)) continue;
+        const m = candidate.match(/\.(?:arg|push)\(([^)]*)\);/);
+        if (m) pairs.push({ option, tools, why, value: m[1], shape: "statement-next" });
+        break;
+      }
+    }
+    // Concatenation: format!("-N{}", p) / format!("--password={}", p) /
+    // `--password=${p}` / "-N" + p — the value is glued to the option.
+    for (const m of line.matchAll(new RegExp(`["'\`]${esc}=?(?:\\{\\}|\\$\\{([^}]+)\\})`, "g"))) {
+      const fmtArg = line.match(/format!\([^,]+,\s*([^)]+)\)/);
+      pairs.push({ option, tools, why, value: m[1] ?? (fmtArg ? fmtArg[1] : "<interpolated>"), shape: "concat" });
+    }
+    for (const m of line.matchAll(new RegExp(`["']${esc}["']\\s*\\+\\s*([A-Za-z_$][\\w$.]*)`, "g"))) {
+      pairs.push({ option, tools, why, value: m[1], shape: "concat" });
     }
   }
   return pairs;
@@ -138,7 +154,7 @@ export function scanSource(file, source) {
     // tool context: a window around the line (multi-line arg arrays; a helper
     // named after the tool may consume the array a few lines below).
     const context = lines.slice(Math.max(0, i - 30), Math.min(lines.length, i + 20)).join("\n");
-    for (const pair of pairsOnLine(line, lines[i + 1])) {
+    for (const pair of pairsOnLine(line, lines[i + 1], lines.slice(i + 1, i + 6))) {
       if (!toolMentioned(context, pair.tools)) continue;
       if (isLiteral(pair.value)) continue;
       findings.push({ file, line: i + 1, option: pair.option, value: pair.value.trim(), why: pair.why, known: known ? known.replace(/.*#/, "#") : null });
@@ -183,8 +199,23 @@ if (invokedDirectly) {
   const rootFlag = process.argv.indexOf("--root");
   const root = rootFlag > -1 ? process.argv[rootFlag + 1] : join(fileURLToPath(new URL(".", import.meta.url)), "..");
   const findings = scanRepo(root);
-  const blocking = findings.filter((f) => !f.known);
-  const known = findings.filter((f) => f.known);
+  const allowlist = (() => {
+    try {
+      return JSON.parse(readFileSync(join(root, KNOWN_ALLOWLIST), "utf8"));
+    } catch {
+      return [];
+    }
+  })();
+  const today = new Date().toISOString().slice(0, 10);
+  const known = [];
+  const blocking = [];
+  for (const f of findings) {
+    const entry = f.known && allowlist.find((e) => e.file === f.file && e.option === f.option && `#${e.ticket}` === f.known);
+    if (!f.known) blocking.push(f);
+    else if (!entry) blocking.push({ ...f, why: `${f.why}; marker ${f.known} has no entry in ${KNOWN_ALLOWLIST}` });
+    else if (entry.expires && entry.expires < today) blocking.push({ ...f, why: `${f.why}; ${KNOWN_ALLOWLIST} entry for ${f.known} expired ${entry.expires}` });
+    else known.push(f);
+  }
   for (const f of known) {
     console.warn(`${f.file}:${f.line}: known secret on argv (${f.why}), tracked by ${f.known}: \`${f.option} ${f.value}\``);
   }
