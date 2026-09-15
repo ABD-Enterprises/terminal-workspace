@@ -78,7 +78,9 @@
   - `MACOS_NOTARY_ISSUER`
   - `MACOS_NOTARY_KEY_BASE64` or `MACOS_NOTARY_KEY_PATH`
 - Apple ID fallback:
-  - `MACOS_NOTARY_APPLE_ID`
+  - `MACOS_NOTARY_APPLE_ID` (#378: stored once into a keychain profile — default name
+    `terminal-workspace-notary` — via stdin; the password never appears on argv, and the
+    same profile serves `native:dmg`)
   - `MACOS_NOTARY_APP_PASSWORD`
   - `MACOS_NOTARY_TEAM_ID`
 - Local-machine fallback:

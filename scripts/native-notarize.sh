@@ -68,10 +68,20 @@ build_notary_auth_args() {
   fi
 
   if [[ -n "$NOTARY_APPLE_ID" && -n "$NOTARY_APP_PASSWORD" && -n "$NOTARY_TEAM_ID" ]]; then
+    # #378: notarytool's own --password puts the app-specific password on argv,
+    # where every local process can read it. `store-credentials` reads the
+    # password from stdin when --password is omitted, so stage the credential
+    # in a keychain profile once and authenticate through the profile —
+    # which is also the only form native-dmg.sh accepts.
     NOTARY_AUTH_MODE="apple-id"
-    # notarytool has no stdin/env form for --password; prefer the API-key or
-    # keychain-profile modes above. secret-argv-known: #378
-    auth_args_ref=(--apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_APP_PASSWORD" --team-id "$NOTARY_TEAM_ID")
+    NOTARY_PROFILE="${NOTARY_PROFILE:-terminal-workspace-notary}"
+    if ! printf '%s\n' "$NOTARY_APP_PASSWORD" | xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+        --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" >/dev/null; then
+      echo "Could not store Apple ID notarization credentials in keychain profile '$NOTARY_PROFILE'." >&2
+      exit 1
+    fi
+    echo "Apple ID notarization credentials stored in keychain profile '$NOTARY_PROFILE' (reuse it with MACOS_NOTARY_PROFILE=$NOTARY_PROFILE, e.g. for native:dmg)."
+    auth_args_ref=(--keychain-profile "$NOTARY_PROFILE")
     return
   fi
 
