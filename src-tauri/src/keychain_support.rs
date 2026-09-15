@@ -77,9 +77,14 @@ impl SecurityCleanupQuarantine {
             .spawn(move || {
                 let mut children = Vec::new();
                 let mut readers = Vec::new();
+                // The sweep runs on its own deadline, not on queue activity: a
+                // burst of submissions must not turn into a burst of kill()s, and
+                // a disconnected sender with items still retained must not spin.
+                let mut next_sweep = Instant::now() + SECURITY_CHILD_QUARANTINE_SWEEP_INTERVAL;
 
                 loop {
-                    match receiver.recv_timeout(SECURITY_CHILD_QUARANTINE_SWEEP_INTERVAL) {
+                    let wait = next_sweep.saturating_duration_since(Instant::now());
+                    match receiver.recv_timeout(wait) {
                         Ok(SecurityCleanupQuarantineItem::Child { child, retained }) => {
                             let was_retained = Self::push_child(&mut children, child);
                             let _ = retained.send(was_retained);
@@ -105,9 +110,16 @@ impl SecurityCleanupQuarantine {
                             if children.is_empty() && readers.is_empty() {
                                 return;
                             }
+                            // Nothing more will arrive; keep sweeping what is
+                            // retained at the normal cadence instead of spinning.
+                            thread::sleep(next_sweep.saturating_duration_since(Instant::now()));
                         }
                     }
 
+                    if Instant::now() < next_sweep {
+                        continue;
+                    }
+                    next_sweep = Instant::now() + SECURITY_CHILD_QUARANTINE_SWEEP_INTERVAL;
                     Self::sweep_children(&mut children);
                     Self::sweep_output_readers(&mut readers);
                 }
@@ -147,6 +159,10 @@ impl SecurityCleanupQuarantine {
             .send(SecurityCleanupQuarantineItem::OutputReader(reader));
     }
 
+    /// Fail-open by design: past the cap the extra handle is dropped (the
+    /// process stays a zombie until app exit, exactly the pre-#321 behaviour)
+    /// rather than letting quarantine grow without bound. The cap notice tells
+    /// the operator it happened.
     fn push_child(
         children: &mut Vec<Box<dyn SecurityChildControl + Send>>,
         child: Box<dyn SecurityChildControl + Send>,
@@ -212,6 +228,8 @@ impl SecurityCleanupQuarantine {
 }
 
 fn emit_security_cleanup_notice(message: String) {
+    // #145 gave the packaged app a log file; stderr alone is invisible there.
+    log::warn!("{message}");
     eprintln!("{message}");
 }
 
@@ -919,11 +937,19 @@ mod tests {
             attempts_at_bound > 0,
             "cleanup must attempt to kill the child"
         );
-        thread::sleep(Duration::from_millis(50));
-        assert_eq!(
-            kill_attempts.load(Ordering::SeqCst),
-            attempts_at_bound,
-            "cleanup must stop retrying after the retry budget"
+        // After the budget the FOREGROUND reaper must have stopped: the only
+        // kill attempts still allowed are the background quarantine's periodic
+        // sweep (one per SECURITY_CHILD_QUARANTINE_SWEEP_INTERVAL), which keeps
+        // nudging the child so it can eventually be reaped. The reaper's own
+        // loop runs far tighter than that, so a cadence bound distinguishes the
+        // two without depending on where a sweep tick lands (the old exact
+        // equality was flaky in CI for exactly that reason).
+        let window = SECURITY_CHILD_QUARANTINE_SWEEP_INTERVAL * 4;
+        thread::sleep(window);
+        let attempts_after = kill_attempts.load(Ordering::SeqCst) - attempts_at_bound;
+        assert!(
+            attempts_after <= 6,
+            "only the quarantine sweep may keep retrying after the budget: {attempts_after} attempts in {window:?}"
         );
         assert!(
             matches!(
