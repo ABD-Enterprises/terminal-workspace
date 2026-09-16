@@ -297,6 +297,11 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     # Some upstream files hold several rules, so a file may appear on more
     # than one row; it is passed to semgrep once.
     semgrep_seen_files=" "
+    # Existence is checked against the submodule's index, not the filesystem:
+    # on a case-insensitive disk a wrongly-cased path would pass here and
+    # fail on the Linux runner.
+    semgrep_index_file="${VALIDATION_ARTIFACT_DIR}/semgrep-rules-index.txt"
+    git -C "${semgrep_rules_dir}" ls-files >"$semgrep_index_file"
     while IFS=$'\t' read -r semgrep_rule_id semgrep_rule_file; do
       [[ -z "$semgrep_rule_id" || "$semgrep_rule_id" == \#* ]] && continue
       if [[ ! "$semgrep_rule_id" =~ ^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$ || ! "$semgrep_rule_file" =~ ^[A-Za-z0-9_/-]+\.ya?ml$ ]]; then
@@ -304,14 +309,18 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
         echo "[validate] .semgrep/rules.tsv row '${semgrep_rule_id}' -> '${semgrep_rule_file}' is not a registry id and a relative rule path." >&2
         exit 1
       fi
+      # Registry ids are lower-case; a few upstream files are not, so the
+      # path rule is compared case-insensitively while the index lookup below
+      # is exact.
       semgrep_expected_file="${semgrep_rule_id%.*}"
       semgrep_expected_file="${semgrep_expected_file//./\/}"
-      if [[ "${semgrep_rule_file%.yaml}" != "$semgrep_expected_file" && "${semgrep_rule_file%.yml}" != "$semgrep_expected_file" ]]; then
+      semgrep_actual_stem="$(printf '%s' "${semgrep_rule_file%.*}" | tr '[:upper:]' '[:lower:]')"
+      if [[ "$semgrep_actual_stem" != "$semgrep_expected_file" ]]; then
         printf 'FAIL: .semgrep/rules.tsv maps %s to %s, not to the file that id denotes\n' "$semgrep_rule_id" "$semgrep_rule_file" >"$SEMGREP_STATUS_FILE"
         echo "[validate] .semgrep/rules.tsv maps ${semgrep_rule_id} to ${semgrep_rule_file}; a registry id is its rule file's path, so this row is not a pin of that rule." >&2
         exit 1
       fi
-      if [[ ! -f "${semgrep_rules_dir}/${semgrep_rule_file}" ]]; then
+      if ! grep -Fxq -- "$semgrep_rule_file" "$semgrep_index_file"; then
         printf 'FAIL: semgrep rule file missing from the pinned submodule: %s\n' "$semgrep_rule_file" >"$SEMGREP_STATUS_FILE"
         echo "[validate] .semgrep/rules.tsv names ${semgrep_rule_file} (${semgrep_rule_id}) but it is not in .semgrep/rules; re-run scripts/semgrep-refresh-rules.sh." >&2
         exit 1

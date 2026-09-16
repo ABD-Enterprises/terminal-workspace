@@ -37,14 +37,20 @@ grep -v '^#' "$MANIFEST" | cut -f1 | sort | uniq >"$TMP/old_ids.txt" || true
 # 3. resolve every id to its rule file. A registry id is the rule file's path
 #    (dots for slashes, no extension) followed by the rule's own id, and
 #    validate.sh enforces exactly that relationship, so no prefix search.
+#    Registry ids are lower-cased while a few upstream files are not
+#    (X509-…yaml), so the path is looked up case-insensitively in the
+#    submodule's index and the manifest records the exact spelling — a
+#    case-insensitive filesystem would otherwise produce a manifest that
+#    only resolves on macOS.
 : >"$TMP/mapped.tsv"; : >"$TMP/unmapped.txt"
 while IFS= read -r id; do
   leaf="${id##*.}"
   rel="${id%.*}"; rel="${rel//.//}"
   hit=""
   for ext in .yaml .yml; do
-    if [[ -f "$RULES_DIR/$rel$ext" ]] && grep -qE "^[[:space:]]*(-[[:space:]]*)?id:[[:space:]]*(${leaf}|${id})[[:space:]]*$" "$RULES_DIR/$rel$ext"; then
-      hit="$rel$ext"; break
+    actual="$(git -C "$RULES_DIR" ls-files -- ":(icase)$rel$ext" | head -n1)"
+    if [[ -n "$actual" ]] && grep -qE "^[[:space:]]*(-[[:space:]]*)?id:[[:space:]]*(${leaf}|${id})[[:space:]]*$" "$RULES_DIR/$actual"; then
+      hit="$actual"; break
     fi
   done
   if [[ -n "$hit" ]]; then printf '%s\t%s\n' "$id" "$hit" >>"$TMP/mapped.tsv"; else echo "$id" >>"$TMP/unmapped.txt"; fi

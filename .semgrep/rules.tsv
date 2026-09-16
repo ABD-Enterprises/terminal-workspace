@@ -20,7 +20,7 @@ csharp.dotnet.security.use_ecb_mode.use_ecb_mode	csharp/dotnet/security/use_ecb_
 csharp.dotnet.security.use_weak_rng_for_keygeneration.use_weak_rng_for_keygeneration	csharp/dotnet/security/use_weak_rng_for_keygeneration.yaml
 csharp.dotnet.security.web-config-insecure-cookie-settings.web-config-insecure-cookie-settings	csharp/dotnet/security/web-config-insecure-cookie-settings.yaml
 csharp.lang.security.ad.jwt-tokenvalidationparameters-no-expiry-validation.jwt-tokenvalidationparameters-no-expiry-validation	csharp/lang/security/ad/jwt-tokenvalidationparameters-no-expiry-validation.yaml
-csharp.lang.security.cryptography.x509-subject-name-validation.X509-subject-name-validation	csharp/lang/security/cryptography/x509-subject-name-validation.yaml
+csharp.lang.security.cryptography.x509-subject-name-validation.X509-subject-name-validation	csharp/lang/security/cryptography/X509-subject-name-validation.yaml
 csharp.lang.security.filesystem.unsafe-path-combine.unsafe-path-combine	csharp/lang/security/filesystem/unsafe-path-combine.yaml
 csharp.lang.security.http.http-listener-wildcard-bindings.http-listener-wildcard-bindings	csharp/lang/security/http/http-listener-wildcard-bindings.yaml
 csharp.lang.security.injections.os-command.os-command-injection	csharp/lang/security/injections/os-command.yaml
@@ -108,10 +108,10 @@ generic.secrets.security.detected-telegram-bot-api-key.detected-telegram-bot-api
 generic.secrets.security.detected-twilio-api-key.detected-twilio-api-key	generic/secrets/security/detected-twilio-api-key.yaml
 generic.secrets.security.google-maps-apikeyleak.google-maps-apikeyleak	generic/secrets/security/google-maps-apikeyleak.yaml
 generic.unicode.security.bidi.contains-bidirectional-characters	generic/unicode/security/bidi.yml
-generic.visualforce.security.ncino.html.usesriforcdns.use-SRI-for-CDNs	generic/visualforce/security/ncino/html/usesriforcdns.yaml
-generic.visualforce.security.ncino.vf.xssfromunescapedurlparam.xss-from-unescaped-url-param	generic/visualforce/security/ncino/vf/xssfromunescapedurlparam.yaml
-generic.visualforce.security.ncino.xml.cspheaderattribute.csp-header-attribute	generic/visualforce/security/ncino/xml/cspheaderattribute.yaml
-generic.visualforce.security.ncino.xml.visualforceapiversion.visualforce-page-api-version	generic/visualforce/security/ncino/xml/visualforceapiversion.yaml
+generic.visualforce.security.ncino.html.usesriforcdns.use-SRI-for-CDNs	generic/visualforce/security/ncino/html/UseSRIForCDNs.yaml
+generic.visualforce.security.ncino.vf.xssfromunescapedurlparam.xss-from-unescaped-url-param	generic/visualforce/security/ncino/vf/XSSFromUnescapedURLParam.yaml
+generic.visualforce.security.ncino.xml.cspheaderattribute.csp-header-attribute	generic/visualforce/security/ncino/xml/CSPHeaderAttribute.yaml
+generic.visualforce.security.ncino.xml.visualforceapiversion.visualforce-page-api-version	generic/visualforce/security/ncino/xml/VisualForceAPIVersion.yaml
 go.aws-lambda.security.database-sqli.database-sqli	go/aws-lambda/security/database-sqli.yaml
 go.aws-lambda.security.tainted-sql-string.tainted-sql-string	go/aws-lambda/security/tainted-sql-string.yaml
 go.gorilla.security.audit.session-cookie-missing-httponly.session-cookie-missing-httponly	go/gorilla/security/audit/session-cookie-missing-httponly.yaml
@@ -397,7 +397,7 @@ javascript.lang.security.detect-disable-mustache-escape.detect-disable-mustache-
 javascript.lang.security.detect-eval-with-expression.detect-eval-with-expression	javascript/lang/security/detect-eval-with-expression.yaml
 javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket	javascript/lang/security/detect-insecure-websocket.yaml
 javascript.lang.security.detect-no-csrf-before-method-override.detect-no-csrf-before-method-override	javascript/lang/security/detect-no-csrf-before-method-override.yaml
-javascript.lang.security.detect-pseudorandombytes.detect-pseudoRandomBytes	javascript/lang/security/detect-pseudorandombytes.yaml
+javascript.lang.security.detect-pseudorandombytes.detect-pseudoRandomBytes	javascript/lang/security/detect-pseudoRandomBytes.yaml
 javascript.lang.security.insecure-object-assign.insecure-object-assign	javascript/lang/security/insecure-object-assign.yaml
 javascript.lang.security.spawn-git-clone.spawn-git-clone	javascript/lang/security/spawn-git-clone.yaml
 javascript.monaco-editor.security.audit.monaco-hover-htmlsupport.monaco-hover-htmlsupport	javascript/monaco-editor/security/audit/monaco-hover-htmlsupport.yaml
@@ -881,7 +881,7 @@ scala.play.security.tainted-slick-sqli.tainted-slick-sqli	scala/play/security/ta
 scala.play.security.tainted-sql-from-http-request.tainted-sql-from-http-request	scala/play/security/tainted-sql-from-http-request.yaml
 scala.play.security.webservice-ssrf.webservice-ssrf	scala/play/security/webservice-ssrf.yaml
 scala.scala-jwt.security.jwt-hardcode.scala-jwt-hardcoded-secret	scala/scala-jwt/security/jwt-hardcode.yaml
-scala.slick.security.scala-slick-overridesql-literal.scala-slick-overrideSql-literal	scala/slick/security/scala-slick-overridesql-literal.yaml
+scala.slick.security.scala-slick-overridesql-literal.scala-slick-overrideSql-literal	scala/slick/security/scala-slick-overrideSql-literal.yaml
 scala.slick.security.scala-slick-sql-non-literal.scala-slick-sql-non-literal	scala/slick/security/scala-slick-sql-non-literal.yaml
 solidity.security.balancer-readonly-reentrancy-getpooltokens.balancer-readonly-reentrancy-getpooltokens	solidity/security/balancer-readonly-reentrancy-getpooltokens.yaml
 solidity.security.balancer-readonly-reentrancy-getrate.balancer-readonly-reentrancy-getrate	solidity/security/balancer-readonly-reentrancy-getrate.yaml
