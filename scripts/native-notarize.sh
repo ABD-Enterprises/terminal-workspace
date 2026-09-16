@@ -74,6 +74,11 @@ build_notary_auth_args() {
     # in a keychain profile once and authenticate through the profile —
     # which is also the only form native-dmg.sh accepts.
     NOTARY_AUTH_MODE="apple-id"
+    # The profile persists in the login keychain (notarytool offers no delete),
+    # exactly like the operator-managed MACOS_NOTARY_PROFILE mode; a stable
+    # name means re-runs overwrite rather than accumulate, and two concurrent
+    # runs with the same Apple ID simply share one credential. CI should use
+    # the App Store Connect key mode, which stays in files that are removed.
     NOTARY_PROFILE="${NOTARY_PROFILE:-terminal-workspace-notary}"
     if ! printf '%s\n' "$NOTARY_APP_PASSWORD" | xcrun notarytool store-credentials "$NOTARY_PROFILE" \
         --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" >/dev/null; then
