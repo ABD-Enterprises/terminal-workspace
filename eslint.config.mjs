@@ -23,6 +23,10 @@ export default tseslint.config(
       // inside it that was named explicitly on the command line.
       ".worktrees",
       ".worktrees/**",
+      // #284: the pinned semgrep-rules submodule ships deliberately bad
+      // fixtures next to every rule; they are semgrep's test inputs, not ours.
+      ".semgrep/rules",
+      ".semgrep/rules/**",
     ],
   },
   js.configs.recommended,

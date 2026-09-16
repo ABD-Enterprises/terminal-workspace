@@ -175,10 +175,19 @@ fi
 
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   SEMGREP_TARGETS=()
+  SEMGREP_RULESET_CHANGED=0
 
   if [[ -n "$SEMGREP_BASE_REF" ]]; then
     while IFS= read -r target; do
       [[ -n "$target" ]] || continue
+      # #284: any change to the pin — including a deletion, so this runs
+      # before the file-exists filter — forces a whole-repository scan below.
+      # The submodule is patterns and deliberately-vulnerable fixtures, not
+      # code to scan, and explicit targets would bypass .semgrepignore.
+      if [[ "$target" == .semgrep/* || "$target" == .gitmodules ]]; then
+        SEMGREP_RULESET_CHANGED=1
+        continue
+      fi
       [[ -f "$target" ]] || continue
       SEMGREP_TARGETS+=("$target")
     done < <(
@@ -188,6 +197,15 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
         git diff --name-only --
       } | sort -u
     )
+  fi
+
+  if [[ "$SEMGREP_RULESET_CHANGED" == 1 ]]; then
+    # #284: a change to the pin (submodule pointer, manifest) must not be the
+    # one change the gate never exercises — that is exactly how a broken or
+    # malicious pin would slip in. Scan the whole repository, whatever else
+    # changed, so the PR shows what the new pin catches.
+    echo "[validate] semgrep ruleset changed; scanning the whole repository" >&2
+    SEMGREP_TARGETS=(.)
   fi
 
   if [[ ${#SEMGREP_TARGETS[@]} -eq 0 ]]; then
@@ -206,13 +224,123 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     # (`docker buildx imagetools inspect semgrep/semgrep:1.172.0`) rather than
     # copied from a doc page.
     #
-    # `--config=auto` is knowingly still remote, and is the other half of the
-    # nondeterminism: the ruleset can change under a PR. Pinning it means
-    # vendoring the ruleset, which needs a license review — tracked separately
-    # rather than done hastily here.
-    if docker run --rm -v "${SEMGREP_SCAN_ROOT}":/src -w /src -e SEMGREP_APP_TOKEN \
+    # #284: the ruleset is pinned too. .semgrep/rules is a git submodule of
+    # semgrep/semgrep-rules held at one commit (a reference, not a copy — the
+    # rules are Semgrep Rules License v1.0, which forbids redistribution, so
+    # they are never committed here), and .semgrep/rules.tsv names exactly the
+    # rule files that made up the registry's c/auto response at the snapshot.
+    # See .semgrep/README.md for owner, cadence and the refresh procedure.
+    #
+    # Nothing here falls back to the registry: a missing file in the manifest
+    # is a hard failure, and --metrics=off makes the registry auto-config impossible
+    # (semgrep refuses to build an auto config with metrics off).
+    semgrep_rules_dir="${SEMGREP_SCAN_ROOT}/.semgrep/rules"
+    if [[ ! -f "${semgrep_rules_dir}/LICENSE" ]]; then
+      # CI checks out without submodules; a fresh clone has an empty directory.
+      # This fetches one pinned commit from git, never rules from the registry.
+      git -C "${SEMGREP_SCAN_ROOT}" submodule update --init --depth 1 -- .semgrep/rules >&2 || {
+        printf 'FAIL: semgrep ruleset submodule (.semgrep/rules) could not be initialised\n' >"$SEMGREP_STATUS_FILE"
+        echo "[validate] .semgrep/rules is empty and 'git submodule update --init' failed; see .semgrep/README.md." >&2
+        exit 1
+      }
+    fi
+    semgrep_submodule_status="$(git -C "${SEMGREP_SCAN_ROOT}" submodule status -- .semgrep/rules 2>/dev/null || true)"
+    if [[ "$semgrep_submodule_status" == +* || "$semgrep_submodule_status" == -* ]]; then
+      printf 'FAIL: .semgrep/rules is not at the pinned commit\n' >"$SEMGREP_STATUS_FILE"
+      echo "[validate] .semgrep/rules checkout differs from the pinned commit (${semgrep_submodule_status}); run 'git submodule update -- .semgrep/rules'." >&2
+      exit 1
+    fi
+    # A pin nobody bumps is silent decay. The manifest header records the
+    # snapshot date; warn past the 90-day cadence, fail past 120.
+    semgrep_snapshot="$(sed -n 's/^# .*snapshot: \([0-9-]*\).*/\1/p' "${SEMGREP_SCAN_ROOT}/.semgrep/rules.tsv" | head -n1)"
+    if [[ -z "$semgrep_snapshot" ]]; then
+      printf 'FAIL: .semgrep/rules.tsv has no snapshot date\n' >"$SEMGREP_STATUS_FILE"
+      echo "[validate] .semgrep/rules.tsv header is missing its 'snapshot: YYYY-MM-DD' field." >&2
+      exit 1
+    fi
+    semgrep_manifest_commit="$(sed -n 's/^# .*submodule: \([0-9a-f]*\).*/\1/p' "${SEMGREP_SCAN_ROOT}/.semgrep/rules.tsv" | head -n1)"
+    semgrep_gitlink_commit="$(git -C "${SEMGREP_SCAN_ROOT}" rev-parse HEAD:.semgrep/rules 2>/dev/null || true)"
+    if [[ -z "$semgrep_manifest_commit" || "$semgrep_manifest_commit" != "$semgrep_gitlink_commit" ]]; then
+      printf 'FAIL: .semgrep/rules.tsv was generated for submodule %s but the pinned gitlink is %s\n' "${semgrep_manifest_commit:-?}" "${semgrep_gitlink_commit:-?}" >"$SEMGREP_STATUS_FILE"
+      echo "[validate] the manifest header and the .semgrep/rules gitlink disagree; re-run scripts/semgrep-refresh-rules.sh so they describe the same snapshot." >&2
+      exit 1
+    fi
+    semgrep_snapshot_epoch="$(date -u -d "${semgrep_snapshot}" +%s 2>/dev/null || date -u -j -f '%Y-%m-%d' "${semgrep_snapshot}" +%s)"
+    semgrep_age_days=$(( ( $(date -u +%s) - semgrep_snapshot_epoch ) / 86400 ))
+    if (( semgrep_age_days < 0 )); then
+      printf 'FAIL: semgrep ruleset snapshot date %s is in the future\n' "$semgrep_snapshot" >"$SEMGREP_STATUS_FILE"
+      echo "[validate] .semgrep/rules.tsv claims snapshot ${semgrep_snapshot}, which is after today (UTC); a future date would defeat the cadence check." >&2
+      exit 1
+    elif (( semgrep_age_days > 120 )); then
+      printf 'FAIL: semgrep ruleset snapshot is %s days old (limit 120)\n' "$semgrep_age_days" >"$SEMGREP_STATUS_FILE"
+      echo "[validate] semgrep ruleset snapshot ${semgrep_snapshot} is ${semgrep_age_days} days old; run 'bash scripts/semgrep-refresh-rules.sh' (cadence: 90 days, hard limit 120)." >&2
+      exit 1
+    elif (( semgrep_age_days > 90 )); then
+      echo "[validate] WARN: semgrep ruleset snapshot ${semgrep_snapshot} is ${semgrep_age_days} days old; refresh is due (cadence: 90 days)." >&2
+    fi
+    # Every manifest row must name the file its id denotes — a registry id is
+    # the rule file's path (dots for slashes, no extension) plus the rule's
+    # own id — and that file must declare the id. Without the path rule a
+    # manifest of 900 fabricated ids could all point at one valid file and
+    # "pin" a gate that runs almost nothing. Ids are unique, and both the
+    # rule count and the distinct-file count have floors so a resolver defect
+    # cannot quietly hollow the gate out.
+    SEMGREP_MANIFEST_MIN_RULES=900
+    SEMGREP_MANIFEST_MIN_FILES=850
+    SEMGREP_CONFIGS=()
+    semgrep_manifest_rules=0
+    if [[ -n "$(grep -v '^#' "${SEMGREP_SCAN_ROOT}/.semgrep/rules.tsv" | cut -f1 | sort | uniq -d)" ]]; then
+      printf 'FAIL: .semgrep/rules.tsv has duplicate rule ids\n' >"$SEMGREP_STATUS_FILE"
+      echo "[validate] .semgrep/rules.tsv contains duplicate rule ids; re-run scripts/semgrep-refresh-rules.sh." >&2
+      exit 1
+    fi
+    # Some upstream files hold several rules, so a file may appear on more
+    # than one row; it is passed to semgrep once.
+    semgrep_seen_files=" "
+    while IFS=$'\t' read -r semgrep_rule_id semgrep_rule_file; do
+      [[ -z "$semgrep_rule_id" || "$semgrep_rule_id" == \#* ]] && continue
+      if [[ ! "$semgrep_rule_id" =~ ^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$ || ! "$semgrep_rule_file" =~ ^[A-Za-z0-9_/-]+\.ya?ml$ ]]; then
+        printf 'FAIL: .semgrep/rules.tsv row is malformed: %s\t%s\n' "$semgrep_rule_id" "$semgrep_rule_file" >"$SEMGREP_STATUS_FILE"
+        echo "[validate] .semgrep/rules.tsv row '${semgrep_rule_id}' -> '${semgrep_rule_file}' is not a registry id and a relative rule path." >&2
+        exit 1
+      fi
+      semgrep_expected_file="${semgrep_rule_id%.*}"
+      semgrep_expected_file="${semgrep_expected_file//./\/}"
+      if [[ "${semgrep_rule_file%.yaml}" != "$semgrep_expected_file" && "${semgrep_rule_file%.yml}" != "$semgrep_expected_file" ]]; then
+        printf 'FAIL: .semgrep/rules.tsv maps %s to %s, not to the file that id denotes\n' "$semgrep_rule_id" "$semgrep_rule_file" >"$SEMGREP_STATUS_FILE"
+        echo "[validate] .semgrep/rules.tsv maps ${semgrep_rule_id} to ${semgrep_rule_file}; a registry id is its rule file's path, so this row is not a pin of that rule." >&2
+        exit 1
+      fi
+      if [[ ! -f "${semgrep_rules_dir}/${semgrep_rule_file}" ]]; then
+        printf 'FAIL: semgrep rule file missing from the pinned submodule: %s\n' "$semgrep_rule_file" >"$SEMGREP_STATUS_FILE"
+        echo "[validate] .semgrep/rules.tsv names ${semgrep_rule_file} (${semgrep_rule_id}) but it is not in .semgrep/rules; re-run scripts/semgrep-refresh-rules.sh." >&2
+        exit 1
+      fi
+      semgrep_rule_leaf="${semgrep_rule_id##*.}"
+      if ! grep -qE "^[[:space:]]*(-[[:space:]]*)?id:[[:space:]]*(${semgrep_rule_leaf}|${semgrep_rule_id})[[:space:]]*$" "${semgrep_rules_dir}/${semgrep_rule_file}"; then
+        printf 'FAIL: %s does not declare rule %s\n' "$semgrep_rule_file" "$semgrep_rule_id" >"$SEMGREP_STATUS_FILE"
+        echo "[validate] .semgrep/rules.tsv maps ${semgrep_rule_id} to ${semgrep_rule_file}, but that file does not declare it; re-run scripts/semgrep-refresh-rules.sh." >&2
+        exit 1
+      fi
+      semgrep_manifest_rules=$(( semgrep_manifest_rules + 1 ))
+      if [[ "$semgrep_seen_files" != *" ${semgrep_rule_file} "* ]]; then
+        semgrep_seen_files+="${semgrep_rule_file} "
+        SEMGREP_CONFIGS+=("--config=.semgrep/rules/${semgrep_rule_file}")
+      fi
+    done <"${SEMGREP_SCAN_ROOT}/.semgrep/rules.tsv"
+    if (( ${#SEMGREP_CONFIGS[@]} < SEMGREP_MANIFEST_MIN_FILES )); then
+      printf 'FAIL: .semgrep/rules.tsv resolved to %s distinct rule files (floor %s)\n' "${#SEMGREP_CONFIGS[@]}" "$SEMGREP_MANIFEST_MIN_FILES" >"$SEMGREP_STATUS_FILE"
+      echo "[validate] only ${#SEMGREP_CONFIGS[@]} distinct rule files in .semgrep/rules.tsv (floor ${SEMGREP_MANIFEST_MIN_FILES}); a shrunken manifest is a hollowed-out gate, not a pin." >&2
+      exit 1
+    fi
+    if (( semgrep_manifest_rules < SEMGREP_MANIFEST_MIN_RULES )); then
+      printf 'FAIL: .semgrep/rules.tsv resolved to %s rules (floor %s)\n' "$semgrep_manifest_rules" "$SEMGREP_MANIFEST_MIN_RULES" >"$SEMGREP_STATUS_FILE"
+      echo "[validate] only ${semgrep_manifest_rules} rules in .semgrep/rules.tsv (floor ${SEMGREP_MANIFEST_MIN_RULES}); a shrunken manifest is a hollowed-out gate, not a pin." >&2
+      exit 1
+    fi
+    if docker run --rm -v "${SEMGREP_SCAN_ROOT}":/src -w /src \
       semgrep/semgrep:1.172.0@sha256:65dcd4408adda7c183a6b4550cb1e9b19f7f627a6fbb7e0559bd466bedc44d7b \
-      semgrep scan --config=auto --error "${SEMGREP_TARGETS[@]}" >"$SEMGREP_OUTPUT_FILE" 2>&1; then
+      semgrep scan "${SEMGREP_CONFIGS[@]}" --metrics=off --disable-version-check --error "${SEMGREP_TARGETS[@]}" >"$SEMGREP_OUTPUT_FILE" 2>&1; then
       printf 'PASS: semgrep completed successfully
 ' >"$SEMGREP_STATUS_FILE"
     else

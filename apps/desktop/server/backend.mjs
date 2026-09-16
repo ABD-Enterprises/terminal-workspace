@@ -131,7 +131,7 @@ function globToRegExp(pattern) {
   // glob with every literal char regex-escaped above; only `*`/`?` become
   // `.*`/`.`. Input is local + trusted (not attacker-facing) and matches are
   // capped (SSH_CONFIG_GLOB_MAX_MATCHES), so this is not a ReDoS vector.
-  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp,semgrep.rules.javascript.lang.security.audit.detect-non-literal-regexp
   return new RegExp(`${source}$`);
 }
 
