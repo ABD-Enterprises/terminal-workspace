@@ -1,0 +1,1 @@
+- [INTERNAL] Split terminal pane lifecycle concerns into focused modules with behavior tests. (#375)
