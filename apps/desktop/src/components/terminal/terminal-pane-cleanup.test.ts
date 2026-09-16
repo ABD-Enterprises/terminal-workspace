@@ -12,7 +12,8 @@ describe("cleanupTerminalPaneLifecycle", () => {
   it("disposes terminal resources and clears reconnect state", () => {
     const clearReconnectTimer = vi.fn();
     const socket = { close: vi.fn() };
-    const terminalRef = ref({ dispose: vi.fn(), _core: { viewport: { _refreshAnimationFrame: null } } });
+    const terminalDispose = vi.fn();
+    const terminalRef = ref({ dispose: terminalDispose, _core: { viewport: { _refreshAnimationFrame: null } } });
     const fitAddonRef = ref({
       activate: vi.fn(),
       dispose: vi.fn(),
@@ -38,7 +39,8 @@ describe("cleanupTerminalPaneLifecycle", () => {
 
     expect(clearReconnectTimer).toHaveBeenCalledOnce();
     expect(socket.close).toHaveBeenCalledOnce();
-    expect(terminalRef.current).toBeNull();
+    expect(terminalDispose).toHaveBeenCalledOnce();
     expect(fitAddonRef.current).toBeNull();
+    expect(terminalRef.current).toBeNull();
   });
 });
