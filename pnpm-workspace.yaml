@@ -1,2 +1,10 @@
 packages:
   - "apps/*"
+
+# #386: supply-chain guards flagged by the semgrep package_managers.pnpm rules.
+# Nothing in the lockfile is a git/tarball/link dependency, and CI installs with
+# a frozen lockfile, so none of these changes what is installed today; they
+# constrain what a future resolution may pull in.
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
+minimumReleaseAge: 10080
