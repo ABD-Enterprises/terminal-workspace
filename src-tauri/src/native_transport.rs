@@ -2349,25 +2349,11 @@ mod tests {
             "a wrong passphrase must be refused, so the key really is encrypted"
         );
 
-        // Nothing from generate_key_pair's staging may survive: no session dir
-        // under the shared root still holds an askpass script (the name is
-        // unique to this staging shape; identity staging uses `*-askpass.sh`).
-        let leftovers: Vec<PathBuf> = fs::read_dir(native_ssh_session_root().unwrap())
-            .unwrap()
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(NATIVE_SSH_DIR_PREFIX)
-            })
-            .map(|entry| entry.path().join("askpass.sh"))
-            .filter(|script| script.exists())
-            .collect();
-        assert!(
-            leftovers.is_empty(),
-            "staged askpass must be scrubbed: {leftovers:?}"
-        );
+        // Scrubbing of the staging itself is proven by
+        // staged_askpass_is_scrubbed_on_drop_and_on_panic; generate_key_pair
+        // holds the StagedAskpass in scope, so Drop runs on every path. (A
+        // global scan of the shared temp root for leftovers raced with
+        // concurrent test binaries staging their own askpass and was flaky.)
         let _ = fs::remove_dir_all(&root);
     }
 
