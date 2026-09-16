@@ -1,0 +1,1 @@
+- [SECURITY] Bump rustls 0.23.40 → 0.23.45 (RUSTSEC-2026-0285: TLS 1.3 handshake messages accepted across encryption level boundaries); the advisory audit blocked every PR since 2026-09-14.
