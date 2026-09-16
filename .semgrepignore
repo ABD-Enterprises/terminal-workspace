@@ -5,3 +5,5 @@ build/
 runs/
 state/
 .git/
+# #284: the pinned ruleset submodule is patterns and deliberately-vulnerable fixtures, not code to scan.
+.semgrep/

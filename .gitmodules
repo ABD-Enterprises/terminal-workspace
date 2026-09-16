@@ -1,0 +1,4 @@
+[submodule ".semgrep/rules"]
+	path = .semgrep/rules
+	url = https://github.com/semgrep/semgrep-rules.git
+	shallow = true
