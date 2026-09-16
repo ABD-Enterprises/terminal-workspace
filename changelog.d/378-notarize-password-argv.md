@@ -1,0 +1,1 @@
+- [SECURITY] Apple-ID notarization no longer passes the app-specific password on argv: `native:notarize` stores it into a keychain profile over stdin and authenticates through the profile (which `native:dmg` can reuse). The last entry on the secret-argv allowlist is gone. (#378)

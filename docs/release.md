@@ -78,7 +78,10 @@
   - `MACOS_NOTARY_ISSUER`
   - `MACOS_NOTARY_KEY_BASE64` or `MACOS_NOTARY_KEY_PATH`
 - Apple ID fallback:
-  - `MACOS_NOTARY_APPLE_ID`
+  - `MACOS_NOTARY_APPLE_ID` (#378: stored into the keychain profile `terminal-workspace-notary`
+    over stdin — the password never appears on argv — and the same profile serves `native:dmg`.
+    The profile persists in the login keychain like any `MACOS_NOTARY_PROFILE`; on shared or CI
+    machines prefer the App Store Connect key mode, whose key file is removed on exit)
   - `MACOS_NOTARY_APP_PASSWORD`
   - `MACOS_NOTARY_TEAM_ID`
 - Local-machine fallback:
