@@ -8,15 +8,13 @@ The unit of work is an **ai-task contract** (scope · done_when · validation ·
 
 Posture — two modes: vibe (unlocked, you drive) and enterprise (org-floor-locked compliance):
 
-- sure-forge's operator surface is **two modes** — strictness is expressed through your ai-task contract's `validation` + the mode (warn vs block), not by hand-setting dials. **vibe** (default) is genuinely low-friction: the scope, design, and capture gates do not block (capture still RECORDS metrics — it warns instead of blocking), validation runs on the host by default, and there is no claim-lease ceremony. **enterprise** is the locked compliance mode — full rigor + containment + the additive Attestation axis — pinned by the org floor: you can raise above it, never below, and `orc posture` prints the active floor. Switch with `orc posture <vibe|enterprise>`.
-- **Attestation** gates compliance overhead (metrics capture, required evidence, multi-scanner cadence, audit-log retention, control coverage). Every gate is OFF in vibe, inert below its threshold, and advisory-first — opting into enterprise is what turns enforcement on. It never substitutes for the containment net. Pin it fleet-wide via the org floor.
-- **Internal engine** (not an operator surface): the `hardened`/`regulated` postures and the raw O/R/C/A dials still *resolve* for back-compat, but you don't set them by hand — the **mode + your contract's `validation`** express strictness. The engine never changes who authors the diff, and never lowers GitHub's gates: branch protection, required checks, CodeQL/secret-scanning/push-protection, and org-floor policy stay in force in every mode.
+- sure-forge's operator surface is **two modes** — strictness is expressed through your ai-task contract's `validation` + the mode, not by hand-setting legacy strictness keys. **vibe** (default) is genuinely low-friction: the scope, design, and capture gates do not block, validation runs on the host by default, and there is no claim-lease ceremony. **enterprise** is the locked compliance mode pinned by the org floor: stricter validation, containment, and evidence requirements can block, and `orc posture` prints the active floor. Switch with `orc posture <vibe|enterprise>`.
+- Enterprise carries the compliance-only extras your organization requires, including metrics capture, required evidence, scanner cadence, audit-log retention, and control coverage. Those requirements stay advisory until the active mode or floor makes them block.
 
-Division of labor (Capability + Router, not a dial):
+Division of labor (Capability + Router):
 
 - Which agent authors the diff is a Capability — the configured coding backend (`.ai/config.json#continuity.model_provider`). The orchestrating/planning agent plans, grooms, reviews, and drives the board; the router delegates implementation to the backend through the loop. Hand-author trivial or mechanical changes directly when spinning up the backend is not worth the overhead.
-- O = who merges / how unattended; R = how hard the work is verified (the scope/design/capture gates); C = how contained the coder is (strict claim-leases and related containment policy).
-- Metrics are always recorded — `orc metrics` (cost/effort/routing) is a primary product — but the capture check is warn-only at vibe and enforced at hardened.
+- Metrics are always recorded — `orc metrics` (cost/effort/routing) is a primary product — but missing capture is advisory at vibe and can block in enterprise when the active policy requires it.
 
 Source of truth:
 
@@ -39,6 +37,7 @@ Startup:
 - Read ticket comments with `orc comments` and diffs with `orc diff` (lockfiles / generated / vendor stripped). Never re-fetch the raw thread or raw diff into the agent context.
 - Every autonomous batch ends with the standard records-derived report via `orc batch close`; set `.ai/config.json#continuity.handoff_anchor` to post that report to a fixed issue, or leave it unset for print-only.
 - Search before broad reads: use `rg` or targeted queries to locate the exact symbol/config/evidence, and read only the surrounding lines you need.
+- For multiple related read-only GitHub lookups, prefer one bounded GraphQL query with aliases over repeated one-endpoint-at-a-time calls when that reduces round trips. Request only decision-relevant fields, set explicit pagination limits on every connection, record `rateLimit { cost remaining resetAt }` for batched investigations, and reuse the result within the run. Do not replace focused calls with oversized queries or unbounded graph traversal. Fall back to REST for one-off lookups, logs or artifacts, unavailable GraphQL surfaces, and mutations where REST has clearer idempotency or failure semantics.
 
 Hard rules:
 
