@@ -14,13 +14,13 @@ interface ReadSshConfigFileRequest extends Partial<SshConfigResolutionContext> {
   path: string;
 }
 
-type ReadSshConfigFileResponse = SshConfigFileRead;
+export type ReadSshConfigFileResponse = SshConfigFileRead;
 
 interface GlobSshConfigFilesRequest extends Partial<SshConfigResolutionContext> {
   pattern: string;
 }
 
-interface GlobSshConfigFilesResponse {
+export interface GlobSshConfigFilesResponse {
   matches: SshConfigGlobMatch[];
 }
 
@@ -38,7 +38,7 @@ export const readSshConfigFile: SshConfigFileReader = async (path, context) => {
     return null;
   }
   try {
-    const response = await invokeTauriCommand<ReadSshConfigFileResponse>(
+    const response = await invokeTauriCommand(
       "terminal_workspace_read_ssh_config_file",
       {
         request: { path, ...context } satisfies ReadSshConfigFileRequest,
@@ -78,7 +78,7 @@ export const globSshConfigFiles: SshConfigGlobLister = async (pattern, context) 
   }
   if (isTauriRuntime()) {
     try {
-      const response = await invokeTauriCommand<GlobSshConfigFilesResponse>(
+      const response = await invokeTauriCommand(
         "terminal_workspace_glob_ssh_config_files",
         { request: { pattern, ...context } satisfies GlobSshConfigFilesRequest }
       );
