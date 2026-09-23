@@ -65,7 +65,7 @@ export function buildTerminalIntro(
 
   return [
     "",
-    `Terminal Workspace session for ${host.label}`,
+    `term-snip session for ${host.label}`,
     formatHostAddress(host),
     stateLine,
     detailLine,

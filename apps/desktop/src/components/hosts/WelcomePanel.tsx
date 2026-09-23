@@ -54,7 +54,7 @@ export function WelcomePanel({ onAddHost, onImportSshConfig }: WelcomePanelProps
   return (
     <div
       role="region"
-      aria-label="Welcome to Terminal Workspace"
+      aria-label="Welcome to term-snip"
       className="flex h-full min-h-0 flex-col items-center justify-center gap-5 rounded-panel border border-slate-800/80 bg-slate-950/40 px-8 py-10 text-center"
     >
       {/*
@@ -64,7 +64,7 @@ export function WelcomePanel({ onAddHost, onImportSshConfig }: WelcomePanelProps
       */}
       <div className="max-w-md space-y-2">
         <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">
-          Welcome to Terminal Workspace
+          Welcome to term-snip
         </p>
         <h2 className="text-2xl font-semibold text-slate-50">Your inventory is empty</h2>
         <p className="text-sm leading-6 text-slate-400">
