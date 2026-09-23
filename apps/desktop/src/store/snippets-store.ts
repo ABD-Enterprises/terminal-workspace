@@ -20,6 +20,7 @@ interface SnippetsState {
   deleteSnippet: (snippetId: string) => void;
   duplicateSnippet: (snippetId: string) => string;
   markSnippetRun: (snippetId: string) => void;
+  removeHostFromAllTargets: (hostId: string) => void;
 }
 
 export const useSnippetsStore = create<SnippetsState>()(
@@ -79,6 +80,15 @@ export const useSnippetsStore = create<SnippetsState>()(
 
         return snippet.id;
       },
+      removeHostFromAllTargets: (hostId) =>
+        set((state) => ({
+          snippets: sortSnippets(
+            state.snippets.map((snippet) => ({
+              ...snippet,
+              targetHostIds: snippet.targetHostIds.filter((id) => id !== hostId),
+            }))
+          ),
+        })),
       markSnippetRun: (snippetId) =>
         set((state) => ({
           snippets: sortSnippets(

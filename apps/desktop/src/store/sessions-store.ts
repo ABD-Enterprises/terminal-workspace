@@ -646,6 +646,7 @@ export interface SessionsState extends SessionWorkspaceState {
   closeTab: (tabId: string) => void;
   splitTab: (tabId: string, host: HostRecord) => void;
   closePane: (tabId: string, paneId: string) => void;
+  closePanesForHost: (hostId: string) => void;
   selectPane: (tabId: string, paneId: string) => void;
   setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
@@ -707,6 +708,37 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => closeSessionTab(state, tabId));
       },
       splitTab: (tabId, host) => set((state) => splitSessionPane(state, tabId, host)),
+      closePanesForHost: (hostId) => {
+        const panesToClose = Object.values(get().panes).filter((p) => p.hostId === hostId);
+        if (panesToClose.length === 0) return;
+        
+        const paneIds = panesToClose.map(p => p.id);
+        closeBackendSessionsForPanes(get().panes, paneIds);
+        
+        set((state) => {
+          let nextState = { ...state };
+          // Find tabs that contain these panes and remove the panes
+          for (const tab of nextState.tabs) {
+            const overlap = tab.paneIds.filter(id => paneIds.includes(id));
+            if (overlap.length > 0) {
+              if (overlap.length === tab.paneIds.length) {
+                // All panes in tab are closed, close the tab
+                nextState = { ...nextState, ...closeSessionTab(nextState, tab.id) };
+              } else {
+                // Remove specific panes from tab
+                // (Currently term-snip doesn't have split pane UI fully fleshed out to handle partial closes easily without a helper, but let's just filter paneIds)
+                const newPaneIds = tab.paneIds.filter(id => !paneIds.includes(id));
+                nextState.tabs = nextState.tabs.map(t => t.id === tab.id ? { ...t, paneIds: newPaneIds, activePaneId: newPaneIds.includes(t.activePaneId) ? t.activePaneId : newPaneIds[0] } : t);
+              }
+            }
+          }
+          
+          const newPanes = { ...nextState.panes };
+          for (const id of paneIds) delete newPanes[id];
+          nextState.panes = newPanes;
+          return nextState;
+        });
+      },
       closePane: (tabId, paneId) => {
         closeBackendSessionsForPanes(get().panes, [paneId]);
         set((state) => removeSessionPane(state, tabId, paneId));
