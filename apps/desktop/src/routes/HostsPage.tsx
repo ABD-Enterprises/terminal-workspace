@@ -6,6 +6,7 @@ import { describeHostRuntime, formatEnvironmentVariables, formatHostAddress, for
 import { useAppStore } from "../store/app-store";
 import { useConnectionSecretsStore } from "../store/connection-secrets-store";
 import { useHostsStore } from "../store/hosts-store";
+import { deleteHostAndCascade } from "../store/cascade-actions";
 import { useKnownHostsStore } from "../store/known-hosts-store";
 import { HostEditor } from "../components/hosts/HostEditor";
 import { HostFilterBar } from "../components/hosts/HostFilterBar";
@@ -89,10 +90,8 @@ export function HostsPage() {
   const commandPaletteOpen = useAppStore((state) => state.commandPaletteOpen);
   const cheatsheetOpen = useAppStore((state) => state.cheatsheetOpen);
   const setHostSecrets = useConnectionSecretsStore((state) => state.setHostSecrets);
-  const clearHostSecrets = useConnectionSecretsStore((state) => state.clearHostSecrets);
   const createHost = useHostsStore((state) => state.createHost);
   const updateHost = useHostsStore((state) => state.updateHost);
-  const deleteHost = useHostsStore((state) => state.deleteHost);
   const toggleFavorite = useHostsStore((state) => state.toggleFavorite);
   const knownHosts = useKnownHostsStore((state) => state.knownHosts);
   const removeKnownHost = useKnownHostsStore((state) => state.removeKnownHost);
@@ -511,8 +510,7 @@ export function HostsPage() {
         onCancel={() => setHostPendingDelete(null)}
         onConfirm={() => {
           if (hostPendingDelete) {
-            deleteHost(hostPendingDelete);
-            clearHostSecrets(hostPendingDelete);
+            deleteHostAndCascade(hostPendingDelete);
             setHostPendingDelete(null);
             updateParams({ focus: null, edit: null });
           }

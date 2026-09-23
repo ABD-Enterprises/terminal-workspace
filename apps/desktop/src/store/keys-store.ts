@@ -72,6 +72,7 @@ interface KeysState {
   addGeneratedKey: (label: string, metadata: KeyMetadata, hasPassphrase: boolean) => string;
   deleteKey: (keyId: string) => KeyRecord | undefined;
   assignHost: (keyId: string, hostId: string) => void;
+  unassignHostFromAll: (hostId: string) => void;
 }
 
 export const useKeysStore = create<KeysState>()(
@@ -115,6 +116,15 @@ export const useKeysStore = create<KeysState>()(
         }
         return key;
       },
+      unassignHostFromAll: (hostId) =>
+        set((state) => ({
+          keys: sortKeys(
+            state.keys.map((key) => ({
+              ...key,
+              assignedHostIds: key.assignedHostIds.filter((entry) => entry !== hostId),
+            }))
+          ),
+        })),
       assignHost: (keyId, hostId) =>
         set((state) => ({
           keys: sortKeys(
