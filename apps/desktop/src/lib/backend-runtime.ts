@@ -71,10 +71,6 @@ interface SessionStreamEventPayload {
   streamId: string;
 }
 
-interface OpenSessionStreamResponse {
-  ok: boolean;
-  streamId: string;
-}
 
 interface SessionStreamRequest {
   sessionId: string;
@@ -223,17 +219,22 @@ function buildAbsoluteBackendUrl(backendBaseUrl: string, path: string) {
   return new URL(path, `${backendBaseUrl.replace(/\/+$/, "")}/`).toString();
 }
 
-export async function invokeTauriCommand<T>(command: string, args?: Record<string, unknown>) {
+import type { TauriCommands } from "./tauri-commands";
+
+export async function invokeTauriCommand<K extends keyof TauriCommands>(
+  command: K,
+  ...args: TauriCommands[K]["request"] extends undefined ? [] : [{ request: TauriCommands[K]["request"] }]
+): Promise<TauriCommands[K]["response"]> {
   const internals = getTauriInternals();
   if (!internals) {
     throw new Error("Tauri runtime is unavailable.");
   }
 
-  return internals.invoke<T>(command, args);
+  return internals.invoke<TauriCommands[K]["response"]>(command, args[0]);
 }
 
 async function getNativeTransportInfo() {
-  cachedTransportInfoPromise ??= invokeTauriCommand<BackendTransportInfo>("terminal_workspace_transport_info")
+  cachedTransportInfoPromise ??= invokeTauriCommand("terminal_workspace_transport_info")
     .catch((error) => {
       cachedTransportInfoPromise = undefined;
       throw error;
@@ -330,7 +331,7 @@ class NativeSessionSocket implements SessionSocketLike {
     }
 
     this.readyState = WebSocket.CLOSING;
-    void invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_close_backend_session_stream", {
+    void invokeTauriCommand("terminal_workspace_close_backend_session_stream", {
       request: {
         sessionId: this.sessionId,
         streamId: this.streamId,
@@ -352,7 +353,7 @@ class NativeSessionSocket implements SessionSocketLike {
       return;
     }
 
-    void invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_send_backend_session_stream", {
+    void invokeTauriCommand("terminal_workspace_send_backend_session_stream", {
       request: {
         data,
         sessionId: this.sessionId,
@@ -451,7 +452,7 @@ class NativeSessionSocket implements SessionSocketLike {
     });
 
     try {
-      const response = await invokeTauriCommand<OpenSessionStreamResponse>(
+      const response = await invokeTauriCommand(
         "terminal_workspace_open_backend_session_stream",
         {
           request: {
@@ -514,7 +515,7 @@ export async function openSessionSocket(sessionId: string): Promise<SessionSocke
 
 export async function getSessionBackendStatus() {
   if (isTauriRuntime()) {
-    return invokeTauriCommand<BackendStatusResponse>("terminal_workspace_backend_status");
+    return invokeTauriCommand("terminal_workspace_backend_status");
   }
 
   return browserFetchJson<BackendStatusResponse>("/api/backend/status");
@@ -522,7 +523,7 @@ export async function getSessionBackendStatus() {
 
 export async function createSession(host: BackendHostConnection) {
   if (isTauriRuntime()) {
-    return invokeTauriCommand<CreateSessionResponse>("terminal_workspace_create_backend_session", {
+    return invokeTauriCommand("terminal_workspace_create_backend_session", {
       request: { host },
     });
   }
@@ -535,7 +536,7 @@ export async function createSession(host: BackendHostConnection) {
 
 export async function closeSession(sessionId: string) {
   if (isTauriRuntime()) {
-    return invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_close_backend_session", {
+    return invokeTauriCommand("terminal_workspace_close_backend_session", {
       request: { sessionId },
     });
   }
@@ -547,7 +548,7 @@ export async function closeSession(sessionId: string) {
 
 export async function resizeSession(sessionId: string, payload: ResizeSessionPayload) {
   if (isTauriRuntime()) {
-    return invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_resize_backend_session", {
+    return invokeTauriCommand("terminal_workspace_resize_backend_session", {
       request: { sessionId, payload },
     });
   }

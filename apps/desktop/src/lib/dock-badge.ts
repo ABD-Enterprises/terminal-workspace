@@ -15,7 +15,7 @@ export async function setDockBadge(count: number): Promise<void> {
     return;
   }
   try {
-    await invokeTauriCommand<void>("terminal_workspace_set_dock_badge", {
+    await invokeTauriCommand("terminal_workspace_set_dock_badge", {
       request: { count: Math.max(0, Math.floor(count)) },
     });
   } catch {

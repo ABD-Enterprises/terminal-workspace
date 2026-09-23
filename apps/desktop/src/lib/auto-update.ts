@@ -34,7 +34,7 @@ export async function checkForUpdates(): Promise<UpdateCheckResult | null> {
   if (!isTauriRuntime()) {
     return null;
   }
-  return await invokeTauriCommand<UpdateCheckResult>("terminal_workspace_check_for_updates", {
+  return await invokeTauriCommand("terminal_workspace_check_for_updates", {
     request: {},
   });
 }
@@ -69,7 +69,7 @@ export async function installUpdateAndRestart(force = false): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  await invokeTauriCommand<void>("terminal_workspace_install_update_and_restart", {
+  await invokeTauriCommand("terminal_workspace_install_update_and_restart", {
     request: { force },
   });
 }

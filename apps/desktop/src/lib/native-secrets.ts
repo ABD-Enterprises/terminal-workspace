@@ -5,39 +5,39 @@ export interface NativeHostSecrets {
   passphrase: string;
 }
 
-interface HostSecretsResponse extends NativeHostSecrets {
+export interface HostSecretsResponse extends NativeHostSecrets {
   /** Set by the backend when the keychain was locked or access was denied,
    *  as opposed to the secret simply being absent (which returns empty). */
   keychainUnavailable?: boolean;
 }
 
-interface HostSecretsRequest {
+export interface HostSecretsRequest {
   hostId: string;
 }
 
-interface StoreHostSecretsRequest extends HostSecretsRequest, NativeHostSecrets {}
+export interface StoreHostSecretsRequest extends HostSecretsRequest, NativeHostSecrets {}
 
-interface KeyPassphraseRequest {
+export interface KeyPassphraseRequest {
   fingerprint: string;
 }
 
-interface StoreKeyPassphraseRequest extends KeyPassphraseRequest {
+export interface StoreKeyPassphraseRequest extends KeyPassphraseRequest {
   passphrase: string;
 }
 
-interface KeyPassphraseResponse {
+export interface KeyPassphraseResponse {
   passphrase: string;
 }
 
-interface IdentityPassphraseRequest {
+export interface IdentityPassphraseRequest {
   identityId: string;
 }
 
-interface StoreIdentityPassphraseRequest extends IdentityPassphraseRequest {
+export interface StoreIdentityPassphraseRequest extends IdentityPassphraseRequest {
   passphrase: string;
 }
 
-interface IdentityPassphraseResponse {
+export interface IdentityPassphraseResponse {
   passphrase: string;
 }
 
@@ -51,7 +51,7 @@ export async function loadNativeHostSecrets(hostId: string): Promise<NativeHostS
     return emptySecrets;
   }
 
-  const response = await invokeTauriCommand<HostSecretsResponse>(
+  const response = await invokeTauriCommand(
     "terminal_workspace_load_host_secrets",
     {
       request: {
@@ -111,7 +111,7 @@ export async function loadNativeKeyPassphrase(fingerprint: string): Promise<stri
     return "";
   }
 
-  const response = await invokeTauriCommand<KeyPassphraseResponse>(
+  const response = await invokeTauriCommand(
     "terminal_workspace_load_key_passphrase",
     {
       request: { fingerprint } satisfies KeyPassphraseRequest,
@@ -154,7 +154,7 @@ export async function loadNativeIdentityPassphrase(identityId: string): Promise<
     return "";
   }
 
-  const response = await invokeTauriCommand<IdentityPassphraseResponse>(
+  const response = await invokeTauriCommand(
     "terminal_workspace_load_identity_passphrase",
     {
       request: { identityId } satisfies IdentityPassphraseRequest,

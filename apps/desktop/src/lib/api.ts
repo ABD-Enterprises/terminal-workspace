@@ -15,7 +15,6 @@ import type {
   ImportPrivateKeyFromBodyPayload,
   KnownHostScanResult,
   ListForwardsResponse,
-  ProtocolRuntimeStatusResponse,
   ResizeSessionPayload,
   SftpDirectoryResponse,
   SnippetExecutionResult,
@@ -152,50 +151,50 @@ const demoBackend: Backend = {
 
 const tauriBackend: Backend = {
   getBackendStatus: () =>
-    invokeTauriCommand<BackendStatusResponse>("terminal_workspace_backend_status"),
+    invokeTauriCommand("terminal_workspace_backend_status"),
   getProtocolRuntimeStatus: (protocol) =>
-    invokeTauriCommand<ProtocolRuntimeStatusResponse>(
+    invokeTauriCommand(
       "terminal_workspace_protocol_runtime_status",
       {
         request: { protocol },
       }
     ),
   createBackendSession: (host) =>
-    invokeTauriCommand<CreateSessionResponse>("terminal_workspace_create_backend_session", {
+    invokeTauriCommand("terminal_workspace_create_backend_session", {
       request: { host },
     }),
   closeBackendSession: (sessionId) =>
-    invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_close_backend_session", {
+    invokeTauriCommand("terminal_workspace_close_backend_session", {
       request: { sessionId },
     }),
   resizeBackendSession: (sessionId, payload) =>
-    invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_resize_backend_session", {
+    invokeTauriCommand("terminal_workspace_resize_backend_session", {
       request: { sessionId, payload },
     }),
   listRemoteDirectory: (host, path) =>
-    invokeTauriCommand<SftpDirectoryResponse>("terminal_workspace_sftp_list_directory", {
+    invokeTauriCommand("terminal_workspace_sftp_list_directory", {
       request: { host, path },
     }),
   createRemoteDirectory: (host, path) =>
-    invokeTauriCommand<{ ok: boolean; path: string }>(
+    invokeTauriCommand(
       "terminal_workspace_sftp_create_directory",
       {
         request: { host, path },
       }
     ),
   renameRemoteEntry: (host, currentPath, nextPath) =>
-    invokeTauriCommand<{ ok: boolean; path: string }>(
+    invokeTauriCommand(
       "terminal_workspace_sftp_rename_entry",
       {
         request: { host, currentPath, nextPath },
       }
     ),
   deleteRemoteEntry: (host, path, isDirectory) =>
-    invokeTauriCommand<{ ok: boolean }>("terminal_workspace_sftp_delete_entry", {
+    invokeTauriCommand("terminal_workspace_sftp_delete_entry", {
       request: { host, path, isDirectory },
     }),
   uploadRemoteFile: async (host, remotePath, file) =>
-    invokeTauriCommand<{ ok: boolean; path: string }>(
+    invokeTauriCommand(
       "terminal_workspace_sftp_upload_file",
       {
         request: {
@@ -207,11 +206,7 @@ const tauriBackend: Backend = {
       }
     ),
   downloadRemoteFile: async (host, path) => {
-    const response = await invokeTauriCommand<{
-      base64Body: string;
-      contentDisposition?: string;
-      contentType?: string;
-    }>("terminal_workspace_sftp_download_file", {
+    const response = await invokeTauriCommand("terminal_workspace_sftp_download_file", {
       request: { host, path },
     });
     const blob = new Blob([decodeBase64ToBytes(response.base64Body)], {
@@ -226,42 +221,42 @@ const tauriBackend: Backend = {
     return { blob, filename } satisfies DownloadRemoteFileResponse;
   },
   inspectPrivateKey: (path) =>
-    invokeTauriCommand<KeyMetadata>("terminal_workspace_inspect_private_key", {
+    invokeTauriCommand("terminal_workspace_inspect_private_key", {
       request: { path },
     }),
   generatePrivateKey: (payload) =>
-    invokeTauriCommand<KeyMetadata>("terminal_workspace_generate_private_key", {
+    invokeTauriCommand("terminal_workspace_generate_private_key", {
       request: payload,
     }),
   importPrivateKeyFromBody: (payload) =>
-    invokeTauriCommand<KeyMetadata>("terminal_workspace_import_private_key_from_body", {
+    invokeTauriCommand("terminal_workspace_import_private_key_from_body", {
       request: payload,
     }),
   copyKeyToHost: (payload) =>
-    invokeTauriCommand<CopyKeyToHostResponse>("terminal_workspace_copy_key_to_host", {
+    invokeTauriCommand("terminal_workspace_copy_key_to_host", {
       request: payload,
     }),
   scanKnownHost: (hostname, port) =>
-    invokeTauriCommand<{ entries: KnownHostScanResult[] }>(
+    invokeTauriCommand(
       "terminal_workspace_scan_known_host",
       {
         request: { hostname, port },
       }
     ),
   listLocalForwards: (sessionId) =>
-    invokeTauriCommand<ListForwardsResponse>("terminal_workspace_list_session_forwards", {
+    invokeTauriCommand("terminal_workspace_list_session_forwards", {
       request: { sessionId },
     }),
   createLocalForward: (payload) =>
-    invokeTauriCommand<PortForwardRecord>("terminal_workspace_create_forward", {
+    invokeTauriCommand("terminal_workspace_create_forward", {
       request: payload,
     }),
   deleteLocalForward: (forwardId) =>
-    invokeTauriCommand<BackendBooleanResponse>("terminal_workspace_delete_forward", {
+    invokeTauriCommand("terminal_workspace_delete_forward", {
       request: { forwardId },
     }),
   executeSnippetOnHosts: (command, targets) =>
-    invokeTauriCommand<{ results: SnippetExecutionResult[] }>(
+    invokeTauriCommand(
       "terminal_workspace_execute_snippet_on_hosts",
       {
         request: { command, targets },
