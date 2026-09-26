@@ -97,7 +97,7 @@ describe("local config", () => {
     });
 
     const bundle = buildLocalConfigBundle();
-    expect(bundle.app).toBe("Terminal Workspace");
+    expect(bundle.app).toBe("term-snip");
     expect(bundle.version).toBe(5);
     expect(bundle.vault.schema).toBe("local-first-vault");
     expect(bundle.vault.vaultId).toBe(baseAppState.vaultId);
@@ -179,7 +179,7 @@ describe("local config", () => {
     });
 
     const bundle: LocalConfigBundle = {
-      app: "Terminal Workspace",
+      app: "term-snip",
       version: 5,
       identities: [],
       exportedAt: "2026-03-29T10:00:00.000Z",
@@ -327,7 +327,7 @@ describe("local config", () => {
     });
 
     const bundle: LocalConfigBundle = {
-      app: "Terminal Workspace",
+      app: "term-snip",
       version: 5,
       identities: [],
       exportedAt: "2026-03-29T11:00:00.000Z",
@@ -434,7 +434,7 @@ describe("local config", () => {
     });
 
     const bundle: LocalConfigBundle = {
-      app: "Terminal Workspace",
+      app: "term-snip",
       version: 5,
       identities: [],
       exportedAt: "2026-03-29T11:30:00.000Z",
@@ -566,7 +566,7 @@ describe("local config", () => {
     });
 
     const bundle: LocalConfigBundle = {
-      app: "Terminal Workspace",
+      app: "term-snip",
       version: 5,
       identities: [],
       exportedAt: "2026-03-29T11:30:00.000Z",
@@ -710,7 +710,7 @@ describe("local config", () => {
 
   it("#115: imports a legacy v4 'TermSnip' bundle, migrating the app field forward", () => {
     // The pre-rename export used app: "TermSnip", version: 4. After the
-    // rename to app: "Terminal Workspace", version 5, that legacy bundle must
+    // rename to app: "term-snip", version 5, that legacy bundle must
     // still inspect + apply without error.
     const legacyV4Bundle = {
       app: "TermSnip",

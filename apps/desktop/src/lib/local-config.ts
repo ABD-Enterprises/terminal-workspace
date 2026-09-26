@@ -27,10 +27,10 @@ export interface LocalVaultMetadata {
 }
 
 export interface LocalConfigBundle {
-  // #115: the app identifier moved from "TermSnip" to "Terminal Workspace"
+  // #115: the app identifier moved from "TermSnip" to "term-snip"
   // with a version bump to 5. Legacy "TermSnip" bundles (v1–v4) still import
   // — the field is migrated forward on read.
-  app: "Terminal Workspace";
+  app: "term-snip";
   version: 5;
   exportedAt: string;
   vault: LocalVaultMetadata;
@@ -696,7 +696,7 @@ export function buildLocalConfigBundle(): LocalConfigBundle {
   // the type that the keys array carries verbatim (M14 / #96 needs no
   // separate handling).
   return {
-    app: "Terminal Workspace",
+    app: "term-snip",
     version: 5,
     exportedAt: new Date().toISOString(),
     vault: {
@@ -720,10 +720,10 @@ function parseImportedLocalConfigBundle(bundle: unknown): PreparedLocalConfigImp
     throw new Error("Config import failed: file does not contain a JSON object.");
   }
 
-  // #115: accept both the new "Terminal Workspace" app field (v5) and the
+  // #115: accept both the new "term-snip" app field (v5) and the
   // legacy "TermSnip" field (v1–v4) so older exports import without loss.
   if (
-    (bundle.app !== "TermSnip" && bundle.app !== "Terminal Workspace") ||
+    (bundle.app !== "TermSnip" && bundle.app !== "term-snip") ||
     (bundle.version !== 1 &&
       bundle.version !== 2 &&
       bundle.version !== 3 &&

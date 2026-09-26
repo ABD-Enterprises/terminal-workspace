@@ -9,7 +9,7 @@ import {
 } from "./vault-sync-contract";
 
 const baseBundle: LocalConfigBundle = {
-  app: "Terminal Workspace",
+  app: "term-snip",
   version: 5,
   identities: [],
   exportedAt: "2026-04-04T16:30:00.000Z",

@@ -143,7 +143,7 @@ export function Sidebar() {
       {/* Header — pinned above the single scroll region. */}
       <div className="px-1.5">
         <p className="text-caption font-semibold uppercase tracking-brand text-emerald-300">
-          Terminal Workspace
+          term-snip
         </p>
         <h1 className="mt-0.5 text-title font-semibold text-slate-50">Local Vault</h1>
       </div>
