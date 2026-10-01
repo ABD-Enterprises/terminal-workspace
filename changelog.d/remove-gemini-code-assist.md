@@ -1,0 +1,1 @@
+- [INTERNAL] Remove the unused Gemini Code Assist GitHub App configuration.
