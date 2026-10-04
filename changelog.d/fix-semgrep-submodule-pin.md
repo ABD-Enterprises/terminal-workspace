@@ -1,0 +1,1 @@
+- [FIX] Restore the `.semgrep/rules` submodule pin to `40b8c63`. It had been moved to `0a44eab`, a commit that does not exist upstream, which failed the `validate` gate on every PR and every Dependabot update job.
