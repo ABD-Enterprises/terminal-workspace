@@ -50,6 +50,11 @@ jobs:
           # restores prior coverage rather than quietly narrowing it.
           languages: actions,javascript-typescript,rust
           build-mode: none
+          # The removed orc-codeql.yml (#400) ran `security-and-quality`; without this
+          # line the default suite drops the medium-precision security queries, which
+          # is how js/file-system-race (CWE-367, alerts 32-34) was found. Security-only
+          # keeps the quality-rule noise out.
+          queries: security-extended
 
       - name: Analyze
         uses: github/codeql-action/analyze@486fec2a3ea2626afcd8c7e9208b4f515078dd7e # codeql-bundle-v2.26.4
