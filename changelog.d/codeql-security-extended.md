@@ -1,0 +1,1 @@
+- [INTERNAL] CodeQL runs the `security-extended` suite again. Removing `orc-codeql.yml` in #400 had silently dropped coverage to the default suite.
