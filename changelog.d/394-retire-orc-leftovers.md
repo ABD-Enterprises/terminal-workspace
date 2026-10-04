@@ -1,0 +1,1 @@
+- [INTERNAL] Retire the last ORC leftovers (#394): Dependabot PRs no longer get the `chore:trivial` run-presence waiver label, the PR template no longer describes the removed ORC auto-merge gate, and the empty `.github/auto-merge-allowed-authors` allowlist is deleted.
