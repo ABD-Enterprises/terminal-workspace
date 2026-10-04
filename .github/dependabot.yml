@@ -3,20 +3,20 @@
 # alerts therefore accumulated (a critical shell-quote advisory sat open for two
 # months) with nothing routinely moving dependencies forward between them.
 #
-# Updates are grouped deliberately. Every bot-authored PR here fails the ORC
-# run-presence check — a bot cannot link a ticket, so Dependabot automatically
-# adds the chore:trivial waiver label alongside its dependencies label. Ungrouped
-# weekly updates would otherwise turn that into steady manual toil; one grouped
-# PR per ecosystem keeps it to a few.
+# Updates are grouped deliberately. Every Dependabot PR still has to clear the
+# required validate, rust-validate and CodeQL checks and get a human review;
+# ungrouped weekly updates would turn that into steady toil, while one grouped PR
+# per ecosystem keeps it to a few. (#394: the chore:trivial label these PRs used
+# to carry was only a waiver for the retired ORC run-presence check, so it is no
+# longer applied.)
 #
 # #248: every group is bounded to minor + patch. Unbounded, the first run produced
 # #247 — 13 dev updates carrying FIVE major jumps (typescript 5.9→7.0, vite
 # 6.4→8.2, vitest 3.2→4.1, @vitejs/plugin-react 5→6, concurrently 9→10) in one PR
 # that failed both validate and rust-validate. That is a toolchain migration, not
 # a dependency bump, and it is not reviewable as a single change. Majors now
-# arrive as individual PRs. That costs a little more waiver toil than grouping
-# them, which is the correct side of the trade for a change that can break the
-# build.
+# arrive as individual PRs. That costs a few more reviews than grouping them,
+# which is the correct side of the trade for a change that can break the build.
 #
 # applies-to: version-updates is stated explicitly (it is also the default) to be
 # clear that SECURITY updates are deliberately left ungrouped — an advisory fix
@@ -27,7 +27,7 @@ updates:
   # together, which is the only practical way to keep pinned actions current.
   - package-ecosystem: "github-actions"
     directory: "/"
-    labels: ["dependencies", "chore:trivial"]
+    labels: ["dependencies"]
     schedule:
       interval: "weekly"
     # Supply-chain hardening: wait before proposing a freshly published version.
@@ -45,7 +45,7 @@ updates:
   # pnpm workspace: the root manifest covers apps/* too.
   - package-ecosystem: "npm"
     directory: "/"
-    labels: ["dependencies", "chore:trivial"]
+    labels: ["dependencies"]
     schedule:
       interval: "weekly"
     # Supply-chain hardening: wait before proposing a freshly published version.
@@ -71,7 +71,7 @@ updates:
   # here, since the OS cannot patch it out from under the binary.
   - package-ecosystem: "cargo"
     directory: "/src-tauri"
-    labels: ["dependencies", "chore:trivial"]
+    labels: ["dependencies"]
     schedule:
       interval: "weekly"
     # Supply-chain hardening: wait before proposing a freshly published version.
