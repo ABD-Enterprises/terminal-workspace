@@ -1,0 +1,1 @@
+- [SECURITY] The Node backend now imports a private key with an exclusive create (`O_EXCL`), so a key that appears between the existence check and the write is refused instead of overwritten. It also reads `~/.ssh` Include matches through one file handle, so the size and type checks apply to the bytes actually read (CodeQL `js/file-system-race`).

@@ -56,6 +56,7 @@ import {
   readJson,
   SFTP_UPLOAD_MAX_BYTES,
 } from "./backend-buffers.mjs";
+import { readBoundedRegularFile, writeNewPrivateFile } from "./backend-files.mjs";
 import {
   projectSshConfigResolutionFailure,
   resolveSshConfigPath,
@@ -178,19 +179,8 @@ async function globSshConfigFiles(pattern, context) {
     if (real !== sshRoot && !real.startsWith(rootPrefix)) {
       continue;
     }
-    let info;
-    try {
-      info = await stat(real);
-    } catch {
-      continue;
-    }
-    if (!info.isFile() || info.size > SSH_CONFIG_MAX_BYTES) {
-      continue;
-    }
-    let content;
-    try {
-      content = await readFile(real, "utf8");
-    } catch {
+    const content = await readBoundedRegularFile(real, SSH_CONFIG_MAX_BYTES);
+    if (content === undefined) {
       continue;
     }
     matches.push({
@@ -1062,18 +1052,12 @@ async function importPrivateKeyFromBody({ path, body }) {
   }
   const resolvedPath = expandHome(path);
   await mkdir(dirname(resolvedPath), { recursive: true });
-  try {
-    await stat(resolvedPath);
-    throw new Error("Target private key path already exists");
-  } catch (error) {
-    if (error?.code !== "ENOENT") {
-      throw error;
-    }
-  }
   // Normalize line endings + ensure a trailing newline (some keys
   // arrive without one and ssh-keygen rejects them).
   const normalized = body.replace(/\r\n?/g, "\n").replace(/\n*$/, "\n");
-  await writeFile(resolvedPath, normalized, { mode: 0o600 });
+  // Exclusive create: refuses an existing key atomically instead of a stat()
+  // pre-check that a key created in between would slip past and be overwritten.
+  await writeNewPrivateFile(resolvedPath, normalized);
   return inspectKey(resolvedPath);
 }
 
