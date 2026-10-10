@@ -143,9 +143,29 @@ jobs:
       # dtolnay/rust-toolchain with a plain rustup script keeps the workflow
       # inside the Actions allowlist, but it also drops that action's compiler
       # problem matchers. That trade is intentional here, not an oversight.
+      # Self-hosted runners ship neither rustup nor cargo. Install rustup in user
+      # space from the pinned archive and verify the published SHA-256 before
+      # running it; a checksum mismatch fails the step. $HOME/.cargo/bin is
+      # prepended to PATH for this step and exported for every later one.
       - name: Setup Rust
         shell: bash
+        env:
+          RUSTUP_VERSION: "1.29.1"
+          RUSTUP_TARGET: aarch64-apple-darwin
+          RUSTUP_INIT_SHA256: ec1b9233e7f72990ecd8e62063fa7f6c3dfc2bec8e97f88bff165f9100ac696a
         run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          if ! command -v rustup >/dev/null 2>&1; then
+            tmp="$(mktemp -d)"
+            curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp/rustup-init" \
+              "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${RUSTUP_TARGET}/rustup-init"
+            echo "${RUSTUP_INIT_SHA256}  $tmp/rustup-init" | shasum -a 256 -c -
+            chmod +x "$tmp/rustup-init"
+            "$tmp/rustup-init" -y --no-modify-path --default-toolchain none
+            rm -rf -- "$tmp"
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
           rustup default stable
           cargo --version
@@ -297,9 +317,29 @@ jobs:
             ~/.cargo/registry/index
           key: cargo-registry-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
 
+      # Self-hosted runners ship neither rustup nor cargo. Install rustup in user
+      # space from the pinned archive and verify the published SHA-256 before
+      # running it; a checksum mismatch fails the step. $HOME/.cargo/bin is
+      # prepended to PATH for this step and exported for every later one.
       - name: Setup Rust
         shell: bash
+        env:
+          RUSTUP_VERSION: "1.29.1"
+          RUSTUP_TARGET: aarch64-unknown-linux-gnu
+          RUSTUP_INIT_SHA256: 15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433
         run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          if ! command -v rustup >/dev/null 2>&1; then
+            tmp="$(mktemp -d)"
+            curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp/rustup-init" \
+              "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${RUSTUP_TARGET}/rustup-init"
+            echo "${RUSTUP_INIT_SHA256}  $tmp/rustup-init" | sha256sum -c -
+            chmod +x "$tmp/rustup-init"
+            "$tmp/rustup-init" -y --no-modify-path --default-toolchain none
+            rm -rf -- "$tmp"
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup toolchain install stable --profile minimal
           rustup default stable
           cargo --version
