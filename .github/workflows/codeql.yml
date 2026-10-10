@@ -32,7 +32,7 @@ permissions:
 jobs:
   CodeQL:
     name: CodeQL
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS) }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -40,8 +40,20 @@ jobs:
       actions: read
 
     steps:
+      - name: Start with fresh Git metadata on self-hosted runners
+        working-directory: ${{ runner.temp }}
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          test "$workspace" != /
+          rm -rf -- "$workspace/.git"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@486fec2a3ea2626afcd8c7e9208b4f515078dd7e # codeql-bundle-v2.26.4

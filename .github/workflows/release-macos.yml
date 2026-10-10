@@ -24,16 +24,32 @@ env:
 
 jobs:
   release-macos:
-    # Signing secrets are still injected by GitHub at run time; the
-    # workflow's "Import signing certificate" step builds an isolated
-    # $RUNNER_TEMP keychain per run, so this is safe to run on a
-    # hosted worker without persisting key material.
-    runs-on: macos-latest
+    # This job signs, notarizes and publishes, so it never runs on the
+    # shared self-hosted macOS pool (that pool executes pull-request code).
+    # The fallback label set below deliberately matches no runner: until a
+    # dedicated signing runner exists and RELEASE_MACOS_RUNNER_LABELS points
+    # at it, the job queues visibly instead of running somewhere unintended.
+    # Signing secrets are still injected by GitHub at run time; the "Import
+    # Developer ID certificate" step builds an isolated $RUNNER_TEMP keychain
+    # per run, so no key material persists on the runner.
+    runs-on: ${{ fromJSON(vars.RELEASE_MACOS_RUNNER_LABELS || '["self-hosted","macOS","release-signing"]') }}
     timeout-minutes: 90
 
     steps:
+      - name: Start with fresh Git metadata on self-hosted runners
+        working-directory: ${{ runner.temp }}
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          test "$workspace" != /
+          rm -rf -- "$workspace/.git"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Resolve release metadata
         id: release_meta

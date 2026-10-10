@@ -24,14 +24,25 @@ env:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS) }}
     timeout-minutes: 30
 
     steps:
+      - name: Start with fresh Git metadata on self-hosted runners
+        working-directory: ${{ runner.temp }}
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          test "$workspace" != /
+          rm -rf -- "$workspace/.git"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Fetch base branch
         if: github.event_name == 'pull_request'
@@ -87,14 +98,27 @@ jobs:
             test-results
 
   # #128: compile + test the Rust crate so a broken native build can no longer
-  # ship "green". Public pull-request code runs on GitHub-hosted macOS.
+  # ship "green". Build and test only, no signing: it runs on the org's
+  # self-hosted Apple Silicon macOS pool (MACOS_RUNNER_LABELS).
   rust-validate:
-    runs-on: macos-latest
+    runs-on: ${{ fromJSON(vars.MACOS_RUNNER_LABELS) }}
     timeout-minutes: 30
 
     steps:
+      - name: Start with fresh Git metadata on self-hosted runners
+        working-directory: ${{ runner.temp }}
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          test "$workspace" != /
+          rm -rf -- "$workspace/.git"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -226,7 +250,7 @@ jobs:
 
       # #101: the localhost-sshd session fixture is #[ignore] by default (it
       # needs an unsandboxed sshd, which sandboxed local/dev envs lack). This
-      # hosted macOS runner is a real machine, so run it explicitly to
+      # self-hosted macOS runner is a real machine, so run it explicitly to
       # exercise the SSH session lifecycle (create -> open stream -> I/O ->
       # close) end-to-end on every PR. #292's ignored reaper regressions share
       # this prefix so the same gate also proves that a later fixture startup
@@ -245,12 +269,24 @@ jobs:
         run: bash scripts/native-trust-tooling-test.sh
 
   native-ssh-fixtures:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS) }}
     timeout-minutes: 10
 
     steps:
+      - name: Start with fresh Git metadata on self-hosted runners
+        working-directory: ${{ runner.temp }}
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          test "$workspace" != /
+          rm -rf -- "$workspace/.git"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Cache cargo registry
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
