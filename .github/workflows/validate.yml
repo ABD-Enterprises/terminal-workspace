@@ -213,7 +213,14 @@ jobs:
       # broken transport should fail early rather than after a full compile.
       # This runner already proves sshd works — the Rust sshd fixture below
       # uses the same facility.
+      # sshd runs exec requests through the account's login shell. The self-hosted
+      # macOS runner account intentionally has none (/usr/bin/false), so the exec
+      # check below cannot pass there, while the fixture itself is unchanged. The
+      # Linux native-ssh-fixtures job keeps the sshd coverage; set the repo variable
+      # TW_SSHD_EXEC_FIXTURES=true to run this step on a self-hosted Mac whose
+      # runner account has a real shell.
       - name: Real backend transport fixture
+        if: runner.environment == 'github-hosted' || vars.TW_SSHD_EXEC_FIXTURES == 'true'
         run: npm run backend:fixtures
 
       - name: Check Rust formatting
@@ -278,7 +285,11 @@ jobs:
       # failure fails Validate. The localShell / external-protocol session
       # lifecycle already runs in the validate:rust step above (those fixtures
       # are not #[ignore]).
+      # Same constraint as the backend transport fixture above: sshd execs through
+      # the login shell, which the self-hosted macOS runner account intentionally
+      # lacks. The Linux native-ssh-fixtures job keeps the sshd coverage.
       - name: Native SSH session lifecycle and reaper (sshd fixtures)
+        if: runner.environment == 'github-hosted' || vars.TW_SSHD_EXEC_FIXTURES == 'true'
         run: cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture -- --include-ignored --test-threads=1
 
       # #272: this is a version-bounded experiment, not product behavior. The
