@@ -1,0 +1,1 @@
+- [SECURITY] The macOS release workflow no longer restores or saves a pnpm store cache and sets `package-manager-cache: false` on `setup-node`, so the job that signs, notarizes and publishes the app cannot consume a poisoned cache (zizmor cache-poisoning).
