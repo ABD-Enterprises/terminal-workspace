@@ -24,14 +24,25 @@ env:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS) }}
     timeout-minutes: 30
 
     steps:
+      - name: Start with fresh Git metadata on self-hosted runners
+        working-directory: ${{ runner.temp }}
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          test "$workspace" != /
+          rm -rf -- "$workspace/.git"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Fetch base branch
         if: github.event_name == 'pull_request'
@@ -87,14 +98,27 @@ jobs:
             test-results
 
   # #128: compile + test the Rust crate so a broken native build can no longer
-  # ship "green". Public pull-request code runs on GitHub-hosted macOS.
+  # ship "green". Build and test only, no signing: it runs on the org's
+  # self-hosted Apple Silicon macOS pool (MACOS_RUNNER_LABELS).
   rust-validate:
-    runs-on: macos-latest
+    runs-on: ${{ fromJSON(vars.MACOS_RUNNER_LABELS) }}
     timeout-minutes: 30
 
     steps:
+      - name: Start with fresh Git metadata on self-hosted runners
+        working-directory: ${{ runner.temp }}
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          test "$workspace" != /
+          rm -rf -- "$workspace/.git"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -119,9 +143,29 @@ jobs:
       # dtolnay/rust-toolchain with a plain rustup script keeps the workflow
       # inside the Actions allowlist, but it also drops that action's compiler
       # problem matchers. That trade is intentional here, not an oversight.
+      # Self-hosted runners ship neither rustup nor cargo. Install rustup in user
+      # space from the pinned archive and verify the published SHA-256 before
+      # running it; a checksum mismatch fails the step. $HOME/.cargo/bin is
+      # prepended to PATH for this step and exported for every later one.
       - name: Setup Rust
         shell: bash
+        env:
+          RUSTUP_VERSION: "1.29.1"
+          RUSTUP_TARGET: aarch64-apple-darwin
+          RUSTUP_INIT_SHA256: ec1b9233e7f72990ecd8e62063fa7f6c3dfc2bec8e97f88bff165f9100ac696a
         run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          if ! command -v rustup >/dev/null 2>&1; then
+            tmp="$(mktemp -d)"
+            curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp/rustup-init" \
+              "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${RUSTUP_TARGET}/rustup-init"
+            echo "${RUSTUP_INIT_SHA256}  $tmp/rustup-init" | shasum -a 256 -c -
+            chmod +x "$tmp/rustup-init"
+            "$tmp/rustup-init" -y --no-modify-path --default-toolchain none
+            rm -rf -- "$tmp"
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
           rustup default stable
           cargo --version
@@ -169,11 +213,29 @@ jobs:
       # broken transport should fail early rather than after a full compile.
       # This runner already proves sshd works — the Rust sshd fixture below
       # uses the same facility.
+      # sshd runs exec requests through the account's login shell. The self-hosted
+      # macOS runner account intentionally has none (/usr/bin/false), so the exec
+      # check below cannot pass there, while the fixture itself is unchanged. The
+      # Linux native-ssh-fixtures job keeps the sshd coverage; set the repo variable
+      # TW_SSHD_EXEC_FIXTURES=true to run this step on a self-hosted Mac whose
+      # runner account has a real shell.
       - name: Real backend transport fixture
+        if: runner.environment == 'github-hosted' || vars.TW_SSHD_EXEC_FIXTURES == 'true'
         run: npm run backend:fixtures
 
       - name: Check Rust formatting
         run: npm run native:fmt:check
+
+      # The self-hosted macOS runner is a system LaunchDaemon without a user
+      # security session, so legacy keychain writes fail with "Write permissions
+      # error" and keychain_secret_round_trip_hides_value_from_live_argv_without_a_tty
+      # cannot pass there. validate:rust passes TW_CARGO_TEST_ARGS through to the
+      # test binary, so the skip also applies to the ACL drift gate's re-run.
+      # TW_KEYCHAIN_TESTS=true re-enables the test once a GUI-session runner exists.
+      - name: Select Rust test filter
+        if: runner.environment != 'github-hosted' && vars.TW_KEYCHAIN_TESTS != 'true'
+        shell: bash
+        run: echo "TW_CARGO_TEST_ARGS=--skip keychain_secret_round_trip_hides_value_from_live_argv_without_a_tty" >> "$GITHUB_ENV"
 
       - name: Compile + test the Rust crate
         run: npm run validate:rust
@@ -226,7 +288,7 @@ jobs:
 
       # #101: the localhost-sshd session fixture is #[ignore] by default (it
       # needs an unsandboxed sshd, which sandboxed local/dev envs lack). This
-      # hosted macOS runner is a real machine, so run it explicitly to
+      # self-hosted macOS runner is a real machine, so run it explicitly to
       # exercise the SSH session lifecycle (create -> open stream -> I/O ->
       # close) end-to-end on every PR. #292's ignored reaper regressions share
       # this prefix so the same gate also proves that a later fixture startup
@@ -234,23 +296,46 @@ jobs:
       # failure fails Validate. The localShell / external-protocol session
       # lifecycle already runs in the validate:rust step above (those fixtures
       # are not #[ignore]).
+      # Same constraint as the backend transport fixture above: sshd execs through
+      # the login shell, which the self-hosted macOS runner account intentionally
+      # lacks. The Linux native-ssh-fixtures job keeps the sshd coverage.
       - name: Native SSH session lifecycle and reaper (sshd fixtures)
+        if: runner.environment == 'github-hosted' || vars.TW_SSHD_EXEC_FIXTURES == 'true'
         run: cargo test --manifest-path src-tauri/Cargo.toml localhost_ssh_transport_fixture -- --include-ignored --test-threads=1
 
       # #272: this is a version-bounded experiment, not product behavior. The
       # fixture records the macOS/OpenSSH versions actually observed and proves
       # append-compatible behavior only for those versions. Run it separately
       # so the ignored OpenSSH phases cannot disappear inside the default suite.
+      # Third sshd-exec-dependent step: the OpenSSH fixture runs `ssh … true`,
+      # a remote command that sshd executes through the login shell, which the
+      # self-hosted macOS runner account intentionally lacks. The three
+      # #[cfg(unix)] #[ignore] tests it drives also run in the Linux
+      # native-ssh-fixtures job; only the macOS/OpenSSH version recording is
+      # lost here. TW_SSHD_EXEC_FIXTURES=true re-enables it.
       - name: Native trust tooling (OpenSSH append experiment)
+        if: runner.environment == 'github-hosted' || vars.TW_SSHD_EXEC_FIXTURES == 'true'
         run: bash scripts/native-trust-tooling-test.sh
 
   native-ssh-fixtures:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS) }}
     timeout-minutes: 10
 
     steps:
+      - name: Start with fresh Git metadata on self-hosted runners
+        working-directory: ${{ runner.temp }}
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          test "$workspace" != /
+          rm -rf -- "$workspace/.git"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Cache cargo registry
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -261,9 +346,29 @@ jobs:
             ~/.cargo/registry/index
           key: cargo-registry-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
 
+      # Self-hosted runners ship neither rustup nor cargo. Install rustup in user
+      # space from the pinned archive and verify the published SHA-256 before
+      # running it; a checksum mismatch fails the step. $HOME/.cargo/bin is
+      # prepended to PATH for this step and exported for every later one.
       - name: Setup Rust
         shell: bash
+        env:
+          RUSTUP_VERSION: "1.29.1"
+          RUSTUP_TARGET: aarch64-unknown-linux-gnu
+          RUSTUP_INIT_SHA256: 15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433
         run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          if ! command -v rustup >/dev/null 2>&1; then
+            tmp="$(mktemp -d)"
+            curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp/rustup-init" \
+              "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${RUSTUP_TARGET}/rustup-init"
+            echo "${RUSTUP_INIT_SHA256}  $tmp/rustup-init" | sha256sum -c -
+            chmod +x "$tmp/rustup-init"
+            "$tmp/rustup-init" -y --no-modify-path --default-toolchain none
+            rm -rf -- "$tmp"
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup toolchain install stable --profile minimal
           rustup default stable
           cargo --version

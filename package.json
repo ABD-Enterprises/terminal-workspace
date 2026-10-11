@@ -50,7 +50,7 @@
     "validate": "bash ./scripts/validate.sh",
     "validate:ci": "TERMSNIP_RUN_E2E=1 bash ./scripts/validate.sh",
     "validate:full": "TERMSNIP_RUN_E2E=1 TERMSNIP_RUN_NATIVE_TRUST=1 bash ./scripts/validate.sh",
-    "validate:rust": "npm run native:check && cargo test --manifest-path src-tauri/Cargo.toml"
+    "validate:rust": "npm run native:check && cargo test --manifest-path src-tauri/Cargo.toml -- ${TW_CARGO_TEST_ARGS:-}"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
@@ -70,7 +70,8 @@
     "overrides": {
       "@babel/core": "^7.29.6",
       "brace-expansion": "^5.0.7",
-      "shell-quote": "^1.9.0"
+      "shell-quote": "^1.11.0",
+      "source-map-js": "^1.2.2"
     }
   }
 }

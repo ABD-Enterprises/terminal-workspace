@@ -24,16 +24,32 @@ env:
 
 jobs:
   release-macos:
-    # Signing secrets are still injected by GitHub at run time; the
-    # workflow's "Import signing certificate" step builds an isolated
-    # $RUNNER_TEMP keychain per run, so this is safe to run on a
-    # hosted worker without persisting key material.
-    runs-on: macos-latest
+    # This job signs, notarizes and publishes, so it never runs on the
+    # shared self-hosted macOS pool (that pool executes pull-request code).
+    # The fallback label set below deliberately matches no runner: until a
+    # dedicated signing runner exists and RELEASE_MACOS_RUNNER_LABELS points
+    # at it, the job queues visibly instead of running somewhere unintended.
+    # Signing secrets are still injected by GitHub at run time; the "Import
+    # Developer ID certificate" step builds an isolated $RUNNER_TEMP keychain
+    # per run, so no key material persists on the runner.
+    runs-on: ${{ fromJSON(vars.RELEASE_MACOS_RUNNER_LABELS || '["self-hosted","macOS","release-signing"]') }}
     timeout-minutes: 90
 
     steps:
+      - name: Start with fresh Git metadata on self-hosted runners
+        working-directory: ${{ runner.temp }}
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          test "$workspace" != /
+          rm -rf -- "$workspace/.git"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Resolve release metadata
         id: release_meta
@@ -121,6 +137,11 @@ jobs:
           CERT_PATH="$RUNNER_TEMP/termsnip-signing.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/termsnip-signing.keychain-db"
 
+          # Persistent runner: record the keychain search list and default
+          # keychain before touching them so the cleanup step can restore both.
+          security list-keychains -d user > "$RUNNER_TEMP/termsnip-keychain-list.txt"
+          security default-keychain -d user > "$RUNNER_TEMP/termsnip-default-keychain.txt" || true
+
           MACOS_CERTIFICATE_P12_BASE64="$MACOS_CERTIFICATE_P12_BASE64" CERT_PATH="$CERT_PATH" python3 <<'PY'
           import base64
           import os
@@ -184,6 +205,38 @@ jobs:
           RELEASE_TARGET: ${{ steps.release_meta.outputs.target }}
           MACOS_RELEASE_CHANNEL: ${{ steps.release_meta.outputs.channel }}
         run: npm run native:publish
+
+      # The signing keychain above is unlocked for 21600 s. On a persistent
+      # runner that would outlive the job, so always remove it and put the
+      # search list and default keychain back the way they were found.
+      - name: Remove signing keychain
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/termsnip-signing.keychain-db"
+          LIST_FILE="$RUNNER_TEMP/termsnip-keychain-list.txt"
+          DEFAULT_FILE="$RUNNER_TEMP/termsnip-default-keychain.txt"
+          if [[ -f "$LIST_FILE" ]]; then
+            saved=()
+            while IFS= read -r line; do
+              line="${line#"${line%%[! ]*}"}"
+              line="${line%\"}"; line="${line#\"}"
+              [[ -n "$line" && "$line" != "$KEYCHAIN_PATH" ]] && saved+=("$line")
+            done < "$LIST_FILE"
+            if [[ ${#saved[@]} -gt 0 ]]; then
+              security list-keychains -d user -s "${saved[@]}"
+            fi
+          fi
+          if [[ -s "$DEFAULT_FILE" ]]; then
+            default="$(tr -d ' "' < "$DEFAULT_FILE")"
+            [[ -n "$default" && "$default" != "$KEYCHAIN_PATH" ]] && security default-keychain -s "$default"
+          fi
+          if [[ -f "$KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+          rm -f -- "$RUNNER_TEMP/termsnip-signing.p12" "$LIST_FILE" "$DEFAULT_FILE"
+          security list-keychains -d user
 
       - name: Upload promoted release artifacts
         if: always() && hashFiles('artifacts/release/**') != ''
