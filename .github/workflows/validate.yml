@@ -307,7 +307,14 @@ jobs:
       # fixture records the macOS/OpenSSH versions actually observed and proves
       # append-compatible behavior only for those versions. Run it separately
       # so the ignored OpenSSH phases cannot disappear inside the default suite.
+      # Third sshd-exec-dependent step: the OpenSSH fixture runs `ssh … true`,
+      # a remote command that sshd executes through the login shell, which the
+      # self-hosted macOS runner account intentionally lacks. The three
+      # #[cfg(unix)] #[ignore] tests it drives also run in the Linux
+      # native-ssh-fixtures job; only the macOS/OpenSSH version recording is
+      # lost here. TW_SSHD_EXEC_FIXTURES=true re-enables it.
       - name: Native trust tooling (OpenSSH append experiment)
+        if: runner.environment == 'github-hosted' || vars.TW_SSHD_EXEC_FIXTURES == 'true'
         run: bash scripts/native-trust-tooling-test.sh
 
   native-ssh-fixtures:
