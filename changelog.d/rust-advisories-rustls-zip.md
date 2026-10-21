@@ -1,0 +1,1 @@
+- [SECURITY] Update `rustls`, `rustls-webpki` and `webpki-root-certs` to patched versions (six RustSec advisories) and record the three `zip` advisories as accepted, because `zip` is compiled only for Windows targets and the app ships macOS-only.

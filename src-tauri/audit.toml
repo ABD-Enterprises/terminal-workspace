@@ -36,6 +36,20 @@ ignore = [
   # `cargo tree -i rkyv` stops reporting "nothing to print" — either means it is
   # being compiled and this justification no longer holds.
   "RUSTSEC-2026-0235",
+
+  # zip 4.6.1 — SUID/SGID bits and symlink targets preserved by
+  # ZipArchive::extract (RUSTSEC-2026-0367, -0368, -0369; fixed in zip 9).
+  # Accepted because the vulnerable code is never built for the shipped target.
+  # zip is a dependency of tauri-plugin-updater that is compiled only for
+  # Windows targets (the updater unpacks a Windows installer). This app ships
+  # macOS-only: `cargo tree -i zip --target aarch64-apple-darwin` and
+  # `--target x86_64-unknown-linux-gnu` report "nothing to print", while
+  # `--target x86_64-pc-windows-msvc` shows it. Read 2026-10-21.
+  # RE-EVALUATE WHEN: a Windows build is shipped, or tauri-plugin-updater moves
+  # to zip 9 or later (cargo-audit then stops reporting it).
+  "RUSTSEC-2026-0367",
+  "RUSTSEC-2026-0368",
+  "RUSTSEC-2026-0369",
 ]
 # Note: cargo audit also reports gtk-rs GTK3 bindings (atk/gdk/gtk/…) as
 # "unmaintained". Those are Linux-only deps Tauri links for its Linux target;
