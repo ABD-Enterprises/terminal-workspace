@@ -1,1 +1,1 @@
-- [INTERNAL] AGENTS.md now carries the fleet core and this repository's rules (validation, merge, changelog, release and signing, live data); CLAUDE.md only imports it.
+- [INTERNAL] AGENTS.md now carries the fleet core and this repository's rules (validation, merge, changelog, release and signing, live data); CLAUDE.md only imports it. (#412)
