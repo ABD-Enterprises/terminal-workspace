@@ -53,13 +53,13 @@
     "validate:rust": "npm run native:check && cargo test --manifest-path src-tauri/Cargo.toml -- ${TW_CARGO_TEST_ARGS:-}"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
     "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.12.0",
     "typescript-eslint": "^8.69.0",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.5"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
