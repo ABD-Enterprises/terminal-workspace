@@ -8,15 +8,19 @@ packages:
 trustPolicy: no-downgrade
 blockExoticSubdeps: true
 minimumReleaseAge: 10080
-# #414-precedent cooldown exception (2026-10-24): these three names are the
-# patched versions named by the open GitHub advisories (vite 8.2.4 fixes five,
-# happy-dom 21.0.4 fixes two highs, vitest's @vitest/mocker 5.0.3 fixes two),
-# and all three were published inside the 7-day window above (vite 10-21,
-# vitest 10-19, happy-dom 10-20). Dev-scope only; the full validate run
-# exercises each bump. Compensating evidence per the #414 record: exact-head
-# independent review plus pnpm audit before merge. Remove these three entries
-# on or after 2026-10-28, when vite 8.2.4 (the newest of the three) has aged
-# out; subsequent updates are then subject to the normal wait again.
+# Cooldown exception (2026-10-24), recorded deliberately per the exception
+# recorded in the #414 PR description: these two exact versions are the
+# patched releases named by the open GitHub advisories, and both were
+# published inside the 7-day window above (vite 8.3.5 on 10-21, six
+# advisories affecting 8.2.2 all fixed by 8.3.3; happy-dom 21.0.4 on
+# 10-20, GHSA-834v-8h66-3h79 / CVE-2026-115895, the incomplete fix for
+# CVE-2026-33943). Dev-scope only; the full validate run exercises each
+# bump, and an exact-head independent review verified every other newly
+# resolved version was outside the window (vitest 5.0.5, published 10-15,
+# resolved under the guard and needs no exemption). Version-scoped rather
+# than name-scoped so future releases of vite and happy-dom are still
+# subject to the full wait; these two entries can be deleted once the
+# versions themselves have aged.
 minimumReleaseAgeExclude:
-  - vite
-  - happy-dom
+  - vite@8.3.5
+  - happy-dom@21.0.4
