@@ -20,7 +20,7 @@
 - `npm run native:notary:auth:test`: portable notarization auth dry run
 - `npm run native:publish:dry-run`: promoted GitHub release publish dry run
 - `npm run validate`: fast local effort guard, lint, unit/integration, build, and changed-file
-  Semgrep when Docker is available
+  Semgrep (required — without Docker the gate fails rather than skips)
 - `npm run validate:ci`: CI-equivalent validation with browser e2e enabled
 - `npm run validate:full`: strongest local validation with browser e2e, macOS native trust
   tooling and the real backend transport fixture when available
