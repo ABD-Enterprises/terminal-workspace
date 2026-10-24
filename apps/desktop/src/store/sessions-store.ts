@@ -58,9 +58,11 @@ function limitCommandHistory(commandHistory: SessionCommandHistoryEntry[]) {
 }
 
 function normalizePersistedPane(pane: SessionPane): SessionPane {
+  const persistCommandHistory = pane.persistCommandHistory ?? false;
   return {
     ...pane,
-    persistOutputPreview: pane.persistOutputPreview ?? true,
+    persistCommandHistory,
+    persistOutputPreview: persistCommandHistory ? pane.persistOutputPreview ?? false : false,
   };
 }
 
@@ -71,10 +73,33 @@ function resolvePersistOutputPreview(
   const pane = panes[entry.paneId];
   return pane
     ? normalizePersistedPane(pane).persistOutputPreview
-    : entry.persistOutputPreview ?? false;
+    : entry.persistCommandHistory === true && entry.persistOutputPreview === true;
 }
 
-function sanitizePersistedWorkspace(
+function resolvePersistCommandHistory(
+  entry: SessionCommandHistoryEntry,
+  panes: Record<string, SessionPane>
+) {
+  const pane = panes[entry.paneId];
+  return pane
+    ? normalizePersistedPane(pane).persistCommandHistory
+    : entry.persistCommandHistory === true;
+}
+
+function redactObviousCommandCredentials(command: string) {
+  return command
+    .replace(
+      /(--(?:password|passwd|token|api[-_]?key|secret|client[-_]secret))(=|\s+)("[^"]*"|'[^']*'|[^\s;&|]+)/gi,
+      "$1$2[REDACTED]"
+    )
+    .replace(
+      /\b(password|passwd|token|api_key|api-key|secret|client_secret|client-secret)(=)("[^"]*"|'[^']*'|[^\s;&|]+)/gi,
+      "$1$2[REDACTED]"
+    )
+    .replace(/(authorization\s*:\s*bearer\s+)[^\s;&|]+/gi, "$1[REDACTED]");
+}
+
+export function sanitizePersistedWorkspace(
   workspace: Pick<SessionWorkspaceState, "tabs" | "panes" | "activeTabId" | "lastRestoredAt">
 ) {
   return {
@@ -103,17 +128,24 @@ export function sanitizePersistedCommandHistory(
   commandHistory: SessionCommandHistoryEntry[],
   panes: Record<string, SessionPane>
 ) {
-  return limitCommandHistory(commandHistory).map<SessionCommandHistoryEntry>((entry) => {
+  return limitCommandHistory(commandHistory)
+    .filter((entry) => resolvePersistCommandHistory(entry, panes))
+    .map<SessionCommandHistoryEntry>((entry) => {
     const persistOutputPreview = resolvePersistOutputPreview(entry, panes);
+    const sanitizedEntry = {
+      ...entry,
+      command: redactObviousCommandCredentials(entry.command),
+      persistCommandHistory: true,
+    };
     if (persistOutputPreview) {
       return {
-        ...entry,
+        ...sanitizedEntry,
         persistOutputPreview: true,
       };
     }
 
     return {
-      ...entry,
+      ...sanitizedEntry,
       persistOutputPreview: false,
       outputPreview: undefined,
       outputUpdatedAt: undefined,
@@ -364,6 +396,37 @@ export function updatePaneReconnectPreference(
   };
 }
 
+export function updatePaneCommandHistoryPersistence<
+  T extends SessionWorkspaceState & { commandHistory?: SessionCommandHistoryEntry[] },
+>(
+  state: T,
+  paneId: string,
+  persistCommandHistory: boolean
+): T {
+  const pane = state.panes[paneId];
+  if (!pane) {
+    return state;
+  }
+
+  const persistOutputPreview = persistCommandHistory && pane.persistOutputPreview;
+  const nextCommandHistory = Array.isArray(state.commandHistory)
+    ? state.commandHistory.map((entry) =>
+        entry.paneId === paneId
+          ? { ...entry, persistCommandHistory, persistOutputPreview }
+          : entry
+      )
+    : undefined;
+
+  return {
+    ...state,
+    panes: {
+      ...state.panes,
+      [paneId]: touchPane(pane, { persistCommandHistory, persistOutputPreview }),
+    },
+    ...(nextCommandHistory ? { commandHistory: nextCommandHistory } : {}),
+  } as T;
+}
+
 export function updatePanePreviewPersistence<
   T extends SessionWorkspaceState & { commandHistory?: SessionCommandHistoryEntry[] },
 >(
@@ -383,9 +446,13 @@ export function updatePanePreviewPersistence<
     return state;
   }
 
+  const shouldPersistOutputPreview = pane.persistCommandHistory && persistOutputPreview;
+
   const nextCommandHistory = Array.isArray(state.commandHistory)
     ? state.commandHistory.map((entry) =>
-        entry.paneId === paneId ? { ...entry, persistOutputPreview } : entry
+        entry.paneId === paneId
+          ? { ...entry, persistOutputPreview: shouldPersistOutputPreview }
+          : entry
       )
     : undefined;
 
@@ -393,7 +460,7 @@ export function updatePanePreviewPersistence<
     ...state,
     panes: {
       ...state.panes,
-      [paneId]: touchPane(pane, { persistOutputPreview }),
+      [paneId]: touchPane(pane, { persistOutputPreview: shouldPersistOutputPreview }),
     },
     ...(nextCommandHistory ? { commandHistory: nextCommandHistory } : {}),
   } as T;
@@ -596,6 +663,7 @@ export function recordPaneCommandHistory(
     transport: pane.transport,
     command: trimmedCommand,
     source,
+    persistCommandHistory: pane.persistCommandHistory,
     persistOutputPreview: normalizePersistedPane(pane).persistOutputPreview,
     createdAt: new Date().toISOString(),
   };
@@ -650,6 +718,7 @@ export interface SessionsState extends SessionWorkspaceState {
   selectPane: (tabId: string, paneId: string) => void;
   setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
+  setPanePersistCommandHistory: (paneId: string, persistCommandHistory: boolean) => void;
   setPanePersistOutputPreview: (paneId: string, persistOutputPreview: boolean) => void;
   setPaneTransport: (paneId: string, transport: SessionTransport) => void;
   setPaneBackendSession: (paneId: string, backendSessionId?: string) => void;
@@ -748,6 +817,8 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => updatePaneConnectionState(state, paneId, connectionState)),
       setPaneReconnectOnRestore: (paneId, reconnectOnRestore) =>
         set((state) => updatePaneReconnectPreference(state, paneId, reconnectOnRestore)),
+      setPanePersistCommandHistory: (paneId, persistCommandHistory) =>
+        set((state) => updatePaneCommandHistoryPersistence(state, paneId, persistCommandHistory)),
       setPanePersistOutputPreview: (paneId, persistOutputPreview) =>
         set((state) => updatePanePreviewPersistence(state, paneId, persistOutputPreview)),
       setPaneTransport: (paneId, transport) =>

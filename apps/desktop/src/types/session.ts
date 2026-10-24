@@ -25,6 +25,7 @@ export interface SessionCommandHistoryEntry {
   transport: SessionTransport;
   command: string;
   source: SessionCommandHistorySource;
+  persistCommandHistory?: boolean;
   persistOutputPreview?: boolean;
   outputPreview?: string;
   outputUpdatedAt?: string;
@@ -40,6 +41,7 @@ export interface SessionPane {
   backendSessionId?: string;
   queuedCommands: QueuedPaneCommand[];
   reconnectOnRestore: boolean;
+  persistCommandHistory: boolean;
   persistOutputPreview: boolean;
   createdAt: string;
   updatedAt: string;
@@ -94,7 +96,8 @@ export function createSessionPane(host: HostRecord, title = host.label): Session
     transport,
     queuedCommands: [],
     reconnectOnRestore: false,
-    persistOutputPreview: true,
+    persistCommandHistory: false,
+    persistOutputPreview: false,
     createdAt: now,
     updatedAt: now,
   };
