@@ -1,1 +1,0 @@
-- [INTERNAL] Audit the pending changelog fragments against the tree before the 0.2.0 roll: correct the stale self-hosted-runner and glib claims, and merge the two overlapping rustls entries into one line stating the final version. (#418)
