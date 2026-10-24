@@ -20,7 +20,7 @@ For native (Tauri) development and the macOS release pipeline, see
 Run the local gate that mirrors CI as closely as practical:
 
 - `npm run validate` — fast local gate: lint, unit/integration tests, desktop
-  build, and changed-file static analysis when available.
+  build, and changed-file Semgrep (required — without Docker the gate fails rather than skips).
 - `npm run validate:ci` — the CI-equivalent gate (adds browser e2e).
 - `npm run test` — unit + integration coverage (Vitest).
 
