@@ -1,0 +1,1 @@
+- [INTERNAL] `npm run validate:full` now also runs the real backend transport fixture, so the strongest local gate covers the auth gate, session lifecycle, exec, SFTP and websocket paths CI already exercises. (#420)
