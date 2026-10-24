@@ -25,7 +25,7 @@
   channel directory and writes a checksum file.
 - `npm run native:publish:dry-run`: promoted-release publish dry run for GitHub release assets.
 - `npm run validate`: fast local effort guard, lint, Vitest, desktop build, and changed-file
-  Semgrep when Docker is available.
+  Semgrep (required — without Docker the gate fails rather than skips).
 - `npm run validate:ci`: CI-equivalent gate with browser e2e enabled.
 - `npm run validate:full`: strongest local gate with browser e2e, macOS native trust tooling
   and the real backend transport fixture when available.

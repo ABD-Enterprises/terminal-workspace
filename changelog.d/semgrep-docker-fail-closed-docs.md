@@ -1,0 +1,1 @@
+- [INTERNAL] The `npm run validate` bullets in README, development, testing and contributing docs now say the changed-file Semgrep gate is required and fails rather than skips without Docker, matching `scripts/validate.sh` and AGENTS.md. (#423)
