@@ -6602,9 +6602,9 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
         );
     }
 
-    // #101 (resolved): these three round-trips used to hit the real login
-    // keychain, which is locked on a headless CI runner, so they were
-    // #[ignore]d. They now run against a throwaway keychain inside an
+    // These three round-trips used to hit the real login keychain, which is
+    // locked on a headless CI runner, so they were #[ignore]d and ran
+    // nowhere. They now run against a throwaway keychain inside an
     // isolated HOME — the isolation keychain_support's argv test already
     // proves works headless — spawned as a detached child (setsid, null
     // stdin) so no interactive prompt can hang them and the login keychain
@@ -6637,8 +6637,35 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
     #[cfg(target_os = "macos")]
     fn run_in_isolated_keychain(test_path: &str, body: impl FnOnce()) {
         if std::env::var_os(KEYCHAIN_ROUND_TRIP_CHILD).is_some() {
+            // Same three preconditions as keychain_support's isolated child:
+            // fail fast instead of hanging on a security prompt for the full
+            // job timeout if the spawn contract (setsid, null stdin, isolated
+            // home) ever regresses.
+            let tty = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/tty");
+            assert!(
+                tty.is_err(),
+                "the isolated round-trip test child unexpectedly acquired a controlling TTY"
+            );
+
+            let mut inherited_stdin_byte = [0u8; 1];
+            let inherited_stdin_read =
+                std::io::Read::read(&mut std::io::stdin(), &mut inherited_stdin_byte)
+                    .expect("the nulled inherited stdin should be readable as EOF");
+            assert_eq!(
+                inherited_stdin_read, 0,
+                "the isolated round-trip test child must inherit /dev/null as stdin"
+            );
+
             let isolated_home = std::path::PathBuf::from(
                 std::env::var_os("HOME").expect("isolated HOME must be set"),
+            );
+            assert_eq!(
+                std::env::var_os("CFFIXED_USER_HOME").as_deref(),
+                Some(isolated_home.as_os_str()),
+                "CoreFoundation and POSIX home resolution must share the isolated home"
             );
             let keychain_dir = isolated_home.join("Library/Keychains");
             std::fs::create_dir_all(&keychain_dir)
@@ -6663,6 +6690,23 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
             assert!(
                 trim_security_output(&isolated_default.stdout).contains(keychain_arg),
                 "the default keychain inside the isolated home must be the throwaway keychain"
+            );
+
+            // The default/search-list assertions above cannot alone prove the
+            // preference domain is isolated: if CFFIXED_USER_HOME were
+            // ignored, this same process would write and read the shared
+            // domain and still report the throwaway path — while the real
+            // user's default keychain ended up repointed at a temp file this
+            // child deletes. Requiring the preference write to land under the
+            // isolated HOME distinguishes the two cases.
+            let prefs_dir = isolated_home.join("Library/Preferences");
+            let prefs_landed = std::fs::read_dir(&prefs_dir)
+                .map(|mut entries| entries.next().is_some())
+                .unwrap_or(false);
+            assert!(
+                prefs_landed,
+                "the user preference write must land under the isolated HOME ({}), not a shared domain",
+                prefs_dir.display()
             );
 
             body();
