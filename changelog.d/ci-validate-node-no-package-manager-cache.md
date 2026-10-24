@@ -1,1 +1,1 @@
-- [INTERNAL] Disable the setup-node package-manager cache in both validate jobs (#424)
+- [INTERNAL] Explicitly disable setup-node's package-manager cache in both validate jobs (#424)
