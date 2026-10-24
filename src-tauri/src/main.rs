@@ -4876,6 +4876,11 @@ mod tests {
         std::sync::atomic::AtomicUsize::new(0);
     static COPYKEY_ROOT_SEQ: std::sync::atomic::AtomicUsize =
         std::sync::atomic::AtomicUsize::new(0);
+    /// Names the per-test isolated HOME. The three keychain round-trip tests
+    /// run concurrently in one test process, so pid+clock alone would be the
+    /// #274 anti-pattern; the counter is what keeps their temp dirs distinct.
+    static KEYCHAIN_HOME_SEQ: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
 
     fn throwaway_host_key_store(label: &str) -> NativeHostKeyStore {
         let nanos = std::time::SystemTime::now()
@@ -6597,100 +6602,217 @@ lrwxr-xr-x    1 ops ops  11 Mar 31 12:00 current -> releases
         );
     }
 
+    // #101 (resolved): these three round-trips used to hit the real login
+    // keychain, which is locked on a headless CI runner, so they were
+    // #[ignore]d. They now run against a throwaway keychain inside an
+    // isolated HOME — the isolation keychain_support's argv test already
+    // proves works headless — spawned as a detached child (setsid, null
+    // stdin) so no interactive prompt can hang them and the login keychain
+    // is never touched.
     #[cfg(target_os = "macos")]
-    #[test]
-    // #101: keychain round-trips hit the real macOS login keychain, which is
-    // unreliable on a headless CI runner (the login keychain may be locked).
-    // Ignored so routine PR validation is deterministic; run them on an
-    // interactive machine with `cargo test -- --include-ignored`.
-    #[ignore = "requires an interactive/unlocked macOS login keychain; flaky on headless CI"]
-    fn keychain_secret_round_trip() {
-        let unique_suffix = SystemTime::now()
+    const KEYCHAIN_ROUND_TRIP_CHILD: &str = "TERMSNIP_KEYCHAIN_ROUND_TRIP_CHILD";
+
+    #[cfg(target_os = "macos")]
+    unsafe extern "C" {
+        fn setsid() -> c_int;
+    }
+
+    #[cfg(target_os = "macos")]
+    fn assert_security_success(args: &[&str]) -> Output {
+        let output = run_security_command(args).expect("security CLI should spawn");
+        assert!(
+            output.status.success(),
+            "security {args:?} failed: {}",
+            format_security_error(&output)
+        );
+        output
+    }
+
+    /// Run `body` in a child process whose default keychain is a throwaway
+    /// file inside a temp HOME, then assert the child passed. In the child
+    /// (detected by `KEYCHAIN_ROUND_TRIP_CHILD`) the throwaway keychain is
+    /// created, unlocked, and made both the default and the only search-list
+    /// entry, so every `security` call the body makes lands there instead of
+    /// the login keychain; the keychain is deleted when the body returns.
+    #[cfg(target_os = "macos")]
+    fn run_in_isolated_keychain(test_path: &str, body: impl FnOnce()) {
+        if std::env::var_os(KEYCHAIN_ROUND_TRIP_CHILD).is_some() {
+            let isolated_home = std::path::PathBuf::from(
+                std::env::var_os("HOME").expect("isolated HOME must be set"),
+            );
+            let keychain_dir = isolated_home.join("Library/Keychains");
+            std::fs::create_dir_all(&keychain_dir)
+                .expect("isolated keychain directory should be created");
+            // The default/search-list change below persists through
+            // CFPreferences, which writes under the isolated HOME — same
+            // reason keychain_support's child creates it.
+            std::fs::create_dir_all(isolated_home.join("Library/Preferences"))
+                .expect("isolated preferences directory should be created");
+            let keychain_path = keychain_dir.join("termsnip-round-trip.keychain-db");
+            let keychain_arg = keychain_path
+                .to_str()
+                .expect("temporary keychain path should be UTF-8");
+            let keychain_password = "termsnip-isolated-keychain-password";
+
+            assert_security_success(&["create-keychain", "-p", keychain_password, keychain_arg]);
+            assert_security_success(&["list-keychains", "-d", "user", "-s", keychain_arg]);
+            assert_security_success(&["default-keychain", "-d", "user", "-s", keychain_arg]);
+            assert_security_success(&["unlock-keychain", "-p", keychain_password, keychain_arg]);
+
+            let isolated_default = assert_security_success(&["default-keychain", "-d", "user"]);
+            assert!(
+                trim_security_output(&isolated_default.stdout).contains(keychain_arg),
+                "the default keychain inside the isolated home must be the throwaway keychain"
+            );
+
+            body();
+
+            assert_security_success(&["delete-keychain", keychain_arg]);
+            return;
+        }
+
+        let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("system time should be after unix epoch")
+            .expect("system clock should be after the Unix epoch")
             .as_nanos();
-        // #274: same reason as the filesystem roots — pid is shared and the
-        // clock is coarse, so the counter is what keeps concurrent tests from
-        // sharing a keychain account.
-        let seq = KEYCHAIN_ACCOUNT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let account = format!("termsnip-test-{}-{unique_suffix}-{seq}", process::id());
-        let service = format!("{KEYCHAIN_PASSWORD_SERVICE}.tests");
+        let seq = KEYCHAIN_HOME_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let isolated_home = std::env::temp_dir().join(format!(
+            "termsnip-keychain-round-trip-{}-{unique}-{seq}",
+            process::id()
+        ));
+        std::fs::create_dir_all(&isolated_home)
+            .expect("isolated keychain test home should be created");
 
-        store_keychain_secret(&service, &account, "test-secret")
-            .expect("storing test keychain secret should succeed");
-        let loaded = load_keychain_secret(&service, &account)
-            .expect("loading test keychain secret should succeed");
-        assert_eq!(loaded.as_deref(), Some("test-secret"));
+        let mut command =
+            Command::new(std::env::current_exe().expect("the Rust test executable should resolve"));
+        command
+            .arg("--exact")
+            .arg(test_path)
+            .arg("--nocapture")
+            .env(KEYCHAIN_ROUND_TRIP_CHILD, "1")
+            .env("HOME", &isolated_home)
+            .env("CFFIXED_USER_HOME", &isolated_home)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-        delete_keychain_secret(&service, &account)
-            .expect("deleting test keychain secret should succeed");
-        let cleared = load_keychain_secret(&service, &account)
-            .expect("loading deleted test keychain secret should succeed");
-        assert_eq!(cleared, None);
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            command.pre_exec(|| {
+                if setsid() == -1 {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(())
+                }
+            });
+        }
+
+        let output = command.output();
+        let cleanup = std::fs::remove_dir_all(&isolated_home);
+        let output = output.expect("the isolated keychain test child should start");
+        cleanup.expect("the isolated keychain test home should be removable");
+
+        assert!(
+            output.status.success(),
+            "isolated keychain child for {test_path} failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[cfg(target_os = "macos")]
     #[test]
-    #[ignore = "requires an interactive/unlocked macOS login keychain; flaky on headless CI"]
+    fn keychain_secret_round_trip() {
+        run_in_isolated_keychain("tests::keychain_secret_round_trip", || {
+            let unique_suffix = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos();
+            // #274: same reason as the filesystem roots — pid is shared and the
+            // clock is coarse, so the counter is what keeps concurrent tests from
+            // sharing a keychain account.
+            let seq = KEYCHAIN_ACCOUNT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let account = format!("termsnip-test-{}-{unique_suffix}-{seq}", process::id());
+            let service = format!("{KEYCHAIN_PASSWORD_SERVICE}.tests");
+
+            store_keychain_secret(&service, &account, "test-secret")
+                .expect("storing test keychain secret should succeed");
+            let loaded = load_keychain_secret(&service, &account)
+                .expect("loading test keychain secret should succeed");
+            assert_eq!(loaded.as_deref(), Some("test-secret"));
+
+            delete_keychain_secret(&service, &account)
+                .expect("deleting test keychain secret should succeed");
+            let cleared = load_keychain_secret(&service, &account)
+                .expect("loading deleted test keychain secret should succeed");
+            assert_eq!(cleared, None);
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
     fn keychain_key_passphrase_round_trip() {
         // Same shape as the per-host round-trip but exercises the new
         // fingerprint-keyed service so a regression in the constant or in
         // the per-fingerprint command path surfaces here. See
         // parity-and-hardening-plan.md P1-S5.
-        let unique_suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after unix epoch")
-            .as_nanos();
-        let seq = KEYCHAIN_ACCOUNT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let fingerprint = format!(
-            "SHA256:term-snip-test-{}-{unique_suffix}-{seq}",
-            process::id()
-        );
-        let service = format!("{KEYCHAIN_KEY_PASSPHRASE_SERVICE}.tests");
+        run_in_isolated_keychain("tests::keychain_key_passphrase_round_trip", || {
+            let unique_suffix = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos();
+            let seq = KEYCHAIN_ACCOUNT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let fingerprint = format!(
+                "SHA256:term-snip-test-{}-{unique_suffix}-{seq}",
+                process::id()
+            );
+            let service = format!("{KEYCHAIN_KEY_PASSPHRASE_SERVICE}.tests");
 
-        store_keychain_secret(&service, &fingerprint, "key-pass")
-            .expect("storing test key passphrase should succeed");
-        let loaded = load_keychain_secret(&service, &fingerprint)
-            .expect("loading test key passphrase should succeed");
-        assert_eq!(loaded.as_deref(), Some("key-pass"));
+            store_keychain_secret(&service, &fingerprint, "key-pass")
+                .expect("storing test key passphrase should succeed");
+            let loaded = load_keychain_secret(&service, &fingerprint)
+                .expect("loading test key passphrase should succeed");
+            assert_eq!(loaded.as_deref(), Some("key-pass"));
 
-        delete_keychain_secret(&service, &fingerprint)
-            .expect("deleting test key passphrase should succeed");
-        let cleared = load_keychain_secret(&service, &fingerprint)
-            .expect("loading deleted test key passphrase should succeed");
-        assert_eq!(cleared, None);
+            delete_keychain_secret(&service, &fingerprint)
+                .expect("deleting test key passphrase should succeed");
+            let cleared = load_keychain_secret(&service, &fingerprint)
+                .expect("loading deleted test key passphrase should succeed");
+            assert_eq!(cleared, None);
+        });
     }
 
     #[cfg(target_os = "macos")]
     #[test]
-    #[ignore = "requires an interactive/unlocked macOS login keychain; flaky on headless CI"]
     fn keychain_identity_passphrase_round_trip() {
         // Same shape as the per-host and per-fingerprint round-trips,
         // exercising the new per-identity service introduced by P2-DM1
         // batch 3. Catches regressions in either the constant or the
         // command-level wrapper.
-        let unique_suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after unix epoch")
-            .as_nanos();
-        let seq = KEYCHAIN_ACCOUNT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let identity_id = format!(
-            "termsnip-identity-test-{}-{unique_suffix}-{seq}",
-            process::id()
-        );
-        let service = format!("{KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE}.tests");
+        run_in_isolated_keychain("tests::keychain_identity_passphrase_round_trip", || {
+            let unique_suffix = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos();
+            let seq = KEYCHAIN_ACCOUNT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let identity_id = format!(
+                "termsnip-identity-test-{}-{unique_suffix}-{seq}",
+                process::id()
+            );
+            let service = format!("{KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE}.tests");
 
-        store_keychain_secret(&service, &identity_id, "identity-pass")
-            .expect("storing test identity passphrase should succeed");
-        let loaded = load_keychain_secret(&service, &identity_id)
-            .expect("loading test identity passphrase should succeed");
-        assert_eq!(loaded.as_deref(), Some("identity-pass"));
+            store_keychain_secret(&service, &identity_id, "identity-pass")
+                .expect("storing test identity passphrase should succeed");
+            let loaded = load_keychain_secret(&service, &identity_id)
+                .expect("loading test identity passphrase should succeed");
+            assert_eq!(loaded.as_deref(), Some("identity-pass"));
 
-        delete_keychain_secret(&service, &identity_id)
-            .expect("deleting test identity passphrase should succeed");
-        let cleared = load_keychain_secret(&service, &identity_id)
-            .expect("loading deleted test identity passphrase should succeed");
-        assert_eq!(cleared, None);
+            delete_keychain_secret(&service, &identity_id)
+                .expect("deleting test identity passphrase should succeed");
+            let cleared = load_keychain_secret(&service, &identity_id)
+                .expect("loading deleted test identity passphrase should succeed");
+            assert_eq!(cleared, None);
+        });
     }
 
     #[test]
