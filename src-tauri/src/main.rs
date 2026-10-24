@@ -4437,7 +4437,9 @@ fn persistence_migrations() -> Vec<Migration> {
 }
 
 /// #180: mirrors `tauri-plugin-sql` 2.4.0's private `wrapper.rs::path_mapper`.
-/// Tests cover only this helper, not the plugin mapper, so re-check it before upgrading.
+/// Verified unchanged through 2.6.0 (#414): the upstream mapper is identical
+/// across 2.4.0, 2.4.1 and 2.6.0. Tests cover only this helper, not the plugin
+/// mapper, so re-check it before upgrading.
 fn database_path_for_url(app_config_dir: &Path, database_url: &str) -> io::Result<PathBuf> {
     let relative_path = database_url
         .split_once(':')
