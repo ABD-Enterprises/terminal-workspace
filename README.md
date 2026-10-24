@@ -50,8 +50,8 @@ release contract, and `.env` remains the local override file.
 - `npm run validate` runs the fast local gate: effort guard, lint, unit/integration tests, desktop
   build, and changed-file Semgrep when Docker is available.
 - `npm run validate:ci` runs the CI-equivalent gate with browser e2e enabled.
-- `npm run validate:full` runs the strongest local gate with browser e2e plus macOS native trust
-  tooling when available.
+- `npm run validate:full` runs the strongest local gate with browser e2e, macOS native trust
+  tooling and the real backend transport fixture when available.
 
 ## Demo Mode
 
