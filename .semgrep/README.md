@@ -19,8 +19,8 @@ Two pieces, and neither is a copy of the rules:
 | Field | Value |
 |---|---|
 | Source of rule ids | `https://semgrep.dev/c/auto` |
-| Snapshot date | 2026-09-16 |
-| Pinned commit | `40b8c63f75dc7c22c8a77482d73bfb864b146f7e` (2026-07-29) |
+| Snapshot date | 2026-10-25 |
+| Pinned commit | `16b9e6d45f10649f6a531ec4838ed9924372c3bc` (2026-10-21) |
 | Rules in manifest | 1055 (registry ids with no upstream file: 18) |
 | Image the pin was verified with | `semgrep/semgrep:1.172.0@sha256:65dcd4408adda7c183a6b4550cb1e9b19f7f627a6fbb7e0559bd466bedc44d7b` |
 | Owner | release (whoever bumps the semgrep image bumps this too) |
