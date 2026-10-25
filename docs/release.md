@@ -62,7 +62,7 @@
 - `artifacts/release/*.notary-*.json`: Apple notarization submission and log output
 - `artifacts/release/*.stapler-*.txt`: stapling and ticket validation logs
 - `artifacts/release/promoted/stable/v0.1.0/`: promoted release zip, manifest, logs, and checksum
-- `artifacts/release/promoted/stable/v0.1.0/terminal-workspace-macos-v0.1.0.app.dmg`: notarized +
+- `artifacts/release/promoted/stable/v0.1.0/terminal-workspace-macos-v0.1.0.dmg`: notarized +
   stapled DMG installer uploaded to the GitHub release
 - `artifacts/release/promoted/stable/latest-macos-release.json`: latest promoted stable manifest
 - `artifacts/release/promoted/stable/v0.1.0/RELEASE_NOTES.md`: promoted release notes used by the
