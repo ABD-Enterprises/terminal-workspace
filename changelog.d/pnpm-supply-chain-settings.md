@@ -1,1 +1,0 @@
-- [SECURITY] pnpm-workspace.yaml now sets trustPolicy: no-downgrade, blockExoticSubdeps: true and minimumReleaseAge: 10080 (7 days), the guards that the semgrep package_managers.pnpm rules check for. No installed version changes. (#386)
