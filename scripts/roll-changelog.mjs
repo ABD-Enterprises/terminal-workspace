@@ -2,22 +2,36 @@
 // Roll changelog.d/*.md fragments into CHANGELOG.md for a release.
 //
 // Each fragment holds one or more `- [LABEL] text (#id)` lines (the shape the
-// changelog-discipline gate requires per PR). This inserts a
+// PR template requires per PR). This inserts a
 // `## <version> — <date>` section directly under `## Unreleased`, grouped by
 // label in the ledger's fixed order, resets the Unreleased subsections to
 // `- None.`, and deletes the consumed fragments.
 //
 // Usage: node scripts/roll-changelog.mjs <version> [--date YYYY-MM-DD] [--dry-run]
-import { readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LABELS = ["BREAKING", "FEATURE", "FIX", "INTERNAL", "SECURITY"];
 
+// A missing changelog.d/ (or one whose fragments were all consumed by an
+// earlier roll) is a normal state, not a crash: report it as "no fragments"
+// instead of failing with a raw ENOENT.
+function readFragmentFiles(dir) {
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch (err) {
+    if (err && (err.code === "ENOENT" || err.code === "ENOTDIR")) return [];
+    throw err;
+  }
+  return names.filter((f) => f.endsWith(".md")).sort();
+}
+
 export function collectFragments(dir) {
   const entries = {};
   for (const label of LABELS) entries[label] = [];
-  const files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+  const files = readFragmentFiles(dir);
   for (const file of files) {
     for (const raw of readFileSync(join(dir, file), "utf8").split("\n")) {
       const line = raw.trim();
@@ -43,7 +57,9 @@ export function renderSection(version, date, entries) {
 
 export function insertRelease(changelog, section) {
   const marker = "## Unreleased";
-  const at = changelog.indexOf(marker);
+  // Anchor on a real heading line, not the first substring: the intro and any
+  // prose must survive the splice.
+  const at = changelog.search(/^## Unreleased[ \t]*$/m);
   if (at < 0) throw new Error("CHANGELOG.md has no '## Unreleased' heading");
   // Everything between Unreleased and the next release heading is reset.
   const rest = changelog.slice(at + marker.length);
@@ -54,7 +70,14 @@ export function insertRelease(changelog, section) {
   return `${changelog.slice(0, at)}${unreleased.join("\n")}\n${section}\n${tail}`;
 }
 
-const invokedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+// Compare real paths: through a symlinked prefix (macOS /var -> /private/var)
+// an absolute argv would otherwise mismatch import.meta.url and the script
+// would silently do nothing while exiting 0.
+const invokedDirectly = (() => {
+  if (!process.argv[1]) return false;
+  try { return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]); }
+  catch { return false; }
+})();
 if (invokedDirectly) {
   const version = process.argv[2];
   if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
@@ -66,6 +89,10 @@ if (invokedDirectly) {
   const dryRun = process.argv.includes("--dry-run");
   const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
   const { files, entries } = collectFragments(join(root, "changelog.d"));
+  if (files.length === 0 || LABELS.every((label) => entries[label].length === 0)) {
+    console.error("[roll-changelog] no fragments in changelog.d/ (missing, empty or blank) — nothing to roll");
+    process.exit(dryRun ? 0 : 1);
+  }
   const section = renderSection(version, date, entries);
   if (dryRun) {
     console.log(section);
