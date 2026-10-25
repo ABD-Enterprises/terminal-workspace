@@ -1,0 +1,1 @@
+- [INTERNAL] Attach the self-hosted runner facts in validate.yml comments to the conditional cases they explain, matching the current runner variables (#428)
