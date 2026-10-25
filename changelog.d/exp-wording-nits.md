@@ -1,0 +1,1 @@
+- [INTERNAL] Apply the three wording nits from the #428 reviews to validate.yml comments (#434)

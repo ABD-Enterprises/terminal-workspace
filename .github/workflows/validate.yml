@@ -100,8 +100,9 @@ jobs:
 
   # #128: compile + test the Rust crate so a broken native build can no longer
   # ship "green". Build and test only, no signing: the runner comes from
-  # vars.MACOS_RUNNER_LABELS (macos-latest when written, 2026-10-25); if the variable points at a
-  # self-hosted Apple Silicon macOS pool, the job runs on that pool instead.
+  # vars.MACOS_RUNNER_LABELS (macos-latest when written, 2026-10-25); if the
+  # variable points at a self-hosted Apple Silicon macOS pool, the job runs on
+  # that pool instead.
   rust-validate:
     runs-on: ${{ fromJSON(vars.MACOS_RUNNER_LABELS) }}
     timeout-minutes: 30
@@ -299,11 +300,11 @@ jobs:
 
       # #101: the localhost-sshd session fixture is #[ignore] by default (it
       # needs an unsandboxed sshd, which sandboxed local/dev envs lack). The
-      # macOS runner this job uses (GitHub-hosted macos-latest when written)
-      # is a real machine rather than a sandboxed one, so the fixture runs on
-      # every PR to exercise the SSH session lifecycle (create -> open stream
-      # -> I/O -> close) end-to-end. On a
-      # self-hosted runner the step only runs when TW_SSHD_EXEC_FIXTURES=true
+      # macOS runner this job uses (GitHub-hosted macos-latest when written, 2026-10-25)
+      # is a full macOS VM rather than a sandboxed dev environment, so the
+      # fixture runs on every PR to exercise the SSH session lifecycle
+      # (create -> open stream -> I/O -> close) end-to-end.
+      # On a self-hosted runner the step only runs when TW_SSHD_EXEC_FIXTURES=true
       # opts it in, and that opt-in assumes an account with a real shell (see
       # below). #292's ignored reaper regressions share this prefix so the
       # same gate also proves that a later fixture startup cleans leaked sshds
