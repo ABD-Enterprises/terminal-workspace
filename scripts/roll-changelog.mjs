@@ -2,13 +2,13 @@
 // Roll changelog.d/*.md fragments into CHANGELOG.md for a release.
 //
 // Each fragment holds one or more `- [LABEL] text (#id)` lines (the shape the
-// changelog-discipline gate requires per PR). This inserts a
+// PR template requires per PR). This inserts a
 // `## <version> — <date>` section directly under `## Unreleased`, grouped by
 // label in the ledger's fixed order, resets the Unreleased subsections to
 // `- None.`, and deletes the consumed fragments.
 //
 // Usage: node scripts/roll-changelog.mjs <version> [--date YYYY-MM-DD] [--dry-run]
-import { readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -70,7 +70,14 @@ export function insertRelease(changelog, section) {
   return `${changelog.slice(0, at)}${unreleased.join("\n")}\n${section}\n${tail}`;
 }
 
-const invokedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+// Compare real paths: through a symlinked prefix (macOS /var -> /private/var)
+// an absolute argv would otherwise mismatch import.meta.url and the script
+// would silently do nothing while exiting 0.
+const invokedDirectly = (() => {
+  if (!process.argv[1]) return false;
+  try { return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]); }
+  catch { return false; }
+})();
 if (invokedDirectly) {
   const version = process.argv[2];
   if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
