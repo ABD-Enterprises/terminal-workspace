@@ -23,7 +23,7 @@ function runGate(assets: string[]): { code: number; stderr: string; stdout: stri
 }
 
 const COMPLETE = [
-  "/promo/terminal-workspace-macos-v0.2.0.dmg",
+  "/promo/terminal-workspace-macos-v0.2.0.app.dmg",
   "/promo/latest.json",
   "/promo/terminal-workspace-macos-v0.2.0.app.tar.gz",
   "/promo/terminal-workspace-macos-v0.2.0.app.tar.gz.sig",
