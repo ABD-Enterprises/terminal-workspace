@@ -99,8 +99,9 @@ jobs:
             test-results
 
   # #128: compile + test the Rust crate so a broken native build can no longer
-  # ship "green". Build and test only, no signing: it runs on the org's
-  # self-hosted Apple Silicon macOS pool (MACOS_RUNNER_LABELS).
+  # ship "green". Build and test only, no signing: the runner comes from
+  # vars.MACOS_RUNNER_LABELS (macos-latest when written, 2026-10-25); if the variable points at a
+  # self-hosted Apple Silicon macOS pool, the job runs on that pool instead.
   rust-validate:
     runs-on: ${{ fromJSON(vars.MACOS_RUNNER_LABELS) }}
     timeout-minutes: 30
@@ -228,7 +229,7 @@ jobs:
       - name: Check Rust formatting
         run: npm run native:fmt:check
 
-      # The self-hosted macOS runner is a system LaunchDaemon without a user
+      # A self-hosted macOS runner would be a system LaunchDaemon without a user
       # security session, so keychain writes fail with "Write permissions
       # error" — the pre-existing documentation for why the argv test cannot
       # pass there. Store/load/delete all round-trip through that session via
@@ -297,15 +298,18 @@ jobs:
           echo "ACL artifacts match the resolved permission surface."
 
       # #101: the localhost-sshd session fixture is #[ignore] by default (it
-      # needs an unsandboxed sshd, which sandboxed local/dev envs lack). This
-      # self-hosted macOS runner is a real machine, so run it explicitly to
-      # exercise the SSH session lifecycle (create -> open stream -> I/O ->
-      # close) end-to-end on every PR. #292's ignored reaper regressions share
-      # this prefix so the same gate also proves that a later fixture startup
-      # cleans leaked sshds and roots without disturbing a live fixture. A
-      # failure fails Validate. The localShell / external-protocol session
-      # lifecycle already runs in the validate:rust step above (those fixtures
-      # are not #[ignore]).
+      # needs an unsandboxed sshd, which sandboxed local/dev envs lack). The
+      # macOS runner this job uses (GitHub-hosted macos-latest when written)
+      # is a real machine rather than a sandboxed one, so the fixture runs on
+      # every PR to exercise the SSH session lifecycle (create -> open stream
+      # -> I/O -> close) end-to-end. On a
+      # self-hosted runner the step only runs when TW_SSHD_EXEC_FIXTURES=true
+      # opts it in, and that opt-in assumes an account with a real shell (see
+      # below). #292's ignored reaper regressions share this prefix so the
+      # same gate also proves that a later fixture startup cleans leaked sshds
+      # and roots without disturbing a live fixture. A failure fails Validate.
+      # The localShell / external-protocol session lifecycle already runs in
+      # the validate:rust step above (those fixtures are not #[ignore]).
       # Same constraint as the backend transport fixture above: sshd execs through
       # the login shell, which the self-hosted macOS runner account intentionally
       # lacks. The Linux native-ssh-fixtures job keeps the sshd coverage.
