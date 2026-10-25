@@ -57,7 +57,9 @@ export function renderSection(version, date, entries) {
 
 export function insertRelease(changelog, section) {
   const marker = "## Unreleased";
-  const at = changelog.indexOf(marker);
+  // Anchor on a real heading line, not the first substring: the intro prose
+  // legitimately mentions `## Unreleased` and must survive the splice.
+  const at = changelog.search(/^## Unreleased[ \t]*$/m);
   if (at < 0) throw new Error("CHANGELOG.md has no '## Unreleased' heading");
   // Everything between Unreleased and the next release heading is reset.
   const rest = changelog.slice(at + marker.length);
@@ -80,8 +82,8 @@ if (invokedDirectly) {
   const dryRun = process.argv.includes("--dry-run");
   const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
   const { files, entries } = collectFragments(join(root, "changelog.d"));
-  if (files.length === 0) {
-    console.error("[roll-changelog] no fragments in changelog.d/ (missing or empty) — nothing to roll");
+  if (files.length === 0 || LABELS.every((label) => entries[label].length === 0)) {
+    console.error("[roll-changelog] no fragments in changelog.d/ (missing, empty or blank) — nothing to roll");
     process.exit(dryRun ? 0 : 1);
   }
   const section = renderSection(version, date, entries);
