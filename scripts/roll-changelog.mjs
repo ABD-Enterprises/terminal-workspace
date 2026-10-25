@@ -57,8 +57,8 @@ export function renderSection(version, date, entries) {
 
 export function insertRelease(changelog, section) {
   const marker = "## Unreleased";
-  // Anchor on a real heading line, not the first substring: the intro prose
-  // legitimately mentions `## Unreleased` and must survive the splice.
+  // Anchor on a real heading line, not the first substring: the intro and any
+  // prose must survive the splice.
   const at = changelog.search(/^## Unreleased[ \t]*$/m);
   if (at < 0) throw new Error("CHANGELOG.md has no '## Unreleased' heading");
   // Everything between Unreleased and the next release heading is reset.
