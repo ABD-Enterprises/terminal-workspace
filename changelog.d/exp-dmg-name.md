@@ -1,0 +1,1 @@
+- [INTERNAL] Use the .app.dmg asset name the tooling produces in the v0.2.0 notes and the updater-artifacts fixture (#433)
