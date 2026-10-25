@@ -1,0 +1,1 @@
+- [INTERNAL] Add docs/releases/v0.2.1.md mirroring the v0.2.0 release-notes pattern, sourced from the rolled 0.2.1 ledger section (#429)
