@@ -300,7 +300,7 @@ jobs:
 
       # #101: the localhost-sshd session fixture is #[ignore] by default (it
       # needs an unsandboxed sshd, which sandboxed local/dev envs lack). The
-      # macOS runner this job uses (GitHub-hosted macos-latest when written)
+      # macOS runner this job uses (GitHub-hosted macos-latest when written, 2026-10-25)
       # is a full macOS VM rather than a sandboxed dev environment, so the
       # fixture runs on every PR to exercise the SSH session lifecycle
       # (create -> open stream -> I/O -> close) end-to-end.
