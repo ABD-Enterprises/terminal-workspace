@@ -1,1 +1,0 @@
-- [SECURITY] Bump transitive dev-tooling packages in pnpm-lock.yaml: browserslist 4.28.1 → 4.29.1 (GHSA-73wf-gq98-2v4g), baseline-browser-mapping 2.10.12 → 2.11.26 (GHSA-w5vr-8v7q-w6rv) and brace-expansion 5.0.9 → 5.0.12 (GHSA-q2hr-2g5m-vwhr and two earlier advisories). `pnpm audit` is now clean. (#402)
