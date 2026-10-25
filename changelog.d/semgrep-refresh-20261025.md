@@ -1,0 +1,1 @@
+- [INTERNAL] Refresh the pinned Semgrep ruleset to snapshot 2026-10-25 (submodule 16b9e6d); whole-repo parity holds at 272 rules / 0 findings on both configs (#431)
