@@ -18,7 +18,7 @@ export interface HostRecord {
    * @deprecated P2-DM1 B4 — owned by the bound IdentityRecord; the runtime
    * reads from the identity when `identityId` is set (see connections.ts).
    * Kept on the host record as a fallback so a partially-migrated workspace
-   * keeps working. Slated for removal in 0.2.0 once we have evidence the
+   * keeps working. Slated for removal once we have evidence the
    * auto-migration ran successfully on every upgrading install.
    */
   username: string;
@@ -57,8 +57,8 @@ export interface HostRecord {
    * Foreign key into `useIdentitiesStore`. When present, the identity owns
    * the canonical (username, authMethod, privateKeyPath) triple and the
    * runtime reads from the identity (see connections.ts P2-DM1 B3). The
-   * per-host duplicates above are deprecated and will be removed in 0.2.0
-   * (P2-DM1 B4).
+   * per-host duplicates above are deprecated and will be removed once that
+   * migration evidence exists (P2-DM1 B4).
    */
   identityId?: string;
 }

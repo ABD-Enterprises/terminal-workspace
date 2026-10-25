@@ -14,10 +14,24 @@ import { fileURLToPath } from "node:url";
 
 const LABELS = ["BREAKING", "FEATURE", "FIX", "INTERNAL", "SECURITY"];
 
+// A missing changelog.d/ (or one whose fragments were all consumed by an
+// earlier roll) is a normal state, not a crash: report it as "no fragments"
+// instead of failing with a raw ENOENT.
+function readFragmentFiles(dir) {
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch (err) {
+    if (err && (err.code === "ENOENT" || err.code === "ENOTDIR")) return [];
+    throw err;
+  }
+  return names.filter((f) => f.endsWith(".md")).sort();
+}
+
 export function collectFragments(dir) {
   const entries = {};
   for (const label of LABELS) entries[label] = [];
-  const files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+  const files = readFragmentFiles(dir);
   for (const file of files) {
     for (const raw of readFileSync(join(dir, file), "utf8").split("\n")) {
       const line = raw.trim();
@@ -66,6 +80,10 @@ if (invokedDirectly) {
   const dryRun = process.argv.includes("--dry-run");
   const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
   const { files, entries } = collectFragments(join(root, "changelog.d"));
+  if (files.length === 0) {
+    console.error("[roll-changelog] no fragments in changelog.d/ (missing or empty) — nothing to roll");
+    process.exit(dryRun ? 0 : 1);
+  }
   const section = renderSection(version, date, entries);
   if (dryRun) {
     console.log(section);
