@@ -1,1 +1,1 @@
-- [INTERNAL] Use the .app.dmg asset name the tooling produces in the v0.2.0 notes and the updater-artifacts fixture (#433)
+- [INTERNAL] Use the .app.dmg name the tooling produces in the v0.2.0 notes and the updater-artifacts fixture, and restore the published v0.1.0 DMG name in release.md (#433)
