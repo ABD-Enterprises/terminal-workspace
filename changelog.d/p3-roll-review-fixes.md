@@ -1,1 +1,1 @@
-- [INTERNAL] Guard roll-changelog against an empty changelog.d, complete the ledger intro sentence, and drop the stale 0.2.0 removal promises in host.ts (#427)
+- [INTERNAL] Roll tooling: guard roll-changelog against an empty changelog.d, restore the `## Unreleased` heading and anchor the roll on it, complete the ledger intro sentence, and drop the stale 0.2.0 removal promises in host.ts (#427)

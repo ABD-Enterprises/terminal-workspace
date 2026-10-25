@@ -57,8 +57,8 @@ export interface HostRecord {
    * Foreign key into `useIdentitiesStore`. When present, the identity owns
    * the canonical (username, authMethod, privateKeyPath) triple and the
    * runtime reads from the identity (see connections.ts P2-DM1 B3). The
-   * per-host duplicates above are deprecated and will be removed once that
-   * migration evidence exists (P2-DM1 B4).
+   * per-host duplicates above are deprecated and will be removed once the
+   * evidence described on `username` exists (P2-DM1 B4).
    */
   identityId?: string;
 }

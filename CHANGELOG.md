@@ -1,8 +1,8 @@
 # Changelog
 
 This file is the operator-facing release ledger. Every pull request adds one
-line under `## Unreleased`, which `scripts/roll-changelog.mjs` rolls into a dated
-version section at release time.
+line as a `changelog.d/` fragment, which `scripts/roll-changelog.mjs` rolls into
+a dated version section at release time.
 
 ## Unreleased
 
