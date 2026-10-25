@@ -1,0 +1,1 @@
+- [INTERNAL] Pin the roll-changelog heading anchor, symlink invocation and fileURLToPath ROOT in its integration test (#432)
