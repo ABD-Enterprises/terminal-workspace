@@ -42,6 +42,35 @@ function run(dir: string, args: string[], script = join(dir, "scripts/roll-chang
   }
 }
 
+// Same spawn with stdout captured, for --dry-run previews.
+function runOut(dir: string, args: string[]) {
+  return execFileSync("node", [join(dir, "scripts/roll-changelog.mjs"), ...args], {
+    cwd: dir,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+// Splice a synthetic release section in directly under the Unreleased block,
+// so a test controls the ledger's starting state for that version.
+function addSection(dir: string, section: string) {
+  const path = join(dir, "CHANGELOG.md");
+  const text = readFileSync(path, "utf8");
+  const at = text.search(/^## \d/m);
+  if (at < 0) throw new Error("CHANGELOG.md has no release heading to splice before");
+  writeFileSync(path, text.slice(0, at) + section + "\n" + text.slice(at));
+}
+
+// The one release section under an exact heading line, through the line
+// before the next `## ` heading.
+function sectionOf(changelog: string, heading: string) {
+  const start = changelog.indexOf(heading);
+  if (start < 0) throw new Error(`no section under ${JSON.stringify(heading)}`);
+  const rest = changelog.slice(start);
+  const next = rest.search(/\n## /);
+  return next >= 0 ? rest.slice(0, next) : rest;
+}
+
 function introOf(changelog: string) {
   return changelog.slice(0, changelog.search(HEADING));
 }
@@ -84,5 +113,82 @@ describe("roll-changelog CLI", () => {
     expect(after).toContain("## 1.0.0 — 2026-01-01");
     expect(after).toContain("from the symlink (#2)");
     expect(existsSync(join(dir, "changelog.d", "f.md"))).toBe(false);
+  });
+
+  // #446: a second roll of a version the ledger already holds used to insert a
+  // second `## <version>` heading, splitting one release across two dates.
+
+  it("merges into the section the ledger already holds instead of duplicating the heading", () => {
+    const dir = fixture("- [FIX] merge-marker appended entry (#901)\n");
+    const before = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    const intro = introOf(before);
+    const heading = before.match(/^## 0\.2\.1 — .*$/m)?.[0];
+    if (!heading) throw new Error("fixture ledger has no 0.2.1 section");
+    const heldBefore = sectionOf(before, heading);
+    const kept = heldBefore.split("\n").filter((line) => line.startsWith("- "));
+    expect(kept.length).toBeGreaterThan(0);
+
+    expect(run(dir, ["0.2.1", "--date", "2026-10-26"])).toBe(0);
+
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    expect(after.startsWith(intro)).toBe(true);
+    // One heading for the release, under the original date.
+    expect(after.match(/^## 0\.2\.1 — /gm)).toHaveLength(1);
+    const held = sectionOf(after, heading);
+    for (const entry of kept) expect(held).toContain(entry);
+    expect(held).toContain("merge-marker appended entry (#901)");
+    expect(existsSync(join(dir, "changelog.d", "f.md"))).toBe(false);
+  });
+
+  it("replaces a - None. placeholder instead of leaving it above the new entry", () => {
+    const dir = fixture("- [FEATURE] merge-marker feature entry (#902)\n");
+    addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FEATURE]\n\n- None.\n");
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+    const held = sectionOf(readFileSync(join(dir, "CHANGELOG.md"), "utf8"), "## 9.9.9 — 2020-01-01");
+    expect(held).toContain("- merge-marker feature entry (#902)");
+    expect(held).not.toContain("- None.");
+    expect(held.match(/### \[FEATURE\]/g)).toHaveLength(1);
+  });
+
+  it("does not repeat an entry the section already holds byte-for-byte", () => {
+    const dir = fixture("- [FIX] merge-marker duplicate entry (#903)\n");
+    // The section holds the entry the way a roll renders it: `- text`, with
+    // the label already spent on the block heading.
+    addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- merge-marker duplicate entry (#903)\n");
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+    const held = sectionOf(readFileSync(join(dir, "CHANGELOG.md"), "utf8"), "## 9.9.9 — 2020-01-01");
+    expect(held.match(/merge-marker duplicate entry \(#903\)/g)).toHaveLength(1);
+  });
+
+  it("creates a label block the section is missing at its place in the fixed order", () => {
+    const dir = fixture("- [BREAKING] merge-marker breaking entry (#904)\n");
+    addSection(
+      dir,
+      "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- an existing fix (#1)\n\n### [SECURITY]\n\n- an existing security fix (#2)\n",
+    );
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+    const held = sectionOf(readFileSync(join(dir, "CHANGELOG.md"), "utf8"), "## 9.9.9 — 2020-01-01");
+    expect(held.indexOf("### [BREAKING]")).toBeGreaterThan(-1);
+    expect(held.indexOf("### [BREAKING]")).toBeLessThan(held.indexOf("### [FIX]"));
+    expect(held.indexOf("### [FIX]")).toBeLessThan(held.indexOf("### [SECURITY]"));
+    expect(held).toContain("- merge-marker breaking entry (#904)");
+    expect(held).toContain("- an existing fix (#1)");
+    expect(held).toContain("- an existing security fix (#2)");
+  });
+
+  it("--dry-run previews the merged section and leaves the ledger untouched", () => {
+    const dir = fixture("- [FIX] merge-marker dry-run entry (#905)\n");
+    const path = join(dir, "CHANGELOG.md");
+    const before = readFileSync(path, "utf8");
+    const intro = introOf(before);
+
+    const preview = runOut(dir, ["0.2.1", "--date", "2026-10-26", "--dry-run"]);
+
+    expect(preview.match(/^## 0\.2\.1 — /gm)).toHaveLength(1);
+    expect(preview).toContain("merge-marker dry-run entry (#905)");
+    expect(preview).not.toContain("## Unreleased");
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(introOf(readFileSync(path, "utf8"))).toBe(intro);
+    expect(existsSync(join(dir, "changelog.d", "f.md"))).toBe(true);
   });
 });
