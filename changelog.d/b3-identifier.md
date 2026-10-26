@@ -1,0 +1,1 @@
+- [FIX] Restore the bundle identifier shipped 0.2.0 ran under, keeping app data, logs and updater continuity on upgrade (#435)
