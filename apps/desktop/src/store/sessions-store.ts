@@ -726,7 +726,7 @@ export const useSessionsStore = create<SessionsState>()(
                 nextState = { ...nextState, ...closeSessionTab(nextState, tab.id) };
               } else {
                 // Remove specific panes from tab
-                // (Currently term-snip doesn't have split pane UI fully fleshed out to handle partial closes easily without a helper, but let's just filter paneIds)
+                // (Currently the app doesn't have split pane UI fully fleshed out to handle partial closes easily without a helper, but let's just filter paneIds)
                 const newPaneIds = tab.paneIds.filter(id => !paneIds.includes(id));
                 nextState.tabs = nextState.tabs.map(t => t.id === tab.id ? { ...t, paneIds: newPaneIds, activePaneId: newPaneIds.includes(t.activePaneId) ? t.activePaneId : newPaneIds[0] } : t);
               }

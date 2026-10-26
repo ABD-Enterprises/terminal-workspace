@@ -65,7 +65,7 @@ interface TerminalThemeEntry {
 const themes: Record<Exclude<TerminalThemeName, "auto">, TerminalThemeEntry> = {
   "slate-emerald": {
     label: "Slate Emerald",
-    description: "Default dark palette inherited from term-snip 0.1 — slate background, emerald accent.",
+    description: "Default dark palette carried over from the 0.1 release — slate background, emerald accent.",
     mode: "dark",
     palette: {
       background: "#08101a",

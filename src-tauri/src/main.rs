@@ -4266,10 +4266,10 @@ const MENU_EVENT_NAME: &str = "terminal_workspace://menu-event";
 /// See parity-and-hardening-review §4.7 / plan P1-UX4.
 fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let about = AboutMetadataBuilder::new()
-        .name(Some("term-snip".to_string()))
+        .name(Some("Terminal Workspace".to_string()))
         .build();
 
-    let app_submenu = SubmenuBuilder::new(app, "term-snip")
+    let app_submenu = SubmenuBuilder::new(app, "Terminal Workspace")
         .about(Some(about))
         .separator()
         .item(
@@ -4378,7 +4378,10 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build()?;
 
     let help_submenu = SubmenuBuilder::new(app, "Help")
-        .item(&MenuItemBuilder::with_id("menu:help", "term-snip Documentation").build(app)?)
+        .item(
+            &MenuItemBuilder::with_id("menu:help", "Terminal Workspace Documentation")
+                .build(app)?,
+        )
         .build()?;
 
     MenuBuilder::new(app)
