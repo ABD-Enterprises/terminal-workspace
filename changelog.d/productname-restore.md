@@ -1,0 +1,1 @@
+- [FIX] Restore the product name installed releases run under, so a build ships Terminal Workspace.app beside the same path v0.1.0 used instead of the old term-snip codename (#444)
