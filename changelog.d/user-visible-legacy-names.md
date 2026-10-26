@@ -1,0 +1,1 @@
+- [FIX] Replace the remaining legacy names users see: default key comments, exported config and trust-policy filenames, the demo-mode key comment and the Help-menu README link (#450)

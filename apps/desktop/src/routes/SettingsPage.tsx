@@ -86,7 +86,7 @@ export function SettingsPage() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `termsnip-config-${bundle.exportedAt.slice(0, 10)}.json`;
+    anchor.download = `terminal-workspace-config-${bundle.exportedAt.slice(0, 10)}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
 

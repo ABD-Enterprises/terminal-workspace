@@ -48,7 +48,7 @@ export function SettingsTrustPolicySection({
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "termsnip-sync-trust-policy.json";
+    anchor.download = "terminal-workspace-sync-trust-policy.json";
     anchor.click();
     URL.revokeObjectURL(url);
 

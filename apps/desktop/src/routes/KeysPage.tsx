@@ -115,7 +115,7 @@ export function KeysPage() {
 
     try {
       const metadata = await generatePrivateKey({
-        comment: values.comment.trim() || values.label.trim() || "termsnip@local",
+        comment: values.comment.trim() || values.label.trim() || "terminal-workspace@local",
         passphrase: values.passphrase,
         path: values.privateKeyPath.trim(),
         type: values.type,

@@ -59,7 +59,7 @@ export const emptyGenerateKeyValues: GenerateKeyValues = {
   label: "",
   privateKeyPath: "~/.ssh/terminal_workspace_ed25519",
   passphrase: "",
-  comment: "termsnip@local",
+  comment: "terminal-workspace@local",
   type: "ed25519",
 };
 
