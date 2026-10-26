@@ -1,0 +1,1 @@
+- [FIX] Restore the product name installed releases run under, so a build installs Terminal Workspace.app at the same path v0.1.0 used, replacing the existing app instead of installing beside it (#444)
