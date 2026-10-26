@@ -1,0 +1,1 @@
+- [INTERNAL] Document the release-signing runner and signing-secret prerequisites for the CI release path (#224)

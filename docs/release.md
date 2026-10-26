@@ -37,6 +37,34 @@
   release is created, so a wrong key or a stale feed can never leave a mislabelled release behind.
 - `native:publish` refuses a `RELEASE_TAG` that is not `v<manifest.version>`.
 
+## CI Release Path Prerequisites (`release-macos.yml`)
+
+Two owner-side prerequisites gate the CI release path. Both were re-read live on 2026-10-26 —
+secret and variable **names** only, never values:
+
+- **Runner.** The `release-macos` job selects its runner as
+  `${{ fromJSON(vars.RELEASE_MACOS_RUNNER_LABELS || '["self-hosted","macOS","release-signing"]') }}`.
+  The fallback deliberately matches no runner, so the job queues visibly rather than executing
+  somewhere unintended, and `RELEASE_MACOS_RUNNER_LABELS` is currently unset. Either register a
+  dedicated macOS self-hosted runner carrying `self-hosted`, `macOS` and `release-signing`, or
+  register a runner with labels of your own and point the repository variable at them as a JSON
+  array. The job must never run on the shared self-hosted pool (that pool executes pull-request
+  code) or on a GitHub-hosted runner.
+- **Secrets.** Registered today: `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+  The workflow also reads `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`,
+  `MACOS_KEYCHAIN_PASSWORD`, `MACOS_SIGN_IDENTITY` and a notarization credential (either
+  `MACOS_NOTARY_KEY_ID` + `MACOS_NOTARY_ISSUER` + `MACOS_NOTARY_KEY_BASE64`, or the
+  `MACOS_NOTARY_APPLE_ID` / `MACOS_NOTARY_APP_PASSWORD` / `MACOS_NOTARY_TEAM_ID` fallback), and
+  stops with `Missing one or more required signing secrets.` when the three certificate secrets are
+  absent.
+
+Trigger the workflow with `workflow_dispatch` and its `release_tag` input, or by pushing a `v*`
+tag — pushing a release tag is an owner action. With both prerequisites in place the job signs,
+notarizes, staples, promotes (emitting the signed `.app.tar.gz`, `latest.json` and `.sig`, because
+the workflow runs both promote and publish with `REQUIRE_UPDATER_ARTIFACTS=1`) and publishes the
+assets. Until then the local path above is the only release route, and any release published
+without the updater triplet leaves installed copies' update checks 404ing (#224).
+
 ## Required Checks Before Shipping
 
 - `npm run native:check`
@@ -91,8 +119,14 @@
   - `MACOS_CERTIFICATE_PASSWORD`
   - `MACOS_KEYCHAIN_PASSWORD`
   - `MACOS_SIGN_IDENTITY`
+  - a notarization credential: `MACOS_NOTARY_KEY_ID`, `MACOS_NOTARY_ISSUER` and
+    `MACOS_NOTARY_KEY_BASE64`, or the Apple ID trio above
+  - `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (updater feed; see
+    `REQUIRE_UPDATER_ARTIFACTS` in "Release Gates")
 
 ## Current Gaps
 
-- The CI release workflow is implemented but has not yet been exercised with live GitHub secrets on
-  this repository.
+- The CI release workflow is implemented but has not yet been exercised with live secrets on this
+  repository, and as of 2026-10-26 both prerequisites in "CI Release Path Prerequisites" are still
+  unmet: no runner matches the job's label set, and only the two `TAURI_SIGNING_*` secrets are
+  registered.
