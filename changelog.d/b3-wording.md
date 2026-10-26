@@ -1,1 +1,1 @@
-- [FIX] Use the accurate term for the advisory bumps in the v0.2.1 release notes (#437)
+- [INTERNAL] Use the accurate term for the advisory bumps in the v0.2.1 release notes (#437)
