@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "term-snip",
+  "productName": "Terminal Workspace",
   "version": "0.2.1",
   "identifier": "com.abdenterprises.terminalworkspace",
   "build": {
@@ -10,7 +10,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "term-snip",
+        "title": "Terminal Workspace",
         "width": 1400,
         "height": 900,
         "dragDropEnabled": false,
