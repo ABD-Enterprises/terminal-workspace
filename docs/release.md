@@ -23,7 +23,8 @@
   promotion, and GitHub release publishing.
 - The current bundle identifier is `com.abdenterprises.terminalworkspace`.
 - Local notarized distribution is complete in this branch, and CI release publishing is now
-  implemented but not yet executed with repository secrets.
+  implemented but not yet executed: it stays blocked on the runner and secrets recorded under
+  "CI Release Path Prerequisites" until both exist.
 
 ## Release Gates (#379)
 
@@ -44,18 +45,26 @@ secret and variable **names** only, never values:
 
 - **Runner.** The `release-macos` job selects its runner as
   `${{ fromJSON(vars.RELEASE_MACOS_RUNNER_LABELS || '["self-hosted","macOS","release-signing"]') }}`.
-  The fallback deliberately matches no runner, so the job queues visibly rather than executing
-  somewhere unintended, and `RELEASE_MACOS_RUNNER_LABELS` was unset on 2026-10-26. Either register
-  a dedicated macOS self-hosted runner carrying `self-hosted`, `macOS` and `release-signing`, or
+  The fallback deliberately matches no runner until a dedicated one is registered — as of
+  2026-10-26 none is, so the job queues visibly rather than executing somewhere unintended — and
+  `RELEASE_MACOS_RUNNER_LABELS` was unset on 2026-10-26. Either register a dedicated macOS
+  self-hosted runner carrying `self-hosted`, `macOS` and `release-signing`, or
   register a runner with labels of your own and point the repository variable at them as a JSON
   array. The job must never run on the shared self-hosted pool (that pool executes pull-request
   code) or on a GitHub-hosted runner.
 - **Secrets.** Registered as of 2026-10-26: `TAURI_SIGNING_PRIVATE_KEY` and
   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The workflow reads the `CI release workflow secrets` list
-  under "Required Environment" as GitHub secrets and checks them first in the
-  `Validate release secrets` step (`npm run release:secrets:validate-env`); with any one missing it
-  exits 1 printing `Missing local signing inputs: <names>`, before the certificate-import step runs
-  or anything is signed.
+  under "Required Environment" as GitHub secrets, but the `Validate release secrets` step
+  (`npm run release:secrets:validate-env`) checks only the ten `MACOS_*` names — and only one
+  complete notarization credential at a time (either the key-mode triple or the Apple ID trio) —
+  exiting 1 with `Missing local signing inputs: <names>` or `Missing local notary inputs: <names>`
+  before the certificate-import step runs or anything is signed. (`MACOS_SIGN_IDENTITY` is soft:
+  the script falls back to an identity already present on the runner.) The `TAURI_SIGNING_*` pair
+  is not checked there. It is read at promote, where `REQUIRE_UPDATER_ARTIFACTS=1` refuses a
+  keyless promote with
+  `ERROR: REQUIRE_UPDATER_ARTIFACTS=1 but TAURI_SIGNING_PRIVATE_KEY is not set.` — only after
+  signing and notarization have already run, so a missing updater secret costs a full release
+  attempt rather than failing in the first minute.
 
 Trigger the workflow with `workflow_dispatch` and its `release_tag` input, or by pushing a `v*`
 tag — pushing a release tag is an owner action. With both prerequisites in place the job signs,
