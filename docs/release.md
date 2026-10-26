@@ -55,13 +55,14 @@ secret and variable **names** only, never values:
 - **Secrets.** Registered as of 2026-10-26: `TAURI_SIGNING_PRIVATE_KEY` and
   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The workflow reads the `CI release workflow secrets` list
   under "Required Environment" as GitHub secrets, but the `Validate release secrets` step
-  (`npm run release:secrets:validate-env`) checks only the ten `MACOS_*` names — and only one
-  complete notarization credential at a time (either the key-mode triple or the Apple ID trio) —
-  exiting 1 with `Missing local signing inputs: <names>` or `Missing local notary inputs: <names>`
-  before the certificate-import step runs or anything is signed. (`MACOS_SIGN_IDENTITY` is soft:
-  the script falls back to an identity already present on the runner.) The `TAURI_SIGNING_*` pair
-  is not checked there. It is read at promote, where `REQUIRE_UPDATER_ARTIFACTS=1` refuses a
-  keyless promote with
+  (`npm run release:secrets:validate-env`) checks only the ten `MACOS_*` names the step passes
+  it — and only one complete notarization credential at a time (either the key-mode triple or
+  the Apple ID trio) — exiting 1 after printing `Missing local signing inputs: <names>`,
+  `Missing local notary inputs: <names>`, or both, whichever gaps exist, before the
+  certificate-import step runs or anything is signed. (`MACOS_SIGN_IDENTITY` is soft in the
+  script: it falls back to an identity already present on the runner, but a fresh runner holds
+  none, so CI still needs the secret.) The `TAURI_SIGNING_*` pair is not checked there — it is
+  read at promote, where `REQUIRE_UPDATER_ARTIFACTS=1` refuses a keyless promote with
   `ERROR: REQUIRE_UPDATER_ARTIFACTS=1 but TAURI_SIGNING_PRIVATE_KEY is not set.` — only after
   signing and notarization have already run, so a missing updater secret costs a full release
   attempt rather than failing in the first minute.
@@ -136,5 +137,4 @@ without the updater triplet leaves installed copies' update checks 404ing (#224)
 
 - The CI release workflow is implemented but has not yet been exercised with live secrets on this
   repository, and as of 2026-10-26 both prerequisites in "CI Release Path Prerequisites" are still
-  unmet: no runner matches the job's label set, and only the two `TAURI_SIGNING_*` secrets are
-  registered.
+  unmet: no runner matches the job's label set, and the signing secrets are incomplete.
