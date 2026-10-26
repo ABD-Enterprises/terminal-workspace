@@ -18,6 +18,11 @@ const PROBE_DIR = ".worktrees/eslint-ignore-probe/apps/desktop/src";
 const PROBE_FILE = `${PROBE_DIR}/probe.ts`;
 
 describe("#267: eslint ignores orc worktree checkouts", () => {
+  // 15s, not the 5s default (#438): under machine load average 10+ the test
+  // was still running when vitest's 5s timer fired — three full gates failed
+  // with this test alive at 5.0-5.7s (up to ~700ms over) while the rest of
+  // the suite stayed green. This guards #267 behavior, not performance —
+  // 15s still bounds a real hang.
   it("enumerates no files from inside .worktrees", async () => {
     const { ESLint } = await import("eslint");
     await mkdir(PROBE_DIR, { recursive: true });
@@ -49,7 +54,7 @@ describe("#267: eslint ignores orc worktree checkouts", () => {
     } finally {
       await rm(".worktrees/eslint-ignore-probe", { recursive: true, force: true });
     }
-  });
+  }, 15000);
 
   it("still enumerates the real checkout", async () => {
     // Guards against "fixing" this with an over-broad ignore.
@@ -60,5 +65,5 @@ describe("#267: eslint ignores orc worktree checkouts", () => {
 
     expect(results).toHaveLength(1);
     expect(results[0]?.errorCount).toBe(0);
-  });
+  }, 15000);
 });
