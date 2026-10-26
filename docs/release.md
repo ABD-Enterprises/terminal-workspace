@@ -45,18 +45,17 @@ secret and variable **names** only, never values:
 - **Runner.** The `release-macos` job selects its runner as
   `${{ fromJSON(vars.RELEASE_MACOS_RUNNER_LABELS || '["self-hosted","macOS","release-signing"]') }}`.
   The fallback deliberately matches no runner, so the job queues visibly rather than executing
-  somewhere unintended, and `RELEASE_MACOS_RUNNER_LABELS` is currently unset. Either register a
-  dedicated macOS self-hosted runner carrying `self-hosted`, `macOS` and `release-signing`, or
+  somewhere unintended, and `RELEASE_MACOS_RUNNER_LABELS` was unset on 2026-10-26. Either register
+  a dedicated macOS self-hosted runner carrying `self-hosted`, `macOS` and `release-signing`, or
   register a runner with labels of your own and point the repository variable at them as a JSON
   array. The job must never run on the shared self-hosted pool (that pool executes pull-request
   code) or on a GitHub-hosted runner.
-- **Secrets.** Registered today: `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
-  The workflow also reads `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`,
-  `MACOS_KEYCHAIN_PASSWORD`, `MACOS_SIGN_IDENTITY` and a notarization credential (either
-  `MACOS_NOTARY_KEY_ID` + `MACOS_NOTARY_ISSUER` + `MACOS_NOTARY_KEY_BASE64`, or the
-  `MACOS_NOTARY_APPLE_ID` / `MACOS_NOTARY_APP_PASSWORD` / `MACOS_NOTARY_TEAM_ID` fallback), and
-  stops with `Missing one or more required signing secrets.` when the three certificate secrets are
-  absent.
+- **Secrets.** Registered as of 2026-10-26: `TAURI_SIGNING_PRIVATE_KEY` and
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The workflow reads the `CI release workflow secrets` list
+  under "Required Environment" as GitHub secrets and checks them first in the
+  `Validate release secrets` step (`npm run release:secrets:validate-env`); with any one missing it
+  exits 1 printing `Missing local signing inputs: <names>`, before the certificate-import step runs
+  or anything is signed.
 
 Trigger the workflow with `workflow_dispatch` and its `release_tag` input, or by pushing a `v*`
 tag — pushing a release tag is an owner action. With both prerequisites in place the job signs,
@@ -121,8 +120,8 @@ without the updater triplet leaves installed copies' update checks 404ing (#224)
   - `MACOS_SIGN_IDENTITY`
   - a notarization credential: `MACOS_NOTARY_KEY_ID`, `MACOS_NOTARY_ISSUER` and
     `MACOS_NOTARY_KEY_BASE64`, or the Apple ID trio above
-  - `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (updater feed; see
-    `REQUIRE_UPDATER_ARTIFACTS` in "Release Gates")
+  - `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (updater feed;
+    `REQUIRE_UPDATER_ARTIFACTS=1` in "CI Release Path Prerequisites")
 
 ## Current Gaps
 
