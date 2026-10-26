@@ -1,0 +1,1 @@
+- [FIX] Restore the bundle identifier installed releases run under, so upgrades keep app data and logs in place (#435)
