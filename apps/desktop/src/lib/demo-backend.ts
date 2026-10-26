@@ -453,7 +453,7 @@ export async function generateDemoPrivateKey(payload: GenerateKeyPayload): Promi
   const metadata = algorithmForType(payload.type);
   return {
     ...metadata,
-    comment: payload.comment.trim() || "termsnip@demo",
+    comment: payload.comment.trim() || "terminal-workspace@demo",
     fingerprint: fingerprint(`${payload.type}:${normalizedPath}:${payload.comment}`),
     privateKeyPath: normalizedPath,
     publicKeyPath: `${normalizedPath}.pub`,

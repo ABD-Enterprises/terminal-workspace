@@ -19,7 +19,11 @@ import { validatePastedPrivateKey } from "../lib/private-key-validation";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useKeysStore } from "../store/keys-store";
-import type { GenerateKeyValues, ImportKeyValues } from "../types/key";
+import {
+  emptyGenerateKeyValues,
+  type GenerateKeyValues,
+  type ImportKeyValues,
+} from "../types/key";
 
 function deriveLabel(path: string) {
   return path.split("/").filter(Boolean).slice(-1)[0] ?? "Imported key";
@@ -115,7 +119,8 @@ export function KeysPage() {
 
     try {
       const metadata = await generatePrivateKey({
-        comment: values.comment.trim() || values.label.trim() || "termsnip@local",
+        comment:
+          values.comment.trim() || values.label.trim() || emptyGenerateKeyValues.comment,
         passphrase: values.passphrase,
         path: values.privateKeyPath.trim(),
         type: values.type,

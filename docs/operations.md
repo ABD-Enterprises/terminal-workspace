@@ -32,7 +32,7 @@
 ### SSH config import — Include directive (issue #28)
 
 The Include directive is resolved by the renderer's preprocessor calling
-`termsnip_read_ssh_config_file`, which reads files under `~/.ssh/` only.
+`terminal_workspace_read_ssh_config_file`, which reads files under `~/.ssh/` only.
 
 1. Create a parent config and an included file inside `~/.ssh/`:
    ```bash

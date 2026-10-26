@@ -94,7 +94,7 @@ describe("native trust and key tooling API", () => {
     invokeTauriCommand.mockResolvedValue({ algorithm: "ED25519" });
 
     await generatePrivateKey({
-      comment: "termsnip@local",
+      comment: "terminal-workspace@local",
       passphrase: "secret",
       path: "~/.ssh/terminal_workspace_ed25519",
       type: "ed25519",
@@ -102,7 +102,7 @@ describe("native trust and key tooling API", () => {
 
     expect(invokeTauriCommand).toHaveBeenCalledWith("terminal_workspace_generate_private_key", {
       request: {
-        comment: "termsnip@local",
+        comment: "terminal-workspace@local",
         passphrase: "secret",
         path: "~/.ssh/terminal_workspace_ed25519",
         type: "ed25519",

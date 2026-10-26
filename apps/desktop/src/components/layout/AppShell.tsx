@@ -176,7 +176,7 @@ export function AppShell() {
           // future surface but this stops being a dead menu item.
           if (typeof window !== "undefined") {
             window.open(
-              "https://github.com/ABD-Enterprises/term-snip#readme",
+              "https://github.com/ABD-Enterprises/terminal-workspace#readme",
               "_blank",
               "noopener,noreferrer"
             );
