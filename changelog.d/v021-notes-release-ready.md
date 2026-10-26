@@ -1,0 +1,1 @@
+- [INTERNAL] Make the v0.2.1 release notes release-ready: add a pending-publication status banner, fix the stale pre-rename app name in the install steps, and add the missing bundle-identifier fix to What changed (#442)
