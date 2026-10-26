@@ -1,0 +1,1 @@
+- [FIX] Restore the Terminal Workspace name in the window title, native menu, About box, help item and remaining UI copy (#445)

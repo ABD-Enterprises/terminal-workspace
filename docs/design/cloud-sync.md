@@ -6,7 +6,7 @@ Tracking issue: #26
 
 This document takes a position on every open question that issue #26 lists, so an implementation phase can start without re-litigating direction. Where a "we may want X later" alternative exists, it's noted, but the recommended path is the one the implementation tickets will be scoped against.
 
-The whole point of cloud sync for term-snip is to give power users **a competitor-style sync experience without giving up local-first control or trusting a server with cleartext.** Anything that does not serve that goal is out of scope here.
+The whole point of cloud sync for Terminal Workspace is to give power users **a competitor-style sync experience without giving up local-first control or trusting a server with cleartext.** Anything that does not serve that goal is out of scope here.
 
 ## Existing groundwork
 

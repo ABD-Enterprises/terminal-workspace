@@ -15,7 +15,7 @@ import { cn } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
 import { useHostsStore } from "../../store/hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
-import { formatHostProtocol } from "../../types/host";
+import { formatHostProtocol, type HostProtocol } from "../../types/host";
 import { PreviewBanner } from "../common/PreviewBanner";
 import { UpdateAvailableBanner } from "../common/UpdateAvailableBanner";
 import { SessionRestoreManager } from "../terminal/SessionRestoreManager";
@@ -23,7 +23,17 @@ import { CommandPaletteDialog } from "./CommandPaletteDialog";
 import { Sidebar } from "./Sidebar";
 import { useCommandPaletteRows } from "./use-command-palette-rows";
 
-const APP_TITLE = "term-snip";
+export const APP_TITLE = "Terminal Workspace";
+
+/**
+ * Title for the document and the native window: the product name, qualified
+ * by the active session when there is one. #445: this used to prefix the
+ * retired pre-rename codename, which overwrote the `productName` restored in
+ * tauri.conf.json the moment React mounted.
+ */
+export function formatAppTitle(host: { label: string; protocol: HostProtocol } | undefined): string {
+  return host ? `${APP_TITLE} — ${host.label} (${formatHostProtocol(host.protocol)})` : APP_TITLE;
+}
 
 export function AppShell() {
   useAppShellTheme();
@@ -229,9 +239,7 @@ export function AppShell() {
     return hosts.find((entry) => entry.id === tab.hostId);
   })();
   useEffect(() => {
-    const nextTitle = activeSessionHostForTitle
-      ? `${APP_TITLE} — ${activeSessionHostForTitle.label} (${formatHostProtocol(activeSessionHostForTitle.protocol)})`
-      : APP_TITLE;
+    const nextTitle = formatAppTitle(activeSessionHostForTitle);
 
     document.title = nextTitle;
 
