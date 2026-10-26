@@ -1,0 +1,1 @@
+- [FIX] Merge a changelog roll into the release section the ledger already holds for that version — keeping its heading and date — instead of inserting a second heading for the same release, and have --dry-run preview the merged section (#447)
