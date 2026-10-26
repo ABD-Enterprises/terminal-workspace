@@ -94,12 +94,17 @@ describe("roll-changelog CLI", () => {
     const dir = fixture("- [FIX] from the test (#1)\n");
     const before = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
     const intro = introOf(before);
+    // Everything from the first release heading down is what the insert path
+    // must not touch: it survives byte-identical as the file's tail, with the
+    // new section spliced in above it.
+    const releases = before.slice(before.search(/^## \d/m));
     // The marker is named in prose before the real heading, so an anchor on
     // the first substring would cut the intro in half.
     expect(intro).toContain("## Unreleased");
     expect(run(dir, ["1.0.0", "--date", "2026-01-01"])).toBe(0);
     const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
     expect(after.startsWith(intro)).toBe(true);
+    expect(after.endsWith(releases)).toBe(true);
     expect(after).toContain("## 1.0.0 — 2026-01-01");
     expect(after).toContain("from the test (#1)");
   });
@@ -156,7 +161,11 @@ describe("roll-changelog CLI", () => {
     // the label already spent on the block heading.
     addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- merge-marker duplicate entry (#903)\n");
     expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
-    const held = sectionOf(readFileSync(join(dir, "CHANGELOG.md"), "utf8"), "## 9.9.9 — 2020-01-01");
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    // Still exactly one heading for the release: the roll merged, it did not
+    // re-insert.
+    expect(after.match(/^## 9\.9\.9 — /gm)).toHaveLength(1);
+    const held = sectionOf(after, "## 9.9.9 — 2020-01-01");
     expect(held.match(/merge-marker duplicate entry \(#903\)/g)).toHaveLength(1);
   });
 
@@ -185,10 +194,55 @@ describe("roll-changelog CLI", () => {
     const preview = runOut(dir, ["0.2.1", "--date", "2026-10-26", "--dry-run"]);
 
     expect(preview.match(/^## 0\.2\.1 — /gm)).toHaveLength(1);
+    // The ledger's own heading and date, not a fresh one for roll day.
+    expect(preview).toContain("## 0.2.1 — 2026-10-24");
     expect(preview).toContain("merge-marker dry-run entry (#905)");
     expect(preview).not.toContain("## Unreleased");
     expect(readFileSync(path, "utf8")).toBe(before);
     expect(introOf(readFileSync(path, "utf8"))).toBe(intro);
     expect(existsSync(join(dir, "changelog.d", "f.md"))).toBe(true);
+  });
+
+  it("keeps prose and indented lines the ledger already holds in a merged section", () => {
+    const dir = fixture("- [FIX] merge-marker prose entry (#907)\n");
+    addSection(
+      dir,
+      "## 9.9.9 — 2020-01-01\n\nHand-written preamble.\n\n### [FIX]\n\n- an existing fix (#1)\n\n  a continuation line\n",
+    );
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+    const held = sectionOf(readFileSync(join(dir, "CHANGELOG.md"), "utf8"), "## 9.9.9 — 2020-01-01");
+    expect(held).toContain("Hand-written preamble.");
+    expect(held).toContain("- an existing fix (#1)");
+    expect(held).toContain("  a continuation line");
+    expect(held).toContain("- merge-marker prose entry (#907)");
+  });
+
+  it("--dry-run previews exactly the section a real run writes", () => {
+    const dir = fixture("- [FIX] merge-marker preview entry (#906)\n");
+    const preview = runOut(dir, ["0.2.1", "--date", "2026-10-26", "--dry-run"]);
+    expect(run(dir, ["0.2.1", "--date", "2026-10-26"])).toBe(0);
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    const written = sectionOf(after, "## 0.2.1 — 2026-10-24");
+    expect(preview.trimEnd()).toBe(written.trimEnd());
+    expect(preview).toContain("merge-marker preview entry (#906)");
+  });
+
+  it("--dry-run searches below Unreleased like the write, not the whole file", () => {
+    const dir = fixture("- [FIX] merge-marker above entry (#908)\n");
+    const path = join(dir, "CHANGELOG.md");
+    const text = readFileSync(path, "utf8");
+    const at = text.search(HEADING);
+    // A section for the version sitting above ## Unreleased: the write never
+    // looks there, so the preview must not merge it either.
+    writeFileSync(path, `## 9.9.9 — 2000-01-01\n\n### [FIX]\n\n- an entry above (#1)\n\n${text.slice(at)}`);
+
+    const preview = runOut(dir, ["9.9.9", "--date", "2026-10-26", "--dry-run"]);
+
+    expect(preview).not.toContain("an entry above (#1)");
+    expect(preview).toContain("## 9.9.9 — 2026-10-26");
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+    const after = readFileSync(path, "utf8");
+    const written = sectionOf(after, "## 9.9.9 — 2026-10-26");
+    expect(preview.trimEnd()).toBe(written.trimEnd());
   });
 });
