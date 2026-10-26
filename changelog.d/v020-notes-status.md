@@ -1,0 +1,1 @@
+- [INTERNAL] State in the v0.2.0 release notes that the tag was never published, so the notes no longer read as release notes for a live download (#440)
