@@ -131,7 +131,8 @@ function renderBlocks({ heading, preamble, blocks }) {
   if (preamble.length > 0) out.push(...preamble, "");
   for (const block of blocks) {
     out.push(block.raw, "");
-    out.push(...block.lines, "");
+    // A heading with no body after it gets one separator, not two.
+    if (block.lines.length > 0) out.push(...block.lines, "");
   }
   return out.join("\n");
 }
@@ -157,8 +158,10 @@ function mergeSection(existing, incoming) {
     );
     const target = match ?? insertBlock(ledger.blocks, block);
     // Blank lines are formatting on the way in; the ledger's own interior
-    // blanks stay put above.
-    const added = [...new Set(block.lines.filter((line) => line !== ""))].filter(
+    // blanks stay put above. A `- None.` placeholder arriving from a folded
+    // duplicate is dropped: it means "nothing here" in the section it came
+    // from, not content to append under real entries.
+    const added = [...new Set(block.lines.filter((line) => line !== "" && line !== "- None."))].filter(
       (line) => !target.lines.includes(line),
     );
     if (added.length === 0) continue;
@@ -171,8 +174,9 @@ function mergeSection(existing, incoming) {
 // Every section the ledger holds for `version`, in file order. Line-scanned
 // rather than built as a RegExp: `version` comes from argv, and a
 // non-literal pattern is exactly what the Semgrep gate blocks. The match must
-// sit at a line start with no word character or dot immediately after it, so
-// 0.2.1 cannot match a 0.2.10 heading or a mention mid-line; each section
+// sit at a line start with the version followed by a space, an em dash or the
+// end of the line, so 0.2.1 cannot match a 0.2.10 heading, a 0.2.1-rc.1
+// prerelease heading for another release, or a mention mid-line; each section
 // ends just before the next `## ` heading. More than one match means the
 // ledger already holds two headings for one release — the roll heals those by
 // folding every duplicate into the first section.
@@ -184,7 +188,7 @@ function findReleases(changelog, version) {
     if (at < 0) break;
     const lineStart = changelog.lastIndexOf("\n", at - 1) + 1;
     const after = changelog[at + needle.length];
-    if (lineStart === at && (after === undefined || !/[\w.]/.test(after))) {
+    if (lineStart === at && (after === undefined || /[\s—]/.test(after))) {
       const rest = changelog.slice(at);
       const next = rest.search(/\n## /);
       const end = next >= 0 ? at + next : changelog.length;
@@ -240,12 +244,15 @@ export function insertRelease(changelog, section, version) {
   for (const dup of held.slice(1)) {
     // Anything sitting between the two duplicates — another release's
     // section, prose — is not part of the duplicate and stays; only the
-    // duplicate's own region goes. The gap ends on the newline that served
-    // as the duplicate heading's blank separator; the heading is going, so
-    // that newline goes with it and the trailing slice supplies the single
-    // separator the following section needs.
+    // duplicate's own region goes. The gap ends on the newline before the
+    // duplicate heading: when a following section exists that newline is the
+    // duplicate's blank separator, which goes with the heading (the trailing
+    // slice supplies the single separator the next section needs); when the
+    // duplicate runs to the end of the file there is no following section,
+    // and that newline is the previous line's terminator — keep it, or the
+    // file would lose its final newline.
     const gap = split.tail.slice(cursor, dup.start);
-    if (!/^\s*$/.test(gap)) tail += gap.slice(0, -1);
+    if (!/^\s*$/.test(gap)) tail += split.tail.slice(dup.end) === "" ? gap : gap.slice(0, -1);
     cursor = dup.end;
   }
   return `${head}${tail}${split.tail.slice(cursor)}`;

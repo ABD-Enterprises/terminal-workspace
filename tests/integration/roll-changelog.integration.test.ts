@@ -51,6 +51,20 @@ function runOut(dir: string, args: string[]) {
   });
 }
 
+// Status plus captured stderr, to pin failure *messages* and not just codes.
+function runCapture(dir: string, args: string[]) {
+  try {
+    execFileSync("node", [join(dir, "scripts/roll-changelog.mjs"), ...args], {
+      cwd: dir,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    return { status: 0, stderr: "" };
+  } catch (error) {
+    const failure = error as { status?: number; stderr?: Buffer | string };
+    return { status: failure.status ?? 1, stderr: String(failure.stderr ?? "") };
+  }
+}
+
 // Splice a synthetic release section in directly under the Unreleased block,
 // so a test controls the ledger's starting state for that version.
 function addSection(dir: string, section: string) {
@@ -338,6 +352,84 @@ describe("roll-changelog CLI", () => {
     expect(after).not.toMatch(/\n\n\n## /);
   });
 
+  it("does not treat a prerelease heading for another release as the section", () => {
+    const dir = fixture("- [FIX] merge-marker stable entry (#915)\n");
+    // The prerelease copy sits first, so a suffix-tolerant match would pick
+    // it as the section for 9.9.9 and the heal would fold — and delete — a
+    // heading that belongs to a different release.
+    addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- a stable entry (#7)\n");
+    addSection(dir, "## 9.9.9-verify.1 — 2021-03-03\n\n### [FIX]\n\n- a prerelease entry (#6)\n");
+
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    // The prerelease section is untouched: heading, date and entry.
+    expect(after).toContain("## 9.9.9-verify.1 — 2021-03-03");
+    expect(after).toContain("- a prerelease entry (#6)");
+    const prerelease = sectionOf(after, "## 9.9.9-verify.1 — 2021-03-03");
+    expect(prerelease).not.toContain("merge-marker stable entry");
+    // The real section keeps its own heading and date and takes the entry.
+    const stable = sectionOf(after, "## 9.9.9 — 2020-01-01");
+    expect(stable).toContain("- a stable entry (#7)");
+    expect(stable).toContain("- merge-marker stable entry (#915)");
+  });
+
+  it("keeps the file's final newline when the duplicate runs to the end of the ledger", () => {
+    const dir = fixture("- [FIX] merge-marker tail entry (#918)\n");
+    // Duplicate directly abutting the section above it (no blank separator)
+    // and sitting last in the file: the newline before its heading is the
+    // previous line's terminator, not a separator to reclaim, and there is
+    // no following section to supply one.
+    writeFileSync(
+      join(dir, "CHANGELOG.md"),
+      `${readFileSync(join(dir, "CHANGELOG.md"), "utf8").replace(/\n+$/, "\n")}## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- a first entry (#1)\n## 5.5.5 — 2020-06-06\n- an intervening entry (#2)\n## 9.9.9 — 2021-02-02\n- a duplicate tail entry (#3)`,
+    );
+
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    expect(after.endsWith("\n")).toBe(true);
+    expect(after.match(/^## 9\.9\.9 — /gm)).toHaveLength(1);
+    // Everything is still there, in order — the duplicate's entry folded
+    // into the healed section, its heading the only thing gone.
+    expect(after).toContain("- a first entry (#1)");
+    expect(after).toContain("- a duplicate tail entry (#3)");
+    expect(after).toContain("## 5.5.5 — 2020-06-06");
+    expect(after).toContain("- an intervening entry (#2)");
+    expect(after).toContain("- merge-marker tail entry (#918)");
+  });
+
+  it("does not fold a duplicate's - None. placeholder under real entries", () => {
+    const dir = fixture("- [FIX] merge-marker placeholder entry (#916)\n");
+    addSection(dir, "## 9.9.9 — 2021-02-02\n\n### [FIX]\n\n- None.\n");
+    addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- a real ledger entry (#8)\n");
+
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    const held = sectionOf(after, "## 9.9.9 — 2020-01-01");
+    expect(held).toContain("- a real ledger entry (#8)");
+    expect(held).toContain("- merge-marker placeholder entry (#916)");
+    // The placeholder meant "nothing here" in the duplicate, not an entry.
+    expect(held).not.toContain("- None.");
+  });
+
+  it("renders a subheading with no body once, without a double blank line", () => {
+    const dir = fixture("- [FIX] merge-marker empty-block entry (#917)\n");
+    addSection(dir, "## 9.9.9 — 2021-02-02\n\n### [FIX]\n\n- a duplicate entry (#9)\n\n### Notes\n");
+    addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- a ledger entry (#10)\n");
+
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    // The empty `### Notes` block folds in as a heading with one separator
+    // before whatever follows it.
+    expect(after).toContain("### Notes");
+    expect(after).not.toMatch(/\n\n\n/);
+    expect(after).toContain("- a ledger entry (#10)");
+    expect(after).toContain("- merge-marker empty-block entry (#917)");
+  });
+
   it("keeps a non-label subheading as its own block and interior blank lines in place", () => {
     const dir = fixture("- [FIX] merge-marker subheading entry (#912)\n");
     addSection(
@@ -365,8 +457,16 @@ describe("roll-changelog CLI", () => {
     const dir = fixture("- [FIX] entry for a missing ledger (#913)\n");
     rmSync(join(dir, "CHANGELOG.md"));
 
-    expect(run(dir, ["1.0.0"])).toBe(1);
-    expect(run(dir, ["1.0.0", "--dry-run"])).toBe(1);
+    const write = runCapture(dir, ["1.0.0"]);
+    const preview = runCapture(dir, ["1.0.0", "--dry-run"]);
+
+    expect(write.status).toBe(1);
+    expect(preview.status).toBe(1);
+    // Not just the same exit code: both report the same missing-ledger
+    // message (the stacks differ by call site, the error line does not).
+    const message = (stderr: string) => stderr.split("\n").find((line) => line.startsWith("Error: "));
+    expect(message(write.stderr)).toContain("CHANGELOG.md is missing");
+    expect(message(preview.stderr)).toBe(message(write.stderr));
 
     // Neither run creates a ledger, and neither consumes the fragment.
     expect(existsSync(join(dir, "CHANGELOG.md"))).toBe(false);
