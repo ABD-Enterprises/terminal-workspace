@@ -4,7 +4,7 @@
 // contracts.
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -190,12 +190,14 @@ describe("roll-changelog CLI", () => {
     const path = join(dir, "CHANGELOG.md");
     const before = readFileSync(path, "utf8");
     const intro = introOf(before);
+    const heading = before.match(/^## 0\.2\.1 — .*$/m)?.[0];
+    if (!heading) throw new Error("fixture ledger has no 0.2.1 section");
 
     const preview = runOut(dir, ["0.2.1", "--date", "2026-10-26", "--dry-run"]);
 
     expect(preview.match(/^## 0\.2\.1 — /gm)).toHaveLength(1);
     // The ledger's own heading and date, not a fresh one for roll day.
-    expect(preview).toContain("## 0.2.1 — 2026-10-24");
+    expect(preview).toContain(heading);
     expect(preview).toContain("merge-marker dry-run entry (#905)");
     expect(preview).not.toContain("## Unreleased");
     expect(readFileSync(path, "utf8")).toBe(before);
@@ -219,10 +221,12 @@ describe("roll-changelog CLI", () => {
 
   it("--dry-run previews exactly the section a real run writes", () => {
     const dir = fixture("- [FIX] merge-marker preview entry (#906)\n");
+    const heading = readFileSync(join(dir, "CHANGELOG.md"), "utf8").match(/^## 0\.2\.1 — .*$/m)?.[0];
+    if (!heading) throw new Error("fixture ledger has no 0.2.1 section");
     const preview = runOut(dir, ["0.2.1", "--date", "2026-10-26", "--dry-run"]);
     expect(run(dir, ["0.2.1", "--date", "2026-10-26"])).toBe(0);
     const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
-    const written = sectionOf(after, "## 0.2.1 — 2026-10-24");
+    const written = sectionOf(after, heading);
     expect(preview.trimEnd()).toBe(written.trimEnd());
     expect(preview).toContain("merge-marker preview entry (#906)");
   });
@@ -230,19 +234,109 @@ describe("roll-changelog CLI", () => {
   it("--dry-run searches below Unreleased like the write, not the whole file", () => {
     const dir = fixture("- [FIX] merge-marker above entry (#908)\n");
     const path = join(dir, "CHANGELOG.md");
+    // The version exists in both places: a held section below Unreleased —
+    // the one the roll must merge into — and a stray copy above it, which
+    // neither run may touch.
+    addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- a held entry below (#7)\n");
     const text = readFileSync(path, "utf8");
     const at = text.search(HEADING);
-    // A section for the version sitting above ## Unreleased: the write never
-    // looks there, so the preview must not merge it either.
     writeFileSync(path, `## 9.9.9 — 2000-01-01\n\n### [FIX]\n\n- an entry above (#1)\n\n${text.slice(at)}`);
+    const before = readFileSync(path, "utf8");
+    const head = before.slice(0, before.search(HEADING));
 
     const preview = runOut(dir, ["9.9.9", "--date", "2026-10-26", "--dry-run"]);
 
+    // The held section below Unreleased is the one the preview merges —
+    // its date, its entry, the new one folded in ...
+    expect(preview).toContain("## 9.9.9 — 2020-01-01");
+    expect(preview).toContain("a held entry below (#7)");
+    expect(preview).toContain("merge-marker above entry (#908)");
+    // ... and the copy above Unreleased is invisible to it.
     expect(preview).not.toContain("an entry above (#1)");
-    expect(preview).toContain("## 9.9.9 — 2026-10-26");
+    expect(preview).not.toContain("2000-01-01");
+
     expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
     const after = readFileSync(path, "utf8");
-    const written = sectionOf(after, "## 9.9.9 — 2026-10-26");
-    expect(preview.trimEnd()).toBe(written.trimEnd());
+    // Everything above ## Unreleased, the stray copy included, survives byte
+    // for byte; below it, exactly one heading for the release.
+    expect(after.startsWith(head)).toBe(true);
+    const tail = after.slice(after.search(HEADING));
+    expect(tail.match(/^## 9\.9\.9 — /gm)).toHaveLength(1);
+    // Preview and write agree, section for section.
+    expect(preview.trimEnd()).toBe(sectionOf(after, "## 9.9.9 — 2020-01-01").trimEnd());
+  });
+
+  it("--dry-run previews a fresh section for a version the ledger does not hold", () => {
+    const dir = fixture("- [FIX] merge-marker fresh preview entry (#910)\n");
+    const path = join(dir, "CHANGELOG.md");
+    const before = readFileSync(path, "utf8");
+
+    const preview = runOut(dir, ["7.7.7", "--date", "2026-10-26", "--dry-run"]);
+
+    expect(preview).toContain("## 7.7.7 — 2026-10-26");
+    expect(preview).toContain("### [FIX]");
+    expect(preview).toContain("merge-marker fresh preview entry (#910)");
+    // Still a preview: the ledger and the fragment are untouched.
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(existsSync(join(dir, "changelog.d", "f.md"))).toBe(true);
+  });
+
+  it("heals a ledger that already holds two headings for the version", () => {
+    const dir = fixture("- [FIX] merge-marker healing entry (#911)\n");
+    // Splice the second section in first: addSection inserts before the
+    // ledger's first release heading, so this lands the later copy above
+    // 0.2.1 and the next call lands the earlier copy above that.
+    addSection(dir, "## 9.9.9 — 2021-02-02\n\n### [FIX]\n\n- a later duplicate entry (#3)\n");
+    addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- an earlier duplicate entry (#4)\n");
+
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    // One heading left, under the first section's date.
+    expect(after.match(/^## 9\.9\.9 — /gm)).toHaveLength(1);
+    expect(after).toContain("## 9.9.9 — 2020-01-01");
+    expect(after).not.toContain("2021-02-02");
+    // Both duplicates' entries and the new one live in the healed section,
+    // and the rest of the ledger below it is intact.
+    const held = sectionOf(after, "## 9.9.9 — 2020-01-01");
+    expect(held).toContain("- an earlier duplicate entry (#4)");
+    expect(held).toContain("- a later duplicate entry (#3)");
+    expect(held).toContain("- merge-marker healing entry (#911)");
+    expect(after).toContain("## 0.2.1 — ");
+  });
+
+  it("keeps a non-label subheading as its own block and interior blank lines in place", () => {
+    const dir = fixture("- [FIX] merge-marker subheading entry (#912)\n");
+    addSection(
+      dir,
+      "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- existing fix one (#1)\n\n- existing fix two (#2)\n\n### Notes\n\n- a hand note\n",
+    );
+
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    expect(after.match(/^## 9\.9\.9 — /gm)).toHaveLength(1);
+    const held = sectionOf(after, "## 9.9.9 — 2020-01-01");
+    // The blank line between the ledger's own entries is the author's
+    // spacing, not formatting to normalize away.
+    expect(held).toContain("- existing fix one (#1)\n\n- existing fix two (#2)");
+    // The roll's entry lands under the label block, before the subheading.
+    expect(held).toContain("- existing fix two (#2)\n- merge-marker subheading entry (#912)");
+    // `### Notes` stays a heading in its own right, not a line folded into
+    // the FIX block above it.
+    expect(held).toContain("- merge-marker subheading entry (#912)\n\n### Notes");
+    expect(held).toContain("### Notes\n\n- a hand note");
+  });
+
+  it("fails the same way for a roll and a --dry-run when CHANGELOG.md is missing", () => {
+    const dir = fixture("- [FIX] entry for a missing ledger (#913)\n");
+    rmSync(join(dir, "CHANGELOG.md"));
+
+    expect(run(dir, ["1.0.0"])).toBe(1);
+    expect(run(dir, ["1.0.0", "--dry-run"])).toBe(1);
+
+    // Neither run creates a ledger, and neither consumes the fragment.
+    expect(existsSync(join(dir, "CHANGELOG.md"))).toBe(false);
+    expect(existsSync(join(dir, "changelog.d", "f.md"))).toBe(true);
   });
 });

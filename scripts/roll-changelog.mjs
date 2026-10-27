@@ -8,11 +8,16 @@
 // a second roll of a partially rolled release lands in — the entries are
 // merged into it (original heading and date kept, a missing label block
 // created, a `- None.` placeholder replaced, an entry already present skipped,
-// every content line the ledger already holds kept) instead of inserting a
-// second heading for the same release; only blank-line formatting is
-// normalized. A version with
+// every content line the ledger already holds kept, a non-label `### `
+// subheading kept as its own block) instead of inserting a second heading for
+// the same release; only blank-line formatting is normalized. A ledger that
+// already holds two headings for one version is healed: every duplicate is
+// folded into the first section and the extra headings go. A version with
 // no section yet is inserted directly under `## Unreleased`. Either way the
 // Unreleased subsections reset to `- None.` and the consumed fragments go.
+// `--dry-run` reads the ledger the same way the write does and prints the
+// same section the write splices, so a preview cannot succeed — or disagree —
+// where the real run would not.
 //
 // Usage: node scripts/roll-changelog.mjs <version> [--date YYYY-MM-DD] [--dry-run]
 import { readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
@@ -62,39 +67,60 @@ export function renderSection(version, date, entries) {
   return out.join("\n");
 }
 
+// Strip the blank lines hugging a block's edges — a heading's own separator
+// and the gap before the next block are formatting the render re-adds. Blank
+// lines *between* content lines are the author's spacing and stay.
+function trimEdges(lines) {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && lines[start] === "") start += 1;
+  while (end > start && lines[end - 1] === "") end -= 1;
+  return lines.slice(start, end);
+}
+
 // Split a rendered release section into its heading line, any content above
-// the first label block, and its `### [LABEL]` blocks in the order the ledger
-// holds them. Every non-blank line is kept exactly as written — prose,
-// indented continuations and `- ` entries alike — so merging never drops what
-// a human wrote into the ledger. Blank lines are formatting: the merge
-// re-renders them.
+// the first block, and its blocks in the order the ledger holds them: the
+// `### [LABEL]` blocks a roll renders, plus any other `### ` subheading a
+// human wrote, which becomes a block of its own so a merge never re-parents
+// it under a label. Every non-blank line is kept exactly as written — prose,
+// indented continuations and `- ` entries alike — and blank lines between
+// content lines survive too, so merging never drops what a human wrote into
+// the ledger.
 function splitSection(section) {
   const lines = section.split("\n");
   const heading = lines.shift();
   if (lines[0] === "") lines.shift();
   const preamble = [];
   const blocks = [];
+  let current = null;
   for (const line of lines) {
-    if (line === "") continue;
-    const m = line.match(/^### \[(BREAKING|FEATURE|FIX|INTERNAL|SECURITY)\]$/);
-    if (m) {
-      blocks.push({ label: m[1], lines: [] });
+    if (line.startsWith("### ")) {
+      const m = line.match(/^### \[(BREAKING|FEATURE|FIX|INTERNAL|SECURITY)\]$/);
+      current = { label: m ? m[1] : null, raw: line, lines: [] };
+      blocks.push(current);
       continue;
     }
-    const top = blocks[blocks.length - 1];
-    if (top) top.lines.push(line);
+    if (current) current.lines.push(line);
     else preamble.push(line);
   }
-  return { heading, preamble, blocks };
+  return {
+    heading,
+    preamble: trimEdges(preamble),
+    blocks: blocks.map((block) => ({ ...block, lines: trimEdges(block.lines) })),
+  };
 }
 
-// Add a label block the section does not have yet at its position in the
-// fixed order, so a new BREAKING block lands above an existing FIX block
-// rather than at the end of the section.
-function insertBlock(blocks, label) {
-  const rank = LABELS.indexOf(label);
-  const block = { label, lines: [] };
-  const at = blocks.findIndex((b) => LABELS.indexOf(b.label) > rank);
+// Add a block the section does not have yet: a label block at its position in
+// the fixed order, so a new BREAKING block lands above an existing FIX block
+// rather than at the end of the section; a non-label subheading at the end,
+// where the ledger stopped writing.
+function insertBlock(blocks, block) {
+  if (block.label === null) {
+    blocks.push(block);
+    return block;
+  }
+  const rank = LABELS.indexOf(block.label);
+  const at = blocks.findIndex((b) => b.label !== null && LABELS.indexOf(b.label) > rank);
   if (at < 0) blocks.push(block);
   else blocks.splice(at, 0, block);
   return block;
@@ -104,7 +130,7 @@ function renderBlocks({ heading, preamble, blocks }) {
   const out = [heading, ""];
   if (preamble.length > 0) out.push(...preamble, "");
   for (const block of blocks) {
-    out.push(`### [${block.label}]`, "");
+    out.push(block.raw, "");
     out.push(...block.lines, "");
   }
   return out.join("\n");
@@ -115,14 +141,26 @@ function renderBlocks({ heading, preamble, blocks }) {
 // under its label, a label block the section is missing is created in the
 // fixed order, a lone `- None.` placeholder is replaced rather than left above
 // the new entry, and an entry already present byte-for-byte is not repeated.
-// Lines the ledger already holds — prose and indented continuations included —
-// pass through untouched.
+// Lines the ledger already holds — prose, subheadings and indented
+// continuations included — pass through in their own place. The incoming side
+// carries prose above its first block only when a duplicate section is being
+// healed; that prose is kept too, after the ledger's.
 function mergeSection(existing, incoming) {
   const ledger = splitSection(existing);
   const roll = splitSection(incoming);
+  for (const line of roll.preamble) {
+    if (!ledger.preamble.includes(line)) ledger.preamble.push(line);
+  }
   for (const block of roll.blocks) {
-    const target = ledger.blocks.find((b) => b.label === block.label) ?? insertBlock(ledger.blocks, block.label);
-    const added = [...new Set(block.lines)].filter((line) => !target.lines.includes(line));
+    const match = ledger.blocks.find(
+      (b) => b.label === block.label && (block.label !== null || b.raw === block.raw),
+    );
+    const target = match ?? insertBlock(ledger.blocks, block);
+    // Blank lines are formatting on the way in; the ledger's own interior
+    // blanks stay put above.
+    const added = [...new Set(block.lines.filter((line) => line !== ""))].filter(
+      (line) => !target.lines.includes(line),
+    );
     if (added.length === 0) continue;
     if (target.lines.length === 1 && target.lines[0] === "- None.") target.lines.length = 0;
     target.lines.push(...added);
@@ -130,31 +168,45 @@ function mergeSection(existing, incoming) {
   return renderBlocks(ledger);
 }
 
-// The section the ledger already holds for `version`, if any. Line-scanned
+// Every section the ledger holds for `version`, in file order. Line-scanned
 // rather than built as a RegExp: `version` comes from argv, and a
 // non-literal pattern is exactly what the Semgrep gate blocks. The match must
 // sit at a line start with no word character or dot immediately after it, so
-// 0.2.1 cannot match a 0.2.10 heading or a mention mid-line; it ends just
-// before the next `## ` heading.
-function findRelease(changelog, version) {
+// 0.2.1 cannot match a 0.2.10 heading or a mention mid-line; each section
+// ends just before the next `## ` heading. More than one match means the
+// ledger already holds two headings for one release — the roll heals those by
+// folding every duplicate into the first section.
+function findReleases(changelog, version) {
   const needle = `## ${version}`;
-  let start = -1;
+  const found = [];
   for (let from = 0; ; ) {
     const at = changelog.indexOf(needle, from);
     if (at < 0) break;
     const lineStart = changelog.lastIndexOf("\n", at - 1) + 1;
     const after = changelog[at + needle.length];
     if (lineStart === at && (after === undefined || !/[\w.]/.test(after))) {
-      start = at;
-      break;
+      const rest = changelog.slice(at);
+      const next = rest.search(/\n## /);
+      const end = next >= 0 ? at + next : changelog.length;
+      found.push({ start: at, end, text: changelog.slice(at, end) });
+      from = end;
+      continue;
     }
     from = at + needle.length;
   }
-  if (start < 0) return null;
-  const rest = changelog.slice(start);
-  const next = rest.search(/\n## /);
-  const end = next >= 0 ? start + next : changelog.length;
-  return { start, end, text: changelog.slice(start, end) };
+  return found;
+}
+
+// The section a roll writes for `version`: merged with the section the ledger
+// already holds below `## Unreleased` — every duplicate folded into the first
+// — or the raw render when it holds none. The write splices this text and
+// `--dry-run` prints this text, so a preview can never disagree with the run.
+function rolledSection(tail, section, version) {
+  const held = findReleases(tail, version);
+  if (held.length === 0) return { held, text: section };
+  let text = mergeSection(held[0].text, section);
+  for (const dup of held.slice(1)) text = mergeSection(text, dup.text);
+  return { held, text };
 }
 
 // Everything below the Unreleased block — the release sections a roll may
@@ -179,12 +231,38 @@ export function insertRelease(changelog, section, version) {
   const unreleased = ["## Unreleased", ""];
   for (const label of LABELS) unreleased.push(`### [${label}]`, "", "- None.", "");
   const head = `${changelog.slice(0, split.at)}${unreleased.join("\n")}\n`;
-  const held = findRelease(split.tail, version);
-  if (held) {
-    // One heading, one date: merge under the section that already exists.
-    return `${head}${split.tail.slice(0, held.start)}${mergeSection(held.text, section)}${split.tail.slice(held.end)}`;
+  const { held, text } = rolledSection(split.tail, section, version);
+  if (held.length === 0) return `${head}${section}\n${split.tail}`;
+  // One heading, one date: merge under the first section the ledger holds and
+  // drop every duplicate heading, its content already folded in.
+  let tail = split.tail.slice(0, held[0].start) + text;
+  let cursor = held[0].end;
+  for (const dup of held.slice(1)) {
+    // Anything sitting between the two duplicates — another release's
+    // section, prose — is not part of the duplicate and stays; only the
+    // duplicate's own region goes.
+    const gap = split.tail.slice(cursor, dup.start);
+    if (!/^\s*$/.test(gap)) tail += gap;
+    cursor = dup.end;
   }
-  return `${head}${section}\n${split.tail}`;
+  return `${head}${tail}${split.tail.slice(cursor)}`;
+}
+
+// Both the write and --dry-run read the ledger through this, so a missing
+// CHANGELOG.md fails identically for each — exit 1 with the same message —
+// instead of the preview printing against an empty ledger the real run would
+// refuse to write.
+function readLedger(changelogPath) {
+  try {
+    return readFileSync(changelogPath, "utf8");
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      throw new Error("CHANGELOG.md is missing — a roll and its --dry-run both need an existing ledger", {
+        cause: err,
+      });
+    }
+    throw err;
+  }
 }
 
 // Compare real paths: through a symlinked prefix (macOS /var -> /private/var)
@@ -213,29 +291,18 @@ if (invokedDirectly) {
   const section = renderSection(version, date, entries);
   const changelogPath = join(root, "CHANGELOG.md");
   if (dryRun) {
-    // Preview what a real run would write, searching the same part of the
-    // ledger the write searches (below `## Unreleased`), so the preview can
-    // never disagree with the write. A missing CHANGELOG.md is a preview
-    // against an empty ledger, not a crash; a ledger without an Unreleased
-    // heading fails here exactly as the real run would.
-    let ledger = "";
-    try {
-      ledger = readFileSync(changelogPath, "utf8");
-    } catch (err) {
-      if (!err || err.code !== "ENOENT") throw err;
-    }
+    // Print exactly the section a real run would splice: the same ledger read
+    // (a missing file fails here as it does there, exit 1), the same
+    // Unreleased-anchored tail, the same merge — so a preview can neither
+    // succeed nor disagree where the write would fail or differ. A ledger
+    // without an Unreleased heading fails here exactly as the real run does.
+    const ledger = readLedger(changelogPath);
     const split = unreleasedSplit(ledger);
-    if (split) {
-      const held = findRelease(split.tail, version);
-      console.log(held ? mergeSection(held.text, section) : section);
-    } else if (ledger === "") {
-      console.log(section);
-    } else {
-      throw new Error("CHANGELOG.md has no '## Unreleased' heading");
-    }
+    if (!split) throw new Error("CHANGELOG.md has no '## Unreleased' heading");
+    console.log(rolledSection(split.tail, section, version).text);
     process.exit(0);
   }
-  writeFileSync(changelogPath, insertRelease(readFileSync(changelogPath, "utf8"), section, version));
+  writeFileSync(changelogPath, insertRelease(readLedger(changelogPath), section, version));
   for (const file of files) unlinkSync(join(root, "changelog.d", file));
   console.log(`[roll-changelog] ${version}: ${files.length} fragment(s) rolled into CHANGELOG.md`);
 }
