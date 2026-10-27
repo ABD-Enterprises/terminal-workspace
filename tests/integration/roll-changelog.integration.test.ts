@@ -305,6 +305,39 @@ describe("roll-changelog CLI", () => {
     expect(after).toContain("## 0.2.1 — ");
   });
 
+  it("keeps a whole release section sitting between two duplicate headings", () => {
+    const dir = fixture("- [FIX] merge-marker gap entry (#914)\n");
+    // Same construction as above, but a different release lands between the
+    // two copies of 9.9.9. That release is not part of the duplicate: the
+    // heal must fold the second copy into the first and carry the whole
+    // intervening section through — dropping it is silent ledger data loss.
+    addSection(dir, "## 9.9.9 — 2021-02-02\n\n### [FIX]\n\n- a later duplicate entry (#3)\n");
+    addSection(dir, "## 5.5.5 — 2020-06-06\n\n### [FIX]\n\n- an intervening release entry (#5)\n");
+    addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- an earlier duplicate entry (#4)\n");
+
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    expect(after.match(/^## 9\.9\.9 — /gm)).toHaveLength(1);
+    expect(after).toContain("## 9.9.9 — 2020-01-01");
+    expect(after).not.toContain("2021-02-02");
+    // The intervening release survives whole: heading, date and entry.
+    expect(after).toContain("## 5.5.5 — 2020-06-06");
+    expect(after).toContain("- an intervening release entry (#5)");
+    // Both duplicates' entries and the new one are in the healed section.
+    const held = sectionOf(after, "## 9.9.9 — 2020-01-01");
+    expect(held).toContain("- an earlier duplicate entry (#4)");
+    expect(held).toContain("- a later duplicate entry (#3)");
+    expect(held).toContain("- merge-marker gap entry (#914)");
+    // The section boundaries keep exactly one blank line on each side of
+    // the surviving gap content — the deleted duplicate's heading does not
+    // leave a hole, and the re-splice does not double the separator. The
+    // healed section's last line is the duplicate's folded-in entry.
+    expect(after).toMatch(/\(#3\)\n\n## 5\.5\.5 — /);
+    expect(after).toMatch(/\(#5\)\n\n## 0\.2\.1 — /);
+    expect(after).not.toMatch(/\n\n\n## /);
+  });
+
   it("keeps a non-label subheading as its own block and interior blank lines in place", () => {
     const dir = fixture("- [FIX] merge-marker subheading entry (#912)\n");
     addSection(

@@ -240,9 +240,12 @@ export function insertRelease(changelog, section, version) {
   for (const dup of held.slice(1)) {
     // Anything sitting between the two duplicates — another release's
     // section, prose — is not part of the duplicate and stays; only the
-    // duplicate's own region goes.
+    // duplicate's own region goes. The gap ends on the newline that served
+    // as the duplicate heading's blank separator; the heading is going, so
+    // that newline goes with it and the trailing slice supplies the single
+    // separator the following section needs.
     const gap = split.tail.slice(cursor, dup.start);
-    if (!/^\s*$/.test(gap)) tail += gap;
+    if (!/^\s*$/.test(gap)) tail += gap.slice(0, -1);
     cursor = dup.end;
   }
   return `${head}${tail}${split.tail.slice(cursor)}`;
