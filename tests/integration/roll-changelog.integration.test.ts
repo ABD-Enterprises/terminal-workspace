@@ -374,12 +374,12 @@ describe("roll-changelog CLI", () => {
     expect(stable).toContain("- merge-marker stable entry (#915)");
   });
 
-  it("keeps the file's final newline when the duplicate runs to the end of the ledger", () => {
+  it("writes an output that ends with a newline when the duplicate runs to the end of the ledger", () => {
     const dir = fixture("- [FIX] merge-marker tail entry (#918)\n");
     // Duplicate directly abutting the section above it (no blank separator)
-    // and sitting last in the file: the newline before its heading is the
-    // previous line's terminator, not a separator to reclaim, and there is
-    // no following section to supply one.
+    // and sitting last in a file that has no final newline: the newline
+    // before its heading is the previous line's terminator, not a separator
+    // to reclaim, and there is no following section to supply one.
     writeFileSync(
       join(dir, "CHANGELOG.md"),
       `${readFileSync(join(dir, "CHANGELOG.md"), "utf8").replace(/\n+$/, "\n")}## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- a first entry (#1)\n## 5.5.5 — 2020-06-06\n- an intervening entry (#2)\n## 9.9.9 — 2021-02-02\n- a duplicate tail entry (#3)`,
@@ -401,7 +401,13 @@ describe("roll-changelog CLI", () => {
 
   it("does not fold a duplicate's - None. placeholder under real entries", () => {
     const dir = fixture("- [FIX] merge-marker placeholder entry (#916)\n");
-    addSection(dir, "## 9.9.9 — 2021-02-02\n\n### [FIX]\n\n- None.\n");
+    // The duplicate carries placeholders on every path into the merge: a
+    // preamble line before the first block, a label block holding only one,
+    // and a whole label block the ledger does not have that holds only one.
+    addSection(
+      dir,
+      "## 9.9.9 — 2021-02-02\n\n- None.\n\n### [FIX]\n\n- None.\n\n### [SECURITY]\n\n- None.\n",
+    );
     addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- a real ledger entry (#8)\n");
 
     expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
@@ -410,8 +416,28 @@ describe("roll-changelog CLI", () => {
     const held = sectionOf(after, "## 9.9.9 — 2020-01-01");
     expect(held).toContain("- a real ledger entry (#8)");
     expect(held).toContain("- merge-marker placeholder entry (#916)");
-    // The placeholder meant "nothing here" in the duplicate, not an entry.
+    // The placeholders meant "nothing here" in the duplicate, not content:
+    // not under the real entries, not in the preamble — and a label block
+    // whose whole body is a placeholder is not manufactured at all.
     expect(held).not.toContain("- None.");
+    expect(held).not.toContain("### [SECURITY]");
+  });
+
+  it("merges into a label heading even when the ledger wrote it with a trailing space", () => {
+    const dir = fixture("- [FIX] merge-marker spaced heading entry (#919)\n");
+    // Writer slop: `### [FIX] ` with a trailing space must still read as the
+    // FIX block, not become a second, non-label block beside it.
+    addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FIX] \n\n- a ledger entry (#11)\n");
+
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    const held = sectionOf(after, "## 9.9.9 — 2020-01-01");
+    expect(held.match(/^### \[FIX\]/gm)).toHaveLength(1);
+    expect(held).toContain("- a ledger entry (#11)");
+    expect(held).toContain("- merge-marker spaced heading entry (#919)");
+    // The heading is normalized to the exact shape on the way through.
+    expect(held).not.toMatch(/^### \[FIX\] /m);
   });
 
   it("renders a subheading with no body once, without a double blank line", () => {

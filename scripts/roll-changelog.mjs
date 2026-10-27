@@ -16,8 +16,10 @@
 // no section yet is inserted directly under `## Unreleased`. Either way the
 // Unreleased subsections reset to `- None.` and the consumed fragments go.
 // `--dry-run` reads the ledger the same way the write does and prints the
-// same section the write splices, so a preview cannot succeed — or disagree —
-// where the real run would not.
+// same section the write splices, so a preview cannot disagree — in what it
+// would write — where the real run would. This is a ledger-read and render
+// preflight, not a full preflight of the write: with nothing to roll the
+// preview exits 0 before the ledger is read, where the real run exits 1.
 //
 // Usage: node scripts/roll-changelog.mjs <version> [--date YYYY-MM-DD] [--dry-run]
 import { readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
@@ -95,8 +97,12 @@ function splitSection(section) {
   let current = null;
   for (const line of lines) {
     if (line.startsWith("### ")) {
-      const m = line.match(/^### \[(BREAKING|FEATURE|FIX|INTERNAL|SECURITY)\]$/);
-      current = { label: m ? m[1] : null, raw: line, lines: [] };
+      // A trailing space after a label heading is writer slop, not a second
+      // block: match on the trimmed line so `### [FIX] ` still reads as the
+      // FIX block instead of duplicating it as a non-label heading.
+      const text = line.trimEnd();
+      const m = text.match(/^### \[(BREAKING|FEATURE|FIX|INTERNAL|SECURITY)\]$/);
+      current = { label: m ? m[1] : null, raw: m ? text : line, lines: [] };
       blocks.push(current);
       continue;
     }
@@ -149,24 +155,34 @@ function renderBlocks({ heading, preamble, blocks }) {
 function mergeSection(existing, incoming) {
   const ledger = splitSection(existing);
   const roll = splitSection(incoming);
+  // Blank lines are formatting on the way in, and a `- None.` placeholder
+  // means "nothing here" in the section it came from — neither is content to
+  // carry into the ledger, in the preamble or in a block.
+  const content = (line) => line !== "" && line !== "- None.";
   for (const line of roll.preamble) {
-    if (!ledger.preamble.includes(line)) ledger.preamble.push(line);
+    if (content(line) && !ledger.preamble.includes(line)) ledger.preamble.push(line);
   }
   for (const block of roll.blocks) {
     const match = ledger.blocks.find(
       (b) => b.label === block.label && (block.label !== null || b.raw === block.raw),
     );
-    const target = match ?? insertBlock(ledger.blocks, block);
-    // Blank lines are formatting on the way in; the ledger's own interior
-    // blanks stay put above. A `- None.` placeholder arriving from a folded
-    // duplicate is dropped: it means "nothing here" in the section it came
-    // from, not content to append under real entries.
-    const added = [...new Set(block.lines.filter((line) => line !== "" && line !== "- None."))].filter(
-      (line) => !target.lines.includes(line),
+    if (!match) {
+      // A block the ledger does not have yet. A label block is only created
+      // when it carries a real entry: an incoming placeholder-only
+      // `### [SECURITY]` is dropped whole rather than manufactured as an
+      // empty section. A non-label subheading is kept even when empty — the
+      // heading itself is what a human wrote.
+      const lines = block.lines.filter((line) => line !== "- None.");
+      if (block.label !== null && !lines.some(content)) continue;
+      insertBlock(ledger.blocks, { ...block, lines });
+      continue;
+    }
+    const added = [...new Set(block.lines.filter(content))].filter(
+      (line) => !match.lines.includes(line),
     );
     if (added.length === 0) continue;
-    if (target.lines.length === 1 && target.lines[0] === "- None.") target.lines.length = 0;
-    target.lines.push(...added);
+    if (match.lines.length === 1 && match.lines[0] === "- None.") match.lines.length = 0;
+    match.lines.push(...added);
   }
   return renderBlocks(ledger);
 }
@@ -301,11 +317,14 @@ if (invokedDirectly) {
   const section = renderSection(version, date, entries);
   const changelogPath = join(root, "CHANGELOG.md");
   if (dryRun) {
-    // Print exactly the section a real run would splice: the same ledger read
-    // (a missing file fails here as it does there, exit 1), the same
-    // Unreleased-anchored tail, the same merge — so a preview can neither
-    // succeed nor disagree where the write would fail or differ. A ledger
-    // without an Unreleased heading fails here exactly as the real run does.
+    // Print exactly the section a real run would splice, once there are
+    // fragments to roll: the same ledger read (a missing file fails here as
+    // it does there, exit 1), the same Unreleased-anchored tail, the same
+    // merge. A ledger without an Unreleased heading fails here exactly as the
+    // real run does. This is a ledger-read and render preflight, not a full
+    // preflight of the write: the no-fragments case above exits before either
+    // path reads the ledger, and there preview and write deliberately differ
+    // (0 vs 1).
     const ledger = readLedger(changelogPath);
     const split = unreleasedSplit(ledger);
     if (!split) throw new Error("CHANGELOG.md has no '## Unreleased' heading");
