@@ -11,10 +11,13 @@
 // every content line the ledger already holds kept, a non-label `### `
 // subheading kept as its own block) instead of inserting a second heading for
 // the same release; only blank-line formatting is normalized. A ledger that
-// already holds two headings for one version is healed: every duplicate is
-// folded into the first section and the extra headings go. A version with
+// already holds two headings for one version below `## Unreleased` is healed:
+// every duplicate is folded into the first section and the extra headings go
+// (a copy above the block is deliberately untouched). A version with
 // no section yet is inserted directly under `## Unreleased`. Either way the
-// Unreleased subsections reset to `- None.` and the consumed fragments go.
+// Unreleased subsections reset to `- None.` and the consumed fragments go —
+// and a roll refuses when the Unreleased block holds anything besides label
+// headings and `- None.` placeholders.
 // `--dry-run` reads the ledger the same way the write does and prints the
 // same section the write splices, so a preview cannot disagree — in what it
 // would write — where the real run would. This is a ledger-read and render
@@ -229,6 +232,23 @@ function rolledSection(tail, section, version) {
   return { held, text };
 }
 
+// The Unreleased block a roll resets must hold only what the skeleton
+// rebuilds: blank lines, the five `### [LABEL]` headings and their own
+// `- None.` placeholders. Anything else is content the reset would silently
+// delete, so a bad ledger refuses instead — on both the write and the
+// --dry-run path, which both split through here.
+function assertSkeletonOnly(block) {
+  for (const raw of block.split("\n")) {
+    const line = raw.trim();
+    const heading =
+      line.startsWith("### [") && line.endsWith("]") && LABELS.includes(line.slice(5, -1));
+    if (line === "" || line === "- None." || heading) continue;
+    throw new Error(
+      `CHANGELOG.md has non-label content under '## Unreleased': ${JSON.stringify(line)} — move it below a release heading before rolling`,
+    );
+  }
+}
+
 // Everything below the Unreleased block — the release sections a roll may
 // merge into. Both the real run and --dry-run go through this, so a preview
 // can never search a different part of the ledger than the write does.
@@ -242,6 +262,9 @@ function unreleasedSplit(changelog) {
   const rest = changelog.slice(at + marker.length);
   const nextRelease = rest.search(/\n## \d/);
   const tailAt = nextRelease >= 0 ? at + marker.length + nextRelease + 1 : changelog.length;
+  // The reset rebuilds this block from the fixed skeleton, so refuse rather
+  // than silently discard whatever else it holds.
+  assertSkeletonOnly(changelog.slice(at + marker.length, tailAt));
   return { at, tail: changelog.slice(tailAt) };
 }
 
@@ -307,6 +330,14 @@ if (invokedDirectly) {
   }
   const dateFlag = process.argv.indexOf("--date");
   const date = dateFlag > -1 ? process.argv[dateFlag + 1] : new Date().toISOString().slice(0, 10);
+  // `--date` lands in a `## <version> — <date>` heading: a value with a
+  // newline or stray text would write an extra heading, so validate the
+  // format before either the dry-run or the write path reads it. A missing
+  // value reads as undefined here and fails the same check.
+  if (dateFlag > -1 && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    console.error("usage: roll-changelog.mjs <version> [--date YYYY-MM-DD] [--dry-run]");
+    process.exit(2);
+  }
   const dryRun = process.argv.includes("--dry-run");
   const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
   const { files, entries } = collectFragments(join(root, "changelog.d"));
