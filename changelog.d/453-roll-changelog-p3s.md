@@ -1,0 +1,1 @@
+- [FIX] Roll changelog: refuse a roll that would discard non-label content under the Unreleased heading, require --date to be YYYY-MM-DD, pin the placeholder filter on the heal block-creation path, and scope the heal comment to below the Unreleased heading (#453)

@@ -89,6 +89,17 @@ function introOf(changelog: string) {
   return changelog.slice(0, changelog.search(HEADING));
 }
 
+// Insert content directly under the `## Unreleased` heading line — inside the
+// block a roll resets — for the #453 refusal tests.
+function injectUnderUnreleased(dir: string, text: string) {
+  const path = join(dir, "CHANGELOG.md");
+  const changelog = readFileSync(path, "utf8");
+  const at = changelog.search(HEADING);
+  if (at < 0) throw new Error("CHANGELOG.md has no '## Unreleased' heading");
+  const lineEnd = changelog.indexOf("\n", at) + 1;
+  writeFileSync(path, changelog.slice(0, lineEnd) + text + changelog.slice(lineEnd));
+}
+
 describe("roll-changelog CLI", () => {
   it("exits 1 for a real roll and 0 for --dry-run when changelog.d is missing", () => {
     const dir = fixture();
@@ -496,6 +507,121 @@ describe("roll-changelog CLI", () => {
 
     // Neither run creates a ledger, and neither consumes the fragment.
     expect(existsSync(join(dir, "CHANGELOG.md"))).toBe(false);
+    expect(existsSync(join(dir, "changelog.d", "f.md"))).toBe(true);
+  });
+
+  // #453: the reset rebuilds the Unreleased block from the fixed five-label
+  // skeleton, so a roll must refuse — exit 1, identically on the write and
+  // the --dry-run path — when the block holds anything else, instead of
+  // silently deleting it.
+
+  it("refuses a roll that would discard non-label content under Unreleased", () => {
+    const dir = fixture("- [FIX] merge-marker unreleased-guard entry (#920)\n");
+    injectUnderUnreleased(dir, "### Notes\n\n- prose under Unreleased\n");
+    const path = join(dir, "CHANGELOG.md");
+    const before = readFileSync(path, "utf8");
+
+    const write = runCapture(dir, ["9.9.9", "--date", "2026-10-26"]);
+    const preview = runCapture(dir, ["9.9.9", "--date", "2026-10-26", "--dry-run"]);
+
+    expect(write.status).toBe(1);
+    expect(preview.status).toBe(1);
+    // Not just the same exit code: both report the same refusal, naming the
+    // offending line and what to do with it (the stacks differ by call site).
+    const message = (stderr: string) => stderr.split("\n").find((line) => line.startsWith("Error: "));
+    expect(message(write.stderr)).toContain("non-label content under '## Unreleased'");
+    expect(message(write.stderr)).toContain("### Notes");
+    expect(message(write.stderr)).toContain("below a release heading");
+    expect(message(preview.stderr)).toBe(message(write.stderr));
+    // The refusal changes nothing: the ledger stays byte-identical, the
+    // fragment is not consumed.
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(existsSync(join(dir, "changelog.d", "f.md"))).toBe(true);
+  });
+
+  it("refuses when Unreleased is the last heading and prose follows the skeleton", () => {
+    const dir = fixture("- [FIX] merge-marker unreleased-tail entry (#921)\n");
+    // Cut every release section off the ledger: the block the reset would
+    // rebuild now runs to the end of the file, so the prose after the
+    // skeleton is everything a roll would lose, with no tail to fall back on.
+    const path = join(dir, "CHANGELOG.md");
+    const changelog = readFileSync(path, "utf8");
+    const at = changelog.search(/^## \d/m);
+    if (at < 0) throw new Error("fixture ledger has no release heading");
+    writeFileSync(path, `${changelog.slice(0, at)}- prose where a release heading would go\n`);
+    const before = readFileSync(path, "utf8");
+
+    const write = runCapture(dir, ["9.9.9", "--date", "2026-10-26"]);
+    const preview = runCapture(dir, ["9.9.9", "--date", "2026-10-26", "--dry-run"]);
+
+    expect(write.status).toBe(1);
+    expect(preview.status).toBe(1);
+    const message = (stderr: string) => stderr.split("\n").find((line) => line.startsWith("Error: "));
+    expect(message(write.stderr)).toContain("non-label content under '## Unreleased'");
+    expect(message(preview.stderr)).toBe(message(write.stderr));
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(existsSync(join(dir, "changelog.d", "f.md"))).toBe(true);
+  });
+
+  // #453: on the heal's block-creation path a non-label subheading carried
+  // over from the duplicate keeps its `- None.` body unless the filter in
+  // mergeSection drops it; deleting that filter must fail the test below.
+
+  it("drops a duplicate's placeholder body when creating its non-label block", () => {
+    const dir = fixture("- [FIX] merge-marker notes-pin entry (#922)\n");
+    // The duplicate ends with a non-label `### Notes` block whose whole body
+    // is a placeholder; the earlier-dated copy lands first and survives as
+    // the section.
+    addSection(
+      dir,
+      "## 9.9.9 — 2021-02-02\n\n### [FIX]\n\n- a later copy entry (#12)\n\n### Notes\n\n- None.\n",
+    );
+    addSection(dir, "## 9.9.9 — 2020-01-01\n\n### [FIX]\n\n- an earlier copy entry (#13)\n");
+
+    expect(run(dir, ["9.9.9", "--date", "2026-10-26"])).toBe(0);
+
+    const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+    expect(after.match(/^## 9\.9\.9 — /gm)).toHaveLength(1);
+    const held = sectionOf(after, "## 9.9.9 — 2020-01-01");
+    expect(held).toContain("- a later copy entry (#12)");
+    expect(held).toContain("- an earlier copy entry (#13)");
+    expect(held).toContain("- merge-marker notes-pin entry (#922)");
+    // The heading survives exactly once; its placeholder body does not.
+    expect(held.match(/^### Notes$/gm)).toHaveLength(1);
+    expect(held).not.toContain("- None.");
+  });
+
+  // #453: `--date` lands in a `## <version> — <date>` heading line, so a
+  // malformed, newline-injected or missing value is rejected with exit 2
+  // before either the write or the --dry-run path runs.
+
+  it("--date rejects a malformed, newline-injected or missing value before either path", () => {
+    const dir = fixture("- [FIX] merge-marker date entry (#923)\n");
+    const path = join(dir, "CHANGELOG.md");
+    const before = readFileSync(path, "utf8");
+
+    for (const args of [
+      ["9.9.9", "--date", "2026-1-1"],
+      ["9.9.9", "--date", "2026-01-01\n## 9.9.9 — injected"],
+      ["9.9.9", "--date"],
+    ]) {
+      // The write and --dry-run alike: the check sits before both.
+      expect(runCapture(dir, args).status).toBe(2);
+      expect(runCapture(dir, [...args, "--dry-run"]).status).toBe(2);
+      // The rejection changes nothing: the ledger stays byte-identical, the
+      // fragment is not consumed.
+      expect(readFileSync(path, "utf8")).toBe(before);
+      expect(existsSync(join(dir, "changelog.d", "f.md"))).toBe(true);
+    }
+    // The usage line, not a stack trace.
+    expect(runCapture(dir, ["9.9.9", "--date", "2026-1-1"]).stderr).toContain(
+      "usage: roll-changelog.mjs",
+    );
+
+    // A well-formed date still previews: exit 0, nothing written.
+    const preview = runOut(dir, ["9.9.9", "--date", "2026-10-26", "--dry-run"]);
+    expect(preview).toContain("## 9.9.9 — 2026-10-26");
+    expect(readFileSync(path, "utf8")).toBe(before);
     expect(existsSync(join(dir, "changelog.d", "f.md"))).toBe(true);
   });
 });
