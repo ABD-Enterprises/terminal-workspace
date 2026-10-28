@@ -34,7 +34,7 @@ function normalizeTrustedKey(key: VaultSyncTrustedKey): VaultSyncTrustedKey {
 
 function createEmptyTrustPolicy(): VaultSyncTrustPolicy {
   return {
-    schema: "termsnip-vault-sync-trust",
+    schema: "terminal-workspace-sync-trust",
     version: 1,
     allowUnknownKeys: false,
     trustedKeys: [],
@@ -82,7 +82,7 @@ export const useVaultSyncTrustStore = create<VaultSyncTrustState>()(
       replacePolicy: (policy) =>
         set({
           policy: {
-            schema: "termsnip-vault-sync-trust",
+            schema: "terminal-workspace-sync-trust",
             version: 1,
             allowUnknownKeys: policy.allowUnknownKeys,
             trustedKeys: sortTrustedKeys(policy.trustedKeys.map(normalizeTrustedKey)),

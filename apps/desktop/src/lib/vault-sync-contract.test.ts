@@ -5,12 +5,13 @@ import {
   classifyVaultSyncStrategy,
   evaluateVaultSyncEnvelopeTrust,
   inspectVaultSyncEnvelope,
+  parseVaultSyncEnvelope,
   parseVaultSyncTrustPolicy,
 } from "./vault-sync-contract";
 
 const baseBundle: LocalConfigBundle = {
-  app: "term-snip",
-  version: 5,
+  app: "terminal-workspace",
+  version: 6,
   identities: [],
   exportedAt: "2026-04-04T16:30:00.000Z",
   vault: {
@@ -105,6 +106,7 @@ describe("vault sync contract", () => {
       authTag: "auth-tag-value",
     });
 
+    expect(envelope.header.schema).toBe("terminal-workspace-sync");
     expect(envelope.header.vaultId).toBe("vault-current");
     expect(envelope.header.snapshotId).toBe("snapshot-next");
     expect(envelope.header.recordCounts).toEqual({
@@ -173,7 +175,7 @@ describe("vault sync contract", () => {
     expect(
       classifyVaultSyncStrategy(
         {
-          schema: "termsnip-vault-sync",
+          schema: "terminal-workspace-sync",
           version: 1,
           payloadKind: "local-config-bundle",
           vaultId: "vault-current",
@@ -194,7 +196,7 @@ describe("vault sync contract", () => {
     expect(
       classifyVaultSyncStrategy(
         {
-          schema: "termsnip-vault-sync",
+          schema: "terminal-workspace-sync",
           version: 1,
           payloadKind: "local-config-bundle",
           vaultId: "vault-current",
@@ -226,7 +228,7 @@ describe("vault sync contract", () => {
       evaluateVaultSyncEnvelopeTrust(
         envelope,
         {
-          schema: "termsnip-vault-sync-trust",
+          schema: "terminal-workspace-sync-trust",
           version: 1,
           allowUnknownKeys: false,
           trustedKeys: [
@@ -254,7 +256,7 @@ describe("vault sync contract", () => {
       evaluateVaultSyncEnvelopeTrust(
         envelope,
         {
-          schema: "termsnip-vault-sync-trust",
+          schema: "terminal-workspace-sync-trust",
           version: 1,
           allowUnknownKeys: false,
           trustedKeys: [
@@ -290,7 +292,7 @@ describe("vault sync contract", () => {
 
     expect(
       evaluateVaultSyncEnvelopeTrust(envelope, {
-        schema: "termsnip-vault-sync-trust",
+        schema: "terminal-workspace-sync-trust",
         version: 1,
         allowUnknownKeys: false,
         trustedKeys: [
@@ -313,7 +315,7 @@ describe("vault sync contract", () => {
 
     expect(
       evaluateVaultSyncEnvelopeTrust(envelope, {
-        schema: "termsnip-vault-sync-trust",
+        schema: "terminal-workspace-sync-trust",
         version: 1,
         allowUnknownKeys: false,
         trustedKeys: [],
@@ -326,7 +328,7 @@ describe("vault sync contract", () => {
 
     expect(
       evaluateVaultSyncEnvelopeTrust(envelope, {
-        schema: "termsnip-vault-sync-trust",
+        schema: "terminal-workspace-sync-trust",
         version: 1,
         allowUnknownKeys: false,
         trustedKeys: [
@@ -384,5 +386,39 @@ describe("vault sync contract", () => {
         ],
       })
     ).toThrow("Vault sync trust policy is invalid.");
+  });
+
+  it("#451: parses a legacy 'termsnip-vault-sync' envelope header at version 1", async () => {
+    const envelope = await buildVaultSyncEnvelope(baseBundle, {
+      algorithm: "AES-256-GCM",
+      keyId: "wrap-key-1",
+      nonce: "nonce-value",
+      ciphertext: "ciphertext-value",
+      authTag: "auth-tag-value",
+    });
+
+    expect(() =>
+      parseVaultSyncEnvelope({
+        ...envelope,
+        header: {
+          ...envelope.header,
+          schema: "termsnip-vault-sync",
+        },
+      })
+    ).not.toThrow();
+  });
+
+  it("#451: parses a trust policy written with the current schema", () => {
+    expect(
+      parseVaultSyncTrustPolicy({
+        schema: "terminal-workspace-sync-trust",
+        version: 1,
+        allowUnknownKeys: false,
+        trustedKeys: [],
+      })
+    ).toMatchObject({
+      allowUnknownKeys: false,
+      trustedKeys: [],
+    });
   });
 });

@@ -1,0 +1,1 @@
+- [FIX] Write the current terminal-workspace identifiers into exported config and trust-policy files and keep the legacy term-snip values importable (#451)

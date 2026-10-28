@@ -9,8 +9,8 @@ const baseAppState = useAppStore.getState();
 const baseTrustState = useVaultSyncTrustStore.getState();
 
 const baseBundle: LocalConfigBundle = {
-  app: "term-snip",
-  version: 5,
+  app: "terminal-workspace",
+  version: 6,
   identities: [],
   exportedAt: "2026-04-04T18:00:00.000Z",
   vault: {
@@ -43,7 +43,7 @@ describe("vault sync runtime", () => {
     useAppStore.getState().setVaultId("vault-current");
     useAppStore.getState().setLastAppliedSnapshotId("snapshot-current");
     useVaultSyncTrustStore.getState().replacePolicy({
-      schema: "termsnip-vault-sync-trust",
+      schema: "terminal-workspace-sync-trust",
       version: 1,
       allowUnknownKeys: false,
       trustedKeys: [
@@ -82,7 +82,7 @@ describe("vault sync runtime", () => {
     useAppStore.getState().setVaultId("vault-current");
     useAppStore.getState().setLastAppliedSnapshotId("snapshot-current");
     useVaultSyncTrustStore.getState().replacePolicy({
-      schema: "termsnip-vault-sync-trust",
+      schema: "terminal-workspace-sync-trust",
       version: 1,
       allowUnknownKeys: false,
       trustedKeys: [],
