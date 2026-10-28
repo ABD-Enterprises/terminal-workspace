@@ -8,7 +8,9 @@ export interface VaultSyncCountSummary {
 }
 
 export interface VaultSyncEnvelopeHeader {
-  schema: "termsnip-vault-sync";
+  // #451: the schema identifier moved from "termsnip-vault-sync" to
+  // "terminal-workspace-sync"; both stay at version 1 and both parse.
+  schema: "terminal-workspace-sync";
   version: 1;
   payloadKind: "local-config-bundle";
   vaultId: string;
@@ -59,7 +61,9 @@ export interface VaultSyncTrustedKey {
 }
 
 export interface VaultSyncTrustPolicy {
-  schema: "termsnip-vault-sync-trust";
+  // #451: the schema identifier moved from "termsnip-vault-sync-trust" to
+  // "terminal-workspace-sync-trust"; both stay at version 1 and both parse.
+  schema: "terminal-workspace-sync-trust";
   version: 1;
   allowUnknownKeys: boolean;
   trustedKeys: VaultSyncTrustedKey[];
@@ -112,7 +116,10 @@ function isCipherPayload(value: unknown): value is VaultSyncCipherPayload {
 function isEnvelopeHeader(value: unknown): value is VaultSyncEnvelopeHeader {
   return (
     isRecord(value) &&
-    value.schema === "termsnip-vault-sync" &&
+    // #451: the legacy "termsnip-vault-sync" schema still parses at
+    // version 1 alongside the current "terminal-workspace-sync".
+    (value.schema === "termsnip-vault-sync" ||
+      value.schema === "terminal-workspace-sync") &&
     value.version === 1 &&
     value.payloadKind === "local-config-bundle" &&
     typeof value.vaultId === "string" &&
@@ -219,7 +226,7 @@ export async function buildVaultSyncEnvelope(
   cipher: VaultSyncCipherPayload
 ): Promise<VaultSyncEnvelope> {
   const header: VaultSyncEnvelopeHeader = {
-    schema: "termsnip-vault-sync",
+    schema: "terminal-workspace-sync",
     version: 1,
     payloadKind: "local-config-bundle",
     vaultId: bundle.vault.vaultId,
@@ -276,7 +283,10 @@ export function parseVaultSyncEnvelope(value: unknown): VaultSyncEnvelope {
 export function parseVaultSyncTrustPolicy(value: unknown): VaultSyncTrustPolicy {
   if (
     !isRecord(value) ||
-    value.schema !== "termsnip-vault-sync-trust" ||
+    // #451: the legacy "termsnip-vault-sync-trust" schema still parses at
+    // version 1 alongside the current "terminal-workspace-sync-trust".
+    (value.schema !== "termsnip-vault-sync-trust" &&
+      value.schema !== "terminal-workspace-sync-trust") ||
     value.version !== 1 ||
     typeof value.allowUnknownKeys !== "boolean" ||
     !Array.isArray(value.trustedKeys) ||

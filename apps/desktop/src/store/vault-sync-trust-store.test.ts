@@ -64,7 +64,23 @@ describe("vault sync trust store", () => {
     useVaultSyncTrustStore.getState().removeTrustedKey("wrap-key-1");
 
     expect(useVaultSyncTrustStore.getState().policy).toEqual({
+      schema: "terminal-workspace-sync-trust",
+      version: 1,
+      allowUnknownKeys: true,
+      trustedKeys: [],
+    });
+  });
+
+  it("#451: replacePolicy writes the current schema even for a legacy-schema policy", () => {
+    useVaultSyncTrustStore.getState().replacePolicy({
       schema: "termsnip-vault-sync-trust",
+      version: 1,
+      allowUnknownKeys: true,
+      trustedKeys: [],
+    } as unknown as typeof baseTrustState.policy);
+
+    expect(useVaultSyncTrustStore.getState().policy).toEqual({
+      schema: "terminal-workspace-sync-trust",
       version: 1,
       allowUnknownKeys: true,
       trustedKeys: [],
