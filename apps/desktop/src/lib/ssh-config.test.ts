@@ -370,5 +370,8 @@ Host alpha
     });
 
     expect(formValues.authMethod).toBe("none");
+    // No `User` line in the config → no guessed default user either. The
+    // editor requires one before the host can be saved.
+    expect(formValues.username).toBe("");
   });
 });

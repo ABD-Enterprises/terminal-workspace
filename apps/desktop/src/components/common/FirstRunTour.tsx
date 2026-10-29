@@ -6,7 +6,16 @@
 // T05 from the feature-parity 20. The chicken-and-egg problem this
 // solves: the keyboard cheatsheet is comprehensive, but a user who
 // doesn't know it exists can't discover ? to open it.
+//
+// The tour sits bottom-right, over the Sessions page's QUICK CONNECT
+// rail, so it dismisses itself on the first real route change — the
+// moment the user shows intent to go somewhere. The one exception is the
+// startup redirect: the index route "/" immediately sends the shell to
+// "/hosts" while AppShell stays mounted, and that is the app booting,
+// not the user navigating.
 
+import { useEffect, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { isMacClient } from "../../lib/shortcuts";
 import { useAppStore } from "../../store/app-store";
 
@@ -15,6 +24,24 @@ export function FirstRunTour() {
   const markSeen = useAppStore((state) => state.markFirstRunTourSeen);
   const openCheatsheet = useAppStore((state) => state.openCheatsheet);
   const openPalette = useAppStore((state) => state.openCommandPalette);
+  const location = useLocation();
+  const previousPathRef = useRef(location.pathname);
+
+  useEffect(() => {
+    const previousPath = previousPathRef.current;
+    if (previousPath === location.pathname) {
+      return;
+    }
+    previousPathRef.current = location.pathname;
+
+    // Skip the "/" → "/hosts" startup redirect; every other first
+    // change is the user navigating, which dismisses the tour.
+    if (previousPath === "/" && location.pathname === "/hosts") {
+      return;
+    }
+
+    markSeen();
+  }, [location.pathname, markSeen]);
 
   if (sawTour) {
     return null;

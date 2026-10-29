@@ -446,7 +446,9 @@ export function toHostFormValues(host: ImportedSshConfigHost): Partial<HostFormV
   return {
     label: host.alias,
     hostname: host.hostname,
-    username: host.username || emptyHostFormValues.username,
+    // Imported entries without a `User` line stay empty — the editor
+    // requires one before saving rather than assuming "root".
+    username: host.username,
     port: String(host.port),
     privateKeyPath: host.privateKeyPath,
     authMethod: usesPrivateKey ? "privateKey" : emptyHostFormValues.authMethod,

@@ -78,6 +78,11 @@ function HostEditorContent({
   const [values, setValues] = useState<HostFormValues>(() =>
     buildHostEditorValues(host, runtimeSecrets)
   );
+  // Density: the everyday connection fields stay in the open form; trust,
+  // grouping, environment and notes sit behind a disclosure so the modal
+  // fits a laptop viewport. Collapsing only hides the section — `values`
+  // keeps everything that was typed.
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const nativeSecretStorage = isTauriRuntime();
   const [runtimeStatusMessage, setRuntimeStatusMessage] = useState<{
     protocol: HostFormValues["protocol"];
@@ -248,7 +253,7 @@ function HostEditorContent({
                   protocol === "localShell"
                     ? current.username || "local"
                     : protocolRequiresUsername(protocol)
-                      ? current.username || "root"
+                      ? current.username
                       : "",
                 port: String(protocolDefaultPort(protocol)),
                 authMethod: hostSupportsCredentialPrompt(protocol) ? current.authMethod : "none",
@@ -416,6 +421,80 @@ function HostEditorContent({
           />
         </label>
         ) : null}
+        {supportsCredentials ? (
+        <label className="block">
+          <span className="text-sm text-slate-300">Password</span>
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={values.password}
+            onChange={(event) =>
+              setValues((current) => ({ ...current, password: event.target.value }))
+            }
+            className={fieldClassName}
+            placeholder={
+              nativeSecretStorage
+                ? "Stored in macOS Keychain in the native shell"
+                : "Kept in memory only in the browser demo"
+            }
+          />
+        </label>
+        ) : null}
+        {supportsCredentials ? (
+        <label className="block">
+          <span className="text-sm text-slate-300">Key passphrase</span>
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={values.passphrase}
+            onChange={(event) =>
+              setValues((current) => ({ ...current, passphrase: event.target.value }))
+            }
+            className={fieldClassName}
+            placeholder="Optional"
+          />
+        </label>
+        ) : null}
+      </div>
+      <div className="mt-5 rounded-2xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm leading-6 text-amber-100">
+        {!supportsCredentials
+          ? values.protocol === "localShell"
+            ? "Protocol metadata stays in the local inventory, while the local shell runtime stays native-only and avoids stored host secrets altogether."
+            : values.protocol === "telnet" || values.protocol === "serial"
+              ? `${formatHostProtocol(values.protocol)} sessions stay native and do not persist transport credentials in inventory.`
+              : `${formatHostProtocol(values.protocol)} sessions can reuse local SSH defaults even when no runtime secret is stored in inventory.`
+          : nativeSecretStorage
+          ? "Passwords and passphrases stay outside the host inventory and persist through macOS Keychain in the native shell."
+          : "Passwords and passphrases stay in memory only in the browser demo and are not exported with host metadata."}
+      </div>
+      {visibleRuntimeStatusMessage ? (
+        <div
+          className={`mt-4 rounded-2xl border px-4 py-3 text-sm leading-6 ${
+            visibleRuntimeStatusMessage.available
+              ? "border-emerald-400/20 bg-emerald-400/5 text-emerald-100"
+              : "border-rose-400/30 bg-rose-400/10 text-rose-100"
+          }`}
+        >
+          {visibleRuntimeStatusMessage.message}
+          {visibleRuntimeStatusMessage.installHint ? (
+            <p className="mt-2 text-xs text-rose-100/80">{visibleRuntimeStatusMessage.installHint}</p>
+          ) : null}
+        </div>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => setShowAdvanced((current) => !current)}
+        aria-expanded={showAdvanced}
+        aria-controls="host-editor-advanced"
+        className="mt-5 flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-300 transition hover:border-slate-600 hover:text-white"
+      >
+        <span>{showAdvanced ? "Hide advanced settings" : "Show advanced settings"}</span>
+        <span aria-hidden="true" className="text-xs text-slate-500">
+          {showAdvanced ? "▴" : "▾"}
+        </span>
+      </button>
+      <div id="host-editor-advanced" className={showAdvanced ? undefined : "hidden"}>
+      <div className="mt-5 grid gap-5 md:grid-cols-2">
         {supportsTrustedKeys ? (
         <label className="block">
           <span className="text-sm text-slate-300">Host key trust</span>
@@ -464,40 +543,6 @@ function HostEditorContent({
             className="h-4 w-4 accent-emerald-400"
           />
           Forward local SSH agent to this host
-        </label>
-        ) : null}
-        {supportsCredentials ? (
-        <label className="block">
-          <span className="text-sm text-slate-300">Password</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={values.password}
-            onChange={(event) =>
-              setValues((current) => ({ ...current, password: event.target.value }))
-            }
-            className={fieldClassName}
-            placeholder={
-              nativeSecretStorage
-                ? "Stored in macOS Keychain in the native shell"
-                : "Kept in memory only in the browser demo"
-            }
-          />
-        </label>
-        ) : null}
-        {supportsCredentials ? (
-        <label className="block">
-          <span className="text-sm text-slate-300">Key passphrase</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={values.passphrase}
-            onChange={(event) =>
-              setValues((current) => ({ ...current, passphrase: event.target.value }))
-            }
-            className={fieldClassName}
-            placeholder="Optional"
-          />
         </label>
         ) : null}
         <label className="block">
@@ -562,31 +607,6 @@ function HostEditorContent({
           />
         </label>
       </div>
-      <div className="mt-5 rounded-2xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm leading-6 text-amber-100">
-        {!supportsCredentials
-          ? values.protocol === "localShell"
-            ? "Protocol metadata stays in the local inventory, while the local shell runtime stays native-only and avoids stored host secrets altogether."
-            : values.protocol === "telnet" || values.protocol === "serial"
-              ? `${formatHostProtocol(values.protocol)} sessions stay native and do not persist transport credentials in inventory.`
-              : `${formatHostProtocol(values.protocol)} sessions can reuse local SSH defaults even when no runtime secret is stored in inventory.`
-          : nativeSecretStorage
-          ? "Passwords and passphrases stay outside the host inventory and persist through macOS Keychain in the native shell."
-          : "Passwords and passphrases stay in memory only in the browser demo and are not exported with host metadata."}
-      </div>
-      {visibleRuntimeStatusMessage ? (
-        <div
-          className={`mt-4 rounded-2xl border px-4 py-3 text-sm leading-6 ${
-            visibleRuntimeStatusMessage.available
-              ? "border-emerald-400/20 bg-emerald-400/5 text-emerald-100"
-              : "border-rose-400/30 bg-rose-400/10 text-rose-100"
-          }`}
-        >
-          {visibleRuntimeStatusMessage.message}
-          {visibleRuntimeStatusMessage.installHint ? (
-            <p className="mt-2 text-xs text-rose-100/80">{visibleRuntimeStatusMessage.installHint}</p>
-          ) : null}
-        </div>
-      ) : null}
       {supportsTrustedKeys ? (
       <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-slate-300">
         Require trusted key blocks SSH, SFTP, and snippet execution until the host key is scanned
@@ -615,6 +635,7 @@ function HostEditorContent({
         />
         Pin this host to Favorites
       </label>
+      </div>
       </form>
     </Modal>
   );

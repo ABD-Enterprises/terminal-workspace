@@ -57,9 +57,16 @@ test.describe("hosts page", () => {
     await expect(createButton).toBeEnabled();
     await createButton.click();
 
-    // The editor closes and the new host appears in the list.
+    // The editor closes, the new host appears in the list, and the save
+    // is confirmed in place — the modal closing alone used to be the only
+    // feedback that anything happened.
     await expect(page.getByRole("heading", { name: "Add Host" })).toHaveCount(0);
     await expect(page.getByText("E2E Test Host").first()).toBeVisible();
+    const confirmation = page.getByRole("status", { name: "Host save confirmation" });
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation).toContainText("E2E Test Host");
+    await confirmation.getByRole("button", { name: "Dismiss save confirmation" }).click();
+    await expect(confirmation).toHaveCount(0);
   });
 
   test("Add host: empty Label keeps Create host disabled (form-validation regression guard)", async ({
@@ -72,6 +79,10 @@ test.describe("hosts page", () => {
     await expect(page.getByRole("button", { name: "Create host" })).toBeDisabled();
     await page.getByPlaceholder("Production Gateway").fill("L");
     await page.getByPlaceholder("bastion.acme.internal").fill("h");
+    // A username is required for SSH too: no "root" is assumed anywhere,
+    // so the form stays invalid until one is typed.
+    await expect(page.getByRole("button", { name: "Create host" })).toBeDisabled();
+    await page.getByPlaceholder("ops").fill("u");
     await expect(page.getByRole("button", { name: "Create host" })).toBeEnabled();
   });
 
@@ -144,18 +155,60 @@ test.describe("hosts page", () => {
     await page.getByRole("button", { name: "Close" }).click();
   });
 
-  test("quick-connect bar enables Connect only for a parseable target", async ({ page }) => {
+  test("quick-connect bar enables Connect only for a parseable target with a username", async ({
+    page,
+  }) => {
     await page.goto("/hosts");
     const quickConnect = page.getByLabel("Quick connect");
     await expect(quickConnect).toBeVisible();
     // Empty input → Connect is disabled.
     const connect = page.getByRole("button", { name: "Connect" });
     await expect(connect).toBeDisabled();
+    // A bare host parses but carries no username — quick connect assumes
+    // no default user (never "root"), so Connect stays disabled and the
+    // inline hint explains what is missing.
+    await quickConnect.fill("quick.example.com");
+    await expect(connect).toBeDisabled();
+    const hint = page.locator("#quick-connect-username-hint");
+    await expect(hint).toBeVisible();
     // A typed `[user@]host[:port]` / `ssh ... -p` target enables Connect.
     await quickConnect.fill("deploy@quick.example.com -p 2200");
     await expect(connect).toBeEnabled();
+    await expect(hint).toHaveCount(0);
     // Clearing it disables Connect again.
     await quickConnect.fill("   ");
     await expect(connect).toBeDisabled();
+  });
+
+  test("Add host: advanced settings hide behind the disclosure and keep typed values", async ({
+    page,
+  }) => {
+    await page.goto("/hosts");
+    await page.getByRole("button", { name: "Add host" }).click();
+    await expect(page.getByRole("heading", { name: "Add Host" })).toBeVisible();
+
+    // Collapsed by default: advanced-only fields are not visible while
+    // the everyday connection fields are.
+    const disclosure = page.getByRole("button", { name: "Show advanced settings" });
+    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await expect(disclosure).toHaveAttribute("aria-controls", "host-editor-advanced");
+    await expect(page.getByPlaceholder("Production Gateway")).toBeVisible();
+    await expect(page.getByPlaceholder("Acme / Production")).not.toBeVisible();
+
+    await disclosure.click();
+    const hide = page.getByRole("button", { name: "Hide advanced settings" });
+    await expect(hide).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByPlaceholder("Acme / Production")).toBeVisible();
+
+    // Values typed while expanded survive collapsing and re-expanding —
+    // the disclosure only toggles visibility, never the form state.
+    await page.getByPlaceholder("Acme / Production").fill("Kept Group");
+    await hide.click();
+    await expect(page.getByRole("button", { name: "Show advanced settings" })).toBeVisible();
+    await page.getByRole("button", { name: "Show advanced settings" }).click();
+    await expect(page.getByPlaceholder("Acme / Production")).toHaveValue("Kept Group");
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("heading", { name: "Add Host" })).toHaveCount(0);
   });
 });
