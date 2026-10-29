@@ -554,7 +554,7 @@ export function HostsPage() {
       <ConfirmDialog
         open={Boolean(hostPendingDelete)}
         title="Delete host"
-        description="This removes the host from the local inventory. Existing tabs close on refresh, and any trusted host key or assigned identity remains in local storage until you remove it separately."
+        description="This deletes the host, wipes its saved credentials, removes it from every snippet's targets, and closes its open tabs now. Its trusted host key and identity are kept, but the host is unassigned from them."
         confirmLabel="Delete host"
         onCancel={() => setHostPendingDelete(null)}
         onConfirm={() => {
