@@ -4317,6 +4317,10 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .select_all()
         .build()?;
 
+    // The View submenu's section items and accelerators must mirror
+    // navigationItems in apps/desktop/src/lib/navigation.ts: AppKit gives
+    // menu key-equivalents precedence over the webview keydown handler, so a
+    // mismatch here silently wins in the native shell (issue #454 review).
     let view_submenu = SubmenuBuilder::new(app, "View")
         .item(
             &MenuItemBuilder::with_id("menu:nav-hosts", "Hosts")
@@ -4339,13 +4343,23 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 .build(app)?,
         )
         .item(
-            &MenuItemBuilder::with_id("menu:nav-transfers", "Transfers")
+            &MenuItemBuilder::with_id("menu:nav-runbooks", "Runbooks")
                 .accelerator("CmdOrCtrl+5")
                 .build(app)?,
         )
         .item(
-            &MenuItemBuilder::with_id("menu:nav-settings", "Settings")
+            &MenuItemBuilder::with_id("menu:nav-transfers", "Transfers")
                 .accelerator("CmdOrCtrl+6")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("menu:nav-tunnels", "Tunnels")
+                .accelerator("CmdOrCtrl+7")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("menu:nav-settings", "Settings")
+                .accelerator("CmdOrCtrl+8")
                 .build(app)?,
         )
         .separator()

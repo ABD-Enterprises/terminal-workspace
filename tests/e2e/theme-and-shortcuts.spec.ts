@@ -1,7 +1,7 @@
 import { expect, primaryShortcut, test } from "./helpers";
 
 // Cross-cutting tests that exercise:
-//   - Cmd+1..6 section navigation shortcuts.
+//   - Cmd+1..8 section navigation shortcuts.
 //   - Theme persistence across reload (zustand persist round trip).
 //   - Sidebar group rename via the inline pencil affordance (P2-DM2).
 

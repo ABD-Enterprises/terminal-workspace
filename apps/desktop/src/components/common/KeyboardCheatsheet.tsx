@@ -2,12 +2,15 @@
 // Triggered by `?` (handled in useKeyboardCheatsheet); also closeable
 // with Esc or by clicking outside. See docs/parity-and-hardening-review
 // — the keyboard-first follow-through item from QWEN's review noted that
-// while ⌘K and ⌘1..6 worked, there was no discovery surface for the
-// keymap. This is that surface.
+// while ⌘K and the section navigation shortcuts worked, there was no
+// discovery surface for the keymap. This is that surface.
 //
-// If you add a new global keybinding, add it to the SECTIONS array below
-// so the user can find it.
+// The section rows below are derived from navigationItems, so adding a
+// section updates this list automatically. If you add a new global
+// keybinding outside that array, add it to the SECTIONS array here so
+// the user can find it.
 
+import { navigationItems } from "../../lib/navigation";
 import { isMacClient } from "../../lib/shortcuts";
 import { useAppStore } from "../../store/app-store";
 import { Modal } from "./Modal";
@@ -35,16 +38,10 @@ function buildSections(): ShortcutSection[] {
     },
     {
       title: "Section navigation",
-      entries: [
-        { keys: [`${mod}1`], description: "Hosts" },
-        { keys: [`${mod}2`], description: "Sessions" },
-        { keys: [`${mod}3`], description: "Snippets" },
-        { keys: [`${mod}4`], description: "Keys" },
-        { keys: [`${mod}5`], description: "Runbooks" },
-        { keys: [`${mod}6`], description: "Transfers" },
-        { keys: [`${mod}7`], description: "Tunnels" },
-        { keys: [`${mod}8`], description: "Settings" },
-      ],
+      entries: navigationItems.map((item, index) => ({
+        keys: [`${mod}${index + 1}`],
+        description: item.label,
+      })),
     },
     {
       title: "Lists",

@@ -113,8 +113,14 @@ export function AppShell() {
         case "menu:nav-keys":
           navigate("/keys");
           break;
+        case "menu:nav-runbooks":
+          navigate("/runbooks");
+          break;
         case "menu:nav-transfers":
           navigate("/transfers");
+          break;
+        case "menu:nav-tunnels":
+          navigate("/tunnels");
           break;
         case "menu:command-palette":
           openCommandPalette();

@@ -5,7 +5,7 @@ import { expect, test } from "./helpers";
 //   - `?` while typing in an input is ignored (the user is typing a
 //     literal "?" into a field).
 //   - Esc and `?` again both close the cheatsheet.
-//   - The cheatsheet lists the discoverable surface (Cmd+K, Cmd+1..6,
+//   - The cheatsheet lists the discoverable surface (Cmd+K, Cmd+1..8,
 //     j/k, Enter, Esc) so a new user can learn it without reading docs.
 
 test.describe("keyboard cheatsheet (`?`)", () => {

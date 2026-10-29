@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { checkForUpdates } from "../lib/auto-update";
 import { isTauriRuntime } from "../lib/backend-runtime";
+import { navigationItems } from "../lib/navigation";
 import { cn } from "../lib/utils";
 import { useAppStore } from "../store/app-store";
 import { listTerminalThemeOptions, type TerminalThemeName } from "../lib/terminal-themes";
@@ -38,7 +39,7 @@ export function SettingsPreferencesSection() {
                 Workspace preferences
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-400">
-                Keep the shell dense by default, or relax spacing slightly. `⌘1` through `⌘6`
+                Keep the shell dense by default, or relax spacing slightly. `⌘1` through `⌘{navigationItems.length}`
                 navigation can also be disabled if it conflicts with your terminal habits.
               </p>
             </div>
@@ -89,7 +90,7 @@ export function SettingsPreferencesSection() {
                 <span>{sectionShortcutsEnabled ? "Section shortcuts enabled" : "Section shortcuts disabled"}</span>
               </button>
               <p className="mt-2 text-sm leading-5 text-slate-300">
-                When enabled, `⌘1` through `⌘6` jump sections and the shell keeps a single shortcut
+                When enabled, `⌘1` through `⌘{navigationItems.length}` jump sections and the shell keeps a single shortcut
                 hint in the header.
               </p>
             </div>

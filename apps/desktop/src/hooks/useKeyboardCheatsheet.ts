@@ -28,8 +28,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
  * never want the cheatsheet to steal it.
  *
  * Addresses the keyboard-first follow-through gap from the QWEN review:
- * users could already use ⌘K (palette) and ⌘1..6 (section nav), but had
- * no surface for discovering the keymap.
+ * users could already use ⌘K (palette) and the section navigation
+ * shortcuts, but had no surface for discovering the keymap.
  */
 export function useKeyboardCheatsheet() {
   const cheatsheetOpen = useAppStore((state) => state.cheatsheetOpen);
