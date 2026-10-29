@@ -392,14 +392,30 @@ jobs:
       - name: Install Linux native dependencies
         shell: bash
         run: |
-          sudo apt-get -o Acquire::Retries=3 update
-          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libwebkit2gtk-4.1-dev \
-            openssh-client \
-            openssh-server \
-            patchelf
+          # Retry the whole update-and-install pair at most three times.
+          # Acquire::Retries=3 bounds the per-invocation download retries, but
+          # a transient failure that hits before the package index is
+          # refreshed, a dpkg lock clash, or a postinst error still fails the
+          # step outright. The loop caps those at three attempts (five seconds
+          # apart) so a flaky mirror cannot fail CI on the first hit, and still
+          # exits non-zero once the cap is reached. See #462.
+          for attempt in 1 2 3; do
+            if sudo apt-get -o Acquire::Retries=3 update \
+              && sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+                libayatana-appindicator3-dev \
+                librsvg2-dev \
+                libwebkit2gtk-4.1-dev \
+                openssh-client \
+                openssh-server \
+                patchelf; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "apt dependency install failed after 3 attempts" >&2
+              exit 1
+            fi
+            sleep 5
+          done
           sudo mkdir -p /run/sshd
 
       - name: Create frontendDist placeholder

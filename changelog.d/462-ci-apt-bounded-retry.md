@@ -1,0 +1,1 @@
+- [INTERNAL] Bound the CI apt dependency step with a three-attempt retry loop around the update-and-install pair, so transient mirror, index and dpkg-lock failures no longer fail the native fixtures job on the first hit (#462)
