@@ -1,0 +1,1 @@
+- [INTERNAL] Bound the retry of the Linux native-dependency apt install in the validate workflow (#455)
