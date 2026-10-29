@@ -93,6 +93,15 @@ function HostEditorContent({
   const supportsCredentials = hostSupportsCredentialPrompt(values.protocol);
   const supportsJumpHosts = hostSupportsJumpHosts(values.protocol);
   const supportsTrustedKeys = hostSupportsTrustedKeys(values.protocol);
+
+  // #464: trust, jump-host and favorite state all render behind this
+  // disclosure, so a collapsed editor hides them entirely. Counting the
+  // ones actually in effect keeps that state legible without expanding.
+  const advancedSetCount = [
+    supportsTrustedKeys && values.hostKeyPolicy === "requireTrusted",
+    supportsJumpHosts && values.jumpHostId !== "",
+    values.favorite,
+  ].filter(Boolean).length;
   const supportsSftp = hostSupportsSftp(values.protocol);
   const supportsNetworkFields = values.protocol !== "localShell";
   const requiresUsername = protocolRequiresUsername(values.protocol);
@@ -490,7 +499,10 @@ function HostEditorContent({
         aria-controls="host-editor-advanced"
         className="mt-5 flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-300 transition hover:border-slate-600 hover:text-white"
       >
-        <span>{showAdvanced ? "Hide advanced settings" : "Show advanced settings"}</span>
+        <span>
+          {showAdvanced ? "Hide advanced settings" : "Show advanced settings"}
+          {!showAdvanced && advancedSetCount > 0 ? ` — ${advancedSetCount} set` : ""}
+        </span>
         <span aria-hidden="true" className="text-xs text-slate-500">
           {showAdvanced ? "▴" : "▾"}
         </span>
