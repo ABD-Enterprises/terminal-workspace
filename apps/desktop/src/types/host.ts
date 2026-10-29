@@ -97,7 +97,9 @@ export const emptyHostFormValues: HostFormValues = {
   label: "",
   protocol: defaultHostProtocol,
   hostname: "",
-  username: "root",
+  // No default user: guessing "root" silently connected as the wrong
+  // account. The editor requires a username where the protocol needs one.
+  username: "",
   port: "22",
   authMethod: "none",
   password: "",

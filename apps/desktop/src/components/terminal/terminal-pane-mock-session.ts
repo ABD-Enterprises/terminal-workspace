@@ -53,7 +53,14 @@ export function createTerminalPaneMockSession({
         tags: stableTags,
         username,
       });
-      responseLines.forEach((line) => terminal.writeln(line));
+      if (responseLines.length > 0) {
+        // The typed command is echoed with `terminal.write` and never
+        // terminated, so the response must open its own line or it runs
+        // onto the prompt. An empty response (blank Enter) must not gain
+        // a blank line — `writeln` appends, it never prepends.
+        terminal.write("\r\n");
+        responseLines.forEach((line) => terminal.writeln(line));
+      }
       outputPreview = responseLines.join("\n");
     }
 

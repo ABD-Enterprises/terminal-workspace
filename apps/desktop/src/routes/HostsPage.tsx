@@ -29,8 +29,10 @@ import { globSshConfigFiles, readSshConfigFile } from "../lib/ssh-config-fs";
 
 // #113: quick-connect parser. Accepts the shapes a user actually types —
 // `ssh user@host -p 2222`, `user@host:2222`, `user@host`, `host:22`, `host`
-// — and returns the SSH fields, or null when there is no hostname. Kept a
-// pure module function so the connect handler stays declarative.
+// — and returns the SSH fields, or null when there is no hostname. A bare
+// host yields an empty username: quick connect never guesses a user, so the
+// caller must refuse to connect until one is typed. Kept a pure module
+// function so the connect handler stays declarative.
 export function parseQuickConnect(
   raw: string
 ): { username: string; hostname: string; port: string } | null {
@@ -66,7 +68,7 @@ export function parseQuickConnect(
   if (!hostname) {
     return null;
   }
-  return { username: username || "root", hostname, port: port || "22" };
+  return { username, hostname, port: port || "22" };
 }
 
 export function HostsPage() {
@@ -76,6 +78,7 @@ export function HostsPage() {
   const [activeTag, setActiveTag] = useState("all");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [quickConnect, setQuickConnect] = useState("");
+  const [saveConfirmation, setSaveConfirmation] = useState<string | null>(null);
   const [hostPendingDelete, setHostPendingDelete] = useState<string | null>(null);
   const [importReport, setImportReport] = useState<
     | {
@@ -122,8 +125,16 @@ export function HostsPage() {
       }
     });
 
+    // The save banner belongs to the result of the last save; opening the
+    // editor again starts a new transaction, so it clears there rather
+    // than lingering over the form the user is about to edit.
+    if (updates.new === "1" || updates.edit) {
+      setSaveConfirmation(null);
+    }
+
     setSearchParams(nextParams);
   };
+
 
   const launchSession = async (hostId: string) => {
     const host = allHosts.find((entry) => entry.id === hostId);
@@ -155,16 +166,21 @@ export function HostsPage() {
   // (so it joins the inventory + Recent like any other), then launch through
   // the shared connect flow that handles the first-connect trust prompt.
   const quickConnectTarget = parseQuickConnect(quickConnect);
+  // A parseable target without a username is still not connectable — the
+  // parser no longer assumes "root", so the UI blocks and explains instead.
+  const quickConnectNeedsUsername = Boolean(
+    quickConnectTarget && !quickConnectTarget.username
+  );
   const handleQuickConnect = async () => {
-    if (!quickConnectTarget) {
+    if (!quickConnectTarget || !quickConnectTarget.username) {
       return;
     }
     const hostId = createHost({
       ...emptyHostFormValues,
       protocol: "ssh",
-      label: quickConnectTarget.username
-        ? `${quickConnectTarget.username}@${quickConnectTarget.hostname}`
-        : quickConnectTarget.hostname,
+      // The guard above rejects an empty username, so the label always
+      // carries it — `user@host` reads as the account being connected as.
+      label: `${quickConnectTarget.username}@${quickConnectTarget.hostname}`,
       hostname: quickConnectTarget.hostname,
       username: quickConnectTarget.username,
       port: quickConnectTarget.port,
@@ -260,6 +276,9 @@ export function HostsPage() {
             onChange={(event) => setQuickConnect(event.target.value)}
             placeholder="user@host -p 22"
             aria-label="Quick connect"
+            aria-describedby={
+              quickConnectNeedsUsername ? "quick-connect-username-hint" : undefined
+            }
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
@@ -267,12 +286,36 @@ export function HostsPage() {
           />
           <button
             type="submit"
-            disabled={!quickConnectTarget}
+            disabled={!quickConnectTarget || quickConnectNeedsUsername}
             className="shrink-0 rounded-control bg-emerald-400 px-3 py-1.5 text-sm font-medium text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
           >
             Connect
           </button>
         </form>
+        {quickConnectNeedsUsername ? (
+          <p id="quick-connect-username-hint" className="text-xs text-amber-300">
+            Add a username before connecting — quick connect assumes no default user
+            (for example deploy@{quickConnectTarget?.hostname}).
+          </p>
+        ) : null}
+
+        {saveConfirmation && !creatingHost && !editingHost ? (
+          <div
+            role="status"
+            aria-label="Host save confirmation"
+            className="flex items-center justify-between gap-3 rounded-surface border border-emerald-400/30 bg-emerald-400/5 px-4 py-3"
+          >
+            <p className="min-w-0 text-sm text-emerald-100">{saveConfirmation}</p>
+            <button
+              type="button"
+              aria-label="Dismiss save confirmation"
+              onClick={() => setSaveConfirmation(null)}
+              className="shrink-0 rounded-md border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400 transition hover:border-slate-500 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+        ) : null}
 
         {allHosts.length === 0 ? (
           // Cold-start: skip the filter bar + list entirely. WelcomePanel
@@ -493,11 +536,17 @@ export function HostsPage() {
         host={editingHost}
         onClose={() => updateParams({ new: null, edit: null })}
         onSave={(values) => {
-          const hostId = editingHost ? updateHost(editingHost.id, values) : createHost(values);
+          const hostId = editingHost
+            ? updateHost(editingHost.id, values)
+            : createHost(values);
+          const wasEdit = Boolean(editingHost);
           setHostSecrets(hostId, {
             password: values.password,
             passphrase: values.passphrase,
           });
+          setSaveConfirmation(
+            `Host "${values.label}" ${wasEdit ? "updated" : "created"}.`
+          );
           updateParams({ new: null, edit: null, focus: hostId });
         }}
       />

@@ -1,0 +1,1 @@
+- [SECURITY] Bump `libz-sys` to 1.1.31 so the `ssh2` dependency chain no longer carries RUSTSEC-2026-0418 (build script leaks environment variables into the build directory) (#463)
