@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { dispatchCommandToActivePane } from "../../lib/active-pane-dispatch";
 import { launchHostSession as sharedLaunchHostSession } from "../../lib/launch-host-session";
 import { navigationItems } from "../../lib/navigation";
 import { scorePaletteMatch } from "../../lib/palette-score";
@@ -17,11 +18,9 @@ export function useCommandPaletteRows() {
   const [paletteQuery, setPaletteQuery] = useState("");
   const [paletteSelectedIndex, setPaletteSelectedIndex] = useState(0);
   const hosts = useHostsStore((state) => state.hosts);
-  const markConnected = useHostsStore((state) => state.markConnected);
   const sessionTabs = useSessionsStore((state) => state.tabs);
   const sessionPanes = useSessionsStore((state) => state.panes);
   const activeSessionTabId = useSessionsStore((state) => state.activeTabId);
-  const queuePaneCommand = useSessionsStore((state) => state.queuePaneCommand);
   const selectSessionTab = useSessionsStore((state) => state.selectTab);
   const closeTab = useSessionsStore((state) => state.closeTab);
   const duplicateSession = useSessionsStore((state) => state.duplicateSession);
@@ -36,6 +35,12 @@ export function useCommandPaletteRows() {
   const activeSessionPane = activeSessionTab
     ? sessionPanes[activeSessionTab.activePaneId]
     : undefined;
+  // #454: the run action dispatches through the shared helper, which resolves
+  // the active pane strictly by `activeTabId`. The palette's other rows keep
+  // the first-tab fallback above; the run row uses the pane the helper will
+  // really queue into, so an offered command is never a silent no-op.
+  const runTargetTab = sessionTabs.find((tab) => tab.id === activeSessionTabId);
+  const runTargetPane = runTargetTab ? sessionPanes[runTargetTab.activePaneId] : undefined;
 
   const focusSessionTab = (tabId: string, replace = false) => {
     selectSessionTab(tabId);
@@ -162,18 +167,19 @@ export function useCommandPaletteRows() {
       return;
     }
 
-    if (!activeSessionPane || !activeSessionTab) {
+    if (!runTargetPane || !runTargetTab) {
       setPaletteQuery("");
       navigate("/snippets");
       closeCommandPalette();
       return;
     }
 
-    queuePaneCommand(activeSessionPane.id, snippet.command, snippet.title);
+    // #454: the shared helper owns "which pane is active", so the palette,
+    // the snippets page and the runbooks page all queue into the same pane.
+    dispatchCommandToActivePane(snippet.command, snippet.title);
     markSnippetRun(snippet.id);
-    markConnected(activeSessionPane.hostId);
     setPaletteQuery("");
-    navigate(`/sessions?tabId=${activeSessionTab.id}`);
+    navigate(`/sessions?tabId=${runTargetTab.id}`);
     closeCommandPalette();
   };
 
@@ -270,7 +276,7 @@ export function useCommandPaletteRows() {
 
   type RecentCommand = ActiveCommand;
   const recentCommands: RecentCommand[] = [
-    ...(recentSnippet && activeSessionPane
+    ...(recentSnippet && runTargetPane
       ? [
           {
             key: `recent:rerun-${recentSnippet.id}`,

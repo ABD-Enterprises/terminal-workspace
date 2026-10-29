@@ -4397,10 +4397,13 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 }
 
 fn persistence_migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        description: "create_terminal_workspace_persistence_tables",
-        sql: r#"
+    vec![
+        Migration {
+            version: 1,
+            description: "create_terminal_workspace_persistence_tables",
+            // version 2 below; do not edit version 1: existing installs have
+            // already run it and would never see a change made here.
+            sql: r#"
             CREATE TABLE IF NOT EXISTS hosts_store (
                 id TEXT PRIMARY KEY,
                 payload TEXT NOT NULL,
@@ -4435,8 +4438,21 @@ fn persistence_migrations() -> Vec<Migration> {
             CREATE INDEX IF NOT EXISTS deletions_deleted_at_idx
                 ON deletions (deleted_at DESC);
         "#,
-        kind: MigrationKind::Up,
-    }]
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "create_runbooks_store_table",
+            sql: r#"
+            CREATE TABLE IF NOT EXISTS runbooks_store (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        "#,
+            kind: MigrationKind::Up,
+        },
+    ]
 }
 
 /// #180: mirrors `tauri-plugin-sql` 2.4.0's private `wrapper.rs::path_mapper`.

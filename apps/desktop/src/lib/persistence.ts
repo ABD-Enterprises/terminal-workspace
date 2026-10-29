@@ -18,6 +18,7 @@ const STORE_TABLES = {
   "terminal-workspace-known-hosts": "known_hosts_store",
   "terminal-workspace-identities": "identities_store",
   "terminal-workspace-snippets": "snippets_store",
+  "terminal-workspace-runbooks": "runbooks_store",
 } as const;
 
 const LEGACY_STORAGE_PREFIX = "termsnip-";

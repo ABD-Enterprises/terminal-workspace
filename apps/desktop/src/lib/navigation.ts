@@ -21,6 +21,11 @@ export const navigationItems: NavigationItem[] = [
     description: "Saved commands and broadcast runs.",
   },
   {
+    path: "/runbooks",
+    label: "Runbooks",
+    description: "Ordered command steps, run one at a time.",
+  },
+  {
     path: "/keys",
     label: "Keys",
     description: "SSH identities, keygen, and trust.",
