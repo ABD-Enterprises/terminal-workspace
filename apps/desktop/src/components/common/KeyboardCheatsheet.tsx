@@ -38,8 +38,8 @@ function buildSections(): ShortcutSection[] {
     {
       title: "Section navigation",
       entries: navigationItems.map((item, index) => ({
-        // Derived rows go through the shared formatter like every other
-        // surface, so non-mac renders "Ctrl+1" rather than "Ctrl1" (#460).
+        // Derived rows go through the shared formatter, so non-mac
+        // renders "Ctrl+1" rather than "Ctrl1" (#460).
         keys: [formatPrimaryShortcut(String(index + 1))],
         description: item.label,
       })),

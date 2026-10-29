@@ -1,2 +1,2 @@
-- [FIX] Align the shortcut cheatsheet's section rows and the header shortcut pill with the shared formatter and wording (#460)
+- [FIX] Align the shortcut glyph surfaces (cheatsheet rows, first-run tour kbd) and the header shortcut pill with the shared formatter and wording (#460)
 - [FIX] Show a count of set values on the collapsed advanced-settings disclosure in the host editor (#464)

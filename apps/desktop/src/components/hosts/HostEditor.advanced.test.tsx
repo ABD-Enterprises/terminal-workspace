@@ -64,6 +64,14 @@ describe("HostEditor advanced disclosure", () => {
     expect(screen.getByRole("button", { name: "Show advanced settings — 1 set" })).toBeTruthy();
   });
 
+  it("counts the default trust requirement on a fresh Add Host form with no host bound", () => {
+    // No `host` prop is the create path (HostsPage passes undefined when
+    // editingHost is null). emptyHostFormValues carries the default trust
+    // policy, so the collapsed disclosure must report it here too.
+    render(<HostEditor open onClose={() => {}} onSave={() => {}} />);
+    expect(screen.getByRole("button", { name: "Show advanced settings — 1 set" })).toBeTruthy();
+  });
+
   it("counts a favorite pin while collapsed", () => {
     render(
       <HostEditor open host={makeHost({ favorite: true })} onClose={() => {}} onSave={() => {}} />,
