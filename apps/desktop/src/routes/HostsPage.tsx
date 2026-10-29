@@ -178,9 +178,9 @@ export function HostsPage() {
     const hostId = createHost({
       ...emptyHostFormValues,
       protocol: "ssh",
-      label: quickConnectTarget.username
-        ? `${quickConnectTarget.username}@${quickConnectTarget.hostname}`
-        : quickConnectTarget.hostname,
+      // The guard above rejects an empty username, so the label always
+      // carries it — `user@host` reads as the account being connected as.
+      label: `${quickConnectTarget.username}@${quickConnectTarget.hostname}`,
       hostname: quickConnectTarget.hostname,
       username: quickConnectTarget.username,
       port: quickConnectTarget.port,

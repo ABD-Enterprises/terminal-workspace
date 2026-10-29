@@ -79,9 +79,11 @@ function HostEditorContent({
     buildHostEditorValues(host, runtimeSecrets)
   );
   // Density: the everyday connection fields stay in the open form; trust,
-  // grouping, environment and notes sit behind a disclosure so the modal
-  // fits a laptop viewport. Collapsing only hides the section — `values`
-  // keeps everything that was typed.
+  // jump host, agent forwarding, grouping, tags, identity label, SFTP
+  // root, environment, notes and Favorites sit behind a disclosure so the
+  // modal fits a laptop viewport (#464 tracks a collapsed-state signal
+  // for set trust/jump values). Collapsing only hides the section —
+  // `values` keeps everything that was typed.
   const [showAdvanced, setShowAdvanced] = useState(false);
   const nativeSecretStorage = isTauriRuntime();
   const [runtimeStatusMessage, setRuntimeStatusMessage] = useState<{

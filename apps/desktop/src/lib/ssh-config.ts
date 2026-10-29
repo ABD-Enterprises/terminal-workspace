@@ -446,8 +446,12 @@ export function toHostFormValues(host: ImportedSshConfigHost): Partial<HostFormV
   return {
     label: host.alias,
     hostname: host.hostname,
-    // Imported entries without a `User` line stay empty — the editor
-    // requires one before saving rather than assuming "root".
+    // Imported entries without a `User` line stay empty — no default
+    // user is assumed. The editor path requires one before saving;
+    // bulk import persists the entry as-is, so a username-less import
+    // lands in the inventory visibly unfinished rather than silently
+    // connecting as the wrong account (#464 tracks a clearer import
+    // report for that case).
     username: host.username,
     port: String(host.port),
     privateKeyPath: host.privateKeyPath,

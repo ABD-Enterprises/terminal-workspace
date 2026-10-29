@@ -94,7 +94,7 @@ describe("FirstRunTour route dismissal", () => {
     expect(screen.queryByRole("status", { name: tourName })).toBeNull();
   });
 
-  it("stays dismissed when the user returns to a previous route", () => {
+  it("stays dismissed when the shell remounts", () => {
     renderTourApp("/hosts");
     fireEvent.click(screen.getByRole("button", { name: "Go to sessions" }));
     expect(useAppStore.getState().sawFirstRunTour).toBe(true);

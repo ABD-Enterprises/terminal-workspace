@@ -26,6 +26,18 @@ Host alpha
     expect(result.unresolvedProxyJumpAliases).toEqual([]);
   });
 
+  it("parses a Host block with no User line to an empty username", () => {
+    // The import flow feeds this straight into the inventory: no default
+    // user is assumed anywhere, so a config entry without `User` must
+    // surface as empty rather than become "root" behind the user's back.
+    const result = parseSshConfig(`
+Host alpha
+  HostName alpha.example.com
+`);
+
+    expect(result.hosts[0]?.username).toBe("");
+  });
+
   it("inherits Host * defaults into concrete hosts and reports them", () => {
     const result = parseSshConfig(`
 Host *
@@ -370,8 +382,9 @@ Host alpha
     });
 
     expect(formValues.authMethod).toBe("none");
-    // No `User` line in the config → no guessed default user either. The
-    // editor requires one before the host can be saved.
+    // No `User` line in the config → no guessed default user either.
+    // The editor requires one before the host can be saved; bulk import
+    // persists the empty username as-is.
     expect(formValues.username).toBe("");
   });
 });
