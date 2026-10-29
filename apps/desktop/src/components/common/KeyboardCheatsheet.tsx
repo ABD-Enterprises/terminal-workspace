@@ -11,7 +11,7 @@
 // the user can find it.
 
 import { navigationItems } from "../../lib/navigation";
-import { formatPrimaryShortcut, isMacClient } from "../../lib/shortcuts";
+import { formatPrimaryShortcut } from "../../lib/shortcuts";
 import { useAppStore } from "../../store/app-store";
 import { Modal } from "./Modal";
 
@@ -26,12 +26,11 @@ interface ShortcutSection {
 }
 
 function buildSections(): ShortcutSection[] {
-  const mod = isMacClient() ? "⌘" : "Ctrl";
   return [
     {
       title: "Global",
       entries: [
-        { keys: [`${mod}K`], description: "Open the command palette" },
+        { keys: [formatPrimaryShortcut("k")], description: "Open the command palette" },
         { keys: ["?"], description: "Show this cheatsheet" },
         { keys: ["Esc"], description: "Close any open dialog or palette" },
       ],

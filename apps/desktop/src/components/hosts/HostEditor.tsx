@@ -97,6 +97,10 @@ function HostEditorContent({
   // #464: trust, jump-host and favorite state all render behind this
   // disclosure, so a collapsed editor hides them entirely. Counting the
   // ones actually in effect keeps that state legible without expanding.
+  // Scoped to the three fields the issue names: agent forwarding, group,
+  // tags, notes and environment also live here but were deliberately left
+  // out. The default trust policy counts — it is real state even on a
+  // fresh Add Host form.
   const advancedSetCount = [
     supportsTrustedKeys && values.hostKeyPolicy === "requireTrusted",
     supportsJumpHosts && values.jumpHostId !== "",
