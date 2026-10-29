@@ -63,7 +63,9 @@ export function CommandPaletteDialog({
                 <p className="mt-1 text-xs text-slate-400">
                   Jump between sections, focus open session tabs, launch hosts directly
                   {sectionShortcutsEnabled
-                    ? ", or use `⌘1` through `⌘" + navigationItems.length + "`."
+                    ? `, or use ${formatPrimaryShortcut("1")} through ${formatPrimaryShortcut(
+                        String(navigationItems.length),
+                      )}.`
                     : "."}
                 </p>
               </div>
