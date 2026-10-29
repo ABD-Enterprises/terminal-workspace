@@ -4,6 +4,7 @@ import { ConfirmDialog } from "../components/common/ConfirmDialog";
 import { SearchInput } from "../components/common/SearchInput";
 import { SnippetEditor } from "../components/snippets/SnippetEditor";
 import { SnippetList } from "../components/snippets/SnippetList";
+import { dispatchCommandToActivePane } from "../lib/active-pane-dispatch";
 import { executeSnippetOnHosts, type SnippetExecutionResult } from "../lib/api";
 import { formatSnippetExecutionFailure } from "../lib/backend-failure-messages";
 import { buildBackendConnection } from "../lib/connections";
@@ -11,6 +12,7 @@ import { ensureRuntimeSecrets } from "../lib/runtime-secrets";
 import { formatHostAddress } from "../lib/utils";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
+import { useRunbooksStore } from "../store/runbooks-store";
 import { useSessionsStore } from "../store/sessions-store";
 import { useSnippetsStore } from "../store/snippets-store";
 import { emptySnippetFormValues, type SnippetRecord } from "../types/snippet";
@@ -24,13 +26,13 @@ export function SnippetsPage() {
   const activeTabId = useSessionsStore((state) => state.activeTabId);
   const tabs = useSessionsStore((state) => state.tabs);
   const panes = useSessionsStore((state) => state.panes);
-  const queuePaneCommand = useSessionsStore((state) => state.queuePaneCommand);
   const snippets = useSnippetsStore((state) => state.snippets);
   const createSnippet = useSnippetsStore((state) => state.createSnippet);
   const updateSnippet = useSnippetsStore((state) => state.updateSnippet);
   const deleteSnippet = useSnippetsStore((state) => state.deleteSnippet);
   const duplicateSnippet = useSnippetsStore((state) => state.duplicateSnippet);
   const markSnippetRun = useSnippetsStore((state) => state.markSnippetRun);
+  const createRunbookFromCommand = useRunbooksStore((state) => state.createRunbookFromCommand);
   const [query, setQuery] = useState("");
   const [selectedSnippetId, setSelectedSnippetId] = useState<string>();
   const [editorTarget, setEditorTarget] = useState<SnippetRecord | null>(null);
@@ -45,7 +47,10 @@ export function SnippetsPage() {
     [hosts]
   );
   const snippetHosts = useMemo(() => hosts.filter((host) => host.protocol === "ssh"), [hosts]);
-  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+  // #454: the same rule the shared dispatch helper uses — the active tab is
+  // the one `activeTabId` names, so the run action is only offered when the
+  // command really can be queued into that pane.
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const activePane = activeTab ? panes[activeTab.activePaneId] : undefined;
 
   const filteredSnippets = useMemo(() => {
@@ -84,10 +89,27 @@ export function SnippetsPage() {
       return;
     }
 
-    queuePaneCommand(activePane.id, selectedSnippet.command, selectedSnippet.title);
+    // #454: the shared helper owns "which pane is active", so the palette,
+    // the snippets page and the runbooks page all queue into the same pane.
+    dispatchCommandToActivePane(selectedSnippet.command, selectedSnippet.title);
     markSnippetRun(selectedSnippet.id);
-    markConnected(activePane.hostId);
     navigate(activeTabId ? `/sessions?tabId=${activeTabId}` : "/sessions");
+  };
+
+  // #454: turn a saved command into a runbook so it can be run one step at a
+  // time, then jump to the new runbook.
+  const createRunbookFromSelectedCommand = () => {
+    if (!selectedSnippet) {
+      return;
+    }
+
+    const runbookId = createRunbookFromCommand(selectedSnippet.id);
+
+    if (!runbookId) {
+      return;
+    }
+
+    navigate(`/runbooks?id=${runbookId}`);
   };
 
   const broadcastToHosts = async () => {
@@ -226,6 +248,14 @@ export function SnippetsPage() {
                       className="rounded-lg bg-emerald-400 px-3 py-1.5 text-sm font-medium text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Run in active pane
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!selectedSnippet}
+                      onClick={createRunbookFromSelectedCommand}
+                      className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Create runbook from command
                     </button>
                     <button
                       type="button"

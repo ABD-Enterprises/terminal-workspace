@@ -26,6 +26,11 @@ export const navigationItems: NavigationItem[] = [
     description: "SSH identities, keygen, and trust.",
   },
   {
+    path: "/runbooks",
+    label: "Runbooks",
+    description: "Ordered command steps, run one at a time.",
+  },
+  {
     path: "/transfers",
     label: "Transfers",
     description: "Remote files and transfer queue.",

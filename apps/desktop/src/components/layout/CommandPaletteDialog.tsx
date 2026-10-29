@@ -62,7 +62,11 @@ export function CommandPaletteDialog({
                 </p>
                 <p className="mt-1 text-xs text-slate-400">
                   Jump between sections, focus open session tabs, launch hosts directly
-                  {sectionShortcutsEnabled ? ", or use `⌘1` through `⌘6`." : "."}
+                  {sectionShortcutsEnabled
+                    ? `, or use ${formatPrimaryShortcut("1")} through ${formatPrimaryShortcut(
+                        String(navigationItems.length),
+                      )}.`
+                    : "."}
                 </p>
               </div>
               <span className="rounded-full border border-slate-700 bg-slate-950/80 px-3 py-1 text-xs text-slate-400">

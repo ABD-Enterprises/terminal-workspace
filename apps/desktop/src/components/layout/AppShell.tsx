@@ -113,8 +113,14 @@ export function AppShell() {
         case "menu:nav-keys":
           navigate("/keys");
           break;
+        case "menu:nav-runbooks":
+          navigate("/runbooks");
+          break;
         case "menu:nav-transfers":
           navigate("/transfers");
+          break;
+        case "menu:nav-tunnels":
+          navigate("/tunnels");
           break;
         case "menu:command-palette":
           openCommandPalette();
@@ -387,7 +393,7 @@ export function AppShell() {
               <div className="flex shrink-0 items-center gap-2">
                 {sectionShortcutsEnabled ? (
                   <span className="hidden rounded-full border border-slate-700 bg-slate-950/80 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400 sm:inline-flex">
-                    {formatPrimaryShortcut("1")} to {formatPrimaryShortcut("6")}
+                    {formatPrimaryShortcut("1")} to {formatPrimaryShortcut(String(navigationItems.length))}
                   </span>
                 ) : null}
                 <button

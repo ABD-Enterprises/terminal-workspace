@@ -6,6 +6,9 @@ import { AppShell } from "../components/layout/AppShell";
 
 const HostsPage = lazy(() => import("./HostsPage").then((module) => ({ default: module.HostsPage })));
 const KeysPage = lazy(() => import("./KeysPage").then((module) => ({ default: module.KeysPage })));
+const RunbooksPage = lazy(() =>
+  import("./RunbooksPage").then((module) => ({ default: module.RunbooksPage }))
+);
 const SessionsPage = lazy(() =>
   import("./SessionsPage").then((module) => ({ default: module.SessionsPage }))
 );
@@ -65,6 +68,14 @@ export function AppRouter() {
               element={
                 <LazyRoute>
                   <SnippetsPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/runbooks"
+              element={
+                <LazyRoute>
+                  <RunbooksPage />
                 </LazyRoute>
               }
             />
