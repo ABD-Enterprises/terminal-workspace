@@ -16,7 +16,7 @@
 
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
-import { isMacClient } from "../../lib/shortcuts";
+import { formatPrimaryShortcut } from "../../lib/shortcuts";
 import { useAppStore } from "../../store/app-store";
 
 export function FirstRunTour() {
@@ -46,8 +46,6 @@ export function FirstRunTour() {
   if (sawTour) {
     return null;
   }
-
-  const cmd = isMacClient() ? "⌘" : "Ctrl";
 
   return (
     // Outer + inner are pointer-events-none so the toast never steals
@@ -103,7 +101,7 @@ export function FirstRunTour() {
               Jump anywhere
             </button>
             <kbd className="rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 font-mono text-[10px] text-slate-200">
-              {cmd}K
+              {formatPrimaryShortcut("k")}
             </kbd>
           </li>
         </ul>

@@ -11,7 +11,7 @@
 // the user can find it.
 
 import { navigationItems } from "../../lib/navigation";
-import { isMacClient } from "../../lib/shortcuts";
+import { formatPrimaryShortcut } from "../../lib/shortcuts";
 import { useAppStore } from "../../store/app-store";
 import { Modal } from "./Modal";
 
@@ -26,12 +26,11 @@ interface ShortcutSection {
 }
 
 function buildSections(): ShortcutSection[] {
-  const mod = isMacClient() ? "⌘" : "Ctrl";
   return [
     {
       title: "Global",
       entries: [
-        { keys: [`${mod}K`], description: "Open the command palette" },
+        { keys: [formatPrimaryShortcut("k")], description: "Open the command palette" },
         { keys: ["?"], description: "Show this cheatsheet" },
         { keys: ["Esc"], description: "Close any open dialog or palette" },
       ],
@@ -39,7 +38,9 @@ function buildSections(): ShortcutSection[] {
     {
       title: "Section navigation",
       entries: navigationItems.map((item, index) => ({
-        keys: [`${mod}${index + 1}`],
+        // Derived rows go through the shared formatter, so non-mac
+        // renders "Ctrl+1" rather than "Ctrl1" (#460).
+        keys: [formatPrimaryShortcut(String(index + 1))],
         description: item.label,
       })),
     },
