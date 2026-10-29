@@ -45,6 +45,16 @@ const NAV_ICONS: Record<string, ReactNode> = {
       <path d="M10.8 10.8l1.6-1.6" strokeLinecap="round" />
     </svg>
   ),
+  "/runbooks": (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+      <circle cx="3.6" cy="4.4" r="0.85" fill="currentColor" stroke="none" />
+      <circle cx="3.6" cy="8" r="0.85" fill="currentColor" stroke="none" />
+      <circle cx="3.6" cy="11.6" r="0.85" fill="currentColor" stroke="none" />
+      <path d="M6.4 4.4h7" strokeLinecap="round" />
+      <path d="M6.4 8h7" strokeLinecap="round" />
+      <path d="M6.4 11.6h4.6" strokeLinecap="round" />
+    </svg>
+  ),
   "/transfers": (
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
       <path d="M5 10.5V3" strokeLinecap="round" />

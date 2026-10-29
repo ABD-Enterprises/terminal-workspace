@@ -40,8 +40,10 @@ function buildSections(): ShortcutSection[] {
         { keys: [`${mod}2`], description: "Sessions" },
         { keys: [`${mod}3`], description: "Snippets" },
         { keys: [`${mod}4`], description: "Keys" },
-        { keys: [`${mod}5`], description: "Transfers" },
-        { keys: [`${mod}6`], description: "Settings" },
+        { keys: [`${mod}5`], description: "Runbooks" },
+        { keys: [`${mod}6`], description: "Transfers" },
+        { keys: [`${mod}7`], description: "Tunnels" },
+        { keys: [`${mod}8`], description: "Settings" },
       ],
     },
     {
