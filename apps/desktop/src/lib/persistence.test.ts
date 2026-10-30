@@ -9,7 +9,7 @@ type StoreTable =
   | "snippets_store";
 
 interface FakeDatabaseOptions {
-  failLoad?: boolean;
+  failGet?: boolean;
   failSelect?: boolean;
   failExecuteOn?: RegExp;
 }
@@ -136,9 +136,12 @@ async function loadPersistence(db: FakeDatabase, options: FakeDatabaseOptions = 
   vi.doMock("./backend-runtime", () => ({ isTauriRuntime: () => true }));
   vi.doMock("@tauri-apps/plugin-sql", () => ({
     default: {
-      load: vi.fn(async () => {
-        if (options.failLoad) {
-          throw new Error("load failed");
+      // The app resolves the pool the plugin already preloaded, so it calls
+      // `get`. `load` is the command that opens a path the caller names, which
+      // is why its capability was dropped.
+      get: vi.fn(() => {
+        if (options.failGet) {
+          throw new Error("get failed");
         }
         return db;
       }),
@@ -197,11 +200,11 @@ describe("Tauri SQLite persistence", () => {
 
     vi.resetModules();
     vi.unstubAllGlobals();
-    const loadHarness = await loadPersistence(new FakeDatabase(), { failLoad: true });
-    loadHarness.localStorage.setItem("terminal-workspace-hosts", "load-fallback");
+    const getHarness = await loadPersistence(new FakeDatabase(), { failGet: true });
+    getHarness.localStorage.setItem("terminal-workspace-hosts", "get-fallback");
     await expect(
-      loadHarness.persistence.createTermsnipStorage("terminal-workspace-hosts").getItem("terminal-workspace-hosts")
-    ).resolves.toBe("load-fallback");
+      getHarness.persistence.createTermsnipStorage("terminal-workspace-hosts").getItem("terminal-workspace-hosts")
+    ).resolves.toBe("get-fallback");
   });
 
   it("#146: a SQLite write failure rejects and does NOT shadow-write localStorage", async () => {

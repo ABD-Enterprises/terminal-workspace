@@ -262,10 +262,11 @@ jobs:
       # #237: #170 started tracking src-tauri/gen/schemas/capabilities.json and
       # acl-manifests.json so a change to the app's effective permission surface
       # is visible in review. Tracking alone gates nothing: capabilities/default.json
-      # grants bundled SETS ("core:default", "sql:default"), and a Tauri or plugin
-      # bump can widen what a set expands to — the real permissions change while no
-      # hand-written file does. Build validation checks schema conformance, not
-      # breadth, so it stays green either way.
+      # grants bundled SETS ("core:default", "log:default") alongside explicitly
+      # named permissions ("sql:allow-select", "sql:allow-execute"), and a Tauri or
+      # plugin bump can widen what a set or a named permission expands to — the real
+      # permissions change while no hand-written file does. Build validation checks
+      # schema conformance, not breadth, so it stays green either way.
       #
       # touch build.rs first, deliberately. tauri_build::build() only re-runs when
       # cargo decides the build script is stale, and Swatinem/rust-cache above
