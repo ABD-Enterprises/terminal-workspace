@@ -28,9 +28,9 @@
 //
 // The lockfile is a weaker substitute for `flock`. It removes itself by path
 // when it releases, so a holder whose lock was reclaimed as stale removes the
-// new holder's lock; and the age rule bounds every lock that is a regular
-// file, but not one that is not — a FIFO at the lock's path is never
-// reclaimed.
+// new holder's lock; and the age rule bounds every lock we can open that is a
+// regular file, but nothing else — a FIFO at the lock's path, or a regular
+// file the owner has made unreadable, is never reclaimed.
 // Each of those needs something abnormal: a hold far longer than a read and
 // an append, or a local writer with the owner's own privileges.
 //
@@ -57,12 +57,12 @@ const LOCK_POLL_MS = 25;
 /**
  * How old a lockfile may be before it is treated as stale.
  *
- * The age is a proxy, and a blunt one: past this it bounds every lock that
- * is a regular file — a dead holder, a recycled PID, a file left behind by a
- * crash, or a writer that has simply stopped — without asking whose it is.
- * The lock is released by removing the file, so a holder that is gone must
- * not be able to wedge every later connection; the cost is that a lock held
- * longer than this is taken from its holder.
+ * The age is a proxy, and a blunt one: past this it bounds every lock that is
+ * a regular file we can open — a dead holder, a recycled PID, a file left
+ * behind by a crash, or a writer that has simply stopped — without asking
+ * whose it is. The lock is released by removing the file, so a holder that is
+ * gone must not be able to wedge every later connection; the cost is that a
+ * lock held longer than this is taken from its holder.
  */
 const LOCK_STALE_MS = 60000;
 
@@ -99,7 +99,7 @@ const UNSAFE_HOSTNAME_CHARACTERS = /[\s#]/;
  *
  * A hostname that could break the record format is refused rather than
  * written. The store is shared with the native app, so a record written here
- * is trust the native app reads too.
+ * is trust that the native app reads too.
  */
 export function knownHostsHostPattern(hostname, port) {
   const name = String(hostname ?? "").trim();
