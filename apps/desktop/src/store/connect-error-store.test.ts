@@ -50,4 +50,16 @@ describe("connect-error-store", () => {
 
     expect(useConnectErrorStore.getState().message).toBeNull();
   });
+
+  it("resets the tone to error when the message is cleared", () => {
+    // A dismissed warning must not leave the tone amber for the next failure,
+    // so clearing resets the tone as well as the message.
+    reportConnectError("Connection cancelled — host key was not trusted.", "warning");
+    expect(useConnectErrorStore.getState().tone).toBe("warning");
+
+    useConnectErrorStore.getState().clearConnectError();
+
+    expect(useConnectErrorStore.getState().message).toBeNull();
+    expect(useConnectErrorStore.getState().tone).toBe("error");
+  });
 });

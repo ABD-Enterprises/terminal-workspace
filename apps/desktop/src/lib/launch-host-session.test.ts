@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { launchHostSession } from "./launch-host-session";
 import type { HostRecord } from "../types/host";
-import { useConnectErrorStore } from "../store/connect-error-store";
+import { reportConnectError, useConnectErrorStore } from "../store/connect-error-store";
 
 // M07 / #89: regression test for the per-host mutex. Two rapid
 // launchHostSession calls for the same host id used to spawn two
@@ -28,6 +28,16 @@ vi.mock("../store/sessions-store", () => ({
     }),
   },
 }));
+
+// `reportConnectError` is the store's reporting entry point and the only thing
+// that refuses an empty message. The spy calls through, so the store state
+// assertions below still describe real behaviour — it exists so the routing is
+// pinned: a change that called `setConnectError` directly would publish a
+// blank banner, and nothing else in the suite would notice.
+vi.mock("../store/connect-error-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../store/connect-error-store")>();
+  return { ...actual, reportConnectError: vi.fn(actual.reportConnectError) };
+});
 
 import { ensureTrustedHostKey } from "./ensure-trusted-host-key";
 
@@ -185,5 +195,23 @@ describe("launchHostSession failure reporting", () => {
     await launchHostSession(host("b"));
 
     expect(useConnectErrorStore.getState().message).toBeNull();
+  });
+
+  it("reports through the store's reporting entry point, not the raw setter", async () => {
+    // The routing itself is the contract: `reportConnectError` refuses an
+    // empty message, so calling `setConnectError` directly from production
+    // would render a blank banner. Nothing else in the suite distinguishes the
+    // two, so it is pinned here.
+    vi.mocked(ensureTrustedHostKey).mockResolvedValue({
+      ok: false,
+      reason: "scan-failed",
+    });
+
+    await launchHostSession(host("a"));
+
+    expect(reportConnectError).toHaveBeenCalledWith(
+      "Could not scan a.example.com:22. Check that the host is reachable and try again.",
+      "error"
+    );
   });
 });
