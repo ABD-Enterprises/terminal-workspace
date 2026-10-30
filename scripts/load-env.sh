@@ -32,7 +32,9 @@
 # previous loader also set and overwrote: the helpers are unset and the working
 # variables are given names that cannot collide with a caller's.
 # TERMSNIP_ENV_LOADED is exported on purpose — it is how a second source of
-# this loader in the same shell becomes a no-op.
+# this loader in the same shell becomes a no-op. BASH_REMATCH is set as a side
+# effect of the `=~` check below; the previous loader's `=~` check did the
+# same, so nothing that worked before stops working now.
 
 if [[ -n "${TERMSNIP_ENV_LOADED:-}" ]]; then
   return 0 2>/dev/null || exit 0
