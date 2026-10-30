@@ -8,6 +8,8 @@
 // actually fails a build.
 
 import { createRequire } from "node:module";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 // `ws` is already a runtime dependency of apps/desktop, so resolving from there
 // keeps this fixture dependency-free.
@@ -20,6 +22,7 @@ const SSH_PORT = Number(process.env.TW_SSH_PORT);
 const SSH_USER = process.env.TW_SSH_USER;
 const TOKEN = process.env.TW_BACKEND_TOKEN;
 const ORIGIN = process.env.TW_ALLOWED_ORIGIN;
+const STATE_DIR = process.env.TW_STATE_DIR;
 const GLOB_CANONICAL_SENTINEL = "GLOB_SUCCESS_CANONICAL_PATH_SENTINEL";
 
 const DEADLINE_MS = 30_000;
@@ -115,6 +118,50 @@ function driveTerminal(sessionId, input, marker) {
           socket.close();
           resolve({ frames, output });
         }
+      }
+    });
+    socket.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+/**
+ * Open the session websocket and resolve on the first terminal outcome: an
+ * error frame, or a "connected" status.
+ *
+ * A connect failure can land before this socket attaches, so the outcome is
+ * also read from the status frame the backend sends on attach. Either way the
+ * session never reaching "connected" is the refusal.
+ */
+function driveTerminalExpectingRefusal(sessionId) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(`${BACKEND.replace("http", "ws")}/ws/sessions/${sessionId}`, {
+      headers: { Origin: ORIGIN },
+    });
+    const timer = setTimeout(() => {
+      socket.terminate();
+      resolve({ error: null, connected: false, timedOut: true });
+    }, DEADLINE_MS);
+
+    socket.on("message", (raw) => {
+      let message;
+      try {
+        message = JSON.parse(raw.toString("utf8"));
+      } catch {
+        return;
+      }
+      if (message.type === "error") {
+        clearTimeout(timer);
+        socket.close();
+        resolve({ error: message.message ?? "", connected: false });
+        return;
+      }
+      if (message.type === "status" && message.state === "connected") {
+        clearTimeout(timer);
+        socket.close();
+        resolve({ error: null, connected: true });
       }
     });
     socket.on("error", (error) => {
@@ -254,6 +301,50 @@ async function main() {
     const names = (listing.json?.entries ?? []).map((entry) => entry.name);
     check("sftp listed the seeded file", names.includes("fixture-file.txt"),
       `status ${listing.status} names ${JSON.stringify(names)}`);
+
+    console.log("[client] host-key trust on first use");
+    // The fixture host is `allowUnknown` with no known host key, so the
+    // backend has nothing to compare against. It must pin what the fixture
+    // sshd presented, in the OpenSSH record shape, and remember it.
+    const knownHostsPath = join(STATE_DIR, "ssh", "known_hosts");
+    const pinned = await readFile(knownHostsPath, "utf8").catch(() => "");
+    check(
+      "the first connect pinned the host key it was shown",
+      pinned.includes(`[127.0.0.1]:${SSH_PORT} ssh-ed25519 `),
+      `store: ${JSON.stringify(pinned)}`,
+    );
+
+    // Change the pin to a different key. The next connect must be refused
+    // rather than accepted: this is the case the pin exists to catch.
+    const tamperedKey = Buffer.from("a-different-host-key").toString("base64");
+    const tampered = pinned.replace(/(ssh-ed25519 )\S+/, `$1${tamperedKey}`);
+    await writeFile(knownHostsPath, tampered, "utf8");
+
+    const afterTamper = await api("/api/backend/sessions", {
+      method: "POST",
+      origin: ORIGIN,
+      body: { host: fixtureHost() },
+    });
+    check(
+      "a session is still created after the pin changed",
+      afterTamper.status === 200 && Boolean(afterTamper.json?.sessionId),
+      `status ${afterTamper.status} body ${afterTamper.text.slice(0, 200)}`,
+    );
+    const refusal = await driveTerminalExpectingRefusal(afterTamper.json?.sessionId);
+    check(
+      "a changed host key is refused instead of accepted",
+      refusal.connected === false && refusal.timedOut !== true,
+      `connected=${refusal.connected} error=${JSON.stringify(refusal.error)}`,
+    );
+    check(
+      "the refusal says why",
+      typeof refusal.error === "string" && refusal.error.includes("Host key verification failed"),
+      `error=${JSON.stringify(refusal.error)}`,
+    );
+    check(
+      "the changed key did not replace the pin",
+      (await readFile(knownHostsPath, "utf8")).includes(tamperedKey),
+    );
 
     console.log("[client] websocket auth");
     const rejected = await expectUpgradeRejected(sessionId, { Origin: "http://evil.invalid" });

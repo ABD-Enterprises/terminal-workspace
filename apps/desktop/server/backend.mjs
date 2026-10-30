@@ -58,6 +58,7 @@ import {
   SFTP_UPLOAD_MAX_BYTES,
 } from "./backend-buffers.mjs";
 import { readBoundedRegularFile, writeNewPrivateFile } from "./backend-files.mjs";
+import { createHostKeyStore, createHostKeyVerifier } from "./backend-host-keys.mjs";
 import {
   projectSshConfigResolutionFailure,
   resolveSshConfigPath,
@@ -252,10 +253,32 @@ function broadcast(session, message) {
 
 function failSession(session, error) {
   session.state = "error";
+  // Remembered, not just broadcast. The handshake can fail before the
+  // websocket attaches — the renderer creates the session and opens the socket
+  // in two steps — and a broadcast to nobody is a message the user never sees.
+  // A failed host-key verification is exactly that case, and its reason is the
+  // whole point of reporting it.
+  session.failureMessage = getErrorMessage(error);
   broadcast(session, {
     type: "error",
-    message: getErrorMessage(error),
+    message: session.failureMessage,
   });
+}
+
+/**
+ * The durable host-key store, created once per backend process.
+ *
+ * The path is resolved from the environment on first use, so a test that sets
+ * `TERMSNIP_STATE_DIR` before the first connection gets its own store and
+ * never touches the developer's real one.
+ */
+let hostKeyStore = null;
+
+function getHostKeyStore() {
+  if (!hostKeyStore) {
+    hostKeyStore = createHostKeyStore();
+  }
+  return hostKeyStore;
 }
 
 async function createConnectConfig(host) {
@@ -276,9 +299,35 @@ async function createConnectConfig(host) {
     readyTimeout: 10000,
   };
 
+  // Filled in by the verifier when it refuses the host, so the connect path
+  // can report why instead of ssh2's bare "Host denied (verification failed)".
+  let hostKeyFailure = { message: null };
+
   if (host.knownHostPublicKey) {
+    // An explicitly trusted key always wins and is checked exactly as before.
+    // Nothing is pinned for it: the user already decided what to trust.
     connectConfig.hostVerifier = (key) =>
       Buffer.isBuffer(key) && key.toString("base64") === host.knownHostPublicKey;
+  } else {
+    // SEC-2: trust on first use against the durable store.
+    //
+    // `hostVerifier` is NEVER left undefined. ssh2's default branch accepts
+    // whatever answers the socket without checking it, which is how a host
+    // whose policy is not `requireTrusted` ended up MITM-able in browser mode
+    // on every connect — and, because nothing was recorded, on every later
+    // connect too.
+    //
+    // The verifier runs during the handshake, before authentication, so a
+    // refused host never receives the password or the private key.
+    const verifier = createHostKeyVerifier({
+      hostname: host.hostname,
+      port: host.port,
+      store: getHostKeyStore(),
+    });
+    connectConfig.hostVerifier = verifier.verify;
+    // The verifier mutates its own `failure` in place, so this reference is
+    // how the connect path learns why the host was refused.
+    hostKeyFailure = verifier.failure;
   }
 
   if (host.agentForwarding && process.env.SSH_AUTH_SOCK) {
@@ -341,7 +390,7 @@ async function createConnectConfig(host) {
     }
   }
 
-  return { config: connectConfig, scrub: scrubBundle };
+  return { config: connectConfig, scrub: scrubBundle, hostKeyFailure };
 }
 
 async function openJumpSocket(host, setStage) {
@@ -369,7 +418,7 @@ async function openJumpSocket(host, setStage) {
 async function connectClient(host, setStage) {
   setStage?.("configuration");
   const client = new Client();
-  const { config: connectConfig, scrub } = await createConnectConfig(host);
+  const { config: connectConfig, scrub, hostKeyFailure } = await createConnectConfig(host);
   setStage?.("connect");
   const jumpConnection = host.jumpHost ? await openJumpSocket(host, setStage) : undefined;
 
@@ -384,6 +433,13 @@ async function connectClient(host, setStage) {
       jumpConnection?.jumpClient,
       setStage
     );
+  } catch (error) {
+    // A refused host key is reported with the reason, not ssh2's bare
+    // "Host denied (verification failed)".
+    if (hostKeyFailure.message) {
+      throw new Error(hostKeyFailure.message, { cause: error });
+    }
+    throw error;
   } finally {
     // Whether the SSH handshake succeeded or failed, ssh2 has already read
     // password / passphrase / private-key bytes off connectConfig (the
@@ -409,6 +465,9 @@ async function createSshSession(host) {
     buffer: [],
     bufferBytes: 0,
     droppedBytes: 0,
+    // Set when the session fails, and replayed to a websocket that attaches
+    // after the failure. See failSession.
+    failureMessage: null,
   };
   // M05 / #87: connectClient (the short-lived path) properly destructures
   // both fields and runs scrub() in finally. createSshSession (the
@@ -417,7 +476,8 @@ async function createSshSession(host) {
   // session's whole lifetime. Capture both, scrub right after connect()
   // returns synchronously (ssh2 has consumed the secrets by then per the
   // contract documented in connectClient's finally block).
-  const { config: connectConfig, scrub: scrubConfig } = await createConnectConfig(host);
+  const { config: connectConfig, scrub: scrubConfig, hostKeyFailure } =
+    await createConnectConfig(host);
   const jumpConnection = host.jumpHost ? await openJumpSocket(host) : undefined;
 
   if (jumpConnection?.socket) {
@@ -490,7 +550,9 @@ async function createSshSession(host) {
 
   session.client.on("error", (error) => {
     session.jumpClient?.end();
-    failSession(session, error);
+    // A refused host key is reported with the reason, not ssh2's bare
+    // "Host denied (verification failed)".
+    failSession(session, hostKeyFailure.message ? new Error(hostKeyFailure.message) : error);
   });
 
   session.client.on("close", () => {
@@ -1539,6 +1601,16 @@ server.on("upgrade", (request, socket, head) => {
         state: session.state,
       })
     );
+    // A failure that happened before this socket attached was never
+    // broadcast to anyone, so it is replayed here.
+    if (session.failureMessage) {
+      ws.send(
+        JSON.stringify({
+          type: "error",
+          message: session.failureMessage,
+        })
+      );
+    }
 
     if (session.buffer.length || session.droppedBytes) {
       let data = session.buffer.join("");
