@@ -50,7 +50,8 @@ function fixtureHost() {
     protocol: "ssh",
     sftpRoot: `${FIXTURE_ROOT}/sftproot`,
     username: SSH_USER,
-    // The fixture host key is generated per run, so pinning is not possible;
+    // The fixture host key is generated per run, so the fixture cannot
+    // pre-supply a known host key; the backend pins it on first use instead.
     // allowUnknown is the fixture's own trust decision, not the app default.
     hostKeyPolicy: "allowUnknown",
   };

@@ -48,10 +48,11 @@ const LOCK_POLL_MS = 25;
 /**
  * How old a lockfile may be before it is treated as stale.
  *
- * The lock is released by removing the file, so a file that old belongs to a
- * process that died without releasing it — or to a PID that has since been
- * recycled, which would otherwise wedge every connection for as long as the
- * unrelated process lives.
+ * The age is a proxy, and a blunt one: past this it bounds every lock —
+ * dead holder, recycled PID, or a writer that has simply stopped — without
+ * asking whose it is. The lock is released by removing the file, so a holder
+ * that is gone must not be able to wedge every later connection; the cost is
+ * that a lock held longer than this is taken from its holder.
  */
 const LOCK_STALE_MS = 60000;
 
@@ -560,8 +561,8 @@ export function createHostKeyStore({
         // the zero-length file a crash between the create and the write
         // leaves behind — has no holder to check, so its age is all there is,
         // and it is reclaimed on that alone. The age is a proxy: the
-        // critical section is a small read and an append, so a writer does
-        // not hold a lock this long.
+        // critical section is a small read and an append, so a writer is not
+        // expected to hold a lock this long.
         const stale = age > LOCK_STALE_MS || (Number.isInteger(holder) && !isProcessAlive(holder));
         if (stale) {
           await rm(resolvedLockPath, { force: true });

@@ -372,7 +372,7 @@ describe("backend SSH host-key trust", () => {
   });
 
   describe("the lockfile", () => {
-    it("treats a lock it cannot read as held rather than stale", async () => {
+    it("treats a lock it cannot parse as held rather than stale", async () => {
       // The lock file is created empty and the PID written into it, so a
       // reader can catch it before the write lands and see a lock it cannot
       // parse. Taking it would put two writers in the critical section, so
@@ -395,7 +395,7 @@ describe("backend SSH host-key trust", () => {
       expect(existsSync(storePath)).toBe(false);
     });
 
-    it("reclaims a lock it cannot read once the lock is old", async () => {
+    it("reclaims a lock it cannot parse once the lock is old", async () => {
       // A crash between the lock file's creation and the write leaves a
       // zero-length lock behind. It has no holder to check, so while it is
       // young it is held — and once it is old the staleness rule reclaims
