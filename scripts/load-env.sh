@@ -14,6 +14,10 @@
 # A blank value in either file is a placeholder rather than an override, so a
 # copy of .env.example (whose signing and token slots are empty) cannot blank
 # out a shared default. The first occurrence of a key inside one file wins.
+#
+# Nothing is left in the sourcing shell's namespace except ROOT_DIR, which the
+# previous loader also set: the helpers are unset and the working variables
+# are given names that cannot collide with a caller's.
 
 if [[ -n "${TERMSNIP_ENV_LOADED:-}" ]]; then
   return 0 2>/dev/null || exit 0
@@ -43,7 +47,7 @@ LOAD_ENV_KEYS=()
 LOAD_ENV_VALUES=()
 LOAD_ENV_SOURCES=()
 
-load_env_index_of_key() {
+load_env_key_index() {
   local needle="$1"
   local index
   for ((index = 0; index < ${#LOAD_ENV_KEYS[@]}; index++)); do
@@ -55,7 +59,7 @@ load_env_index_of_key() {
   return 1
 }
 
-load_env_file() {
+load_env_values_from_file() {
   local file_path="$1"
   local source="$2"
   local raw_line line key value index
@@ -91,7 +95,7 @@ load_env_file() {
       continue
     fi
 
-    if index="$(load_env_index_of_key "$key")"; then
+    if index="$(load_env_key_index "$key")"; then
       # The later file replaces the earlier one; a second occurrence inside the
       # same file does not.
       if [[ "${LOAD_ENV_SOURCES[$index]}" != "$source" ]]; then
@@ -107,19 +111,21 @@ load_env_file() {
   done <"$file_path"
 }
 
-load_env_file "$ROOT_DIR/.env.shared" shared
-load_env_file "$ROOT_DIR/.env" local
+load_env_values_from_file "$ROOT_DIR/.env.shared" shared
+load_env_values_from_file "$ROOT_DIR/.env" local
 
 # The real process environment always wins: a variable that is already
-# exported is left exactly as it is.
+# exported is left exactly as it is. The loop variables are named so they
+# cannot collide with the sourcing script's own, and are unset below.
 for ((load_env_index = 0; load_env_index < ${#LOAD_ENV_KEYS[@]}; load_env_index++)); do
-  key="${LOAD_ENV_KEYS[$load_env_index]}"
-  if [[ -n "${!key:-}" ]]; then
+  load_env_key="${LOAD_ENV_KEYS[$load_env_index]}"
+  if [[ -n "${!load_env_key:-}" ]]; then
     continue
   fi
-  export "$key=${LOAD_ENV_VALUES[$load_env_index]}"
+  export "$load_env_key=${LOAD_ENV_VALUES[$load_env_index]}"
 done
 
-unset LOAD_ENV_KEYS LOAD_ENV_VALUES LOAD_ENV_SOURCES load_env_index
+unset LOAD_ENV_KEYS LOAD_ENV_VALUES LOAD_ENV_SOURCES load_env_index load_env_key
+unset -f load_env_values_from_file load_env_key_index
 
 export TERMSNIP_ENV_LOADED=1

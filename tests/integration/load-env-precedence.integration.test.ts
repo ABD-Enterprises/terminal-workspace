@@ -23,9 +23,35 @@ const PROBED_KEYS = [
   "TERMSNIP_TEST_BLANK",
   "TERMSNIP_TEST_QUOTED",
   "TERMSNIP_UI_PORT",
+  // Probed because the loader must not touch the sourcing shell's variables.
+  "key",
 ] as const;
 
 const UNSET = "__unset__";
+
+/**
+ * The interpreters the loader is checked under.
+ *
+ * `bash` is whatever `#!/usr/bin/env bash` resolves to, which is the
+ * interpreter the release scripts that source the loader actually run. On
+ * macOS `/bin/bash` is the stock 3.2 build, and it is checked too: a construct
+ * that only newer bash accepts would pass CI (where `bash` is 5.x) and break a
+ * stock macOS, and this loader is the one script every release script sources.
+ */
+function interpreters(): string[] {
+  const found = new Set<string>();
+  for (const candidate of ["bash", "/bin/bash"]) {
+    try {
+      const probe = spawnSync(candidate, ["-c", "exit 0"], { encoding: "utf8" });
+      if (probe.error === undefined && probe.status === 0) {
+        found.add(candidate);
+      }
+    } catch {
+      // Not available on this platform.
+    }
+  }
+  return [...found];
+}
 
 const createdRoots: string[] = [];
 
@@ -56,15 +82,19 @@ function makeRoot(shared: string | null, local: string | null): string {
  * (which makes the loader a no-op) or an inherited TERMSNIP_* value cannot
  * decide the outcome.
  */
-function load(root: string, processEnv: Record<string, string> = {}): Record<string, string> {
+function load(
+  root: string,
+  processEnv: Record<string, string> = {},
+  interpreter = "bash",
+): Record<string, string> {
   const prints = PROBED_KEYS.map((key) => `printf '${key}=%s\\n' "\${${key}-${UNSET}}"`).join("\n");
-  const result = spawnSync("bash", ["-c", `source "$1"\n${prints}`, "bash", join(root, "scripts", "load-env.sh")], {
+  const result = spawnSync(interpreter, ["-c", `source "$1"\n${prints}`, "bash", join(root, "scripts", "load-env.sh")], {
     encoding: "utf8",
     env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...processEnv },
   });
 
   if (result.status !== 0) {
-    throw new Error(`loader exited with ${result.status}: ${result.stderr}`);
+    throw new Error(`loader exited with ${result.status} under ${interpreter}: ${result.stderr}`);
   }
 
   const values: Record<string, string> = {};
@@ -138,6 +168,42 @@ describe("scripts/load-env.sh precedence (#481)", () => {
 
     for (const key of PROBED_KEYS) {
       expect(values[key]).toBe(UNSET);
+    }
+  });
+
+  it("leaves the sourcing shell's own variables alone", () => {
+    // The loader's working variables must not land in the sourcing shell's
+    // namespace. The previous loader declared them local; a loader that used a
+    // top-level loop variable named `key` would replace a caller's own
+    // exported `key` with the name of the last env file key it read — which
+    // also breaks the guarantee that the real process environment wins.
+    const root = makeRoot("AAA=1\nBBB=2\n", null);
+
+    const values = load(root, { key: "caller-value" });
+
+    expect(values.key).toBe("caller-value");
+  });
+
+  it("resolves the same way under every available interpreter", () => {
+    // `#!/usr/bin/env bash` picks whatever bash is first on PATH, and on macOS
+    // that is not the stock /bin/bash. A construct only newer bash accepts
+    // would pass CI and break a stock macOS, so the precedence is pinned under
+    // each interpreter that exists here.
+    const root = makeRoot(
+      "TERMSNIP_TEST_SHARED=shared-only\nTERMSNIP_TEST_OVERRIDDEN=from-shared\n",
+      "TERMSNIP_TEST_OVERRIDDEN=from-local\nTERMSNIP_TEST_LOCAL=local-only\n",
+    );
+
+    const results = interpreters().map((interpreter) => ({
+      interpreter,
+      values: load(root, {}, interpreter),
+    }));
+
+    expect(results.length).toBeGreaterThan(0);
+    for (const { interpreter, values } of results) {
+      expect(values.TERMSNIP_TEST_OVERRIDDEN, interpreter).toBe("from-local");
+      expect(values.TERMSNIP_TEST_LOCAL, interpreter).toBe("local-only");
+      expect(values.TERMSNIP_TEST_SHARED, interpreter).toBe("shared-only");
     }
   });
 });

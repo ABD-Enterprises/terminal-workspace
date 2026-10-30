@@ -13,11 +13,11 @@ A map of the daily-use features a local-first macOS SSH client needs, and how ea
 implemented here. It is not a build checklist and not a status board: a row reads "Implemented"
 only when the code exists in the tree, and the Evidence column names the files that carry it.
 
-How it was verified on 2026-10-29: the table was re-read against the tree at `main` and the SSH
-connect row — the one the 2026-10-29 critical review flagged — was corrected, because it still
-claimed the native backend was pending and the native backend has shipped. The other rows keep
-their 2026-03-29 and 2026-05-06 evidence and were not re-derived, and the parity percentages
-below are dated estimates that were not recomputed.
+How it was verified on 2026-10-29: the SSH connect row — the one the 2026-10-29 critical review
+flagged — was re-read against the tree at `main` and corrected, because it still claimed the
+native backend was pending and the native backend has shipped. The other rows keep their
+2026-03-29 and 2026-05-06 evidence and were not re-derived, and the parity percentages below
+are dated estimates that were not recomputed.
 
 Which backend owns which responsibility — the native Tauri/Rust shell, or the browser-preview Node
 backend — is set out in [`docs/architecture.md`](docs/architecture.md). That document is the
@@ -88,10 +88,10 @@ Honest daily-use parity estimate (2026-05-06): ~80% — palette / tabs / splits 
 
 ## Next Highest-Value Gap
 
-Updated 2026-10-29 against current code:
+Updated 2026-05-06 against current code (item 2 re-verified 2026-10-29):
 
 1. ~~optional macOS Keychain integration for runtime secrets~~ — **shipped**: per-host, per-key-fingerprint, and per-identity passphrase persistence via Tauri keychain commands (`apps/desktop/src/lib/native-secrets.ts`, `src-tauri/src/main.rs`, `keychain_support.rs`).
-2. ~~validate the desktop shell against a native Tauri/Rust package path once `cargo` is available in this environment~~ — **shipped**: `scripts/validate.sh` builds, lints and tests the crate on macOS (`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`), CI runs the `rust-validate` workflow, and the native trust tooling test runs on GitHub-hosted runners. The native trust step is still opt-in locally (`TERMSNIP_RUN_NATIVE_TRUST=1`) and skips on a machine without Rust installed.
-3. ~~add theme customization~~ — **shipped**: terminal theme picker with `prefers-color-scheme` Auto mode (`SettingsPage.tsx:381-489`). Font picker (family + size) is the remaining gap.
-4. ~~OpenSSH-config import polish~~ — **partially shipped**: Match host/originalhost/user/all in PR #29 (2026-05-06). Include directive support tracked in #28 (needs backend filesystem primitive).
-5. cloud sync / E2E vault sync — design ticket #26 in `ready_for_plan` (multi-month design problem; do not implement until the seven open questions in the ticket are answered).
+2. ~~validate the desktop shell against a native Tauri/Rust package path once `cargo` is available in this environment~~ — **shipped** (re-verified 2026-10-29): `scripts/validate.sh` checks the crate's formatting, lints it with `-D warnings` and runs its tests on macOS (`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`), and skips the Rust steps when `cargo` is not installed. CI runs the `rust-validate` job on the runner named by `vars.MACOS_RUNNER_LABELS`, and the native trust tooling test runs when that runner is GitHub-hosted. The native trust step is still opt-in locally (`TERMSNIP_RUN_NATIVE_TRUST=1`).
+3. ~~add theme customization~~ — **shipped**: terminal theme picker with `prefers-color-scheme` Auto mode (`apps/desktop/src/routes/SettingsPreferencesSection.tsx`, `apps/desktop/src/lib/terminal-themes.ts`). Font picker (family + size) is the remaining gap.
+4. ~~OpenSSH-config import polish~~ — **shipped**: Match host/originalhost/user/all in PR #29 (2026-05-06), plus Include directive support in `apps/desktop/src/lib/ssh-config-include.ts` (wired in `apps/desktop/src/routes/HostsPage.tsx`); the importer's issue #28 was closed on 2026-05-10.
+5. cloud sync / E2E vault sync — still not implemented; the tree has no cloud transport. The design ticket #26 was closed on 2026-05-10; the groundwork it names is in `apps/desktop/src/lib/vault-sync-contract.ts` (vaultId, sourceDeviceId, snapshotId).
