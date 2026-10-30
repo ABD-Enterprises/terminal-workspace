@@ -70,7 +70,10 @@ async function launchHostSessionInner(host: HostRecord): Promise<LaunchHostSessi
     // sites have a try/catch, so without this it surfaced as an unhandled
     // rejection with nothing on screen. The detail stays in the console —
     // it can carry internals that do not belong in the UI.
-    console.warn(`[connect] trust scan failed for ${host.label}:`, error);
+    // The label is passed as its own argument, not interpolated into the
+    // message: a host label is user-controlled and a format specifier in it
+    // would forge the log line.
+    console.warn("[connect] trust scan failed for host:", host.label, error);
     const message = `Could not reach ${host.hostname}:${host.port}. Check that the host is reachable and try again.`;
     reportFailure(message);
     return { ok: false, reason: "trust-scan-threw", errorMessage: message };
