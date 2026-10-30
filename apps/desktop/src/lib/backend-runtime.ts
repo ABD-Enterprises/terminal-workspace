@@ -486,7 +486,18 @@ async function browserFetchJson<T>(path: string, init?: RequestInit) {
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new Error(errorBody || `Backend request failed: ${response.status}`);
+    let message = errorBody;
+    if (errorBody) {
+      try {
+        const parsed = JSON.parse(errorBody);
+        if (parsed && typeof parsed === "object" && typeof parsed.error === "string") {
+          message = parsed.error;
+        }
+      } catch {
+        // Not valid JSON, keep raw text
+      }
+    }
+    throw new Error(message || `Backend request failed: ${response.status}`);
   }
 
   return (await response.json()) as T;

@@ -10,6 +10,7 @@ import {
 import { buildBackendConnection } from "../../lib/connections";
 import { ensureRuntimeSecrets } from "../../lib/runtime-secrets";
 import { formatBytes, formatHostAddress } from "../../lib/utils";
+import { formatBackendFailure } from "../../lib/backend-failure-messages";
 import { useKnownHostsStore } from "../../store/known-hosts-store";
 import { useTransfersStore } from "../../store/transfers-store";
 import type { HostRecord } from "../../types/host";
@@ -132,7 +133,7 @@ export function FileBrowser({ host }: FileBrowserProps) {
       if (!loadGuardRef.current.isCurrent(token)) {
         return;
       }
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(formatBackendFailure(error));
       setEntries([]);
     } finally {
       // Also guarded: a stale load clearing `loading` would hide the spinner
@@ -210,7 +211,7 @@ export function FileBrowser({ host }: FileBrowserProps) {
       await action();
       completeTransfer(transferId);
     } catch (error) {
-      failTransfer(transferId, error instanceof Error ? error.message : String(error));
+      failTransfer(transferId, formatBackendFailure(error));
       throw error;
     }
   };
@@ -270,7 +271,7 @@ export function FileBrowser({ host }: FileBrowserProps) {
       setDraftAction(null);
       await loadDirectory(currentPath);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(formatBackendFailure(error));
     }
   };
 
@@ -298,7 +299,7 @@ export function FileBrowser({ host }: FileBrowserProps) {
       );
       await loadDirectory(currentPath);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(formatBackendFailure(error));
     }
   };
 
@@ -336,7 +337,7 @@ export function FileBrowser({ host }: FileBrowserProps) {
         }
       );
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(formatBackendFailure(error));
     }
   };
 
@@ -373,7 +374,7 @@ export function FileBrowser({ host }: FileBrowserProps) {
       }
       await loadDirectory(currentPath);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(formatBackendFailure(error));
     }
   };
 
