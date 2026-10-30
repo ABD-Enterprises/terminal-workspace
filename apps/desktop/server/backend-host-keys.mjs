@@ -31,7 +31,8 @@
 // the last one wins and a later verification reports a mismatch — the
 // fail-closed direction.
 
-import { chmod, lstat, mkdir, open, readFile, rm, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { chmod, mkdir, open, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -53,6 +54,9 @@ const LOCK_POLL_MS = 25;
  * unrelated process lives.
  */
 const LOCK_STALE_MS = 60000;
+
+/** The store path is not a regular file. Refused rather than followed. */
+class NotARegularFileError extends Error {}
 
 export const HOST_KEY_VERDICT = Object.freeze({
   /** Nothing was pinned for this host; the presented key has been recorded. */
@@ -321,44 +325,54 @@ export function createHostKeyStore({
    * answered the socket, which is the exact hole this closes.
    */
   async function load() {
-    // A symlink or a directory here means something is manipulating trust
-    // state, so it is refused rather than followed. The native store makes
-    // the same check with `symlink_metadata`, and refuses a path that is not
-    // a regular file.
-    let stats;
+    let contents;
+    // Opened ONCE, with O_NOFOLLOW so a symlink at this path is refused
+    // rather than followed, and everything after that goes through the
+    // descriptor. A path-based check followed by a path-based read is a race:
+    // the file can be replaced in between. The native store makes the same
+    // check with `symlink_metadata` and then reads through the open handle.
+    let handle;
     try {
-      stats = await lstat(path);
+      handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     } catch (error) {
-      // A store that does not exist yet is the normal case: nothing has been
-      // pinned. The first sighting creates it.
       if (error?.code === "ENOENT") {
+        // A store that does not exist yet is the normal case: nothing has
+        // been pinned. The first sighting creates it.
         return new Map();
+      }
+      if (error?.code === "ELOOP") {
+        throw new NotARegularFileError(
+          "the SSH host-key store is not a regular file; refusing to authenticate",
+        );
       }
       throw new Error(`could not read the SSH host-key store: ${error?.message ?? error}`, {
         cause: error,
       });
     }
-    if (!stats.isFile()) {
-      throw new Error(
-        "the SSH host-key store is not a regular file; refusing to authenticate",
-      );
-    }
 
-    let contents;
     try {
+      const stats = await handle.stat();
+      if (!stats.isFile()) {
+        throw new NotARegularFileError(
+          "the SSH host-key store is not a regular file; refusing to authenticate",
+        );
+      }
+
       // Read as bytes and decode strictly: the native store reads with
       // `read_to_string`, which errors on invalid UTF-8, and the two must
       // agree about whether the same file is valid. A lossy decode would
       // replace the bad bytes with U+FFFD and accept the file instead.
-      const bytes = await readFile(path);
+      const bytes = await handle.readFile();
       contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } catch (error) {
-      // No ENOENT special case here: a store that vanished between the check
-      // above and this read is a race, and the native store's read_to_string
-      // fails closed on it too.
+      if (error instanceof NotARegularFileError) {
+        throw error;
+      }
       throw new Error(`could not read the SSH host-key store: ${error?.message ?? error}`, {
         cause: error,
       });
+    } finally {
+      await handle.close();
     }
 
     const records = new Map();
@@ -396,41 +410,62 @@ export function createHostKeyStore({
     // explicitly.
     await chmod(directory, 0o700);
 
-    // Only when the file exists and does not already end in a newline: a
-    // previous writer that stopped mid-line must not have our record welded
-    // onto the end of theirs.
-    let needsSeparator = false;
+    const body = `${pattern} ${algorithm} ${key}\n`;
+
+    // Opened ONCE, with O_NOFOLLOW so a symlink at this path is refused
+    // rather than followed, and the trailing-newline check and the append
+    // both go through the same descriptor. A path-based check followed by a
+    // path-based write is a race: the file can be replaced in between.
+    //
+    // O_APPEND means the record is written at the end of the file with a
+    // single write, rather than a rewrite — a rewrite would destroy a pin
+    // another writer added, which is exactly what the native store refuses
+    // to do.
+    let handle;
     try {
-      const existing = await readFile(path);
-      needsSeparator = existing.length > 0 && existing[existing.length - 1] !== 0x0a;
+      handle = await open(
+        path,
+        constants.O_RDWR | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW,
+        0o600,
+      );
     } catch (error) {
-      if (error?.code !== "ENOENT") {
-        throw new Error(`could not read the SSH host-key store: ${error?.message ?? error}`, {
-          cause: error,
-        });
-      }
-    }
-
-    const body = `${needsSeparator ? "\n" : ""}${pattern} ${algorithm} ${key}\n`;
-
-    // Opened with "a" so the record is appended with a single O_APPEND write
-    // rather than a rewrite: a rewrite would destroy a pin another writer
-    // added, which is exactly what the native store refuses to do.
-    const handle = await open(path, "a", 0o600);
-    try {
-      // Re-check through the OPEN descriptor, not the path. `open` follows a
-      // symlink, so a path swapped between the check above and the open
-      // would send the append somewhere else entirely. `fstat` on the open
-      // handle reports the file that was actually opened. The native store
-      // makes the same check with `file.metadata()`.
-      const stats = await handle.stat();
-      if (!stats.isFile()) {
-        throw new Error(
+      if (error?.code === "ELOOP") {
+        throw new NotARegularFileError(
           "the SSH host-key store is not a regular file; refusing to authenticate",
         );
       }
-      await handle.write(Buffer.from(body, "utf8"));
+      throw new Error(`could not write the SSH host-key store: ${error?.message ?? error}`, {
+        cause: error,
+      });
+    }
+
+    try {
+      const stats = await handle.stat();
+      if (!stats.isFile()) {
+        throw new NotARegularFileError(
+          "the SSH host-key store is not a regular file; refusing to authenticate",
+        );
+      }
+
+      // Only when the file exists and does not already end in a newline: a
+      // previous writer that stopped mid-line must not have our record
+      // welded onto the end of theirs.
+      let needsSeparator = false;
+      if (stats.size > 0) {
+        const tail = Buffer.alloc(1);
+        const { bytesRead } = await handle.read(tail, 0, 1, stats.size - 1);
+        needsSeparator = bytesRead === 1 && tail[0] !== 0x0a;
+      }
+
+      await handle.write(Buffer.from(`${needsSeparator ? "\n" : ""}${body}`, "utf8"));
       await handle.sync();
+    } catch (error) {
+      if (error instanceof NotARegularFileError) {
+        throw error;
+      }
+      throw new Error(`could not write the SSH host-key store: ${error?.message ?? error}`, {
+        cause: error,
+      });
     } finally {
       await handle.close();
     }
@@ -479,8 +514,18 @@ export function createHostKeyStore({
       // stale: taking a lock whose holder is unknown would put two writers
       // in the critical section.
       try {
-        const holder = Number.parseInt(await readFile(resolvedLockPath, "utf8"), 10);
-        const age = Date.now() - (await stat(resolvedLockPath)).mtimeMs;
+        // Opened once, and both the PID and the age are read through the
+        // descriptor, so the check and the read cannot disagree about which
+        // file they are talking about.
+        const handle = await open(resolvedLockPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+        let holder = Number.NaN;
+        let age = 0;
+        try {
+          holder = Number.parseInt(await handle.readFile("utf8"), 10);
+          age = Date.now() - (await handle.stat()).mtimeMs;
+        } finally {
+          await handle.close();
+        }
         const stale = !Number.isInteger(holder) ? false : !isProcessAlive(holder) || age > LOCK_STALE_MS;
         if (stale) {
           await rm(resolvedLockPath, { force: true });
