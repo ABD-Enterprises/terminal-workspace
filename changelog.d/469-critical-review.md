@@ -1,0 +1,1 @@
+- [INTERNAL] Add the 2026-10-29 critical review: 50 security, maintainability, and usability findings, each written as a paste-ready issue body (#469)
