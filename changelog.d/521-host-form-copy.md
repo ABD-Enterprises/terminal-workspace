@@ -1,0 +1,2 @@
+- [FIX] Remove the internal engineering notes from the Settings page and describe the host-delete dialog accurately (#521)
+- [FIX] Validate the host form fields and explain why the create button is disabled instead of failing silently (#521)
