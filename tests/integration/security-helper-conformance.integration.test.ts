@@ -7,6 +7,7 @@ import {
   resolveRemotePath,
   sanitizeFilename,
 } from "../../apps/desktop/server/backend-paths.mjs";
+import { globMatches } from "../../apps/desktop/server/backend-glob.mjs";
 import {
   buildEnvironmentExportPrefix,
   buildExecCommand,
@@ -315,6 +316,15 @@ describe("#155: JS helpers match the shared cross-backend corpus", () => {
   it("sanitizeFilename", () => {
     for (const item of cases("sanitizeFilename")) {
       expect(sanitizeFilename(item.input as string), item.why).toBe(item.expected);
+    }
+  });
+
+  it("globMatches", () => {
+    for (const item of cases("globMatches")) {
+      expect(
+        globMatches(item.pattern as string, item.text as string),
+        item.why
+      ).toBe(item.expected);
     }
   });
 

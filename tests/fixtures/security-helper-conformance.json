@@ -218,6 +218,79 @@
       "why": "a newline is replaced"
     }
   ],
+  "$globMatchesComment": [
+    "globMatches pins the SSH-config Include glob semantics: `pattern` is the glob, `text` is the filename it is tested against, and `expected` is the Rust answer — the Rust transport is the shipping one.",
+    "The divergence these cases were written to expose: Rust matches on Unicode scalar values, so `?` consumes exactly one code point and `*` matches any run of them, a newline included. A JavaScript regex without the `u` flag consumes one UTF-16 code unit and never matches a newline, so a filename holding an astral character was matched natively and skipped in browser mode.",
+    "Both harnesses read this group, so changing either matcher without the other fails the gate."
+  ],
+  "globMatches": [
+    {
+      "pattern": "*.conf",
+      "text": "app.conf",
+      "expected": true,
+      "why": "`*` matches any run of characters"
+    },
+    {
+      "pattern": "*.conf",
+      "text": "app.cfg",
+      "expected": false,
+      "why": "the literal suffix still has to match"
+    },
+    {
+      "pattern": "conf?",
+      "text": "conf1",
+      "expected": true,
+      "why": "`?` is exactly one character"
+    },
+    {
+      "pattern": "conf?",
+      "text": "conf12",
+      "expected": false,
+      "why": "`?` is exactly one character, not one or more"
+    },
+    {
+      "pattern": "a?b",
+      "text": "a🦀b",
+      "expected": true,
+      "why": "`?` consumes one Unicode scalar value — an astral character is one character in Rust, and a JS regex only sees it that way with the u flag"
+    },
+    {
+      "pattern": "a?b",
+      "text": "a🦀🦀b",
+      "expected": false,
+      "why": "`?` consumes exactly one scalar value, not a whole run"
+    },
+    {
+      "pattern": "a*b",
+      "text": "a\nb",
+      "expected": true,
+      "why": "`*` matches a newline — Rust's matcher has no newline exception"
+    },
+    {
+      "pattern": "a?b",
+      "text": "a\nb",
+      "expected": true,
+      "why": "`?` matches a newline as well — the JS `.` needs the s flag for that"
+    },
+    {
+      "pattern": "[abc].conf",
+      "text": "[abc].conf",
+      "expected": true,
+      "why": "`[` is literal — neither matcher has character classes"
+    },
+    {
+      "pattern": "10-*",
+      "text": "10-staging",
+      "expected": true,
+      "why": "a staged name matches its prefix"
+    },
+    {
+      "pattern": "10-*",
+      "text": "20-prod",
+      "expected": false,
+      "why": "a different prefix does not match"
+    }
+  ],
   "shellSingleQuote": [
     {
       "input": "abc",

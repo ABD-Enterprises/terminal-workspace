@@ -24,7 +24,7 @@ use crate::native_transport::{
     get_channel_environment, normalize_remote_path, resolve_remote_path, sanitize_filename,
     shell_single_quote,
 };
-use crate::{CopyKeyToHostFailure, RemoteCommandFailure, SshFailureStage};
+use crate::{glob_match, CopyKeyToHostFailure, RemoteCommandFailure, SshFailureStage};
 
 fn fixture() -> Value {
     // CARGO_MANIFEST_DIR is src-tauri/, so the repo root is its parent.
@@ -204,6 +204,28 @@ fn sanitize_filename_matches_the_shared_corpus() {
             sanitize_filename(&input),
             text(case, "expected"),
             "sanitize_filename({input:?}) — {}",
+            text(case, "why")
+        );
+    }
+}
+
+#[test]
+fn glob_matches_matches_the_shared_corpus() {
+    // #MAINT-1: the Rust matcher is the canonical one — it matches on Unicode
+    // scalar values, so `?` consumes exactly one code point and `*` matches any
+    // run of them, a newline included. The Node matcher used to disagree.
+    let fixture = fixture();
+    for case in cases(&fixture, "globMatches") {
+        let pattern = text(case, "pattern");
+        let input = text(case, "text");
+        let expected = case
+            .get("expected")
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| panic!("case is missing `expected`: {case}"));
+        assert_eq!(
+            glob_match(&pattern, &input),
+            expected,
+            "glob_match({pattern:?}, {input:?}) — {}",
             text(case, "why")
         );
     }

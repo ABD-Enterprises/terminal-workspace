@@ -3735,6 +3735,21 @@ mod ssh_config_command_tests {
     }
 
     #[test]
+    fn glob_match_counts_unicode_scalar_values_not_utf16_code_units() {
+        // #MAINT-1: this matcher is the canonical one. The Node matcher used
+        // to consume one UTF-16 code unit per `?` and never match a newline,
+        // so an astral filename was matched natively and skipped in browser
+        // mode — the same SSH config produced a different host set per
+        // backend.
+        assert!(glob_match("a?b", "a🦀b"));
+        assert!(!glob_match("a?b", "a🦀🦀b"));
+        assert!(glob_match("a*b", "a\nb"));
+        assert!(glob_match("a?b", "a\nb"));
+        assert!(glob_match("[abc].conf", "[abc].conf"));
+        assert!(!glob_match("a?b", "ab"));
+    }
+
+    #[test]
     fn glob_refuses_directory_outside_ssh() {
         // A pattern that resolves outside ~/.ssh must be rejected (either
         // because the directory is not under ~/.ssh, or because ~/.ssh itself
