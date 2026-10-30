@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
 
+# Env-file precedence, highest first:
+#
+#   1. a variable already exported in the real process environment
+#   2. .env          (git-ignored; local overrides)
+#   3. .env.shared   (tracked; non-secret shared defaults)
+#
+# .env is read after .env.shared and replaces the shared value for the same
+# key, which is what docs/development.md, docs/release.md and
+# docs/operations.md describe. The real process environment still wins over
+# both files, so an exported shell variable is never clobbered.
+#
+# A blank value in either file is a placeholder rather than an override, so a
+# copy of .env.example (whose signing and token slots are empty) cannot blank
+# out a shared default. The first occurrence of a key inside one file wins.
+
 if [[ -n "${TERMSNIP_ENV_LOADED:-}" ]]; then
   return 0 2>/dev/null || exit 0
 fi
@@ -23,15 +38,33 @@ strip_wrapping_quotes() {
   printf '%s' "$value"
 }
 
-load_env_defaults_from_file() {
+# Collected across both files, in the order the files are parsed.
+LOAD_ENV_KEYS=()
+LOAD_ENV_VALUES=()
+LOAD_ENV_SOURCES=()
+
+load_env_index_of_key() {
+  local needle="$1"
+  local index
+  for ((index = 0; index < ${#LOAD_ENV_KEYS[@]}; index++)); do
+    if [[ "${LOAD_ENV_KEYS[$index]}" == "$needle" ]]; then
+      printf '%s' "$index"
+      return 0
+    fi
+  done
+  return 1
+}
+
+load_env_file() {
   local file_path="$1"
+  local source="$2"
+  local raw_line line key value index
 
   if [[ ! -f "$file_path" ]]; then
     return 0
   fi
 
   while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
-    local line key value
     line="$(trim_whitespace "$raw_line")"
 
     if [[ -z "$line" || "$line" == \#* ]]; then
@@ -53,13 +86,40 @@ load_env_defaults_from_file() {
       continue
     fi
 
-    if [[ -z "${!key:-}" ]]; then
-      export "$key=$value"
+    # A blank value is a placeholder, not an override.
+    if [[ -z "$value" ]]; then
+      continue
     fi
+
+    if index="$(load_env_index_of_key "$key")"; then
+      # The later file replaces the earlier one; a second occurrence inside the
+      # same file does not.
+      if [[ "${LOAD_ENV_SOURCES[$index]}" != "$source" ]]; then
+        LOAD_ENV_VALUES[$index]="$value"
+        LOAD_ENV_SOURCES[$index]="$source"
+      fi
+      continue
+    fi
+
+    LOAD_ENV_KEYS+=("$key")
+    LOAD_ENV_VALUES+=("$value")
+    LOAD_ENV_SOURCES+=("$source")
   done <"$file_path"
 }
 
-load_env_defaults_from_file "$ROOT_DIR/.env.shared"
-load_env_defaults_from_file "$ROOT_DIR/.env"
+load_env_file "$ROOT_DIR/.env.shared" shared
+load_env_file "$ROOT_DIR/.env" local
+
+# The real process environment always wins: a variable that is already
+# exported is left exactly as it is.
+for ((load_env_index = 0; load_env_index < ${#LOAD_ENV_KEYS[@]}; load_env_index++)); do
+  key="${LOAD_ENV_KEYS[$load_env_index]}"
+  if [[ -n "${!key:-}" ]]; then
+    continue
+  fi
+  export "$key=${LOAD_ENV_VALUES[$load_env_index]}"
+done
+
+unset LOAD_ENV_KEYS LOAD_ENV_VALUES LOAD_ENV_SOURCES load_env_index
 
 export TERMSNIP_ENV_LOADED=1

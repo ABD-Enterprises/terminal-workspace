@@ -3,8 +3,29 @@
 Research date: 2026-03-29 (last full research pass)
 Honest-scoring overlay added: 2026-04-27
 Last audited against current code: 2026-05-06 (overlay bullets + row 46 reverified line-by-line)
+Re-audited: 2026-10-29 — the SSH connect row still claimed the native backend was pending; it has shipped. That row is corrected below.
 
 Goal: build a local-first macOS replacement that reaches roughly 90% of the competitor daily-use value without cloning branding or chasing cloud/team features first.
+
+## What this table is
+
+A map of the daily-use features a local-first macOS SSH client needs, and how each one is
+implemented here. It is not a build checklist and not a status board: a row reads "Implemented"
+only when the code exists in the tree, and the Evidence column names the files that carry it.
+
+How it was verified on 2026-10-29: the table was re-read against the tree at `main` and the SSH
+connect row — the one the 2026-10-29 critical review flagged — was corrected, because it still
+claimed the native backend was pending and the native backend has shipped. The other rows keep
+their 2026-03-29 and 2026-05-06 evidence and were not re-derived, and the parity percentages
+below are dated estimates that were not recomputed.
+
+Which backend owns which responsibility — the native Tauri/Rust shell, or the browser-preview Node
+backend — is set out in [`docs/architecture.md`](docs/architecture.md). That document is the
+authority when this table and it disagree.
+
+The `competitor` links are a deliberate anonymisation of the product this table was researched
+against, applied on 2026-05-28 (commit `716639e`). They are not unfilled template placeholders —
+the evidence text around them is real — but their link targets are scrubbed and do not resolve.
 
 > **Honest-scoring overlay (last audited 2026-05-06)**
 >
@@ -35,7 +56,7 @@ Primary competitor evidence:
 
 Original presence-based parity estimate (2026-03-29): 96%
 Honest daily-use parity estimate (2026-04-27): ~70% — see review document.
-Honest daily-use parity estimate (2026-05-06): ~80% — palette / tabs / splits / fingerprint / themes already shipped; remaining gaps are SSH config Include support (#28), keychain-prompt UX polish, font picker, native Tauri/Rust validation pass.
+Honest daily-use parity estimate (2026-05-06): ~80% — palette / tabs / splits / fingerprint / themes already shipped; remaining gaps were SSH config Include support (#28), keychain-prompt UX polish, font picker, and the native Tauri/Rust validation pass. The native validation pass has since shipped (see the gap list below); the ~80% figure itself is a 2026-05-06 estimate and is not recomputed here.
 
 | Feature | User value | competitor behavior summary | Our implementation approach | Priority | Status | Evidence |
 |---|---|---|---|---|---|---|
@@ -43,7 +64,7 @@ Honest daily-use parity estimate (2026-05-06): ~80% — palette / tabs / splits 
 | Groups, tags, favorites, search/filter | Fast retrieval across medium and large fleets | competitor highlights nested groups, labels/tags, and search as core navigation aids | Implemented groups, tags, favorites, sidebar search, and page-level filters; no inherited protocol settings yet | Must-have | Implemented | competitor docs: [Organizing data](https://competitor.com/documentation/organizing-data); local UI: `apps/desktop/src/components/hosts/HostFilterBar.tsx`, `apps/desktop/src/components/layout/Sidebar.tsx`; Playwright smoke included host creation and updated counts |
 | Dense desktop shell, left nav, top tabs | Replace single-pane terminal apps with a navigable desktop workspace | competitor X moved to horizontal tabs plus a lighter sidebar to separate data from active work | Implemented routed shell with compact desktop density, left navigation, top tabs, persistent section shortcuts, and reduced-scroll operator panels across hosts, sessions, keys, snippets, and transfers | Must-have | Implemented | competitor blog: [competitor X](https://competitor.com/blog/competitor-x); local shell: `apps/desktop/src/components/layout/AppShell.tsx`, `apps/desktop/src/components/layout/TopTabs.tsx`, `apps/desktop/src/components/layout/Sidebar.tsx`; browser validation on 2026-03-29 confirmed the dense host grid and session workspace fit major controls and detail panels into a 1440x900 viewport |
 | Command palette | Keyboard-first navigation across hosts and active work | competitor exposes a command palette for fuzzy host search and tab/action jumps | Implemented section jumps, active-session focus, host actions for session launch, SFTP, and trust workflows, plus snippet execution from the palette across route changes | Should-have | Implemented | competitor blog: [competitor X](https://competitor.com/blog/competitor-x); local palette and shortcuts: `apps/desktop/src/components/layout/AppShell.tsx`, `apps/desktop/src/components/layout/TopTabs.tsx`, `apps/desktop/src/hooks/useCommandPalette.ts`, `apps/desktop/src/routes/KeysPage.tsx`; validated 2026-03-29 with Playwright palette flows for `/transfers`, `/keys?scanHost=...&autoScan=1`, and route-hop snippet execution into `/tmp/termsnip-palette-snippet.log` |
-| SSH connect/disconnect | Real replacement value starts when the app can open live SSH sessions | competitor supports SSH as a primary protocol with reconnect/history behavior | Implemented a local Node bridge with `ssh2`, websocket terminal IO, reconnect flow, and real local sshd validation; native Tauri/Rust backend still pending | Must-have | Implemented | Local runtime: `apps/desktop/server/backend.mjs`, `apps/desktop/src/components/terminal/TerminalPane.tsx`; validated 2026-03-29 against local sshd on `127.0.0.1:2222` plus browser reconnect smoke |
+| SSH connect/disconnect | Real replacement value starts when the app can open live SSH sessions | competitor supports SSH as a primary protocol with reconnect/history behavior | Implemented the shipping native Tauri/Rust transport — direct SSH and jump-host session lifecycle, native session stream IO, native SFTP, forwarding and remote snippet execution — with Keychain-backed secret persistence; the Node `ssh2` bridge with its websocket terminal IO is kept for browser preview only | Must-have | Implemented | Native runtime: `src-tauri/src/native_transport.rs`, `src-tauri/src/keychain_support.rs`, and the 38 Tauri commands registered in `src-tauri/src/main.rs`; browser-preview runtime: `apps/desktop/server/backend.mjs`, `apps/desktop/src/components/terminal/TerminalPane.tsx`; which backend owns what: `docs/architecture.md`; validated 2026-03-29 against local sshd on `127.0.0.1:2222` plus browser reconnect smoke, re-verified against the tree on 2026-10-29 |
 | Multiple tabs and split panes | Work comfortably across many hosts at once | competitor uses horizontal tabs, session switching shortcuts, and split view workflows | Implemented persisted tab and split-pane workspace around xterm.js panes with live SSH transport | Must-have | Implemented | competitor blog: [competitor X](https://competitor.com/blog/competitor-x); local state/UI: `apps/desktop/src/store/sessions-store.ts`, `apps/desktop/src/components/terminal/TerminalTabView.tsx`, `apps/desktop/src/components/terminal/SplitLayout.tsx`; validated 2026-03-29 in browser |
 | Key import and generation | Remove dependence on external SSH config handwork | competitor provides key generation/import and host-to-key assignment | Implemented local key inventory, import by path, local `ssh-keygen` generation, and host assignment | Must-have | Implemented | competitor docs: [SSH keys](https://competitor.com/documentation/ssh-keys); local runtime/UI: `apps/desktop/server/backend.mjs`, `apps/desktop/src/routes/KeysPage.tsx`, `apps/desktop/src/store/keys-store.ts`; validated 2026-03-29 by importing `/tmp/termsnip-sshd/client_key`, generating `/tmp/termsnip-generated/ui_generated`, and assigning the generated key to `Billing API` |
 | Passphrase handling and known hosts | Make private-key auth and trust prompts manageable in-app | competitor includes passphrase-aware keys plus trust/known-hosts UX | Implemented local known-host scanning, trust inventory, per-host strict trust policy, host-level revoke/reaccept flow, session-only runtime secrets, in-app missing-secret prompts for SSH/SFTP/snippet flows, and macOS Keychain persistence for host secrets, per-key-fingerprint passphrases, and per-identity passphrases via Tauri commands `terminal_workspace_load/store/clear_*` | Must-have | Implemented | competitor docs: [SSH keys](https://competitor.com/documentation/ssh-keys); local auth/trust: `apps/desktop/src/types/host.ts`, `apps/desktop/src/routes/KeysPage.tsx`, `apps/desktop/src/routes/HostsPage.tsx`, `apps/desktop/src/store/known-hosts-store.ts`, `apps/desktop/src/store/connection-secrets-store.ts`, `apps/desktop/src/store/connection-secret-prompt-store.ts`, `apps/desktop/src/lib/runtime-secrets.ts`, `apps/desktop/src/lib/native-secrets.ts`, `apps/desktop/src/lib/connections.ts`, `apps/desktop/server/backend.mjs`, `src-tauri/src/main.rs`, `src-tauri/src/keychain_support.rs`; validated 2026-03-29 by importing a passphrase-protected localhost key, assigning it to `Local SSH Test B`, hard-reloading the app, satisfying the in-app passphrase prompt, and executing `PASSPHRASE_PROMPT_OK` over SSH; keychain integration verified 2026-05-06 (closed issue #25 was based on stale claim) |
@@ -67,10 +88,10 @@ Honest daily-use parity estimate (2026-05-06): ~80% — palette / tabs / splits 
 
 ## Next Highest-Value Gap
 
-Updated 2026-05-06 against current code:
+Updated 2026-10-29 against current code:
 
 1. ~~optional macOS Keychain integration for runtime secrets~~ — **shipped**: per-host, per-key-fingerprint, and per-identity passphrase persistence via Tauri keychain commands (`apps/desktop/src/lib/native-secrets.ts`, `src-tauri/src/main.rs`, `keychain_support.rs`).
-2. validate the desktop shell against a native Tauri/Rust package path once `cargo` is available in this environment — still pending (validate.sh skips the cargo-based native trust step on machines without Rust installed).
+2. ~~validate the desktop shell against a native Tauri/Rust package path once `cargo` is available in this environment~~ — **shipped**: `scripts/validate.sh` builds, lints and tests the crate on macOS (`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`), CI runs the `rust-validate` workflow, and the native trust tooling test runs on GitHub-hosted runners. The native trust step is still opt-in locally (`TERMSNIP_RUN_NATIVE_TRUST=1`) and skips on a machine without Rust installed.
 3. ~~add theme customization~~ — **shipped**: terminal theme picker with `prefers-color-scheme` Auto mode (`SettingsPage.tsx:381-489`). Font picker (family + size) is the remaining gap.
 4. ~~OpenSSH-config import polish~~ — **partially shipped**: Match host/originalhost/user/all in PR #29 (2026-05-06). Include directive support tracked in #28 (needs backend filesystem primitive).
 5. cloud sync / E2E vault sync — design ticket #26 in `ready_for_plan` (multi-month design problem; do not implement until the seven open questions in the ticket are answered).
