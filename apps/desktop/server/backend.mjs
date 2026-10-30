@@ -301,7 +301,7 @@ async function createConnectConfig(host) {
 
   // Filled in by the verifier when it refuses the host, so the connect path
   // can report why instead of ssh2's bare "Host denied (verification failed)".
-  let hostKeyFailure = { message: null };
+  let hostKeyFailure = { error: null };
 
   if (host.knownHostPublicKey) {
     // An explicitly trusted key always wins and is checked exactly as before.
@@ -436,8 +436,8 @@ async function connectClient(host, setStage) {
   } catch (error) {
     // A refused host key is reported with the reason, not ssh2's bare
     // "Host denied (verification failed)".
-    if (hostKeyFailure.message) {
-      throw new Error(hostKeyFailure.message, { cause: error });
+    if (hostKeyFailure.error) {
+      throw hostKeyFailure.error;
     }
     throw error;
   } finally {
@@ -552,7 +552,7 @@ async function createSshSession(host) {
     session.jumpClient?.end();
     // A refused host key is reported with the reason, not ssh2's bare
     // "Host denied (verification failed)".
-    failSession(session, hostKeyFailure.message ? new Error(hostKeyFailure.message) : error);
+    failSession(session, hostKeyFailure.error ?? error);
   });
 
   session.client.on("close", () => {

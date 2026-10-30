@@ -67,6 +67,20 @@ describe("backend SSH host-key trust", () => {
       expect(() => knownHostsHostPattern("example.internal", 0)).toThrow();
       expect(() => knownHostsHostPattern("example.internal", 70000)).toThrow();
     });
+
+    it("refuses a hostname that could forge another record", async () => {
+      // The store is a line-oriented file: one record per line, fields split
+      // on whitespace, and a line starting with "#" is a comment. A hostname
+      // carrying a newline could therefore write a record for a different
+      // host — forging a pin — or a malformed line that breaks the store for
+      // every host. The store is shared with the native app, so a record
+      // written here is trust the native app reads too.
+      const { knownHostsHostPattern } = await load();
+      expect(() => knownHostsHostPattern("a.internal\nb.internal", 22)).toThrow();
+      expect(() => knownHostsHostPattern("#\ntrusted.internal", 22)).toThrow();
+      expect(() => knownHostsHostPattern("a.internal b.internal", 22)).toThrow();
+      expect(() => knownHostsHostPattern("trusted.internal#", 22)).toThrow();
+    });
   });
 
   describe("algorithm names", () => {
@@ -241,6 +255,40 @@ describe("backend SSH host-key trust", () => {
         store.verifyOrPin({ hostname: "example.internal", port: 22, keyBlob: Buffer.alloc(2) }),
       ).rejects.toThrow(/unusable host key/);
     });
+
+    it("refuses a hostname that could forge another record", async () => {
+      // The refusal happens before anything is written, so the store is left
+      // exactly as it was.
+      const { createHostKeyStore } = await load();
+      const store = createHostKeyStore({ path: storePath });
+
+      await expect(
+        store.verifyOrPin({
+          hostname: "#\ntrusted.internal",
+          port: 22,
+          keyBlob: keyBlob(),
+        }),
+      ).rejects.toThrow(/may not contain whitespace/);
+
+      const { existsSync } = await import("node:fs");
+      expect(existsSync(storePath)).toBe(false);
+    });
+
+    it("refuses a store that is not valid UTF-8", async () => {
+      // The native store reads with `read_to_string`, which errors on invalid
+      // UTF-8. A lossy decode would replace the bad bytes with U+FFFD and
+      // accept a file the native store refuses, so the two modes would
+      // disagree about whether the same file is valid.
+      const { createHostKeyStore } = await load();
+      const { mkdir } = await import("node:fs/promises");
+      await mkdir(join(root, "ssh"), { recursive: true });
+      await writeFile(storePath, Buffer.from([0x61, 0xff, 0x62, 0x0a]));
+
+      const store = createHostKeyStore({ path: storePath });
+      await expect(
+        store.verifyOrPin({ hostname: "example.internal", port: 22, keyBlob: keyBlob() }),
+      ).rejects.toThrow(/could not read the SSH host-key store/);
+    });
   });
 
   describe("append-only writes", () => {
@@ -313,14 +361,14 @@ describe("backend SSH host-key trust", () => {
         verifier.verify(keyBlob(), resolve);
       });
       expect(first).toBe(true);
-      expect(verifier.failure.message).toBeNull();
+      expect(verifier.failure.error).toBeNull();
 
       const second = await new Promise<boolean>((resolve) => {
         verifier.verify(keyBlob("ssh-ed25519", "DIFFERENT"), resolve);
       });
       expect(second).toBe(false);
-      expect(verifier.failure.message).toMatch(/Host key verification failed/);
-      expect(verifier.failure.message).toContain("example.internal:2222");
+      expect(verifier.failure.error?.message).toMatch(/Host key verification failed/);
+      expect(verifier.failure.error?.message).toContain("example.internal:2222");
     });
 
     it("refuses when the store cannot be read", async () => {
@@ -340,7 +388,7 @@ describe("backend SSH host-key trust", () => {
         verifier.verify(keyBlob(), resolve);
       });
       expect(permitted).toBe(false);
-      expect(verifier.failure.message).toMatch(/Could not verify the host key/);
+      expect(verifier.failure.error?.message).toMatch(/Could not verify the host key/);
     });
   });
 });
