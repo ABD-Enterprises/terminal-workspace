@@ -111,13 +111,22 @@ export function knownHostsHostPattern(hostname, port) {
  * error, so control characters are dropped before the message is built.
  */
 function safeHostLabel(hostname, port) {
-  // Drop the C0 control characters and DEL. Written out rather than matched
-  // with a regular expression so the intent is readable and the lint rule
-  // about control characters in patterns does not apply.
+  // Drop the C0 control characters, DEL, and the C1 range (0x80-0x9F).
+  // Written out rather than matched with a regular expression so the intent
+  // is readable and the lint rule about control characters in patterns does
+  // not apply. The C1 range matters: xterm.js reads U+009B as a CSI, so a
+  // hostname carrying one could colour or clear the terminal over the real
+  // error message.
   const name = Array.from(String(hostname ?? ""))
     .filter((character) => {
       const code = character.codePointAt(0) ?? 0;
-      return code >= 0x20 && code !== 0x7f;
+      if (code < 0x20 || code === 0x7f) {
+        return false;
+      }
+      if (code >= 0x80 && code <= 0x9f) {
+        return false;
+      }
+      return true;
     })
     .join("");
   const number = Number(port);
@@ -197,10 +206,15 @@ export function hostKeyMismatchMessage(hostname, port) {
  * The message an unverifiable host key produces: the store could not be read
  * or written, or the key was unusable.
  */
-export function hostKeyVerificationFailureMessage(hostname, port, error) {
+export function hostKeyVerificationFailureMessage(hostname, port) {
+  // Built from trusted data only. The underlying error — an `fs` failure
+  // naming the store's absolute path, or a malformed-store message naming the
+  // file and the line — stays on the server as the error's `cause` and is
+  // never relayed. #230 is exactly about that class of text reaching a
+  // client.
   return (
-    `Could not verify the host key for ${safeHostLabel(hostname, port)}: ${error?.message ?? error}. ` +
-    "Credentials were not sent."
+    `Could not verify the host key for ${safeHostLabel(hostname, port)}: the SSH host-key store ` +
+    "could not be read or written, so the host was not authenticated. Credentials were not sent."
   );
 }
 
@@ -214,8 +228,8 @@ export function hostKeyVerificationFailureMessage(hostname, port, error) {
  * the message is built here from the host label and a fixed explanation.
  */
 export class HostKeyRejectedError extends Error {
-  constructor(message) {
-    super(message);
+  constructor(message, options) {
+    super(message, options);
     this.name = "HostKeyRejectedError";
     // 403, not 500: the request was refused on purpose, and the caller did
     // nothing wrong that a retry would fix.
@@ -254,8 +268,13 @@ export function createHostKeyVerifier({ hostname, port, store }) {
         // The store could not be read or written, or the key was unusable.
         // Refusing is the fail-closed direction: an unverifiable host must not
         // be authenticated against.
+        //
+        // The cause carries the detail — which file, which line, which fs
+        // error — for the in-process diagnostics channel. The message the
+        // client sees is built from trusted data only.
         failure.error = new HostKeyRejectedError(
-          hostKeyVerificationFailureMessage(hostname, port, error),
+          hostKeyVerificationFailureMessage(hostname, port),
+          { cause: error },
         );
         callback(false);
       });
@@ -287,7 +306,11 @@ function isProcessAlive(pid) {
  * A durable `host-pattern -> (algorithm, base64 key)` map in OpenSSH
  * `known_hosts` shape.
  */
-export function createHostKeyStore({ path = resolveKnownHostsPath(), lockPath } = {}) {
+export function createHostKeyStore({
+  path = resolveKnownHostsPath(),
+  lockPath,
+  lockTimeoutMs = LOCK_TIMEOUT_MS,
+} = {}) {
   const resolvedLockPath = lockPath ?? `${path}.lock.node`;
 
   /**
@@ -306,6 +329,8 @@ export function createHostKeyStore({ path = resolveKnownHostsPath(), lockPath } 
     try {
       stats = await lstat(path);
     } catch (error) {
+      // A store that does not exist yet is the normal case: nothing has been
+      // pinned. The first sighting creates it.
       if (error?.code === "ENOENT") {
         return new Map();
       }
@@ -328,9 +353,9 @@ export function createHostKeyStore({ path = resolveKnownHostsPath(), lockPath } 
       const bytes = await readFile(path);
       contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } catch (error) {
-      if (error?.code === "ENOENT") {
-        return new Map();
-      }
+      // No ENOENT special case here: a store that vanished between the check
+      // above and this read is a race, and the native store's read_to_string
+      // fails closed on it too.
       throw new Error(`could not read the SSH host-key store: ${error?.message ?? error}`, {
         cause: error,
       });
@@ -421,7 +446,7 @@ export function createHostKeyStore({ path = resolveKnownHostsPath(), lockPath } 
    * the caller refuses to authenticate rather than proceeding unlocked.
    */
   async function acquireLock() {
-    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+    const deadline = Date.now() + lockTimeoutMs;
     await mkdir(dirname(resolvedLockPath), { recursive: true, mode: 0o700 });
 
     for (;;) {

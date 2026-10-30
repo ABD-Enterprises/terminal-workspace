@@ -346,6 +346,29 @@ async function main() {
       (await readFile(knownHostsPath, "utf8")).includes(tamperedKey),
     );
 
+    // The refusal must not carry the store's absolute path. #230 is exactly
+    // about that class of text reaching a client, and the store's failures
+    // name the file and the line.
+    await writeFile(knownHostsPath, "malformed-line-without-fields\n", "utf8");
+    const malformed = await api("/api/backend/sftp/list", {
+      method: "POST",
+      origin: ORIGIN,
+      body: { host: fixtureHost(), path: "." },
+    });
+    const malformedBody = malformed.text ?? "";
+    check(
+      "a damaged store is refused rather than re-pinned",
+      malformed.status === 403,
+      `status ${malformed.status} body ${malformedBody.slice(0, 200)}`,
+    );
+    check(
+      "the refusal does not carry the store's path",
+      !malformedBody.includes(knownHostsPath) &&
+        !malformedBody.includes(STATE_DIR) &&
+        !malformedBody.includes("known_hosts"),
+      `body ${malformedBody.slice(0, 300)}`,
+    );
+
     console.log("[client] websocket auth");
     const rejected = await expectUpgradeRejected(sessionId, { Origin: "http://evil.invalid" });
     check("an unlisted Origin cannot upgrade the websocket", rejected.rejected === true,

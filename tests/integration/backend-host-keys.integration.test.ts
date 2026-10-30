@@ -12,6 +12,7 @@
 // temporary directory, so they cover the durable behaviour rather than a mock:
 // a pin written by one store instance is read by the next.
 
+import { existsSync as existsSyncSync } from "node:fs";
 import { mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,6 +34,10 @@ async function load() {
  * which is exactly what the store reads. The trailing bytes stand in for the
  * key material.
  */
+function existsSyncStore(path: string): boolean {
+  return existsSyncSync(path);
+}
+
 function keyBlob(algorithm = "ssh-ed25519", filler = "AAAA"): Buffer {
   const name = Buffer.from(algorithm, "utf8");
   const length = Buffer.alloc(4);
@@ -347,7 +352,119 @@ describe("backend SSH host-key trust", () => {
     });
   });
 
+  describe("the lockfile", () => {
+    it("treats a lock it cannot read as held rather than stale", async () => {
+      // The PID is written before the lock file's handle is closed, so a
+      // reader never sees an empty lock — but if it does see one it cannot
+      // parse, taking it would put two writers in the critical section. The
+      // fail-closed direction is to refuse.
+      const { createHostKeyStore } = await load();
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      await mkdir(join(root, "ssh"), { recursive: true });
+      await writeFile(`${storePath}.lock.node`, "not-a-pid\n", "utf8");
+
+      const store = createHostKeyStore({ path: storePath, lockTimeoutMs: 150 });
+
+      await expect(
+        store.verifyOrPin({ hostname: "example.internal", port: 22, keyBlob: keyBlob() }),
+      ).rejects.toThrow(/locked by another process/);
+
+      // The store was left untouched: nothing was written while the lock was
+      // held by someone else.
+      const { existsSync } = await import("node:fs");
+      expect(existsSync(storePath)).toBe(false);
+    });
+
+    it("reclaims a lock whose holder is gone", async () => {
+      // A process that died without releasing the lock would otherwise wedge
+      // every later connection.
+      const { createHostKeyStore } = await load();
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      const { spawnSync } = await import("node:child_process");
+      await mkdir(join(root, "ssh"), { recursive: true });
+
+      // The PID of a process that has already exited.
+      const exited = spawnSync(process.execPath, ["-e", ""]);
+      await writeFile(`${storePath}.lock.node`, `${exited.pid}\n`, "utf8");
+
+      const store = createHostKeyStore({ path: storePath, lockTimeoutMs: 2000 });
+
+      const result = await store.verifyOrPin({
+        hostname: "example.internal",
+        port: 22,
+        keyBlob: keyBlob(),
+      });
+
+      expect(result.verdict).toBe("pinned");
+      expect(existsSyncStore(storePath)).toBe(true);
+    });
+  });
+
   describe("the ssh2 verifier", () => {
+    it("does not put the store's path in the message it refuses with", async () => {
+      // #230 is about exactly this: raw `fs` text carries absolute
+      // filesystem paths, and it must not reach a client. The store's own
+      // failures name the file and the line — that detail stays on the
+      // server as the error's cause.
+      const { createHostKeyStore, createHostKeyVerifier } = await load();
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      await mkdir(join(root, "ssh"), { recursive: true });
+      await writeFile(storePath, "example.internal ssh-ed25519\n", "utf8");
+
+      const verifier = createHostKeyVerifier({
+        hostname: "example.internal",
+        port: 22,
+        store: createHostKeyStore({ path: storePath }),
+      });
+
+      const permitted = await new Promise<boolean>((resolve) => {
+        verifier.verify(keyBlob(), resolve);
+      });
+
+      expect(permitted).toBe(false);
+      const message = verifier.failure.error?.message ?? "";
+      expect(message).not.toContain(storePath);
+      expect(message).not.toContain(root);
+      expect(message).not.toContain("known_hosts");
+      // The detail is still on the server.
+      expect(String(verifier.failure.error?.cause)).toContain("malformed");
+    });
+
+    it("keeps terminal control characters out of the message", async () => {
+      // xterm.js reads U+009B as a CSI, so a hostname carrying one could
+      // colour or clear the terminal over the real error message.
+      const { createHostKeyStore, createHostKeyVerifier } = await load();
+      const store = createHostKeyStore({ path: storePath });
+      const verifier = createHostKeyVerifier({
+        hostname: "evil\u009b31mFORGED\u009b0m.internal",
+        port: 22,
+        store,
+      });
+
+      // Pin first, then present a different key so the refusal has a
+      // message to carry.
+      await new Promise<boolean>((resolve) => {
+        verifier.verify(keyBlob(), resolve);
+      });
+      await new Promise<boolean>((resolve) => {
+        verifier.verify(keyBlob("ssh-ed25519", "DIFFERENT"), resolve);
+      });
+
+      const message = verifier.failure.error?.message ?? "";
+      // The CSI introducer is what makes a terminal act on the rest. The
+      // letters that followed it survive as ordinary text, which is inert.
+      expect(message).not.toContain("\u009b");
+      expect(message).not.toContain("\u001b");
+      expect(
+        Array.from(message).every((character) => {
+          const code = character.codePointAt(0) ?? 0;
+          return code >= 0x20 && code !== 0x7f && !(code >= 0x80 && code <= 0x9f);
+        }),
+      ).toBe(true);
+      // The label is still readable, so the user can tell which host it was.
+      expect(message).toContain("evil");
+    });
+
     it("accepts the first key it sees and refuses a changed one", async () => {
       const { createHostKeyStore, createHostKeyVerifier } = await load();
       const store = createHostKeyStore({ path: storePath });
