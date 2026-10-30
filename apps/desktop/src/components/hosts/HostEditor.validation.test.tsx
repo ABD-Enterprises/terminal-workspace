@@ -12,13 +12,14 @@
 // HostEditor.test.ts (TypeScript deduplicates same-basename inputs differing
 // only by extension).
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HostEditor } from "./HostEditor";
 
 afterEach(cleanup);
 
-function renderEditor() {
-  render(<HostEditor open onClose={() => {}} onSave={() => {}} />);
+function renderEditor(onSave = vi.fn()) {
+  render(<HostEditor open onClose={() => {}} onSave={onSave} />);
+  return onSave;
 }
 
 function inputFor(labelText: string): HTMLInputElement {
@@ -106,6 +107,77 @@ describe("HostEditor form validation", () => {
     fireEvent.change(inputFor("Port"), { target: { value: "70000" } });
 
     expect(screen.getByText("Enter a port between 1 and 65535.")).toBeTruthy();
+  });
+
+  it("keeps submit disabled while the port is not a number", () => {
+    // The message alone is not enough: if the port error were not part of
+    // what blocks the save, a typo'd port would surface later as an invisible
+    // connect failure — the whole reason the field is validated here.
+    renderEditor();
+
+    fireEvent.change(inputFor("Label"), { target: { value: "Production Gateway" } });
+    fireEvent.change(inputFor("Hostname"), { target: { value: "gateway.internal" } });
+    fireEvent.change(inputFor("Username"), { target: { value: "operator" } });
+
+    const submit = screen.getByRole("button", { name: "Create host" });
+    expect(submit.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.change(inputFor("Port"), { target: { value: "not-a-port" } });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(inputFor("Port"), { target: { value: "22" } });
+    expect(submit.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("requires a port before the host can be saved", () => {
+    renderEditor();
+
+    fireEvent.change(inputFor("Label"), { target: { value: "Production Gateway" } });
+    fireEvent.change(inputFor("Hostname"), { target: { value: "gateway.internal" } });
+    fireEvent.change(inputFor("Username"), { target: { value: "operator" } });
+
+    // The field starts at the protocol's default port, so it has to be
+    // cleared to be empty.
+    fireEvent.change(inputFor("Port"), { target: { value: "" } });
+
+    expect(screen.getByText("A port is required.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create host" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+  });
+
+  it("does not save a host whose port is invalid", () => {
+    // The disabled button is the first line of defence; the submit handler's
+    // own guard is the second, and it is the one a keyboard or a scripted
+    // submit reaches.
+    const onSave = renderEditor();
+
+    fireEvent.change(inputFor("Label"), { target: { value: "Production Gateway" } });
+    fireEvent.change(inputFor("Hostname"), { target: { value: "gateway.internal" } });
+    fireEvent.change(inputFor("Username"), { target: { value: "operator" } });
+    fireEvent.change(inputFor("Port"), { target: { value: "not-a-port" } });
+
+    const form = document.querySelector("form");
+    if (!form) {
+      throw new Error("host editor form not found");
+    }
+    fireEvent.submit(form);
+
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("announces a field error as an alert", () => {
+    // The aria-describedby linkage carries the message to a screen-reader
+    // user who navigates to the field. The alert role is what announces it
+    // when the error appears while focus is elsewhere.
+    renderEditor();
+
+    expect(screen.getByText("A label is required.").getAttribute("role")).toBe("alert");
+    expect(screen.getByText("A hostname is required.").getAttribute("role")).toBe("alert");
+    expect(screen.getByText("A username is required.").getAttribute("role")).toBe("alert");
+
+    fireEvent.change(inputFor("Port"), { target: { value: "not-a-port" } });
+    expect(screen.getByText("Enter a number.").getAttribute("role")).toBe("alert");
   });
 
   it("accepts a serial baud rate that is above the TCP port range", () => {

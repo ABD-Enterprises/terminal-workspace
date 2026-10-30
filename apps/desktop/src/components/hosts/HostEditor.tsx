@@ -463,8 +463,9 @@ function HostEditorContent({
                 return;
               }
               // Populate the per-host credential fields from the identity.
-              // Backward compat: the runtime still reads these per-host
-              // fields in this build (see P2-DM1 batch 3).
+              // The runtime prefers the identity's fields when the host is
+              // bound to one, and falls back to these per-host fields when it
+              // is not — so they stay populated either way.
               setValues((current) => ({
                 ...current,
                 identityId: identity.id,
