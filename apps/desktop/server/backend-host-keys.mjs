@@ -32,7 +32,7 @@
 // fail-closed direction.
 
 import { constants } from "node:fs";
-import { chmod, mkdir, open, rm } from "node:fs/promises";
+import { chmod, mkdir, open, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -333,7 +333,11 @@ export function createHostKeyStore({
     // check with `symlink_metadata` and then reads through the open handle.
     let handle;
     try {
-      handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      // O_NONBLOCK, because opening a FIFO for reading blocks until a writer
+      // appears: a FIFO at this path would hang the connect instead of
+      // refusing it. The `stat` below then refuses it as not a regular file,
+      // which is the same answer the native store gives.
+      handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     } catch (error) {
       if (error?.code === "ENOENT") {
         // A store that does not exist yet is the normal case: nothing has
@@ -490,13 +494,18 @@ export function createHostKeyStore({
         // released by removing it, so a reader never sees an empty lock: an
         // empty lock file would parse as a dead PID and be taken as stale
         // while its holder was still inside the critical section.
-        const handle = await open(resolvedLockPath, "wx", 0o600);
-        try {
-          await handle.write(Buffer.from(`${process.pid}\n`, "utf8"));
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
+        //
+        // `wx` is the exclusive create: the file is made only if it does not
+        // exist, and `flush` writes the PID to disk before the handle closes.
+        // It is done in one call rather than an open-then-write so that this
+        // path is never checked and then used through the path — the file
+        // could be replaced in between.
+        await writeFile(resolvedLockPath, `${process.pid}\n`, {
+          encoding: "utf8",
+          flag: "wx",
+          mode: 0o600,
+          flush: true,
+        });
         return async () => {
           await rm(resolvedLockPath, { force: true });
         };
@@ -517,12 +526,27 @@ export function createHostKeyStore({
         // Opened once, and both the PID and the age are read through the
         // descriptor, so the check and the read cannot disagree about which
         // file they are talking about.
-        const handle = await open(resolvedLockPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+        //
+        // O_NONBLOCK, because opening a FIFO for reading blocks until a
+        // writer appears: a FIFO at this path would hang the connect rather
+        // than refuse it. O_NOFOLLOW, because a symlink here would let
+        // another local user point the lock at a file of their choosing.
+        const handle = await open(
+          resolvedLockPath,
+          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        );
         let holder = Number.NaN;
         let age = 0;
         try {
-          holder = Number.parseInt(await handle.readFile("utf8"), 10);
-          age = Date.now() - (await handle.stat()).mtimeMs;
+          const stats = await handle.stat();
+          if (stats.isFile()) {
+            holder = Number.parseInt(await handle.readFile("utf8"), 10);
+            age = Date.now() - stats.mtimeMs;
+          }
+          // A lock that is not a regular file — a FIFO, a device, a
+          // directory — carries no PID and must not be read, so `holder`
+          // stays NaN and the lock counts as LIVE below. We cannot prove it
+          // is stale, so we must not take it.
         } finally {
           await handle.close();
         }

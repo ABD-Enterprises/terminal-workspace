@@ -240,6 +240,25 @@ describe("backend SSH host-key trust", () => {
       ).rejects.toThrow(/not a regular file/);
     });
 
+    it.skipIf(process.platform === "win32")(
+      "refuses a store that is a FIFO instead of hanging on it",
+      async () => {
+        // Opening a FIFO for reading blocks until a writer appears, so a FIFO
+        // at the store's path would hang the connect instead of refusing it.
+        // The store has to notice that the path is not a regular file.
+        const { createHostKeyStore } = await load();
+        const { mkdir } = await import("node:fs/promises");
+        const { spawnSync } = await import("node:child_process");
+        await mkdir(join(root, "ssh"), { recursive: true });
+        expect(spawnSync("mkfifo", [storePath]).status).toBe(0);
+
+        const store = createHostKeyStore({ path: storePath });
+        await expect(
+          store.verifyOrPin({ hostname: "example.internal", port: 22, keyBlob: keyBlob() }),
+        ).rejects.toThrow(/not a regular file/);
+      },
+    );
+
     it("refuses a store reached through a symlink", async () => {
       const { createHostKeyStore } = await load();
       const { mkdir } = await import("node:fs/promises");
@@ -374,6 +393,31 @@ describe("backend SSH host-key trust", () => {
       const { existsSync } = await import("node:fs");
       expect(existsSync(storePath)).toBe(false);
     });
+
+    it.skipIf(process.platform === "win32")(
+      "treats a lock that is a FIFO as held rather than hanging on it",
+      async () => {
+        // A FIFO at the lock's path would hang the connect if the lock were
+        // read by opening it for reading: the open blocks until a writer
+        // appears. It cannot be a real lock — it holds no PID — so it counts
+        // as held, and the connection is refused rather than wedged.
+        const { createHostKeyStore } = await load();
+        const { mkdir } = await import("node:fs/promises");
+        const { spawnSync } = await import("node:child_process");
+        await mkdir(join(root, "ssh"), { recursive: true });
+        expect(spawnSync("mkfifo", [`${storePath}.lock.node`]).status).toBe(0);
+
+        const store = createHostKeyStore({ path: storePath, lockTimeoutMs: 150 });
+
+        await expect(
+          store.verifyOrPin({ hostname: "example.internal", port: 22, keyBlob: keyBlob() }),
+        ).rejects.toThrow(/locked by another process/);
+
+        // The store was left untouched: nothing was written while the lock was
+        // held by someone else.
+        expect(existsSyncStore(storePath)).toBe(false);
+      },
+    );
 
     it("reclaims a lock whose holder is gone", async () => {
       // A process that died without releasing the lock would otherwise wedge
