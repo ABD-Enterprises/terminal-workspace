@@ -373,10 +373,11 @@ describe("backend SSH host-key trust", () => {
 
   describe("the lockfile", () => {
     it("treats a lock it cannot read as held rather than stale", async () => {
-      // The PID is written before the lock file's handle is closed, so a
-      // reader never sees an empty lock — but if it does see one it cannot
-      // parse, taking it would put two writers in the critical section. The
-      // fail-closed direction is to refuse.
+      // The lock file is created empty and the PID written into it, so a
+      // reader can catch it before the write lands and see a lock it cannot
+      // parse. Taking it would put two writers in the critical section, so
+      // while it is young it counts as held. The fail-closed direction is to
+      // refuse.
       const { createHostKeyStore } = await load();
       const { mkdir, writeFile } = await import("node:fs/promises");
       await mkdir(join(root, "ssh"), { recursive: true });
@@ -392,6 +393,31 @@ describe("backend SSH host-key trust", () => {
       // held by someone else.
       const { existsSync } = await import("node:fs");
       expect(existsSync(storePath)).toBe(false);
+    });
+
+    it("reclaims a lock it cannot read once the lock is old", async () => {
+      // A crash between the lock file's creation and the write leaves a
+      // zero-length lock behind. It has no holder to check, so while it is
+      // young it is held — but a lock that old cannot still be a live
+      // holder's file, and without this it would wedge every later
+      // connection until someone deleted it by hand.
+      const { createHostKeyStore } = await load();
+      const { mkdir, utimes, writeFile } = await import("node:fs/promises");
+      await mkdir(join(root, "ssh"), { recursive: true });
+      await writeFile(`${storePath}.lock.node`, "", "utf8");
+      const old = new Date(Date.now() - 10 * 60 * 1000);
+      await utimes(`${storePath}.lock.node`, old, old);
+
+      const store = createHostKeyStore({ path: storePath, lockTimeoutMs: 2000 });
+
+      const result = await store.verifyOrPin({
+        hostname: "example.internal",
+        port: 22,
+        keyBlob: keyBlob(),
+      });
+
+      expect(result.verdict).toBe("pinned");
+      expect(existsSyncStore(storePath)).toBe(true);
     });
 
     it.skipIf(process.platform === "win32")(

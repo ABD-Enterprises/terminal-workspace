@@ -498,9 +498,10 @@ export function createHostKeyStore({
         //
         // The file is created empty and the PID written into it, so a reader
         // can catch it in the window before the write lands and see a
-        // zero-length lock. That is safe: an unparsable lock counts as held
-        // rather than stale, so a live lock is never taken out from under its
-        // holder.
+        // zero-length lock. That is safe: a lock we cannot parse counts as
+        // held rather than stale, so a live holder's lock is never taken out
+        // from under it — and one left behind by a crash is reclaimed once
+        // it is old enough (see the staleness rule below).
         await writeFile(resolvedLockPath, `${process.pid}\n`, {
           encoding: "utf8",
           flag: "wx",
@@ -545,23 +546,30 @@ export function createHostKeyStore({
             age = Date.now() - stats.mtimeMs;
           }
           // A lock that is not a regular file — a FIFO, a device, a
-          // directory — carries no PID and must not be read: a device would
-          // never reach an end, and none of them is a lock we wrote. So
-          // `holder` stays NaN and the lock counts as LIVE below. We cannot
-          // prove it is stale, so we must not take it.
+          // directory — carries no PID and must not be read: none of them is
+          // a lock we wrote, and a device's length is unknown, so reading it
+          // to the end may never finish. So `holder` stays NaN and the lock
+          // counts as LIVE below. We cannot prove it is stale, so we must
+          // not take it.
         } finally {
           await handle.close();
         }
-        const stale = !Number.isInteger(holder) ? false : !isProcessAlive(holder) || age > LOCK_STALE_MS;
+        // A lock whose holder we can name is stale when that process is gone,
+        // or when the lock is old enough on its own. A lock we cannot parse —
+        // the zero-length file a crash between the create and the write
+        // leaves behind — has no holder to check, so it is reclaimed only
+        // once it is old: while it could still be a live holder's file, it
+        // is not ours to take.
+        const stale = age > LOCK_STALE_MS || (Number.isInteger(holder) && !isProcessAlive(holder));
         if (stale) {
           await rm(resolvedLockPath, { force: true });
           continue;
         }
       } catch {
         // The lock file vanished between the EEXIST and this read, or it
-        // cannot be read at all — a symlink, a directory, a file we may not
-        // open. Either way we cannot tell whether its holder is alive, so we
-        // must not take the lock; try again and let the deadline refuse.
+        // cannot be read at all — a symlink, a file we may not open. Either
+        // way we cannot tell whether its holder is alive, so we must not
+        // take the lock; try again and let the deadline refuse.
       }
 
       if (Date.now() >= deadline) {
