@@ -16,7 +16,12 @@
 #
 # A blank value in either file is a placeholder rather than an override, so a
 # copy of .env.example (whose signing and token slots are empty) cannot blank
-# out a shared default. The first occurrence of a key inside one file wins.
+# out a shared default.
+#
+# Within one file the first occurrence of a key wins, blank or not. Across
+# files the later one replaces the earlier, so a blank first line in .env does
+# not stop a later .env line from supplying the value — it only stops .env
+# from blanking out a value .env.shared provided.
 #
 # A key that appears in a file but only ever with a blank value is exported
 # empty. That is what the previous loader did, and the release scripts that
@@ -24,8 +29,10 @@
 # abort them, where an empty one takes the documented fallback.
 #
 # Nothing is left in the sourcing shell's namespace except ROOT_DIR, which the
-# previous loader also set: the helpers are unset and the working variables
-# are given names that cannot collide with a caller's.
+# previous loader also set and overwrote: the helpers are unset and the working
+# variables are given names that cannot collide with a caller's.
+# TERMSNIP_ENV_LOADED is exported on purpose — it is how a second source of
+# this loader in the same shell becomes a no-op.
 
 if [[ -n "${TERMSNIP_ENV_LOADED:-}" ]]; then
   return 0 2>/dev/null || exit 0

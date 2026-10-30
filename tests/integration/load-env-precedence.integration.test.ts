@@ -221,8 +221,8 @@ describe("scripts/load-env.sh precedence (#481)", () => {
 
   it("keeps the first occurrence of a key inside one file", () => {
     // A file that defines the same key twice resolves to the first value, not
-    // the last. The previous loader took the last one, and nothing pinned the
-    // rule, so it was one edit away from changing.
+    // the last. The previous loader took the first one too, but nothing pinned
+    // the rule, so it was one edit away from changing.
     const root = makeRoot(
       "TERMSNIP_TEST_DUPLICATE=first\nTERMSNIP_TEST_DUPLICATE=second\n",
       null,
