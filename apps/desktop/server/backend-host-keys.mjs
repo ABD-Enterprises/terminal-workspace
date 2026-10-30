@@ -535,8 +535,9 @@ export function createHostKeyStore({
       // connection. A lock that names no holder — an unreadable or empty
       // one — is treated as LIVE, not stale, while it is young: taking a
       // lock whose holder is unknown would put two writers in the critical
-      // section. A regular lock that old is reclaimed, by the staleness rule
-      // below; one that is not a regular file never is.
+      // section. A regular lock we can open that is old is reclaimed, by the
+      // staleness rule below; a lock we cannot open, or one that is not a
+      // regular file, never is.
       try {
         // Opened once, and both the PID and the age are read through the
         // descriptor, so the check and the read cannot disagree about which

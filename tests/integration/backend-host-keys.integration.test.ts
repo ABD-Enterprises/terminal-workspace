@@ -79,7 +79,7 @@ describe("backend SSH host-key trust", () => {
       // carrying a newline could therefore write a record for a different
       // host — forging a pin — or a malformed line that breaks the store for
       // every host. The store is shared with the native app, so a record
-      // written here is trust the native app reads too.
+      // written here is trust that the native app reads too.
       const { knownHostsHostPattern } = await load();
       expect(() => knownHostsHostPattern("a.internal\nb.internal", 22)).toThrow();
       expect(() => knownHostsHostPattern("#\ntrusted.internal", 22)).toThrow();
