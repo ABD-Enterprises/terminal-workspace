@@ -52,6 +52,11 @@ function setDemoMode(enabled: boolean) {
 }
 
 describe("AppShell", () => {
+  it("imports successfully", async () => {
+    const mod = await import("./AppShell");
+    expect(mod).toBeDefined();
+  });
+
   beforeEach(() => {
     useConnectErrorStore.getState().clearConnectError();
     setDemoMode(false);
