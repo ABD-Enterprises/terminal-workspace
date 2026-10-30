@@ -178,6 +178,46 @@ describe("backend runtime bridge", () => {
     });
   });
 
+  it("extracts the error field from a JSON error response in browser mode", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error: "Host key verification failed." }), {
+          headers: { "Content-Type": "application/json" },
+          status: 400,
+        })
+      )
+    );
+    Reflect.deleteProperty(globalThis, "window");
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: fetchMock,
+      writable: true,
+    });
+
+    await expect(createSession(hostFixture)).rejects.toThrow("Host key verification failed.");
+  });
+
+  it("falls back to raw text when an error response is not JSON", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response("502 Bad Gateway: Upstream connection refused", {
+          headers: { "Content-Type": "text/plain" },
+          status: 502,
+        })
+      )
+    );
+    Reflect.deleteProperty(globalThis, "window");
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: fetchMock,
+      writable: true,
+    });
+
+    await expect(getSessionBackendStatus()).rejects.toThrow(
+      "502 Bad Gateway: Upstream connection refused"
+    );
+  });
+
   it("uses the tauri invoke bridge for native backend status and lifecycle calls", async () => {
     const invoke = vi.fn()
       .mockResolvedValueOnce({ ok: true })
