@@ -123,7 +123,11 @@ describe("#230: the surrounding contract is unchanged", () => {
     const source = await readFile("apps/desktop/server/backend.mjs", "utf8");
 
     expect(source).toContain("function getErrorMessage(error) {\n  return error instanceof Error ? error.message : String(error);\n}");
-    expect(source).toMatch(/function failSession\(session, error\) \{[\s\S]*?message: getErrorMessage\(error\),/);
+    // The message that goes out on the wire is the real one. It is also
+    // remembered on the session, so a websocket that attaches after the
+    // failure is replayed it rather than being told nothing.
+    expect(source).toMatch(/session\.failureMessage = getErrorMessage\(error\);/);
+    expect(source).toMatch(/function failSession\(session, error\) \{[\s\S]*?message: session\.failureMessage,/);
   });
 
   it("still routes the glob endpoint's refusal through an explicit 400", async () => {
