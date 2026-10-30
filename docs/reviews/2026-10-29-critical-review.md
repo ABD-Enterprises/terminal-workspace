@@ -66,7 +66,7 @@ Ordered by *user-visible and security impact × effort*, not by severity label.
 | 1 | Surface connect failures in the app shell | UX-1, UX-25 | S |
 | 2 | Fix the browser-mode CSRF weakness | SEC-1, SEC-4 | M |
 | 3 | Add host-key pinning to the Node backend; drop `sql:allow-load` | SEC-2, SEC-3 | M |
-| 4 | Remove the internal notes from Settings; fix the delete-host copy; validate the host form | UX-2, UX-3, UX-5, UX-23 | S |
+| 4 | Remove the internal notes from Settings; fix the delete-host copy; validate the host form | UX-2, UX-3, UX-5 | S |
 | 5 | Pin the two SSH-config glob matchers to one behaviour | MAINT-1 | S |
 | 6 | Fix `.env` precedence; correct `FEATURE_PARITY.md` | MAINT-2, MAINT-3 | S |
 | 7 | Extract the shared PTY session loop | MAINT-4 | M |
@@ -881,23 +881,23 @@ Confirmed by a repository-wide search.
 
 ---
 
-## MAINT-6 — 25 of 38 IPC commands still return bare `String` errors
+## MAINT-6 — 23 of 38 IPC commands still return bare `String` errors
 
-**Title:** `refactor: finish the typed IpcError migration for the remaining 25 commands`
+**Title:** `refactor: finish the typed IpcError migration for the remaining 23 commands`
 **Labels:** `enhancement`, `risk:low`, `ai/ready-for-work`
 **Files:** `src-tauri/src/main.rs` (all `#[tauri::command]` fns), `src-tauri/src/sftp.rs`
 
 ````markdown
 ## Summary
 
-The typed-error design is sound and the migration is deliberate, but 25 of the
+The typed-error design is sound and the migration is deliberate, but 23 of the
 38 IPC commands still return a bare `String` error, so the frontend has to
 regex-match English prose to classify them.
 
 ## Detail
 
-Tally of all 38 commands: **String 25, `IpcError` 5, `KeyCommandFailure` 3,
-`SshConfigCommandFailure` 2, infallible 3.**
+Tally of all 38 commands: **String 23, `IpcError` 6, `KeyCommandFailure` 3,
+`SshConfigCommandFailure` 2, infallible 4.**
 
 `src-tauri/src/ipc_error.rs:1-10` states the codes match
 `ssh-error-classifier.ts`'s categories *"for the commands not yet migrated"*,
@@ -906,7 +906,7 @@ and `apps/desktop/src/lib/ssh-error-classifier.ts:107-125` reads
 
 ## Why it matters
 
-For 25 commands the frontend can only match prose (for example
+For 23 commands the frontend can only match prose (for example
 `/Permission denied \(publickey/i` at
 `apps/desktop/src/lib/ssh-error-classifier.ts:46`). Rewording a Rust error
 string silently changes a user-facing category, and **no test fails**.
@@ -920,7 +920,8 @@ extend.
 
 ## Confidence
 
-Confirmed by the reviewer's tally of the command signatures.
+Confirmed by the reviewer's tally of the command signatures, recounted against
+ccd33ac.
 ````
 
 ---
@@ -990,18 +991,19 @@ actual weight untouched.
 
 ## Detail
 
-The file is 6,944 lines, but **2,049 are inline test modules**
+The file is 6,944 lines, but **2,403 are test code**: the 2,049-line tail
 (`#[cfg(test)] mod native_transport_conformance_tests;` at :4896,
-`native_transport_fixtures` at :4899, `mod tests` at :4902). Production is
-4,895 lines.
+`native_transport_fixtures` at :4899, `mod tests` at :4902) plus the 354-line
+`mod ssh_config_command_tests` that sits mid-file at :3684-4037. Production
+is 4,541 lines.
 
 `generate_handler!` at :4829 registers **38 commands**, and all 38 have a
 matching `#[tauri::command]` attribute — zero orphaned or unregistered
 commands, cross-checked in both directions.
 
-The 32 handlers in `main.rs` total **637 body lines = 13.0%** of production
+The 32 handlers in `main.rs` total **637 body lines = 14.0%** of production
 code, and only two exceed 30 lines (:4040 at 132 lines, :2964 at 82). The
-other **87% (4,258 lines, 157 helper functions)** is transport and session
+other **86% (3,904 lines, 157 helper functions)** is transport and session
 lifecycle:
 
 | Function | Lines |
@@ -1030,11 +1032,11 @@ it. Recounting at the `#[cfg(test)]` boundaries:
 | Region | `expect()` | `unwrap()` |
 |---|---|---|
 | `main.rs` 1-3684 (production) | **2** | **0** |
-| `main.rs` 3685-4903 (test modules) | 40 | 0 |
-| `main.rs` 4903-6944 (inline tests) | 139 | 0 |
+| `main.rs` 3685-4903 (a test module, then production again) | 40 | 0 |
+| `main.rs` 4903-6944 (inline tests) | 139 | 4 |
 
-Crate-wide production totals: **2 `expect()`, 0 `unwrap()`**. The 181 figure
-counts inline test assertions.
+Crate-wide production totals: **8 `expect()`, 0 `unwrap()`** — 7 call sites
+plus one inside a doc comment. The 181 figure counts inline test assertions.
 
 ## Confidence
 
@@ -1076,8 +1078,9 @@ resolution, shell quoting, deadlines, buffers, responses. Still monolithic:
 | `scanKnownHost` | 37 |
 | `listRemoteDirectory` | 36 |
 
-Plus a **321-line if-chain router** (`backend.mjs:1179-1499`, 22 sequential
-`if (request.method === … && url.pathname === …)` checks).
+Plus a **321-line if-chain router** (`backend.mjs:1179-1499`, 21 sequential
+`if (request.method === …)` route guards, 17 of them pairing the method with
+a `url.pathname` literal).
 
 ## Fix
 
@@ -1312,10 +1315,10 @@ Confirmed by the reviewer.
 ## Note
 
 `validate.yml` is 433 lines across **three named jobs** (`validate` :26,
-`rust-validate` :106, `native-ssh-fixtures` :335) with 25 individually named
+`rust-validate` :106, `native-ssh-fixtures` :335) with 36 individually named
 steps — a readable pipeline, not a monolith.
 
-**23 of 25** `scripts/*.sh` use `set -euo pipefail`; the sole exception is
+**25 of 26** `scripts/*.sh` use `set -euo pipefail`; the sole exception is
 `scripts/load-env.sh`, which is a sourced library where `set -e` would be
 wrong.
 
@@ -1433,7 +1436,8 @@ The `<aside>` renders verbatim to end users:
 
 > *"…so seeded demo and screenshot flows stay stable."*
 
-A ticket ID (`P2-DM1`) appears in the shipped UI.
+A ticket ID (`P2-DM1`) appears in the shipped *source* — in a comment at
+`:374`, not in the rendered text.
 
 Separately, the "Reusable identities" blurb at `:159-164` first promises
 *"Editing the identity once propagates to every host that adopts it"* and then
@@ -2325,15 +2329,16 @@ review does not spend its budget there.
   vacuously. The `quoted_values_round_trip_through_a_real_shell` test
   (`native_transport_conformance_tests.rs:306`) proves the *spelling* through
   an actual `/bin/sh`.
-- **Test colocation is real, not aspirational.** 121 colocated
-  `*.test.ts(x)` files against 137 source files; every `backend-*.mjs` module
+- **Test colocation is real, not aspirational.** 122 colocated
+  `*.test.ts(x)` files against 138 source files; every `backend-*.mjs` module
   has a matching integration test; `local-config.ts` (960 lines) carries 790
   lines of tests including legacy-bundle migration cases.
 - **Rust test code is roughly 45% of Rust** (~7,219 test lines vs ~8,666
   production), and the inline `#[cfg(test)]` modules live in a dedicated tail
-  of `main.rs` (`:4896-6944`) rather than interleaved with production code.
+  of `main.rs` (`:4896-6944`), with one exception — `mod ssh_config_command_tests`
+  at `:3684-4037` sits mid-file, between production code.
 - **Every `#[tauri::command]` returns a `Result`** or is trivially
-  infallible — 3 commands are non-`Result`, and none of the 35 fallible ones
+  infallible — 4 commands are non-`Result`, and none of the 34 fallible ones
   panics on a user-reachable path.
 - **The dependency manifests are exemplary.** `Cargo.toml` documents *why*
   `macos-private-api` is needed and prices its two costs (App Store
@@ -2457,22 +2462,32 @@ Seven findings that had not been individually re-read were spot-checked by
 printing the cited ranges afterwards — all seven landed exactly where the
 finding claims.
 
-## One correction
+## Corrections
 
 A review initially reported "181 `expect()` and 4 `unwrap()` in `main.rs`" as
 a production-code signal. Recounting at the `#[cfg(test)]` boundaries gives
-**2 `expect()` and 0 `unwrap()`** for production code; the 181 counts inline
-test assertions. The substantive conclusion — that production Rust error
-handling is clean — holds, but the raw number must not be used as a
-production metric. See MAINT-8.
+**8 `expect()` and 0 `unwrap()`** for production code across the crate; the
+181 counts inline test assertions. The substantive conclusion — that
+production Rust error handling is clean — holds, but the raw number must not
+be used as a production metric. See MAINT-8.
+
+The same recounting corrected the production/test split: `mod
+ssh_config_command_tests` (`:3684-4037`) is a test module that sits mid-file,
+so production code is 4,541 lines rather than 4,895, and the handler share of
+production is 14.0% rather than 13.0%. MAINT-6's command tally was recounted
+the same way: **23** commands return a bare `String` error rather than 25,
+and **4** commands are not `Result` at all rather than 3.
 
 ## Not independently re-verified
 
-Roughly 30 findings are single-sourced from the reviewers and are marked
-**Confirmed by the reviewer** rather than by the verification pass. They are
-well-evidenced but should be confirmed before being acted on: SEC-5 through
-SEC-10 (except the SEC-8 partial), MAINT-6, MAINT-7, MAINT-9, MAINT-12,
-MAINT-14, MAINT-15, and UX-5 through UX-22 and UX-24.
+Thirty findings are single-sourced from the reviewers rather than by the
+verification pass. They are well-evidenced but should be confirmed before
+being acted on: SEC-5 through SEC-10 (except the SEC-8 partial), MAINT-6,
+MAINT-7, MAINT-9, MAINT-12, MAINT-14, MAINT-15, and UX-5 through UX-22 and
+UX-24. Twenty-three of them carry the **Confirmed by the reviewer** marker
+verbatim; the other seven carry a related single-source wording
+("Confirmed by reading the code", "Confirmed by reading the workflow",
+"Confirmed in code", "Confirmed").
 
 ## What was not done
 
