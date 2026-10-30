@@ -109,6 +109,26 @@ describe("HostEditor form validation", () => {
     expect(screen.getByText("Enter a port between 1 and 65535.")).toBeTruthy();
   });
 
+  it("keeps submit disabled while the port is out of range", () => {
+    // A range error that only renders is the same invisible failure as a
+    // non-numeric one: the host would save with a red message showing and
+    // then fail to connect.
+    renderEditor();
+
+    fireEvent.change(inputFor("Label"), { target: { value: "Production Gateway" } });
+    fireEvent.change(inputFor("Hostname"), { target: { value: "gateway.internal" } });
+    fireEvent.change(inputFor("Username"), { target: { value: "operator" } });
+
+    const submit = screen.getByRole("button", { name: "Create host" });
+    expect(submit.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.change(inputFor("Port"), { target: { value: "70000" } });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(inputFor("Port"), { target: { value: "65535" } });
+    expect(submit.hasAttribute("disabled")).toBe(false);
+  });
+
   it("keeps submit disabled while the port is not a number", () => {
     // The message alone is not enough: if the port error were not part of
     // what blocks the save, a typo'd port would surface later as an invisible
