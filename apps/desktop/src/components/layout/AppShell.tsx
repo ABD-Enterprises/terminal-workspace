@@ -17,6 +17,8 @@ import { useHostsStore } from "../../store/hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
 import { formatHostProtocol, type HostProtocol } from "../../types/host";
 import { PreviewBanner } from "../common/PreviewBanner";
+import { DemoModeBanner } from "../common/DemoModeBanner";
+import { ConnectErrorBanner } from "../common/ConnectErrorBanner";
 import { UpdateAvailableBanner } from "../common/UpdateAvailableBanner";
 import { SessionRestoreManager } from "../terminal/SessionRestoreManager";
 import { CommandPaletteDialog } from "./CommandPaletteDialog";
@@ -370,6 +372,8 @@ export function AppShell() {
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <PreviewBanner />
+        <DemoModeBanner />
+        <ConnectErrorBanner />
         <UpdateAvailableBanner />
         <main
           className={cn(

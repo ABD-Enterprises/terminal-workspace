@@ -1,6 +1,7 @@
 // The response boundary lives outside backend.mjs so it can be tested without
 // importing the server and binding its port. I/O is injected by backend.mjs.
 import { OperationTimeoutError } from "./backend-deadline.mjs";
+import { HostKeyRejectedError } from "./backend-host-keys.mjs";
 import { shellSingleQuote } from "./backend-shell.mjs";
 
 function commandResult(target, fields) {
@@ -15,6 +16,11 @@ function commandResult(target, fields) {
 }
 
 export function sshFailureStage(error) {
+  // A refused host key has its own type, and its message is not ssh2's, so
+  // it is recognised by type rather than by the level switch below.
+  if (error instanceof HostKeyRejectedError) {
+    return "host-key-verification";
+  }
   switch (error?.level) {
     case "handshake":
       return error.message === "Host denied (verification failed)"

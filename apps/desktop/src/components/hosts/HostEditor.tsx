@@ -35,6 +35,32 @@ interface HostEditorProps {
 const fieldClassName =
   "mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20";
 
+/**
+ * Validate the port field.
+ *
+ * The field holds a TCP port for ssh/mosh/telnet and a baud rate for serial,
+ * so the accepted range differs: a serial line runs at 115200, which would be
+ * rejected by the 1-65535 port range. A local shell has no network port at
+ * all and never renders the field.
+ */
+function validatePortOrBaudRate(
+  value: string,
+  protocol: HostFormValues["protocol"]
+): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return protocol === "serial" ? "A baud rate is required." : "A port is required.";
+  }
+  if (!/^\d+$/.test(trimmed)) {
+    return "Enter a number.";
+  }
+  const parsed = Number(trimmed);
+  if (protocol === "serial") {
+    return parsed > 0 ? null : "Enter a baud rate above 0.";
+  }
+  return parsed >= 1 && parsed <= 65535 ? null : "Enter a port between 1 and 65535.";
+}
+
 interface RuntimeStatusMessage {
   available: boolean;
   installHint?: string;
@@ -126,10 +152,34 @@ function HostEditorContent({
             ? "Mosh sessions launch through the native bridge and can reuse local SSH credentials when you store them here."
             : null;
 
+  // Form validation.
+  //
+  // The submit button used to be disabled with no explanation anywhere, so a
+  // user who left a required field blank saw a greyed-out button and no clue
+  // what was missing or which field was at fault. Each field now carries its
+  // own message, marked with aria-invalid, and the footer states how many
+  // fields still need attention.
+  const labelError = values.label.trim() ? null : "A label is required.";
+  const hostnameError =
+    supportsNetworkFields && !values.hostname.trim()
+      ? values.protocol === "serial"
+        ? "A device path is required."
+        : "A hostname is required."
+      : null;
+  const usernameError =
+    requiresUsername && !values.username.trim() ? "A username is required." : null;
+  const portError = supportsNetworkFields
+    ? validatePortOrBaudRate(values.port, values.protocol)
+    : null;
+  const validationErrors = [labelError, hostnameError, usernameError, portError].filter(
+    (message): message is string => message !== null
+  );
+
   const isInvalid =
     !values.label.trim() ||
     (supportsNetworkFields && !values.hostname.trim()) ||
-    (requiresUsername && !values.username.trim());
+    (requiresUsername && !values.username.trim()) ||
+    portError !== null;
   const jumpHostOptions = hosts.filter(
     (candidate) => candidate.id !== host?.id && candidate.protocol === "ssh"
   );
@@ -213,7 +263,14 @@ function HostEditorContent({
       description="Tune connection defaults, trust policy, and local-first metadata in one dense form."
       onClose={onClose}
       footer={
-        <div className="flex justify-end gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {validationErrors.length > 0 ? (
+            <p className="mr-auto text-xs text-amber-200">
+              {validationErrors.length === 1
+                ? "One field still needs attention."
+                : `${validationErrors.length} fields still need attention.`}
+            </p>
+          ) : null}
           <button
             type="button"
             onClick={onClose}
@@ -245,15 +302,24 @@ function HostEditorContent({
         }}
       >
       <div className="grid gap-5 md:grid-cols-2">
-        <label className="block">
-          <span className="text-sm text-slate-300">Label</span>
-          <input
-            value={values.label}
-            onChange={(event) => setValues((current) => ({ ...current, label: event.target.value }))}
-            className={fieldClassName}
-            placeholder="Production Gateway"
-          />
-        </label>
+        <div className="block">
+          <label className="block">
+            <span className="text-sm text-slate-300">Label</span>
+            <input
+              value={values.label}
+              onChange={(event) => setValues((current) => ({ ...current, label: event.target.value }))}
+              className={fieldClassName}
+              placeholder="Production Gateway"
+              aria-invalid={labelError ? true : undefined}
+              aria-describedby={labelError ? `${formId}-label-error` : undefined}
+            />
+          </label>
+          {labelError ? (
+            <p id={`${formId}-label-error`} role="alert" className="mt-1 text-xs text-rose-200">
+              {labelError}
+            </p>
+          ) : null}
+        </div>
         <label className="block">
           <span className="text-sm text-slate-300">Protocol</span>
           <select
@@ -297,27 +363,45 @@ function HostEditorContent({
           </div>
         )}
         {supportsNetworkFields ? (
-        <label className="block">
-          <span className="text-sm text-slate-300">{hostnameLabel}</span>
-          <input
-            value={values.hostname}
-            onChange={(event) => setValues((current) => ({ ...current, hostname: event.target.value }))}
-            className={fieldClassName}
-            placeholder={hostnamePlaceholder}
-          />
-        </label>
+        <div className="block">
+          <label className="block">
+            <span className="text-sm text-slate-300">{hostnameLabel}</span>
+            <input
+              value={values.hostname}
+              onChange={(event) => setValues((current) => ({ ...current, hostname: event.target.value }))}
+              className={fieldClassName}
+              placeholder={hostnamePlaceholder}
+              aria-invalid={hostnameError ? true : undefined}
+              aria-describedby={hostnameError ? `${formId}-hostname-error` : undefined}
+            />
+          </label>
+          {hostnameError ? (
+            <p id={`${formId}-hostname-error`} role="alert" className="mt-1 text-xs text-rose-200">
+              {hostnameError}
+            </p>
+          ) : null}
+        </div>
         ) : null}
         {supportsNetworkFields && requiresUsername ? (
-        <label className="block">
-          <span className="text-sm text-slate-300">Username</span>
-          <input
-            autoComplete="username"
-            value={values.username}
-            onChange={(event) => setValues((current) => ({ ...current, username: event.target.value }))}
-            className={fieldClassName}
-            placeholder="ops"
-          />
-        </label>
+        <div className="block">
+          <label className="block">
+            <span className="text-sm text-slate-300">Username</span>
+            <input
+              autoComplete="username"
+              value={values.username}
+              onChange={(event) => setValues((current) => ({ ...current, username: event.target.value }))}
+              className={fieldClassName}
+              placeholder="ops"
+              aria-invalid={usernameError ? true : undefined}
+              aria-describedby={usernameError ? `${formId}-username-error` : undefined}
+            />
+          </label>
+          {usernameError ? (
+            <p id={`${formId}-username-error`} role="alert" className="mt-1 text-xs text-rose-200">
+              {usernameError}
+            </p>
+          ) : null}
+        </div>
         ) : !supportsNetworkFields ? (
           <label className="block">
             <span className="text-sm text-slate-300">Shell label</span>
@@ -335,15 +419,24 @@ function HostEditorContent({
           </div>
         )}
         {supportsNetworkFields ? (
-        <label className="block">
-          <span className="text-sm text-slate-300">{portLabel}</span>
-          <input
-            value={values.port}
-            onChange={(event) => setValues((current) => ({ ...current, port: event.target.value }))}
-            className={fieldClassName}
-            placeholder={portPlaceholder}
-          />
-        </label>
+        <div className="block">
+          <label className="block">
+            <span className="text-sm text-slate-300">{portLabel}</span>
+            <input
+              value={values.port}
+              onChange={(event) => setValues((current) => ({ ...current, port: event.target.value }))}
+              className={fieldClassName}
+              placeholder={portPlaceholder}
+              aria-invalid={portError ? true : undefined}
+              aria-describedby={portError ? `${formId}-port-error` : undefined}
+            />
+          </label>
+          {portError ? (
+            <p id={`${formId}-port-error`} role="alert" className="mt-1 text-xs text-rose-200">
+              {portError}
+            </p>
+          ) : null}
+        </div>
         ) : null}
         {supportsCredentials ? (
         <label className="block md:col-span-2">
@@ -370,8 +463,9 @@ function HostEditorContent({
                 return;
               }
               // Populate the per-host credential fields from the identity.
-              // Backward compat: the runtime still reads these per-host
-              // fields in this build (see P2-DM1 batch 3).
+              // The runtime prefers the identity's fields when the host is
+              // bound to one, and falls back to these per-host fields when it
+              // is not — so they stay populated either way.
               setValues((current) => ({
                 ...current,
                 identityId: identity.id,

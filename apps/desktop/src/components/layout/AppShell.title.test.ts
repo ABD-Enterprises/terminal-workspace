@@ -1,10 +1,5 @@
 import { expect, it } from "vitest";
 
-it("imports successfully", async () => {
-  const mod = await import("./AppShell");
-  expect(mod).toBeDefined();
-});
-
 it("#445: the window title is the product name, qualified by the active host", async () => {
   const { APP_TITLE, formatAppTitle } = await import("./AppShell");
 
