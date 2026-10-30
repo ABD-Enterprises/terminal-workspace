@@ -113,8 +113,10 @@ function load(
 /**
  * The function names left defined in the sourcing shell after the loader runs.
  *
- * The loader promises to leave nothing behind but ROOT_DIR, so a helper it
- * forgot to unset is a false guarantee in its own header.
+ * The loader's header says the helpers are unset, so a helper it forgot to
+ * unset is a false guarantee in its own header. The header also names the
+ * three things it does leave behind — ROOT_DIR, TERMSNIP_ENV_LOADED and
+ * BASH_REMATCH — none of which is a function.
  */
 function leftoverFunctions(root: string, interpreter = "bash"): string[] {
   const result = spawnSync(
