@@ -22,6 +22,8 @@ const PROBED_KEYS = [
   "TERMSNIP_TEST_LOCAL",
   "TERMSNIP_TEST_BLANK",
   "TERMSNIP_TEST_QUOTED",
+  "TERMSNIP_TEST_DUPLICATE",
+  "TERMSNIP_TEST_EMPTY_ONLY",
   "TERMSNIP_UI_PORT",
   // Probed because the loader must not touch the sourcing shell's variables.
   "key",
@@ -108,6 +110,39 @@ function load(
   return values;
 }
 
+/**
+ * The function names left defined in the sourcing shell after the loader runs.
+ *
+ * The loader promises to leave nothing behind but ROOT_DIR, so a helper it
+ * forgot to unset is a false guarantee in its own header.
+ */
+function leftoverFunctions(root: string, interpreter = "bash"): string[] {
+  const result = spawnSync(
+    interpreter,
+    [
+      "-c",
+      // `compgen` exits 1 when it matches nothing, which is the outcome this
+      // test wants, so the status is discarded here and the names are read.
+      `source "$1"\ncompgen -A function || true`,
+      "bash",
+      join(root, "scripts", "load-env.sh"),
+    ],
+    {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+    },
+  );
+
+  if (result.status !== 0) {
+    throw new Error(`loader exited with ${result.status} under ${interpreter}: ${result.stderr}`);
+  }
+
+  return result.stdout
+    .split("\n")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
 describe("scripts/load-env.sh precedence (#481)", () => {
   it("lets .env override .env.shared for a key present in both files", () => {
     const root = makeRoot(
@@ -182,6 +217,52 @@ describe("scripts/load-env.sh precedence (#481)", () => {
     const values = load(root, { key: "caller-value" });
 
     expect(values.key).toBe("caller-value");
+  });
+
+  it("keeps the first occurrence of a key inside one file", () => {
+    // A file that defines the same key twice resolves to the first value, not
+    // the last. The previous loader took the last one, and nothing pinned the
+    // rule, so it was one edit away from changing.
+    const root = makeRoot(
+      "TERMSNIP_TEST_DUPLICATE=first\nTERMSNIP_TEST_DUPLICATE=second\n",
+      null,
+    );
+
+    expect(load(root).TERMSNIP_TEST_DUPLICATE).toBe("first");
+  });
+
+  it("exports a key whose only definition is blank as empty, not unset", () => {
+    // The release scripts that source the loader read these variables under
+    // `set -u`. An unset variable aborts them; an empty one takes the
+    // documented fallback. The previous loader exported empty, and that is the
+    // contract this keeps.
+    const root = makeRoot("TERMSNIP_TEST_EMPTY_ONLY=\n", null);
+
+    const values = load(root);
+
+    expect(values.TERMSNIP_TEST_EMPTY_ONLY).toBe("");
+    expect(values.TERMSNIP_TEST_EMPTY_ONLY).not.toBe(UNSET);
+  });
+
+  it("lets a file fill in an exported variable that is empty", () => {
+    // An exported variable only wins when it carries a value. An empty one is
+    // a placeholder, like a blank line in a file.
+    const root = makeRoot("TERMSNIP_TEST_SHARED=shared-only\n", null);
+
+    const values = load(root, { TERMSNIP_TEST_SHARED: "" });
+
+    expect(values.TERMSNIP_TEST_SHARED).toBe("shared-only");
+  });
+
+  it("leaves no helper functions behind in the sourcing shell", () => {
+    const root = makeRoot("AAA=1\n", null);
+
+    const names = leftoverFunctions(root);
+
+    expect(names).not.toContain("trim_whitespace");
+    expect(names).not.toContain("strip_wrapping_quotes");
+    expect(names).not.toContain("load_env_values_from_file");
+    expect(names).not.toContain("load_env_key_index");
   });
 
   it("resolves the same way under every available interpreter", () => {

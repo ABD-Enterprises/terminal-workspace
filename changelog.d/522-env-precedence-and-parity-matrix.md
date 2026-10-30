@@ -1,2 +1,3 @@
 - [FIX] `.env` now overrides `.env.shared` as the documentation describes: the loader reads `.env` after `.env.shared` and lets it replace the shared value, an exported shell variable still wins over both files, and a blank value in either file is a placeholder rather than an override (#522)
 - [FIX] Correct `FEATURE_PARITY.md`: the SSH connect row no longer claims the native Tauri/Rust backend is pending, the document states what the table is and how it was verified, and it cross-references `docs/architecture.md` (#522)
+- [INTERNAL] Make the env loader's guarantees exact: unset every helper it defines, export a key whose only definition is blank as empty rather than leaving it unset, and pin the first-occurrence and blank-placeholder rules in the test (#522)
