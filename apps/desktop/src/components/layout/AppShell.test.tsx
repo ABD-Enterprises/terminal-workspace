@@ -16,6 +16,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useAppStore } from "../../store/app-store";
 import { useConnectErrorStore } from "../../store/connect-error-store";
 
 vi.mock("./Sidebar", () => ({ Sidebar: () => null }));
@@ -46,14 +47,20 @@ async function renderAppShell() {
   );
 }
 
+function setDemoMode(enabled: boolean) {
+  useAppStore.setState({ ...useAppStore.getState(), demoModeEnabled: enabled });
+}
+
 describe("AppShell", () => {
   beforeEach(() => {
     useConnectErrorStore.getState().clearConnectError();
+    setDemoMode(false);
   });
 
   afterEach(() => {
     cleanup();
     useConnectErrorStore.getState().clearConnectError();
+    setDemoMode(false);
   });
 
   it("shows a reported connect failure in the shell", async () => {
@@ -75,5 +82,22 @@ describe("AppShell", () => {
     await renderAppShell();
 
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows the demo-mode banner in the shell when demo mode is on", async () => {
+    // The banner's own test proves it renders; only the shell can prove it is
+    // MOUNTED, which is the difference between "demo mode is indicated" and
+    // "the user is told the output they are reading is fabricated".
+    setDemoMode(true);
+
+    await renderAppShell();
+
+    expect(screen.queryByRole("status", { name: "Demo mode" })).not.toBeNull();
+  });
+
+  it("shows no demo-mode banner when demo mode is off", async () => {
+    await renderAppShell();
+
+    expect(screen.queryByRole("status", { name: "Demo mode" })).toBeNull();
   });
 });
