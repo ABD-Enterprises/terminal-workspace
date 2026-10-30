@@ -490,16 +490,17 @@ export function createHostKeyStore({
 
     for (;;) {
       try {
-        // The PID is written before the file is closed, and the file is only
-        // released by removing it, so a reader never sees an empty lock: an
-        // empty lock file would parse as a dead PID and be taken as stale
-        // while its holder was still inside the critical section.
-        //
         // `wx` is the exclusive create: the file is made only if it does not
         // exist, and `flush` writes the PID to disk before the handle closes.
         // It is done in one call rather than an open-then-write so that this
         // path is never checked and then used through the path — the file
         // could be replaced in between.
+        //
+        // The file is created empty and the PID written into it, so a reader
+        // can catch it in the window before the write lands and see a
+        // zero-length lock. That is safe: an unparsable lock counts as held
+        // rather than stale, so a live lock is never taken out from under its
+        // holder.
         await writeFile(resolvedLockPath, `${process.pid}\n`, {
           encoding: "utf8",
           flag: "wx",
@@ -544,9 +545,10 @@ export function createHostKeyStore({
             age = Date.now() - stats.mtimeMs;
           }
           // A lock that is not a regular file — a FIFO, a device, a
-          // directory — carries no PID and must not be read, so `holder`
-          // stays NaN and the lock counts as LIVE below. We cannot prove it
-          // is stale, so we must not take it.
+          // directory — carries no PID and must not be read: a device would
+          // never reach an end, and none of them is a lock we wrote. So
+          // `holder` stays NaN and the lock counts as LIVE below. We cannot
+          // prove it is stale, so we must not take it.
         } finally {
           await handle.close();
         }
@@ -556,7 +558,10 @@ export function createHostKeyStore({
           continue;
         }
       } catch {
-        // The lock file vanished between the EEXIST and this read; try again.
+        // The lock file vanished between the EEXIST and this read, or it
+        // cannot be read at all — a symlink, a directory, a file we may not
+        // open. Either way we cannot tell whether its holder is alive, so we
+        // must not take the lock; try again and let the deadline refuse.
       }
 
       if (Date.now() >= deadline) {
