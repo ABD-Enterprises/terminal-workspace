@@ -30,6 +30,7 @@ import {
   shutdownBackend,
 } from "./backend-lifecycle.mjs";
 import { resolveRemotePath, sanitizeFilename } from "./backend-paths.mjs";
+import { globMatcher } from "./backend-glob.mjs";
 import { createStaticHandler } from "./backend-static.mjs";
 import {
   buildExecCommand,
@@ -117,25 +118,6 @@ const SSH_CONFIG_GLOB_MAX_MATCHES = 256;
 // recently used canonical paths. Evicted keys fail as invalid resolution context.
 const SSH_CONFIG_RESOLUTION_REGISTRY = new SshConfigResolutionRegistry();
 
-function globToRegExp(pattern) {
-  let source = "^";
-  for (const char of pattern) {
-    if (char === "*") {
-      source += ".*";
-    } else if (char === "?") {
-      source += ".";
-    } else {
-      source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    }
-  }
-  // Safe dynamic regex: `source` is built from the user's own ~/.ssh Include
-  // glob with every literal char regex-escaped above; only `*`/`?` become
-  // `.*`/`.`. Input is local + trusted (not attacker-facing) and matches are
-  // capped (SSH_CONFIG_GLOB_MAX_MATCHES), so this is not a ReDoS vector.
-  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp,semgrep.rules.javascript.lang.security.audit.detect-non-literal-regexp
-  return new RegExp(`${source}$`);
-}
-
 /**
  * Expand an Include glob to the files it matches under ~/.ssh, each with its
  * content. The directory and every match are resolved with realpath and must
@@ -163,7 +145,14 @@ async function globSshConfigFiles(pattern, context) {
     throw new Error(`glob directory ${parentReal} is not under ${sshRoot}`);
   }
 
-  const matcher = globToRegExp(filePattern);
+  const matcher = globMatcher(filePattern);
+  if (matcher === null) {
+    // The pattern is not expressible as a Unicode regex (an unpaired
+    // surrogate), so it cannot match any file. Skipping it explicitly keeps
+    // the request from failing on a name macOS allowed but UTF-8 cannot
+    // represent.
+    return { matches: [] };
+  }
   const names = await readdir(parentReal);
   const matches = [];
   for (const name of names) {

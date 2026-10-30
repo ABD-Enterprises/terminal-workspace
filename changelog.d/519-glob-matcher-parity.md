@@ -1,0 +1,1 @@
+- [FIX] Pin the Node SSH-config `Include` glob matcher to the Rust one: the Node regex now uses the `u` and `s` flags, so `?` consumes one Unicode code point and `*` matches a newline instead of one UTF-16 code unit and never. A new `globMatches` group in the shared cross-backend corpus is asserted by both harnesses, so the two matchers cannot drift apart again (#519)
