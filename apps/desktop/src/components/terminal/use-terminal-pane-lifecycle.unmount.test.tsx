@@ -11,11 +11,15 @@ import { type SessionPane } from "../../types/session";
 
 const terminalDispose = vi.fn();
 const fitAddonDispose = vi.fn();
+const terminalConstructorArgs = vi.fn();
 
 vi.mock("xterm", () => ({
   Terminal: class {
     cols = 80;
     rows = 24;
+    constructor(options?: unknown) {
+      terminalConstructorArgs(options);
+    }
     attachCustomKeyEventHandler = vi.fn();
     clear = vi.fn();
     dispose = terminalDispose;
@@ -169,6 +173,11 @@ describe("useTerminalPaneLifecycle unmount", () => {
     // The effect ran: a terminal was created and handed to the caller's ref.
     expect(terminalRef.current).not.toBeNull();
     expect(fitAddonRef.current).not.toBeNull();
+    expect(terminalConstructorArgs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scrollback: 10000,
+      })
+    );
 
     // Simulate the state cleanup must undo: a live socket and a pending reconnect.
     (socketRef as MutableRefObject<unknown>).current = socket;
