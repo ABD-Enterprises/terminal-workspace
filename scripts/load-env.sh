@@ -28,13 +28,15 @@
 # source this one read those variables under `set -u`: an unset variable would
 # abort them, where an empty one takes the documented fallback.
 #
-# Nothing is left in the sourcing shell's namespace except ROOT_DIR, which the
-# previous loader also set and overwrote: the helpers are unset and the working
-# variables are given names that cannot collide with a caller's.
-# TERMSNIP_ENV_LOADED is exported on purpose — it is how a second source of
-# this loader in the same shell becomes a no-op. BASH_REMATCH is set as a side
-# effect of the `=~` check below; the previous loader's `=~` check did the
-# same, so nothing that worked before stops working now.
+# Apart from the variables it is meant to export, the loader leaves three
+# things behind in the sourcing shell: ROOT_DIR, which the previous loader
+# also set and overwrote; TERMSNIP_ENV_LOADED, exported on purpose — it is
+# how a second source of this loader in the same shell becomes a no-op; and
+# BASH_REMATCH, set as a side effect of the `=~` check below when a file is
+# parsed and a line reaches it. The previous loader's `=~` check did the
+# same, so nothing that worked before stops working now. The helpers are
+# unset and the working variables are given names that cannot collide with a
+# caller's.
 
 if [[ -n "${TERMSNIP_ENV_LOADED:-}" ]]; then
   return 0 2>/dev/null || exit 0
