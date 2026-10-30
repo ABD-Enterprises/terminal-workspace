@@ -13,6 +13,17 @@ import { join } from "node:path";
  * itself an authentication signal — the backend is bound to 127.0.0.1 and
  * a malicious page in another origin can only reach this list explicitly.
  *
+ * This allowlist is DEFENCE IN DEPTH, not the control that keeps a page the
+ * user visits from driving the backend. An allowlisted origin is a place the
+ * user might be; it is not a statement that whoever is at that origin is the
+ * app. The controls that actually stop a cross-origin page are:
+ *   - a body must arrive as `application/json`, so the simple content types a
+ *     page can send without a preflight are refused outright (readJson), and
+ *   - a preflight is always refused, and no response carries a CORS header
+ *     (see the OPTIONS handling in backend.mjs).
+ * A page that could reach an allowlisted origin still cannot get a request
+ * body past the first control without a preflight, and the preflight fails.
+ *
  * Tauri's renderer reports `tauri://localhost` (or `http://tauri.localhost`
  * on some platforms). The dev vite proxy reports the renderer's origin
  * (typically `http://127.0.0.1:5173`).

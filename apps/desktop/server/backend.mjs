@@ -58,6 +58,7 @@ import {
   SFTP_UPLOAD_MAX_BYTES,
 } from "./backend-buffers.mjs";
 import { readBoundedRegularFile, writeNewPrivateFile } from "./backend-files.mjs";
+import { assertHostRequestIsAllowed } from "./backend-host-validation.mjs";
 import {
   projectSshConfigResolutionFailure,
   resolveSshConfigPath,
@@ -267,6 +268,12 @@ async function createConnectConfig(host) {
       `Trusted host key required for ${host.hostname}:${host.port} but none was provided. Scan and trust the host first.`
     );
   }
+
+  // The host record arrives in the request body, so the parts the backend must
+  // not take on trust are checked before anything is done with it: an
+  // unrecognised authMethod, and agent forwarding the backend was not
+  // authorised to perform. See backend-host-validation.mjs.
+  assertHostRequestIsAllowed(host);
 
   const connectConfig = {
     host: host.hostname,
@@ -1187,6 +1194,22 @@ const server = createServer(async (request, response) => {
   });
   if (!authDecision.ok) {
     denyUnauthorized(response, authDecision);
+    return;
+  }
+
+  // A CORS preflight must always fail. The backend sends no
+  // `Access-Control-Allow-*` header on any response, so a preflight that
+  // reached this point would already be refused by the browser — but refusing
+  // it explicitly means it keeps failing even if CORS headers are added by
+  // mistake later. `readJson` refuses the simple content types a cross-origin
+  // page can send without a preflight, so between the two a page the user
+  // visits cannot reach the mutating routes.
+  if (request.method === "OPTIONS") {
+    response.writeHead(405, {
+      "content-type": "application/json; charset=utf-8",
+      allow: "GET, POST, DELETE",
+    });
+    response.end(JSON.stringify({ error: "Method not allowed" }));
     return;
   }
 

@@ -53,8 +53,13 @@ function fixtureHost() {
   };
 }
 
-async function api(path, { method = "GET", body, origin, token } = {}) {
-  const headers = { "Content-Type": "application/json" };
+async function api(path, { method = "GET", body, origin, token, contentType } = {}) {
+  const headers = {};
+  if (contentType !== undefined) {
+    headers["Content-Type"] = contentType;
+  } else if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
   if (origin) headers.Origin = origin;
   if (token) headers.Authorization = `Bearer ${token}`;
 
@@ -71,7 +76,7 @@ async function api(path, { method = "GET", body, origin, token } = {}) {
   } catch {
     json = undefined;
   }
-  return { status: response.status, json, text };
+  return { status: response.status, json, text, headers: response.headers };
 }
 
 /**
@@ -168,6 +173,59 @@ async function main() {
 
     const byToken = await api("/api/backend/status", { token: TOKEN });
     check("a valid token alone is accepted", byToken.status === 200, `status ${byToken.status}`);
+
+    console.log("[client] cross-site hardening");
+    // A CORS preflight must never be answered with anything a browser would
+    // accept, and the response must carry no CORS header at all.
+    const preflight = await api("/api/backend/sessions", {
+      method: "OPTIONS",
+      origin: ORIGIN,
+    });
+    check("a preflight is refused", preflight.status === 405, `status ${preflight.status}`);
+    check("a refused preflight carries no CORS headers",
+      preflight.headers.get("access-control-allow-origin") === null &&
+        preflight.headers.get("access-control-allow-methods") === null &&
+        preflight.headers.get("access-control-allow-headers") === null,
+      `acao ${preflight.headers.get("access-control-allow-origin")}`);
+
+    // The content types a browser can send cross-origin WITHOUT a preflight.
+    // A body in one of them must never be parsed.
+    for (const contentType of ["text/plain", "application/x-www-form-urlencoded"]) {
+      const simple = await api("/api/backend/sessions", {
+        method: "POST",
+        origin: ORIGIN,
+        contentType,
+        body: { host: fixtureHost() },
+      });
+      check(`a ${contentType} body is refused`,
+        simple.status === 415, `status ${simple.status}`);
+    }
+
+    // A host record that asks for an authentication method the backend does
+    // not act on.
+    const unsupportedAuth = await api("/api/backend/sessions", {
+      method: "POST",
+      origin: ORIGIN,
+      body: { host: { ...fixtureHost(), authMethod: "agent" } },
+    });
+    check("an unsupported authMethod is refused",
+      unsupportedAuth.status === 400 &&
+        unsupportedAuth.json?.error === "Unsupported authentication method.",
+      `status ${unsupportedAuth.status} body ${unsupportedAuth.text.slice(0, 200)}`);
+
+    // Agent forwarding hands the local ssh-agent to the remote host. The host
+    // record asking for it is caller-controlled, so the backend only honours
+    // it when it was started with TERMSNIP_ALLOW_AGENT_FORWARDING=1 — which
+    // this fixture does not set.
+    const agentForwarding = await api("/api/backend/sessions", {
+      method: "POST",
+      origin: ORIGIN,
+      body: { host: { ...fixtureHost(), agentForwarding: true } },
+    });
+    check("agent forwarding is refused unless the backend allows it",
+      agentForwarding.status === 403 &&
+        agentForwarding.json?.error === "Agent forwarding is disabled on this backend.",
+      `status ${agentForwarding.status} body ${agentForwarding.text.slice(0, 200)}`);
 
     console.log("[client] SSH config glob success boundary");
     const glob = await api("/api/backend/ssh-config/glob", {

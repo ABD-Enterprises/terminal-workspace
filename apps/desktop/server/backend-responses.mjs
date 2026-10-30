@@ -4,6 +4,7 @@
 import { channel } from "node:diagnostics_channel";
 
 import { PayloadTooLargeError } from "./backend-buffers.mjs";
+import { InvalidHostError } from "./backend-host-validation.mjs";
 
 /**
  * #230: raw errors are published here instead of logged. A subscriber attached
@@ -68,6 +69,14 @@ export function respondError(response, error, status = 500) {
     error.limit > 0
   ) {
     message = `Request body exceeds the ${error.limit}-byte limit.`;
+  }
+
+  // The other exception: InvalidHostError is only ever constructed by this
+  // codebase with a static message — never the rejected value, never anything
+  // the caller supplied — so relaying it tells the caller what was wrong
+  // without opening the path #230 closed.
+  if (error instanceof InvalidHostError) {
+    message = error.message;
   }
 
   sendJson(response, statusCode, { error: message });

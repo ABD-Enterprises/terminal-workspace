@@ -11,10 +11,21 @@ async function load() {
   return buffers;
 }
 
-function postForResponse(port: number, body: Buffer): Promise<{ status: number; body: string }> {
+function postForResponse(
+  port: number,
+  body: Buffer,
+  contentType?: string
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const req = httpRequest(
-      { host: "127.0.0.1", port, method: "POST", path: "/" },
+      {
+        host: "127.0.0.1",
+        port,
+        method: "POST",
+        path: "/",
+        // readJson only accepts JSON, so a control request has to say so.
+        headers: contentType ? { "content-type": contentType } : undefined,
+      },
       (res) => {
         let responseBody = "";
         res.setEncoding("utf8");
@@ -53,14 +64,72 @@ describe("backend memory bounds", () => {
     try {
       // 4 KiB body against a 1 KiB cap: the client must RECEIVE a 413, proving
       // the connection was not destroyed before the response was sent.
-      expect(await postForResponse(port, Buffer.alloc(4096, 0x61))).toEqual({
+      expect(await postForResponse(port, Buffer.alloc(4096, 0x61), "application/json")).toEqual({
         status: 413,
         body: "Request body rejected",
       });
       // A within-limit JSON body still succeeds.
-      expect(await postForResponse(port, Buffer.from(JSON.stringify({ ok: true })))).toEqual({
+      expect(
+        await postForResponse(port, Buffer.from(JSON.stringify({ ok: true })), "application/json")
+      ).toEqual({
         status: 200,
         body: '{"ok":true}',
+      });
+      // A charset parameter is still JSON.
+      expect(
+        await postForResponse(
+          port,
+          Buffer.from(JSON.stringify({ ok: true })),
+          "application/json; charset=utf-8"
+        )
+      ).toEqual({
+        status: 200,
+        body: '{"ok":true}',
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("readJson refuses a body that is not JSON with a 415", async () => {
+    const { readJson } = await load();
+    const server = createServer(async (req, res) => {
+      try {
+        const body = await readJson(req);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(body));
+      } catch (error: unknown) {
+        const status = (error as { statusCode?: number })?.statusCode ?? 500;
+        res.writeHead(status);
+        res.end("Request body rejected");
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      // The browser's "simple" content types are the ones a cross-origin page
+      // can send without a preflight. A request carrying one of them must not
+      // have its body parsed.
+      for (const contentType of [
+        "text/plain",
+        "application/x-www-form-urlencoded",
+        "multipart/form-data; boundary=xyz",
+      ]) {
+        expect(
+          await postForResponse(port, Buffer.from(JSON.stringify({ command: "uptime" })), contentType)
+        ).toEqual({
+          status: 415,
+          body: "Request body rejected",
+        });
+      }
+
+      // And no content type at all.
+      expect(
+        await postForResponse(port, Buffer.from(JSON.stringify({ command: "uptime" })))
+      ).toEqual({
+        status: 415,
+        body: "Request body rejected",
       });
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
