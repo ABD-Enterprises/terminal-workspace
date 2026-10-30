@@ -197,21 +197,71 @@ describe("launchHostSession failure reporting", () => {
     expect(useConnectErrorStore.getState().message).toBeNull();
   });
 
-  it("reports through the store's reporting entry point, not the raw setter", async () => {
-    // The routing itself is the contract: `reportConnectError` refuses an
-    // empty message, so calling `setConnectError` directly from production
-    // would render a blank banner. Nothing else in the suite distinguishes the
-    // two, so it is pinned here.
-    vi.mocked(ensureTrustedHostKey).mockResolvedValue({
-      ok: false,
-      reason: "scan-failed",
-    });
+  it("routes every failure mode through the store's reporting entry point", async () => {
+    // The routing itself is the contract: `reportConnectError` is the entry
+    // point that refuses an empty message, so a change that called
+    // `setConnectError` directly from production would render a blank banner.
+    // Nothing else in the suite distinguishes the two, so every branch that
+    // reports a failure is pinned here.
+    const cases: Array<{
+      setup: () => void;
+      message: string;
+      tone: "error" | "warning";
+    }> = [
+      {
+        setup: () => vi.mocked(ensureTrustedHostKey).mockRejectedValue(new Error("network down")),
+        message: "Could not reach a.example.com:22. Check that the host is reachable and try again.",
+        tone: "error",
+      },
+      {
+        setup: () =>
+          vi.mocked(ensureTrustedHostKey).mockResolvedValue({ ok: false, reason: "user-rejected" }),
+        message: "Connection cancelled — host key for host-a was not trusted.",
+        tone: "warning",
+      },
+      {
+        setup: () =>
+          vi.mocked(ensureTrustedHostKey).mockResolvedValue({ ok: false, reason: "scan-failed" }),
+        message: "Could not scan a.example.com:22. Check that the host is reachable and try again.",
+        tone: "error",
+      },
+      {
+        setup: () =>
+          vi.mocked(ensureTrustedHostKey).mockResolvedValue({ ok: false, reason: "scan-empty" }),
+        message: "a.example.com:22 returned no host keys to trust.",
+        tone: "error",
+      },
+      {
+        setup: () =>
+          vi.mocked(ensureTrustedHostKey).mockResolvedValue({
+            ok: false,
+            reason: "user-non-interactive",
+          }),
+        message:
+          "Could not prompt for the host key of host-a. Open the host from the Hosts page to approve it.",
+        tone: "error",
+      },
+      {
+        // The defensive fall-through for a reason ensureTrustedHostKey does
+        // not produce; it still has to report through the same entry point.
+        setup: () =>
+          vi.mocked(ensureTrustedHostKey).mockResolvedValue({
+            ok: false,
+            reason: "policy-allows-unknown",
+          }),
+        message: "Connection cancelled.",
+        tone: "warning",
+      },
+    ];
 
-    await launchHostSession(host("a"));
+    for (const { setup, message, tone } of cases) {
+      vi.mocked(reportConnectError).mockClear();
+      setup();
 
-    expect(reportConnectError).toHaveBeenCalledWith(
-      "Could not scan a.example.com:22. Check that the host is reachable and try again.",
-      "error"
-    );
+      await launchHostSession(host("a"));
+
+      expect(reportConnectError).toHaveBeenCalledTimes(1);
+      expect(reportConnectError).toHaveBeenCalledWith(message, tone);
+    }
   });
 });
