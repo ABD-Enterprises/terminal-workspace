@@ -8,7 +8,11 @@
 
 import { useHostsStore } from "../store/hosts-store";
 import { useSessionsStore } from "../store/sessions-store";
-import { useConnectErrorStore, type ConnectErrorTone } from "../store/connect-error-store";
+import {
+  reportConnectError,
+  useConnectErrorStore,
+  type ConnectErrorTone,
+} from "../store/connect-error-store";
 import type { HostRecord } from "../types/host";
 import { ensureTrustedHostKey } from "./ensure-trusted-host-key";
 
@@ -58,7 +62,9 @@ export async function launchHostSession(host: HostRecord): Promise<LaunchHostSes
  * to duplicate the user-facing message.
  */
 function reportFailure(message: string, tone: ConnectErrorTone = "error") {
-  useConnectErrorStore.getState().setConnectError(message, tone);
+  // `reportConnectError` is the store's reporting entry point: it ignores an
+  // empty message, so a blank banner can never be published.
+  reportConnectError(message, tone);
 }
 
 async function launchHostSessionInner(host: HostRecord): Promise<LaunchHostSessionResult> {
