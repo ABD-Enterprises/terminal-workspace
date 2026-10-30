@@ -1286,7 +1286,7 @@ Confirmed — the file is 19 lines.
 ````markdown
 ## Summary
 
-23 of 25 scripts reproduce `cd "$(dirname "${BASH_SOURCE[0]}")/.."`, and 15
+23 of 26 scripts reproduce `cd "$(dirname "${BASH_SOURCE[0]}")/.."`, and 15
 also define `ROOT_DIR=`.
 
 ## Why it matters: marginal
@@ -2312,7 +2312,7 @@ review does not spend its budget there.
   name resolves to a real attribute — cross-checked clean in both
   directions.
 - **Rust production code contains essentially no `unwrap` / `expect`.**
-  Crate-wide production totals: 2 `expect()`, 0 `unwrap()`. See MAINT-8 for
+  Crate-wide production totals: 8 `expect()`, 0 `unwrap()`. See MAINT-8 for
   the correct breakdown.
 - **The typed-error design is right, and the frontend honours it.**
   `ipc_error.rs` defines a stable `code` vocabulary that deliberately
@@ -2352,10 +2352,10 @@ review does not spend its budget there.
   worktree probe previously produced 536 parse errors on untouched files.
 - **`scripts/validate.sh` documents why each gate exists, not just what it
   runs.** See MAINT-15.
-- **Shell strict mode is near-universal and correctly scoped.** 23 of 25
+- **Shell strict mode is near-universal and correctly scoped.** 25 of 26
   scripts use `set -euo pipefail`; the one exception is the sourced env
   loader, where `set -e` would be incorrect.
-- **CI is structured, not monolithic.** Three named jobs, 25 individually
+- **CI is structured, not monolithic.** Three named jobs, 36 individually
   named steps, plus an ACL-drift gate (`:282`) and a real-sshd fixture job
   (`:335`) that exists specifically because the unit suite cannot detect PTY
   hangs.
