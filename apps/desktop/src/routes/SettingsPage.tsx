@@ -146,8 +146,8 @@ export function SettingsPage() {
   };
 
   return (
-    <section className="grid h-full min-h-0 gap-3 overflow-auto pr-1 xl:grid-cols-[1.2fr_0.9fr]">
-      <div className="grid gap-3">
+    <section className="grid h-full min-h-0 gap-3 overflow-auto pr-1">
+      <div className="grid max-w-3xl gap-3">
         <SettingsPreferencesSection />
 
         <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 p-4">
@@ -158,9 +158,9 @@ export function SettingsPage() {
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-400">
                 A reusable bundle of <code>(username, auth method, key path)</code> shared across hosts.
-                Editing the identity once propagates to every host that adopts it. The runtime still
-                reads each host's per-host fields in this build — switching the read path lands in the
-                next batch of P2-DM1.
+                A host bound to an identity takes its username, auth method and key from that identity
+                when it connects, so editing the identity changes every host that adopts it. A host
+                with no identity keeps its own fields.
               </p>
             </div>
             <div className="flex shrink-0 gap-2">
@@ -368,33 +368,6 @@ export function SettingsPage() {
           setErrorMessage={setErrorMessage}
         />
       </div>
-
-      <aside className="rounded-[22px] border border-slate-800/80 bg-slate-950/45 p-4">
-        <p className="text-sm leading-6 text-slate-400">
-          Cloud sync, shared vaults, and team features are still intentionally outside the 90%
-          local-first target. The immediate focus is making a single Mac fully replace daily
-          alternative client usage.
-        </p>
-        <div className="mt-4 space-y-4 text-sm leading-6 text-slate-300">
-          <p>
-            Browser and screenshot flows still default to demo mode. The native shell now defaults
-            to live transport so local testing starts against the real Tauri-backed connection path.
-          </p>
-          <p>
-            Native mode now covers sessions, transfers, forwards, snippets, key inspection, key
-            generation, and trust scanning. Browser mode still uses the backend path so seeded demo
-            and screenshot flows stay stable.
-          </p>
-          <p>
-            Local config imports now preview whether a snapshot is a fast-forward, a divergent
-            replacement, or a vault adoption step before replacing the local workspace.
-          </p>
-          <p>
-            Remote sync trust policy is now local-first too: trusted wrapping keys can be
-            exported, imported, rotated, and enforced before encrypted envelopes are accepted.
-          </p>
-        </div>
-      </aside>
 
       <ConfirmDialog
         open={Boolean(identityPendingDelete)}
