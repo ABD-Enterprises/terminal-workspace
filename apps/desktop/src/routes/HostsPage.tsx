@@ -143,9 +143,10 @@ export function HostsPage() {
     }
     const result = await launchHostSession(host);
     if (!result.ok || !result.tabId) {
-      // Trust prompt rejected / scan failed — surface a non-blocking
-      // banner via console for now; future polish ticket can route this
-      // through a global toast.
+      // Trust prompt rejected / scan failed. `launchHostSession` already
+      // published the message to the app-shell banner, so it reaches the
+      // screen from every connect entry point. This log keeps the surface
+      // name for debugging.
       if (result.errorMessage) {
         console.warn(`[hosts] ${result.errorMessage}`);
       }
