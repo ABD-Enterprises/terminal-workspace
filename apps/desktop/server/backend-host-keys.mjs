@@ -28,8 +28,9 @@
 //
 // The lockfile is a weaker substitute for `flock`. It removes itself by path
 // when it releases, so a holder whose lock was reclaimed as stale removes the
-// new holder's lock; and the age rule bounds every lock that names a holder,
-// but not one that does not — a FIFO at the lock's path is never reclaimed.
+// new holder's lock; and the age rule bounds every lock that is a regular
+// file, but not one that is not — a FIFO at the lock's path is never
+// reclaimed.
 // Each of those needs something abnormal: a hold far longer than a read and
 // an append, or a local writer with the owner's own privileges.
 //
@@ -57,11 +58,11 @@ const LOCK_POLL_MS = 25;
  * How old a lockfile may be before it is treated as stale.
  *
  * The age is a proxy, and a blunt one: past this it bounds every lock that
- * names a holder — dead holder, recycled PID, or a writer that has simply
- * stopped — without asking whose it is. The lock is released by removing the
- * file, so a holder that is gone must not be able to wedge every later
- * connection; the cost is that a lock held longer than this is taken from its
- * holder.
+ * is a regular file — a dead holder, a recycled PID, a file left behind by a
+ * crash, or a writer that has simply stopped — without asking whose it is.
+ * The lock is released by removing the file, so a holder that is gone must
+ * not be able to wedge every later connection; the cost is that a lock held
+ * longer than this is taken from its holder.
  */
 const LOCK_STALE_MS = 60000;
 
@@ -93,8 +94,8 @@ const UNSAFE_HOSTNAME_CHARACTERS = /[\s#]/;
  *
  * Port 22 is written bare, anything else as `[host]:port`, because a bare
  * `host` in `known_hosts` means port 22 and nothing else. This mirrors the
- * Rust `known_hosts_host_pattern` exactly, so the two implementations read and
- * write the same records.
+ * Rust `known_hosts_host_pattern` in shape, so the two implementations read
+ * and write the same records — with one difference, below.
  *
  * A hostname that could break the record format is refused rather than
  * written. The store is shared with the native app, so a record written here
