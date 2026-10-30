@@ -158,9 +158,9 @@ export function SettingsPage() {
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-400">
                 A reusable bundle of <code>(username, auth method, key path)</code> shared across hosts.
-                Editing the identity once propagates to every host that adopts it. The runtime still
-                reads each host's per-host fields in this build — switching the read path lands in the
-                next batch of P2-DM1.
+                A host bound to an identity takes its username, auth method and key from that identity
+                when it connects, so editing the identity changes every host that adopts it. A host
+                with no identity keeps its own fields.
               </p>
             </div>
             <div className="flex shrink-0 gap-2">

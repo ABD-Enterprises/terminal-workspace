@@ -49,6 +49,38 @@ describe("HostEditor form validation", () => {
     expect(inputFor("Username").getAttribute("aria-invalid")).toBe("true");
   });
 
+  it("points each field's description at that field's own message", () => {
+    renderEditor();
+
+    const fields = [
+      ["Label", "A label is required."],
+      ["Hostname", "A hostname is required."],
+      ["Username", "A username is required."],
+    ] as const;
+
+    for (const [labelText, message] of fields) {
+      const describedBy = inputFor(labelText).getAttribute("aria-describedby");
+      expect(describedBy, `${labelText} must describe itself`).toBeTruthy();
+
+      const target = document.getElementById(describedBy as string);
+      expect(target, `${labelText} description target must exist`).not.toBeNull();
+      expect(target?.textContent, `${labelText} description target`).toBe(message);
+    }
+  });
+
+  it("keeps submit disabled while a required field is missing", () => {
+    renderEditor();
+
+    const submit = screen.getByRole("button", { name: "Create host" });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(inputFor("Label"), { target: { value: "Production Gateway" } });
+    fireEvent.change(inputFor("Hostname"), { target: { value: "gateway.internal" } });
+    fireEvent.change(inputFor("Username"), { target: { value: "operator" } });
+
+    expect(submit.hasAttribute("disabled")).toBe(false);
+  });
+
   it("clears a field's error once it is filled in", () => {
     renderEditor();
 
