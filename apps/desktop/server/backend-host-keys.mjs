@@ -498,10 +498,9 @@ export function createHostKeyStore({
         //
         // The file is created empty and the PID written into it, so a reader
         // can catch it in the window before the write lands and see a
-        // zero-length lock. That is safe: a lock we cannot parse counts as
-        // held rather than stale, so a live holder's lock is never taken out
-        // from under it — and one left behind by a crash is reclaimed once
-        // it is old enough (see the staleness rule below).
+        // zero-length lock. That is safe: such a lock is held rather than
+        // stale while it is young, and reclaimed once it is old (see the
+        // staleness rule below).
         await writeFile(resolvedLockPath, `${process.pid}\n`, {
           encoding: "utf8",
           flag: "wx",
@@ -521,9 +520,11 @@ export function createHostKeyStore({
 
       // The holder may have died without releasing the lock. A lock file whose
       // process is gone is stale and would otherwise wedge every later
-      // connection. An unreadable or empty lock is treated as LIVE, not
-      // stale: taking a lock whose holder is unknown would put two writers
-      // in the critical section.
+      // connection. A lock that names no holder — an unreadable or empty
+      // one — is treated as LIVE, not stale, while it is young: taking a
+      // lock whose holder is unknown would put two writers in the critical
+      // section. A regular lock that old is reclaimed, by the staleness rule
+      // below; one that is not a regular file never is.
       try {
         // Opened once, and both the PID and the age are read through the
         // descriptor, so the check and the read cannot disagree about which
@@ -557,9 +558,10 @@ export function createHostKeyStore({
         // A lock whose holder we can name is stale when that process is gone,
         // or when the lock is old enough on its own. A lock we cannot parse —
         // the zero-length file a crash between the create and the write
-        // leaves behind — has no holder to check, so it is reclaimed only
-        // once it is old: while it could still be a live holder's file, it
-        // is not ours to take.
+        // leaves behind — has no holder to check, so its age is all there is,
+        // and it is reclaimed on that alone. The age is a proxy: the
+        // critical section is a small read and an append, so a writer does
+        // not hold a lock this long.
         const stale = age > LOCK_STALE_MS || (Number.isInteger(holder) && !isProcessAlive(holder));
         if (stale) {
           await rm(resolvedLockPath, { force: true });

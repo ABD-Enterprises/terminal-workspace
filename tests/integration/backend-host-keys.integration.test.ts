@@ -398,8 +398,8 @@ describe("backend SSH host-key trust", () => {
     it("reclaims a lock it cannot read once the lock is old", async () => {
       // A crash between the lock file's creation and the write leaves a
       // zero-length lock behind. It has no holder to check, so while it is
-      // young it is held — but a lock that old cannot still be a live
-      // holder's file, and without this it would wedge every later
+      // young it is held — and once it is old the staleness rule reclaims
+      // it. Without that, the leftover lock would wedge every later
       // connection until someone deleted it by hand.
       const { createHostKeyStore } = await load();
       const { mkdir, utimes, writeFile } = await import("node:fs/promises");
