@@ -1,0 +1,3 @@
+- [SECURITY] Verify SSH host keys in the browser backend instead of accepting whatever answers the socket: a host with no explicitly trusted key is now pinned on first sight in a durable `known_hosts` store, and a host whose key later changes is refused before any credential is sent (#525)
+- [SECURITY] Refuse a hostname that could forge a record in the shared host-key store, and re-check the store through the open descriptor rather than the path (#525)
+- [SECURITY] Keep the host-key store's absolute path off the wire: the refusal says what went wrong without relaying the raw filesystem error (#525)
