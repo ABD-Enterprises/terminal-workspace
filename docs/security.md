@@ -15,7 +15,8 @@
 - The host-key store is append-only and fails closed: a malformed store is an error rather than an
   empty map, so a damaged file cannot silently re-pin whatever answers the socket.
 - The store refuses a path that is not a regular file — a symlink, a FIFO or a directory — rather
-  than following it, and the lockfile it serialises its own writers with is held to the same rule.
+  than following it. The lockfile it serialises its own writers with is treated the same way: a
+  lock that is not a regular file carries no holder, so it is held rather than taken.
 - Release automation now prefers App Store Connect API-key auth, falls back to Apple ID auth, and
   only uses a local `notarytool` keychain profile as the final fallback.
 

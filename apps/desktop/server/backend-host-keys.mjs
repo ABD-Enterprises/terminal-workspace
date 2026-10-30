@@ -24,12 +24,20 @@
 // lockfile (`known_hosts.lock.node`) to serialise Node instances against each
 // other. The two protocols do not exclude one another — the same gap the
 // native store already documents for the `ssh` binary, which cannot be made to
-// take a lock either. What that leaves open is stated plainly: two writers
-// meeting the SAME host for the first time can both decide "unknown" and
-// append. Both appends are well-formed records, so the file stays readable;
-// the risk is a store holding two different keys for one host, in which case
-// the last one wins and a later verification reports a mismatch — the
-// fail-closed direction.
+// take a lock either.
+//
+// The lockfile is a weaker substitute for `flock`. It removes itself by path
+// when it releases, so a holder whose lock was reclaimed as stale removes the
+// new holder's lock; and the age rule bounds every lock that names a holder,
+// but not one that does not — a FIFO at the lock's path is never reclaimed.
+// Each of those needs something abnormal: a hold far longer than a read and
+// an append, or a local writer with the owner's own privileges.
+//
+// What that leaves open is stated plainly: two writers meeting the SAME host
+// for the first time can both decide "unknown" and append. Both appends are
+// well-formed records, so the file stays readable; the risk is a store
+// holding two different keys for one host, in which case the last one wins
+// and a later verification reports a mismatch — the fail-closed direction.
 
 import { constants } from "node:fs";
 import { chmod, mkdir, open, rm, writeFile } from "node:fs/promises";
@@ -48,11 +56,12 @@ const LOCK_POLL_MS = 25;
 /**
  * How old a lockfile may be before it is treated as stale.
  *
- * The age is a proxy, and a blunt one: past this it bounds every lock —
- * dead holder, recycled PID, or a writer that has simply stopped — without
- * asking whose it is. The lock is released by removing the file, so a holder
- * that is gone must not be able to wedge every later connection; the cost is
- * that a lock held longer than this is taken from its holder.
+ * The age is a proxy, and a blunt one: past this it bounds every lock that
+ * names a holder — dead holder, recycled PID, or a writer that has simply
+ * stopped — without asking whose it is. The lock is released by removing the
+ * file, so a holder that is gone must not be able to wedge every later
+ * connection; the cost is that a lock held longer than this is taken from its
+ * holder.
  */
 const LOCK_STALE_MS = 60000;
 
@@ -331,7 +340,8 @@ export function createHostKeyStore({
     // rather than followed, and everything after that goes through the
     // descriptor. A path-based check followed by a path-based read is a race:
     // the file can be replaced in between. The native store makes the same
-    // check with `symlink_metadata` and then reads through the open handle.
+    // check with `symlink_metadata` but then reads by path, so it keeps that
+    // narrow race; reading through the descriptor here closes it.
     let handle;
     try {
       // O_NONBLOCK, because opening a FIFO for reading blocks until a writer
