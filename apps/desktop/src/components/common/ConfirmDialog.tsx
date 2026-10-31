@@ -85,8 +85,6 @@ export function ConfirmDialog({
           </button>
         </div>
       }
-    >
-      <p className="text-sm leading-6 text-slate-300">{description}</p>
-    </Modal>
+    />
   );
 }
