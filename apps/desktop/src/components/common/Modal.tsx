@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, type ReactNode } from "react";
 import { cn } from "../../lib/utils";
 
 interface ModalProps {
@@ -20,6 +20,9 @@ export function Modal({
   footer,
   className,
 }: ModalProps) {
+  const baseId = useId();
+  const titleId = `${baseId}-modal-title`;
+  const descriptionId = `${baseId}-modal-description`;
   useEffect(() => {
     if (!open) {
       return;
@@ -86,6 +89,8 @@ export function Modal({
       <div
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
         className={cn(
           "relative z-10 flex max-h-[calc(100vh-5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[32px] border border-slate-700/70 bg-slate-900 shadow-2xl shadow-slate-950/70",
           className
@@ -96,8 +101,8 @@ export function Modal({
             <p className="text-xs font-semibold uppercase tracking-[0.26em] text-emerald-300">
               Local Workspace
             </p>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-50">{title}</h2>
-            {description ? <p className="mt-2 text-sm text-slate-400">{description}</p> : null}
+            <h2 id={titleId} className="mt-2 text-2xl font-semibold text-slate-50">{title}</h2>
+            {description ? <p id={descriptionId} className="mt-2 text-sm text-slate-400">{description}</p> : null}
           </div>
           <button
             type="button"
