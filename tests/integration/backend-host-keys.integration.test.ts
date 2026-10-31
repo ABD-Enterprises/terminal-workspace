@@ -45,6 +45,41 @@ function keyBlob(algorithm = "ssh-ed25519", filler = "AAAA"): Buffer {
   return Buffer.concat([length, name, Buffer.from(filler, "utf8")]);
 }
 
+/**
+ * A child script that pins a host whose record is far larger than the
+ * file-size limit the parent imposes, so the append can only be partly
+ * written. It prints the outcome rather than throwing, so the parent can
+ * assert on what the store did.
+ */
+const SHORT_WRITE_SCRIPT = `
+import { pathToFileURL } from "node:url";
+
+// The limit is reached mid-write; the signal must not kill the process
+// before it can report what happened.
+process.on("SIGXFSZ", () => {});
+
+const [, , modulePath, storePath] = process.argv;
+const { createHostKeyStore, HOST_KEY_VERDICT } = await import(pathToFileURL(modulePath).href);
+
+const algorithm = Buffer.from("ssh-ed25519", "utf8");
+const length = Buffer.alloc(4);
+length.writeUInt32BE(algorithm.length, 0);
+const keyBlob = Buffer.concat([length, algorithm, Buffer.alloc(65536, 0x41)]);
+
+const store = createHostKeyStore({ path: storePath });
+try {
+  const result = await store.verifyOrPin({
+    hostname: "example.internal",
+    port: 22,
+    keyBlob,
+  });
+  console.log("VERDICT " + result.verdict);
+  process.exit(result.verdict === HOST_KEY_VERDICT.PINNED ? 1 : 2);
+} catch (error) {
+  console.log("REFUSED " + error.message);
+}
+`;
+
 describe("backend SSH host-key trust", () => {
   let root = "";
   let storePath = "";
@@ -353,6 +388,41 @@ describe("backend SSH host-key trust", () => {
         `a.internal ssh-ed25519 AAAA\nb.internal ssh-ed25519 ${keyBlob().toString("base64")}\n`,
       );
     });
+
+    it.skipIf(process.platform === "win32")(
+      "refuses a record it could only write part of, instead of leaving a torn pin",
+      async () => {
+        // A short write — a full disk, a file-size limit — would leave a
+        // truncated key in the store. The pin would look real while holding
+        // the wrong bytes, so the host would be refused from then on. The
+        // native store refuses a short write for the same reason, and the two
+        // stores have to agree.
+        //
+        // The write is forced from a child process with a file-size limit,
+        // because the failure cannot be provoked in-process.
+        const { spawnSync } = await import("node:child_process");
+        const { fileURLToPath } = await import("node:url");
+        const modulePath = fileURLToPath(
+          new URL("../../apps/desktop/server/backend-host-keys.mjs", import.meta.url),
+        );
+        const scriptPath = join(root, "short-write.mjs");
+        await writeFile(scriptPath, SHORT_WRITE_SCRIPT, "utf8");
+
+        const result = spawnSync(
+          "sh",
+          [
+            "-c",
+            `ulimit -f 1; exec "${process.execPath}" "${scriptPath}" "${modulePath}" "${storePath}"`,
+          ],
+          { encoding: "utf8" },
+        );
+
+        expect(result.stdout).toContain("only partially written");
+        // The pin is refused, so the store never reports the host as pinned.
+        expect(result.stdout).not.toContain("VERDICT pinned");
+        expect(result.status).toBe(0);
+      },
+    );
   });
 
   describe("file permissions", () => {

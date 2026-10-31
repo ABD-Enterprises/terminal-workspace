@@ -13,7 +13,9 @@
   credential is sent. The store is the same OpenSSH-shaped file the native transport uses
   (`<app data dir>/ssh/known_hosts`), so a host trusted in one mode is trusted in the other.
 - The host-key store is append-only and fails closed: a malformed store is an error rather than an
-  empty map, so a damaged file cannot silently re-pin whatever answers the socket.
+  empty map, so a damaged file cannot silently re-pin whatever answers the socket. A record that
+  can only be written in part is refused rather than accepted, so a truncated key is never mistaken
+  for a pin — the same rule the native store applies.
 - The store refuses a path that is not a regular file — a symlink, a FIFO or a directory — rather
   than following it. The lockfile it serialises its own writers with is treated the same way: a
   lock that is not a regular file carries no holder, so it is held rather than taken.

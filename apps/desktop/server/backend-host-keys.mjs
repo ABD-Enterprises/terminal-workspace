@@ -14,10 +14,18 @@
 //     trusted in the native app is trusted in browser mode and vice versa;
 //   * the same record shape, `host-pattern algorithm base64-key`, one per line;
 //   * the same rules — the first sighting pins, a later change is a mismatch and
-//     is refused, and a malformed store is an error rather than an empty map.
+//     is refused, and a malformed store is an error rather than an empty map;
+//   * the same refusal of a short write — a record that could only be written
+//     in part is an error, not a pin.
 //
 // Append-only, like the native store: a record is never rewritten or removed,
 // so a pin another writer appended cannot be destroyed by our write.
+//
+// A short write leaves the bytes that did fit on disk, so the store can be
+// left holding a truncated record. That is the native store's behaviour too —
+// it refuses the write rather than retrying into the file, because a retry
+// could interleave with another writer's record. The truncated line is then
+// read as a mismatch, which refuses the host rather than trusting it.
 //
 // Concurrency. The native store takes an `flock` on a `known_hosts.lock`
 // sidecar. Node has no `flock`, so this module uses its own exclusive-create
@@ -68,6 +76,9 @@ const LOCK_STALE_MS = 60000;
 
 /** The store path is not a regular file. Refused rather than followed. */
 class NotARegularFileError extends Error {}
+
+/** The record was only partly written, so the store is left with a torn line. */
+class PartialWriteError extends Error {}
 
 export const HOST_KEY_VERDICT = Object.freeze({
   /** Nothing was pinned for this host; the presented key has been recorded. */
@@ -473,10 +484,21 @@ export function createHostKeyStore({
         needsSeparator = bytesRead === 1 && tail[0] !== 0x0a;
       }
 
-      await handle.write(Buffer.from(`${needsSeparator ? "\n" : ""}${body}`, "utf8"));
+      const payload = Buffer.from(`${needsSeparator ? "\n" : ""}${body}`, "utf8");
+      const { bytesWritten } = await handle.write(payload);
+      if (bytesWritten !== payload.length) {
+        // A short write leaves a torn record behind: the host key would be
+        // pinned as a truncated blob, so the next connect with the same,
+        // correct key would be refused as a mismatch — a lockout the user
+        // cannot get out of. The native store refuses a short write for the
+        // same reason, and the two stores have to agree.
+        throw new PartialWriteError(
+          `the SSH host-key store at ${path} was only partially written; refusing to authenticate`,
+        );
+      }
       await handle.sync();
     } catch (error) {
-      if (error instanceof NotARegularFileError) {
+      if (error instanceof NotARegularFileError || error instanceof PartialWriteError) {
         throw error;
       }
       throw new Error(`could not write the SSH host-key store: ${error?.message ?? error}`, {
