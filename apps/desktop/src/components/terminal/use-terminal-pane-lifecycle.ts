@@ -155,6 +155,7 @@ export function useTerminalPaneLifecycle({
       cursorBlink: true,
       fontFamily: '"SFMono-Regular", "Menlo", "Monaco", monospace',
       fontSize: 13,
+      scrollback: 10000,
       theme: initialPaletteRef.current,
     });
     const fitAddon = new FitAddon();
