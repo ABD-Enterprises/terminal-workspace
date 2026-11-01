@@ -4,6 +4,7 @@
 import { channel } from "node:diagnostics_channel";
 
 import { PayloadTooLargeError } from "./backend-buffers.mjs";
+import { HostKeyRejectedError } from "./backend-host-keys.mjs";
 
 /**
  * #230: raw errors are published here instead of logged. A subscriber attached
@@ -59,7 +60,17 @@ export function respondError(response, error, status = 500) {
       ? "Invalid request."
       : "Internal server error.";
 
-  // The one exception: a size limit is a number this process chose, not
+  // The one exception besides the size limit: a refused host key. Its message
+  // is built by the error itself from the host label and a fixed explanation,
+  // so relaying it does not reopen the hole the deny-by-default rule above
+  // closes — no arbitrary error text is passed through, only this one type's
+  // own. Without it the user sees "Internal server error." for a host whose
+  // key changed, which is the one case they have to act on.
+  if (error instanceof HostKeyRejectedError) {
+    message = error.message;
+  }
+
+  // The other exception: a size limit is a number this process chose, not
   // anything the error text carried, and a user hitting an upload cap needs it.
   if (
     statusCode === 413 &&
