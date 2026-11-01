@@ -1,0 +1,1 @@
+- [SECURITY] Override the dev-scope lint dependency minimatch to 11.0.3 (pnpm override with a version-scoped release-age exemption), fixing GHSA-g3hv-75wg-m249; eslint and typescript-eslint still declare minimatch ^10, so no parent release could pull the fix (#529)
