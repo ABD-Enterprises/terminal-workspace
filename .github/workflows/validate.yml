@@ -23,8 +23,10 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # Public repository: the hosted fallback keeps CI starting when the runner
+  # variable is empty, as it is for pull requests opened from forks.
   validate:
-    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS) }}
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 30
 
     steps:
@@ -104,7 +106,7 @@ jobs:
   # variable points at a self-hosted Apple Silicon macOS pool, the job runs on
   # that pool instead.
   rust-validate:
-    runs-on: ${{ fromJSON(vars.MACOS_RUNNER_LABELS) }}
+    runs-on: ${{ fromJSON(vars.MACOS_RUNNER_LABELS || '["macos-latest"]') }}
     timeout-minutes: 30
 
     steps:
@@ -333,7 +335,7 @@ jobs:
         run: bash scripts/native-trust-tooling-test.sh
 
   native-ssh-fixtures:
-    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS) }}
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 10
 
     steps:
