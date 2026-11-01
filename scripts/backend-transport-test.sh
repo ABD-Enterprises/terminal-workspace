@@ -138,6 +138,12 @@ export TERMSNIP_BACKEND_TOKEN="fixture-token-0123456789abcdef0123456789abcdef"
 export TERMSNIP_ALLOWED_ORIGINS="http://backend-fixture.termsnip.invalid"
 export TERMSNIP_BACKEND_PORT="$BACKEND_PORT"
 
+# The backend's durable SSH host-key store. It lives inside the fixture root
+# so the fixture never writes to the developer's real store, and so the client
+# can read back what the backend pinned.
+export TERMSNIP_STATE_DIR="$FIXTURE_ROOT/state"
+mkdir -p "$TERMSNIP_STATE_DIR"
+
 HOME="$FIXTURE_ROOT/fixture-home" TMPDIR="$FIXTURE_ROOT/tmp" node apps/desktop/server/backend.mjs \
   >"$FIXTURE_ROOT/backend.log" 2>&1 &
 BACKEND_PID=$!
@@ -167,6 +173,7 @@ TW_SSH_PORT="$SSH_PORT" \
 TW_SSH_USER="$(id -un)" \
 TW_BACKEND_TOKEN="$TERMSNIP_BACKEND_TOKEN" \
 TW_ALLOWED_ORIGIN="$TERMSNIP_ALLOWED_ORIGINS" \
+TW_STATE_DIR="$TERMSNIP_STATE_DIR" \
   node tests/system/backend-transport-client.mjs
 
 echo "[backend-fixture] PASS"

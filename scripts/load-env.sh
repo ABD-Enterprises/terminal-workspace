@@ -1,5 +1,43 @@
 #!/usr/bin/env bash
 
+# Env-file precedence, highest first:
+#
+#   1. a variable already exported in the real process environment with a
+#      non-empty value
+#   2. .env          (git-ignored; local overrides)
+#   3. .env.shared   (tracked; non-secret shared defaults)
+#
+# .env is read after .env.shared and replaces the shared value for the same
+# key, which is what docs/development.md, docs/release.md and
+# docs/operations.md describe. The real process environment still wins over
+# both files, so an exported shell variable is never clobbered — but only when
+# it carries a value. An exported variable that is empty is a placeholder like
+# any other, so a file can still fill it in.
+#
+# A blank value in either file is a placeholder rather than an override, so a
+# copy of .env.example (whose signing and token slots are empty) cannot blank
+# out a shared default.
+#
+# Within one file the first occurrence of a key wins, blank or not. Across
+# files the later one replaces the earlier, so a blank first line in .env does
+# not stop a later .env line from supplying the value — it only stops .env
+# from blanking out a value .env.shared provided.
+#
+# A key that appears in a file but only ever with a blank value is exported
+# empty. That is what the previous loader did, and the release scripts that
+# source this one read those variables under `set -u`: an unset variable would
+# abort them, where an empty one takes the documented fallback.
+#
+# Apart from the variables it is meant to export, the loader leaves three
+# things behind in the sourcing shell: ROOT_DIR, which the previous loader
+# also set and overwrote; TERMSNIP_ENV_LOADED, exported on purpose — it is
+# how a second source of this loader in the same shell becomes a no-op; and
+# BASH_REMATCH, set as a side effect of the `=~` check below when a file is
+# parsed and a line reaches it. The previous loader's `=~` check did the
+# same, so nothing that worked before stops working now. The helpers are
+# unset and the working variables are given names that cannot collide with a
+# caller's.
+
 if [[ -n "${TERMSNIP_ENV_LOADED:-}" ]]; then
   return 0 2>/dev/null || exit 0
 fi
@@ -23,15 +61,35 @@ strip_wrapping_quotes() {
   printf '%s' "$value"
 }
 
-load_env_defaults_from_file() {
+# Collected across both files, in the order the files are parsed. A key whose
+# value was blank is recorded with an empty value, so it is still exported —
+# empty — at the end.
+LOAD_ENV_KEYS=()
+LOAD_ENV_VALUES=()
+LOAD_ENV_SOURCES=()
+
+load_env_key_index() {
+  local needle="$1"
+  local index
+  for ((index = 0; index < ${#LOAD_ENV_KEYS[@]}; index++)); do
+    if [[ "${LOAD_ENV_KEYS[$index]}" == "$needle" ]]; then
+      printf '%s' "$index"
+      return 0
+    fi
+  done
+  return 1
+}
+
+load_env_values_from_file() {
   local file_path="$1"
+  local source="$2"
+  local raw_line line key value index
 
   if [[ ! -f "$file_path" ]]; then
     return 0
   fi
 
   while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
-    local line key value
     line="$(trim_whitespace "$raw_line")"
 
     if [[ -z "$line" || "$line" == \#* ]]; then
@@ -53,13 +111,50 @@ load_env_defaults_from_file() {
       continue
     fi
 
-    if [[ -z "${!key:-}" ]]; then
-      export "$key=$value"
+    if [[ -z "$value" ]]; then
+      # A blank value is a placeholder, not an override: it never replaces a
+      # value another file already provided. The key is still recorded the
+      # first time it is seen, so it is exported — empty — when nothing else
+      # provides one.
+      if ! index="$(load_env_key_index "$key")"; then
+        LOAD_ENV_KEYS+=("$key")
+        LOAD_ENV_VALUES+=("")
+        LOAD_ENV_SOURCES+=("$source")
+      fi
+      continue
     fi
+
+    if index="$(load_env_key_index "$key")"; then
+      # The later file replaces the earlier one; a second occurrence inside the
+      # same file does not.
+      if [[ "${LOAD_ENV_SOURCES[$index]}" != "$source" ]]; then
+        LOAD_ENV_VALUES[index]="$value"
+        LOAD_ENV_SOURCES[index]="$source"
+      fi
+      continue
+    fi
+
+    LOAD_ENV_KEYS+=("$key")
+    LOAD_ENV_VALUES+=("$value")
+    LOAD_ENV_SOURCES+=("$source")
   done <"$file_path"
 }
 
-load_env_defaults_from_file "$ROOT_DIR/.env.shared"
-load_env_defaults_from_file "$ROOT_DIR/.env"
+load_env_values_from_file "$ROOT_DIR/.env.shared" shared
+load_env_values_from_file "$ROOT_DIR/.env" local
+
+# The real process environment always wins: a variable that is already
+# exported with a value is left exactly as it is. The loop variables are named
+# so they cannot collide with the sourcing script's own, and are unset below.
+for ((load_env_index = 0; load_env_index < ${#LOAD_ENV_KEYS[@]}; load_env_index++)); do
+  load_env_key="${LOAD_ENV_KEYS[$load_env_index]}"
+  if [[ -n "${!load_env_key:-}" ]]; then
+    continue
+  fi
+  export "$load_env_key=${LOAD_ENV_VALUES[$load_env_index]}"
+done
+
+unset LOAD_ENV_KEYS LOAD_ENV_VALUES LOAD_ENV_SOURCES load_env_index load_env_key
+unset -f load_env_values_from_file load_env_key_index trim_whitespace strip_wrapping_quotes
 
 export TERMSNIP_ENV_LOADED=1
