@@ -6,7 +6,7 @@ interface ModalProps {
   title: string;
   description?: string;
   onClose: () => void;
-  children: ReactNode;
+  children?: ReactNode;
   footer?: ReactNode;
   className?: string;
 }
@@ -107,7 +107,7 @@ export function Modal({
             Esc
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">{children}</div>
+        {children ? <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">{children}</div> : null}
         {footer ? (
           <div className="shrink-0 border-t border-slate-800 bg-slate-900 px-6 py-5">
             {footer}

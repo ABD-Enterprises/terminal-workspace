@@ -1,0 +1,1 @@
+﻿- [FIX] Drop duplicate description paragraph from confirm dialogs (#526)
