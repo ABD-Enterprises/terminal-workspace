@@ -29,9 +29,6 @@ fi
 IGNORE_IDS=(
   RUSTSEC-2023-0071 # rsa — Marvin Attack; no fixed release exists
   RUSTSEC-2026-0235 # rkyv — lockfile-only, never compiled into this app
-  RUSTSEC-2026-0367 # zip 4.6.1 — compiled only for Windows targets (updater), not shipped
-  RUSTSEC-2026-0368 # zip 4.6.1 — same
-  RUSTSEC-2026-0369 # zip 4.6.1 — same
 )
 
 # Two sources of truth for one list is how the previous claim went stale, so a

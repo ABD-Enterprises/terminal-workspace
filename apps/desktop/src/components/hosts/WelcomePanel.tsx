@@ -104,9 +104,10 @@ export function WelcomePanel({ onAddHost, onImportSshConfig }: WelcomePanelProps
         <button
           type="button"
           onClick={handleTrySampleData}
+          title="Loads seeded sample hosts and turns on demo mode. Connections are simulated and the output is fabricated."
           className="rounded text-slate-300 underline-offset-4 transition hover:text-white hover:underline"
         >
-          Load sample data
+          Load sample data (demo mode)
         </button>
       </div>
     </div>

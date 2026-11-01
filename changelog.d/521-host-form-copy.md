@@ -1,0 +1,3 @@
+- [FIX] Remove the internal engineering notes from the Settings page and describe the host-delete dialog accurately (#521)
+- [FIX] Validate the host form fields and explain why the create button is disabled instead of failing silently (#521)
+- [INTERNAL] Pin the host form's gating behaviour in the test suite, so an invalid port can no longer save the host with the message showing but the rule unenforced (#521)

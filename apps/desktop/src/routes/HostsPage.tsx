@@ -143,9 +143,10 @@ export function HostsPage() {
     }
     const result = await launchHostSession(host);
     if (!result.ok || !result.tabId) {
-      // Trust prompt rejected / scan failed — surface a non-blocking
-      // banner via console for now; future polish ticket can route this
-      // through a global toast.
+      // Trust prompt rejected / scan failed. `launchHostSession` already
+      // published the message to the app-shell banner, so it reaches the
+      // screen from every connect entry point. This log keeps the surface
+      // name for debugging.
       if (result.errorMessage) {
         console.warn(`[hosts] ${result.errorMessage}`);
       }
@@ -554,7 +555,7 @@ export function HostsPage() {
       <ConfirmDialog
         open={Boolean(hostPendingDelete)}
         title="Delete host"
-        description="This removes the host from the local inventory. Existing tabs close on refresh, and any trusted host key or assigned identity remains in local storage until you remove it separately."
+        description="This deletes the host, wipes its saved credentials, removes it from every snippet's targets, and closes its open tabs now. Its trusted host key and identity are kept, but the host is unassigned from them."
         confirmLabel="Delete host"
         onCancel={() => setHostPendingDelete(null)}
         onConfirm={() => {

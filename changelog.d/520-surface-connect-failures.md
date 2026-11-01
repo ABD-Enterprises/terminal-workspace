@@ -1,0 +1,3 @@
+- [FIX] Surface connect failures in the app shell instead of logging them to the console, so a host that is down or unreachable says why (#520)
+- [FIX] Show a demo-mode indicator in the native app so simulated connections are never mistaken for real ones (#520)
+- [INTERNAL] Split the AppShell tests by topic so the new shell-rendering test is covered by the typecheck gate (#520)
