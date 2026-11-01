@@ -329,7 +329,7 @@ export function SettingsPage() {
           ) : null}
 
           {errorMessage ? (
-            <div className="mt-3 rounded-[16px] border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
+            <div role="alert" className="mt-3 rounded-[16px] border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
               {errorMessage}
             </div>
           ) : null}

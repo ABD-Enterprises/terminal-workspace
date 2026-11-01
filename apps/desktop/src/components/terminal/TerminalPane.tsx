@@ -126,7 +126,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             </div>
           </header>
           {runtimeStatusMessage && !runtimeStatusMessage.available ? (
-            <div className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+            <div role="alert" className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p>{runtimeStatusMessage.message}</p>
               {runtimeStatusMessage.installHint ? (
                 <p className="mt-1 text-rose-100/80">{runtimeStatusMessage.installHint}</p>
