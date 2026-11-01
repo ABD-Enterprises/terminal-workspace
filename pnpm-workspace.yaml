@@ -21,6 +21,19 @@ minimumReleaseAge: 10080
 # than name-scoped so future releases of vite and happy-dom are still
 # subject to the full wait; these two entries can be deleted once the
 # versions themselves have aged.
+# Cooldown exception (2026-10-31): GHSA-g3hv-75wg-m249 (minimatch
+# globparts amplification) is fixed only in minimatch 11.0.1 and later, with
+# no 10.x backport. eslint, @eslint/config-array and
+# @typescript-eslint/typescript-estree still require minimatch ^10 in their
+# latest releases, so package.json overrides it to ^11.0.1. Every 11.x
+# release, and its new dependency @isaacs/nonrecursive-glob-match, was
+# published inside the 7-day window (10-26 to 10-28). These exact versions
+# are the newest patch of each (nonrecursive-glob-match 1.0.2 corrected the
+# :print: and :punct: classes; 11.0.3 and 1.0.3 add caching). Dev-scope only
+# (lint tooling); version-scoped so later releases still wait the full
+# window, and these entries can be deleted once the versions have aged.
 minimumReleaseAgeExclude:
   - vite@8.3.5
   - happy-dom@21.0.4
+  - minimatch@11.0.3
+  - "@isaacs/nonrecursive-glob-match@1.0.3"

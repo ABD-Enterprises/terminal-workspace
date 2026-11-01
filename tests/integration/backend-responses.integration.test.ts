@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import { PayloadTooLargeError } from "../../apps/desktop/server/backend-buffers.mjs";
+import { HostKeyRejectedError } from "../../apps/desktop/server/backend-host-keys.mjs";
 import {
   HTTP_ERROR_DIAGNOSTIC_CHANNEL,
   respondError,
@@ -51,6 +52,38 @@ describe("#230: respondError does not relay internal error text", () => {
 
     expect(response.recorded.status).toBe(500);
     expect(JSON.parse(response.recorded.body!)).toEqual({ error: "Internal server error." });
+  });
+
+  it("relays a refused host key's reason, and only that reason", () => {
+    // A refused host key is the one failure whose reason the user has to act
+    // on: the difference between "the host is unreachable" and "the key
+    // changed". Its message is built by the error itself from the host label
+    // and a fixed explanation, so relaying it does not reopen the leak the
+    // tests above pin shut.
+    const response = recordingResponse();
+
+    respondError(
+      response,
+      new HostKeyRejectedError("Host key verification failed for gateway.internal:22."),
+    );
+
+    expect(response.recorded.status).toBe(403);
+    expect(JSON.parse(response.recorded.body!)).toEqual({
+      error: "Host key verification failed for gateway.internal:22.",
+    });
+  });
+
+  it("still refuses to relay a look-alike error that is not a host-key rejection", () => {
+    // The exception is by TYPE, not by message: anything that merely looks
+    // like one is still sanitised.
+    const sentinel = "TS_HOST_KEY_LOOKALIKE_PROBE_7c1e4b";
+    const impostor = new Error(`Host key verification failed for ${sentinel}`);
+    Object.assign(impostor, { statusCode: 403 });
+    const response = recordingResponse();
+
+    respondError(response, impostor);
+
+    expect(response.recorded.body).not.toContain(sentinel);
   });
 
   it("keeps the glob endpoint's refusal a 400, without the paths it names", () => {
@@ -123,7 +156,11 @@ describe("#230: the surrounding contract is unchanged", () => {
     const source = await readFile("apps/desktop/server/backend.mjs", "utf8");
 
     expect(source).toContain("function getErrorMessage(error) {\n  return error instanceof Error ? error.message : String(error);\n}");
-    expect(source).toMatch(/function failSession\(session, error\) \{[\s\S]*?message: getErrorMessage\(error\),/);
+    // The message that goes out on the wire is the real one. It is also
+    // remembered on the session, so a websocket that attaches after the
+    // failure is replayed it rather than being told nothing.
+    expect(source).toMatch(/session\.failureMessage = getErrorMessage\(error\);/);
+    expect(source).toMatch(/function failSession\(session, error\) \{[\s\S]*?message: session\.failureMessage,/);
   });
 
   it("still routes the glob endpoint's refusal through an explicit 400", async () => {

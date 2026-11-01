@@ -1,0 +1,1 @@
+- [SECURITY] Update tauri-plugin-updater to 2.14.1, which moves its Windows-only `zip` dependency from 4.6.1 to 9.2.0 and closes the three Dependabot alerts against `src-tauri/Cargo.lock`; the matching accepted-advisory entries are removed from `audit.toml` and `scripts/native-audit.sh` (#528)
