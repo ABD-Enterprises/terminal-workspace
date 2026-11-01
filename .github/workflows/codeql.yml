@@ -32,7 +32,7 @@ permissions:
 jobs:
   CodeQL:
     name: CodeQL
-    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS) }}
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 30
     permissions:
       contents: read

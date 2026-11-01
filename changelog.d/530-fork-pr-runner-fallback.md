@@ -1,0 +1,1 @@
+- [INTERNAL] CI falls back to GitHub-hosted runners when the runner variable is empty, so pull requests from forks can run checks (#530)
