@@ -80,7 +80,7 @@ export function PortForwardPanel({ sessionId, disabled = false }: PortForwardPan
       </div>
 
       {errorMessage ? (
-        <div className="mt-3 rounded-[14px] border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+        <div role="alert" className="mt-3 rounded-[14px] border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
           {errorMessage}
         </div>
       ) : null}

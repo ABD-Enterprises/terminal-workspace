@@ -352,7 +352,7 @@ export function KeysPage() {
               </select>
 
               {scanError ? (
-                <div className="mt-2 rounded-[14px] border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+                <div role="alert" className="mt-2 rounded-[14px] border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
                   {scanError}
                 </div>
               ) : null}

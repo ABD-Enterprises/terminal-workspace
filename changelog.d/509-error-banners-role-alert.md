@@ -1,0 +1,1 @@
+- [FIX] Add role="alert" to error banners across desktop views for screen-reader announcement (#531)

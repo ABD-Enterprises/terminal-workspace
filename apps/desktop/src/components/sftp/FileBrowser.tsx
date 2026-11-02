@@ -541,7 +541,7 @@ export function FileBrowser({ host }: FileBrowserProps) {
 
         <div className="min-h-0 flex-1 px-3.5 py-2.5">
           {errorMessage ? (
-            <div className="mb-3 rounded-[18px] border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
+            <div role="alert" className="mb-3 rounded-[18px] border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
               {errorMessage}
             </div>
           ) : null}
