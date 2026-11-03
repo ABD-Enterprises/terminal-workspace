@@ -1,0 +1,1 @@
+- [INTERNAL] CodeQL cancels superseded pull request runs; main-branch runs are never cancelled (#534)
