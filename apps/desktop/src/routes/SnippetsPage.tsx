@@ -41,6 +41,7 @@ export function SnippetsPage() {
   const [selectedHostIdsOverride, setSelectedHostIdsOverride] = useState<string[] | null>(null);
   const [broadcastBusy, setBroadcastBusy] = useState(false);
   const [broadcastResults, setBroadcastResults] = useState<SnippetExecutionResult[]>([]);
+  const [broadcastError, setBroadcastError] = useState<string>();
 
   const hostsById = useMemo(
     () => Object.fromEntries(hosts.map((host) => [host.id, host])),
@@ -119,6 +120,7 @@ export function SnippetsPage() {
 
     const targetHosts = snippetHosts.filter((host) => selectedHostIds.includes(host.id));
     setBroadcastBusy(true);
+    setBroadcastError(undefined);
 
     try {
       const preparedTargets = [];
@@ -126,6 +128,7 @@ export function SnippetsPage() {
       for (const host of targetHosts) {
         const readyForConnection = await ensureRuntimeSecrets(host, "Run snippet");
         if (!readyForConnection) {
+          setBroadcastError(`Credentials not provided for host "${host.label}".`);
           return;
         }
 
@@ -144,6 +147,8 @@ export function SnippetsPage() {
       targetHosts.forEach((host) => markConnected(host.id));
       setBroadcastResults(result.results);
       markSnippetRun(selectedSnippet.id);
+    } catch (error) {
+      setBroadcastError(error instanceof Error ? error.message : String(error));
     } finally {
       setBroadcastBusy(false);
     }
@@ -364,6 +369,15 @@ export function SnippetsPage() {
                       </div>
                     </div>
                   </div>
+
+                  {broadcastError ? (
+                    <div
+                      role="alert"
+                      className="rounded-[14px] border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100"
+                    >
+                      {broadcastError}
+                    </div>
+                  ) : null}
 
                   {broadcastResults.length ? (
                     <div className="rounded-[18px] border border-slate-800 bg-slate-900/60 p-3">
