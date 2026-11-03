@@ -1,1 +1,1 @@
-- [INTERNAL] Clarify ordinary agent delivery and optional SureForge supervision while retaining independent review and required checks.
+- [INTERNAL] Clarify ordinary agent delivery and optional SureForge supervision while retaining independent review and required checks (#535).
