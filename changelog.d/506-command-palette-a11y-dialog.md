@@ -1,0 +1,1 @@
+- [FIX] Add dialog role, aria-modal, and accessible name to command palette (#532)
