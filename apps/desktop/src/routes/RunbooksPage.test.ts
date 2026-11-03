@@ -181,4 +181,20 @@ describe("#454 RunbooksPage", () => {
     expect(stored?.lastRunAt).toBeTruthy();
     expect(screen.getByText("Queued step 1 of 2.")).toBeTruthy();
   });
+  it("#503: explains why Run next step is disabled when no active pane is open", () => {
+    useRunbooksStore.getState().createRunbook({
+      name: "Nightly checks",
+      steps: "uptime\ndf -h",
+    });
+
+    renderRunbooksPage("/runbooks");
+
+    const runButton = screen.getByRole("button", { name: "Run next step" });
+    expect(runButton.hasAttribute("disabled")).toBe(true);
+    expect(runButton.getAttribute("title")).toBe("Open a session pane first");
+
+    expect(
+      screen.getByText("Nothing was queued: open a session pane first, or reset the runbook.")
+    ).toBeTruthy();
+  });
 });

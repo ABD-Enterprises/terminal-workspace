@@ -1,0 +1,1 @@
+- [FIX] Explain why Run next step is disabled when no active pane is open (#537)
