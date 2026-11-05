@@ -1,0 +1,1 @@
+- [DOCS] Add module map table to docs/architecture.md (#540)
