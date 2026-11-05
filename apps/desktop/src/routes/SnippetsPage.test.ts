@@ -6,7 +6,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement, useEffect } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useRunbooksStore } from "../store/runbooks-store";
 import { useSnippetsStore } from "../store/snippets-store";
 import { sampleSnippets } from "../types/snippet";
@@ -74,5 +74,31 @@ describe("#454 snippets page", () => {
     expect(runbook.steps).toEqual([snippet.command]);
     expect(runbook.nextStepIndex).toBe(0);
     expect(currentPath).toBe(`/runbooks?id=${runbook.id}`);
+  });
+  it("#499: displays on-screen error banner when snippet broadcast fails", async () => {
+    const { useHostsStore } = await import("../store/hosts-store");
+    const { sampleHosts } = await import("../types/host");
+    const api = await import("../lib/api");
+
+    useHostsStore.setState({ hosts: [...sampleHosts] });
+
+    vi.spyOn(api, "executeSnippetOnHosts").mockRejectedValueOnce(
+      new Error("Network connection dropped during broadcast")
+    );
+
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ["/snippets"] },
+        createElement(SnippetsPage)
+      )
+    );
+
+    const broadcastButton = screen.getByRole("button", { name: "Broadcast" });
+    fireEvent.click(broadcastButton);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toBeDefined();
+    expect(alert.textContent).toContain("Network connection dropped during broadcast");
   });
 });
