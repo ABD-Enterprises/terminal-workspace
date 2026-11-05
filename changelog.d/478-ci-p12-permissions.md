@@ -1,0 +1,1 @@
+- [FIX] Restrict Developer ID signing certificate file permissions to 0600 in macOS release workflow (#541)
