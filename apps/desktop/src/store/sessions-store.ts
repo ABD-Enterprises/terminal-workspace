@@ -326,7 +326,8 @@ export function removeSessionPane(
 export function updatePaneConnectionState(
   state: SessionWorkspaceState,
   paneId: string,
-  connectionState: SessionConnectionState
+  connectionState: SessionConnectionState,
+  connectionError?: string
 ): SessionWorkspaceState {
   const pane = state.panes[paneId];
   if (!pane) {
@@ -339,6 +340,7 @@ export function updatePaneConnectionState(
       ...state.panes,
       [paneId]: touchPane(pane, {
         connectionState,
+        connectionError: connectionState === "error" ? (connectionError ?? pane.connectionError) : undefined,
         reconnectOnRestore: connectionState === "connected" || pane.reconnectOnRestore,
       }),
     },
@@ -648,7 +650,11 @@ export interface SessionsState extends SessionWorkspaceState {
   closePane: (tabId: string, paneId: string) => void;
   closePanesForHost: (hostId: string) => void;
   selectPane: (tabId: string, paneId: string) => void;
-  setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
+  setPaneState: (
+    paneId: string,
+    connectionState: SessionConnectionState,
+    connectionError?: string
+  ) => void;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
   setPanePersistOutputPreview: (paneId: string, persistOutputPreview: boolean) => void;
   setPaneTransport: (paneId: string, transport: SessionTransport) => void;
@@ -744,8 +750,8 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => removeSessionPane(state, tabId, paneId));
       },
       selectPane: (tabId, paneId) => set((state) => setActiveSessionPane(state, tabId, paneId)),
-      setPaneState: (paneId, connectionState) =>
-        set((state) => updatePaneConnectionState(state, paneId, connectionState)),
+      setPaneState: (paneId, connectionState, connectionError) =>
+        set((state) => updatePaneConnectionState(state, paneId, connectionState, connectionError)),
       setPaneReconnectOnRestore: (paneId, reconnectOnRestore) =>
         set((state) => updatePaneReconnectPreference(state, paneId, reconnectOnRestore)),
       setPanePersistOutputPreview: (paneId, persistOutputPreview) =>

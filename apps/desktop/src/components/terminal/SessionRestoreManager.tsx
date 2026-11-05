@@ -77,17 +77,19 @@ export function SessionRestoreManager() {
             .then(({ sessionId }) => {
               setPaneBackendSession(pane.id, sessionId);
             })
-            .catch(() => {
+            .catch((error) => {
               setPaneBackendSession(pane.id, undefined);
-              setPaneState(pane.id, "error");
+              const message = error instanceof Error ? error.message : String(error);
+              setPaneState(pane.id, "error", message);
             })
             .finally(() => {
               restoringPaneIdsRef.current.delete(pane.id);
             });
-        } catch {
+        } catch (error) {
           restoringPaneIdsRef.current.delete(pane.id);
           setPaneBackendSession(pane.id, undefined);
-          setPaneState(pane.id, "error");
+          const message = error instanceof Error ? error.message : String(error);
+          setPaneState(pane.id, "error", message);
         }
       }
     };

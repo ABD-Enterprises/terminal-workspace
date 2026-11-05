@@ -1,0 +1,1 @@
+- [FIX] Preserve and surface restore error reason in tab tooltip, subtitle, and banner on failed reconnect (#501)
