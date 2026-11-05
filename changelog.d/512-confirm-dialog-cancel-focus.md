@@ -1,0 +1,1 @@
+- [FIX] Move default initial focus to Cancel on destructive confirm dialogs (#512)
