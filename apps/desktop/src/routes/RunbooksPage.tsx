@@ -368,6 +368,7 @@ export function RunbooksPage() {
                     <button
                       type="button"
                       disabled={!activePane || runbookFinished}
+                      title={!activePane ? "Open a session pane first" : undefined}
                       onClick={handleRunNextStep}
                       className={primaryButtonClass}
                     >
@@ -391,7 +392,13 @@ export function RunbooksPage() {
                   </div>
                 </div>
 
-                {runStatus ? <p className="mt-2 text-xs text-slate-400">{runStatus}</p> : null}
+                {!activePane ? (
+                  <p className="mt-2 text-xs text-amber-200/90">
+                    Nothing was queued: open a session pane first, or reset the runbook.
+                  </p>
+                ) : runStatus ? (
+                  <p className="mt-2 text-xs text-slate-400">{runStatus}</p>
+                ) : null}
 
                 <p className="mt-3 text-[11px] text-slate-500">
                   {selectedRunbook.steps.length
