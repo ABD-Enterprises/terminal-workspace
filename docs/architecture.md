@@ -17,3 +17,19 @@ shipping transport and persistence work:
 
 The browser preview keeps the Node backend so web/demo review remains possible, but the native app
 does not proxy JSON, binary, or websocket traffic through Node.
+
+## Module Map
+
+The table below maps each frontend transport module to the module that does the same job in the native app (Rust/Tauri) and in the browser preview (Node). Paths for the native column are under `src-tauri/src`, and paths for the browser column are under `apps/desktop/server`. The browser preview serves its routes and WebSocket from `backend.mjs`; the other `.mjs` files are helpers it imports.
+
+| Layer / Subsystem | Frontend (`apps/desktop/src`) | Responsibility | Native counterpart | Browser preview counterpart |
+| :--- | :--- | :--- | :--- | :--- |
+| **API Boundary** | `lib/api.ts` | Exposes one function per backend operation and picks the demo, native (Tauri IPC) or browser-preview (HTTP `fetch`) implementation | `main.rs` (the `#[tauri::command]` handlers registered in `generate_handler!`), `sftp.rs` | `backend.mjs` (HTTP routes under `/api/backend/`) |
+| **Transport Runtime** | `lib/backend-runtime.ts` | Detects the Tauri runtime (`isTauriRuntime()`), wraps `invokeTauriCommand`, and opens, parses and closes the session stream or WebSocket | `main.rs` (transport info and session-stream commands) | `backend.mjs` (WebSocket upgrade for `/ws/sessions/<id>`) |
+| **Backend Contract** | `lib/backend-contract.ts`, `lib/tauri-commands.ts` | Request, response and failure types shared by both backends, and the table of Tauri command names with their request and response types | `ipc_types.rs` | `backend.mjs` (plain JSON; there is no separate schema file) |
+| **Error Handling** | `lib/backend-failure-messages.ts` | Turns typed backend failures into user-facing messages (error classification by code is in `lib/ssh-error-classifier.ts`) | `ipc_error.rs` (typed error with a stable code) | `backend-responses.mjs` (JSON and error response helpers) |
+| **Connection Payload** | `lib/connections.ts` | Builds the connection payload for a host: resolved identity, trusted host key and the jump-host chain (rejects cycles) | `native_transport.rs` (SSH sessions, key handling, transport loops) | `backend.mjs` |
+| **Host Key Management** | `lib/ensure-trusted-host-key.ts` | First-connect fingerprint prompt: scans the host key, asks the user to trust it and stores the choice | `native_host_keys.rs` (durable trust-on-first-use store) | `backend-host-keys.mjs` (same `known_hosts` format) |
+| **SFTP Operations** | `components/sftp/FileBrowser.tsx` | Remote file browser UI (listing, rename, delete, upload, download) that calls the SFTP functions in `lib/api.ts` | `sftp.rs` | `backend-sftp.mjs` (deadline-bounded SFTP helper); routes are in `backend.mjs` |
+| **Secrets** | `lib/runtime-secrets.ts`, `lib/native-secrets.ts` | Decides which passwords and passphrases a connection needs, prompts for them, and reads or stores them through the native keychain commands | `keychain_support.rs` (macOS Keychain through the `security` tool) | `secrets.mjs` (zero-fills its in-memory copies; no keychain) |
+| **Conformance Tests** | `tests/integration/security-helper-conformance.integration.test.ts` | Runs the same cases from `tests/fixtures/security-helper-conformance.json` against both backends' path, glob and shell-quoting helpers | `native_transport_conformance_tests.rs` | `backend-shell.mjs`, `backend-paths.mjs`, `backend-glob.mjs` (the helpers under test) |
