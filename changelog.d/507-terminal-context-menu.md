@@ -1,0 +1,1 @@
+- [FIX] Right-clicking the terminal now opens a Copy, Paste and Clear menu instead of pasting the clipboard straight into the shell, and refused or unavailable clipboard access is shown instead of failing silently (#507)
