@@ -23,8 +23,7 @@ import {
   emptyHostFormValues,
 } from "../types/host";
 import { launchHostSession } from "../lib/launch-host-session";
-import { parseSshConfig, toHostFormValues } from "../lib/ssh-config";
-import { resolveSshIncludes } from "../lib/ssh-config-include";
+import { importSshConfigText, type SshConfigImportReport } from "../lib/ssh-config-import";
 import { globSshConfigFiles, readSshConfigFile } from "../lib/ssh-config-fs";
 
 // #113: quick-connect parser. Accepts the shapes a user actually types —
@@ -80,15 +79,7 @@ export function HostsPage() {
   const [quickConnect, setQuickConnect] = useState("");
   const [saveConfirmation, setSaveConfirmation] = useState<string | null>(null);
   const [hostPendingDelete, setHostPendingDelete] = useState<string | null>(null);
-  const [importReport, setImportReport] = useState<
-    | {
-        importedCount: number;
-        defaultsAppliedCount: number;
-        unresolvedProxyJumpAliases: string[];
-        skipped: { reason: string; detail: string }[];
-      }
-    | null
-  >(null);
+  const [importReport, setImportReport] = useState<SshConfigImportReport | null>(null);
   const setQuery = useAppStore((state) => state.setSidebarSearch);
   const commandPaletteOpen = useAppStore((state) => state.commandPaletteOpen);
   const cheatsheetOpen = useAppStore((state) => state.cheatsheetOpen);
@@ -216,21 +207,13 @@ export function HostsPage() {
           // Resolve `Include` directives via the native bridge when
           // available; falls back to "log and skip" in dev/web mode
           // where readSshConfigFile returns null.
-          const expanded = await resolveSshIncludes(content, {
-            readFile: readSshConfigFile,
-            globFiles: globSshConfigFiles,
-          });
-          const result = parseSshConfig(expanded.text);
-          const skipped = [...result.skipped, ...expanded.skipped];
-          result.hosts.forEach((host) =>
-            createHost({ ...emptyHostFormValues, ...toHostFormValues(host) })
+          setImportReport(
+            await importSshConfigText(content, {
+              readFile: readSshConfigFile,
+              globFiles: globSshConfigFiles,
+              createHost,
+            })
           );
-          setImportReport({
-            importedCount: result.hosts.length,
-            defaultsAppliedCount: result.defaultsAppliedCount,
-            unresolvedProxyJumpAliases: result.unresolvedProxyJumpAliases,
-            skipped,
-          });
         };
         reader.readAsText(file);
       }
@@ -592,6 +575,14 @@ export function HostsPage() {
                   Inherited defaults from <code>Host *</code> on{" "}
                   <strong className="text-white">{importReport.defaultsAppliedCount}</strong> host
                   {importReport.defaultsAppliedCount === 1 ? "" : "s"}.
+                </li>
+              ) : null}
+              {importReport.missingUsernameAliases.length > 0 ? (
+                <li>
+                  No username, so these cannot connect until you add one:{" "}
+                  <span className="text-amber-300">
+                    {importReport.missingUsernameAliases.join(", ")}
+                  </span>
                 </li>
               ) : null}
               {importReport.unresolvedProxyJumpAliases.length > 0 ? (
