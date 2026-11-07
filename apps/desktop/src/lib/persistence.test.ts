@@ -1,17 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { VaultDeletionMap } from "../store/vault-sync-store";
 
-type StoreTable =
-  | "hosts_store"
-  | "keys_store"
-  | "known_hosts_store"
-  | "identities_store"
-  | "snippets_store";
+// #472: native persistence goes through typed commands. This fake stands in
+// for src-tauri/src/persistence.rs, whose own tests cover the SQL against a
+// real database; here the renderer side's fallbacks and mirroring are tested.
 
-interface FakeDatabaseOptions {
-  failLoad?: boolean;
-  failSelect?: boolean;
-  failExecuteOn?: RegExp;
+interface NativeOptions {
+  failReads?: boolean;
+  failCommand?: string;
+}
+
+interface DeletionRecord {
+  deletedAt: string;
+  id: string;
+  kind: string;
 }
 
 class MemoryStorage {
@@ -30,96 +32,50 @@ class MemoryStorage {
   }
 }
 
-class FakeDatabase {
-  readonly deletions = new Map<string, { deleted_at: string; id: string; kind: string }>();
-  readonly executeCalls: string[] = [];
-  readonly stores = new Map<StoreTable, string>();
-  private deletionSnapshot: Map<string, { deleted_at: string; id: string; kind: string }> | undefined;
+class FakeNative {
+  readonly calls: string[] = [];
+  readonly deletions = new Map<string, DeletionRecord>();
+  readonly stores = new Map<string, string>();
 
-  constructor(private readonly options: FakeDatabaseOptions = {}) {}
+  constructor(private readonly options: NativeOptions = {}) {}
 
-  async select<T>(sql: string): Promise<T> {
-    if (this.options.failSelect) {
-      throw new Error("select failed");
+  async invoke(command: string, args?: { request: Record<string, unknown> }) {
+    this.calls.push(command);
+    const request = args?.request ?? {};
+    if (this.options.failCommand === command) {
+      throw new Error(`${command} failed`);
     }
-
-    const storeTable = this.storeTableFromSql(sql);
-    if (storeTable) {
-      const payload = this.stores.get(storeTable);
-      return (payload ? [{ payload }] : []) as T;
-    }
-
-    if (sql.includes("FROM deletions")) {
-      return [...this.deletions.values()].sort((left, right) =>
-        right.deleted_at.localeCompare(left.deleted_at)
-      ) as T;
-    }
-
-    return [] as T;
-  }
-
-  async execute(sql: string, params: unknown[] = []) {
-    this.executeCalls.push(sql);
-    if (this.options.failExecuteOn?.test(sql)) {
-      throw new Error("execute failed");
-    }
-
-    if (sql === "BEGIN IMMEDIATE TRANSACTION") {
-      this.deletionSnapshot = new Map(this.deletions);
-      return;
-    }
-
-    if (sql === "ROLLBACK") {
-      if (this.deletionSnapshot) {
-        this.deletions.clear();
-        for (const [key, value] of this.deletionSnapshot) {
-          this.deletions.set(key, value);
+    switch (command) {
+      case "terminal_workspace_persistence_read_store":
+        if (this.options.failReads) {
+          throw new Error("read failed");
         }
-      }
-      this.deletionSnapshot = undefined;
-      return;
+        return this.stores.get(String(request.store)) ?? null;
+      case "terminal_workspace_persistence_write_store":
+        this.stores.set(String(request.store), String(request.payload));
+        return undefined;
+      case "terminal_workspace_persistence_remove_store":
+        this.stores.delete(String(request.store));
+        return undefined;
+      case "terminal_workspace_persistence_read_deletions":
+        if (this.options.failReads) {
+          throw new Error("read failed");
+        }
+        return [...this.deletions.values()].sort((left, right) =>
+          right.deletedAt.localeCompare(left.deletedAt)
+        );
+      case "terminal_workspace_persistence_replace_deletions":
+        this.deletions.clear();
+        for (const record of request.records as DeletionRecord[]) {
+          this.deletions.set(`${record.kind}:${record.id}`, record);
+        }
+        return undefined;
+      case "terminal_workspace_persistence_clear_deletions":
+        this.deletions.clear();
+        return undefined;
+      default:
+        throw new Error(`unexpected command ${command}`);
     }
-
-    if (sql === "COMMIT") {
-      this.deletionSnapshot = undefined;
-      return;
-    }
-
-    const storeTable = this.storeTableFromSql(sql);
-    if (storeTable && sql.includes("INSERT INTO")) {
-      this.stores.set(storeTable, String(params[1]));
-      return;
-    }
-
-    if (storeTable && sql.includes("DELETE FROM")) {
-      this.stores.delete(storeTable);
-      return;
-    }
-
-    if (sql === "DELETE FROM deletions") {
-      this.deletions.clear();
-      return;
-    }
-
-    if (sql.includes("INSERT INTO deletions")) {
-      const [kind, id, deletedAt] = params.map(String);
-      this.deletions.set(`${kind}:${id}`, { deleted_at: deletedAt, id, kind });
-    }
-  }
-
-  private storeTableFromSql(sql: string): StoreTable | undefined {
-    for (const table of [
-      "hosts_store",
-      "keys_store",
-      "known_hosts_store",
-      "identities_store",
-      "snippets_store",
-    ] as const) {
-      if (sql.includes(table)) {
-        return table;
-      }
-    }
-    return undefined;
   }
 }
 
@@ -130,19 +86,13 @@ function serializeDeletions(deletions: Partial<VaultDeletionMap>) {
   });
 }
 
-async function loadPersistence(db: FakeDatabase, options: FakeDatabaseOptions = {}) {
+async function loadPersistence(native: FakeNative) {
   const localStorage = new MemoryStorage();
   vi.stubGlobal("window", { localStorage });
-  vi.doMock("./backend-runtime", () => ({ isTauriRuntime: () => true }));
-  vi.doMock("@tauri-apps/plugin-sql", () => ({
-    default: {
-      load: vi.fn(async () => {
-        if (options.failLoad) {
-          throw new Error("load failed");
-        }
-        return db;
-      }),
-    },
+  vi.doMock("./backend-runtime", () => ({
+    isTauriRuntime: () => true,
+    invokeTauriCommand: (command: string, args?: { request: Record<string, unknown> }) =>
+      native.invoke(command, args),
   }));
 
   const persistence = await import("./persistence");
@@ -157,25 +107,37 @@ describe("Tauri SQLite persistence", () => {
   });
 
   it("migrates localStorage payloads into SQLite and mirrors successful writes", async () => {
-    const db = new FakeDatabase();
-    const { localStorage, persistence } = await loadPersistence(db);
+    const native = new FakeNative();
+    const { localStorage, persistence } = await loadPersistence(native);
     const storage = persistence.createTermsnipStorage("terminal-workspace-hosts");
     localStorage.setItem("terminal-workspace-hosts", "local-payload");
 
     await expect(storage.getItem("terminal-workspace-hosts")).resolves.toBe("local-payload");
-    expect(db.stores.get("hosts_store")).toBe("local-payload");
+    expect(native.stores.get("terminal-workspace-hosts")).toBe("local-payload");
 
     await storage.setItem("terminal-workspace-hosts", "sqlite-payload");
-    expect(db.stores.get("hosts_store")).toBe("sqlite-payload");
+    expect(native.stores.get("terminal-workspace-hosts")).toBe("sqlite-payload");
     expect(localStorage.getItem("terminal-workspace-hosts")).toBe("sqlite-payload");
 
     await storage.removeItem("terminal-workspace-hosts");
-    expect(db.stores.has("hosts_store")).toBe(false);
+    expect(native.stores.has("terminal-workspace-hosts")).toBe(false);
     expect(localStorage.getItem("terminal-workspace-hosts")).toBeNull();
   });
 
+  it("reads the native payload in preference to localStorage", async () => {
+    const native = new FakeNative();
+    native.stores.set("terminal-workspace-keys", "native-payload");
+    const { localStorage, persistence } = await loadPersistence(native);
+    localStorage.setItem("terminal-workspace-keys", "stale-local");
+
+    await expect(
+      persistence.createTermsnipStorage("terminal-workspace-keys").getItem("terminal-workspace-keys")
+    ).resolves.toBe("native-payload");
+    expect(native.calls).not.toContain("terminal_workspace_persistence_write_store");
+  });
+
   it("#115: forward-migrates a legacy termsnip-* key, keeping the old key for rollback", async () => {
-    const { localStorage, persistence } = await loadPersistence(new FakeDatabase());
+    const { localStorage, persistence } = await loadPersistence(new FakeNative());
     // Data exists only under the legacy namespace; the new key is absent.
     localStorage.setItem("termsnip-app", "legacy-payload");
     const storage = persistence.createMigratingLocalStorage();
@@ -187,77 +149,98 @@ describe("Tauri SQLite persistence", () => {
     expect(localStorage.getItem("termsnip-app")).toBe("legacy-payload");
   });
 
-  it("falls back to localStorage when a SQLite READ (load or select) fails", async () => {
-    const selectDb = new FakeDatabase({ failSelect: true });
-    const selectHarness = await loadPersistence(selectDb);
-    selectHarness.localStorage.setItem("terminal-workspace-hosts", "fallback-payload");
+  it("falls back to localStorage when a native READ fails", async () => {
+    const harness = await loadPersistence(new FakeNative({ failReads: true }));
+    harness.localStorage.setItem("terminal-workspace-hosts", "fallback-payload");
     await expect(
-      selectHarness.persistence.createTermsnipStorage("terminal-workspace-hosts").getItem("terminal-workspace-hosts")
+      harness.persistence
+        .createTermsnipStorage("terminal-workspace-hosts")
+        .getItem("terminal-workspace-hosts")
     ).resolves.toBe("fallback-payload");
 
-    vi.resetModules();
-    vi.unstubAllGlobals();
-    const loadHarness = await loadPersistence(new FakeDatabase(), { failLoad: true });
-    loadHarness.localStorage.setItem("terminal-workspace-hosts", "load-fallback");
+    harness.localStorage.setItem("terminal-workspace-vault-sync", "deletion-fallback");
     await expect(
-      loadHarness.persistence.createTermsnipStorage("terminal-workspace-hosts").getItem("terminal-workspace-hosts")
-    ).resolves.toBe("load-fallback");
+      harness.persistence
+        .createTermsnipDeletionStorage("terminal-workspace-vault-sync")
+        .getItem("terminal-workspace-vault-sync")
+    ).resolves.toBe("deletion-fallback");
   });
 
-  it("#146: a SQLite write failure rejects and does NOT shadow-write localStorage", async () => {
+  it("#146: a native write failure rejects and does NOT shadow-write localStorage", async () => {
     const harness = await loadPersistence(
-      new FakeDatabase({ failExecuteOn: /INSERT INTO hosts_store/ })
+      new FakeNative({ failCommand: "terminal_workspace_persistence_write_store" })
     );
     const storage = harness.persistence.createTermsnipStorage("terminal-workspace-hosts");
     // localStorage already mirrors the last good SQLite value.
     harness.localStorage.setItem("terminal-workspace-hosts", "old-value");
 
-    await expect(
-      storage.setItem("terminal-workspace-hosts", "new-value")
-    ).rejects.toThrow(/execute failed/);
+    await expect(storage.setItem("terminal-workspace-hosts", "new-value")).rejects.toThrow(
+      /write_store failed/
+    );
 
     // The failed write must NOT leave a localStorage copy newer than SQLite —
     // that split-brain is exactly what later resurrects the stale SQLite row.
     expect(harness.localStorage.getItem("terminal-workspace-hosts")).toBe("old-value");
   });
 
-  it("#146: a SQLite delete failure rejects and does NOT shadow-remove localStorage", async () => {
+  it("#146: a native delete failure rejects and does NOT shadow-remove localStorage", async () => {
     const harness = await loadPersistence(
-      new FakeDatabase({ failExecuteOn: /DELETE FROM hosts_store/ })
+      new FakeNative({ failCommand: "terminal_workspace_persistence_remove_store" })
     );
     const storage = harness.persistence.createTermsnipStorage("terminal-workspace-hosts");
     harness.localStorage.setItem("terminal-workspace-hosts", "still-here");
 
-    await expect(
-      storage.removeItem("terminal-workspace-hosts")
-    ).rejects.toThrow(/execute failed/);
+    await expect(storage.removeItem("terminal-workspace-hosts")).rejects.toThrow(
+      /remove_store failed/
+    );
     expect(harness.localStorage.getItem("terminal-workspace-hosts")).toBe("still-here");
   });
 
-  it("mirrors a successful deletion write to localStorage", async () => {
-    const db = new FakeDatabase();
-    const { localStorage, persistence } = await loadPersistence(db);
+  it("sends every deletion kind in one replace and mirrors it to localStorage", async () => {
+    const native = new FakeNative();
+    const { localStorage, persistence } = await loadPersistence(native);
     const storage = persistence.createTermsnipDeletionStorage("terminal-workspace-vault-sync");
 
     await storage.setItem(
       "terminal-workspace-vault-sync",
       serializeDeletions({
         hosts: [{ deletedAt: "2026-02-01T00:00:00.000Z", id: "new" }],
+        knownHosts: [{ deletedAt: "2026-02-02T00:00:00.000Z", id: "kh" }],
       })
     );
 
-    expect(db.deletions.get("hosts:new")).toBeDefined();
+    expect(
+      native.calls.filter((call) => call === "terminal_workspace_persistence_replace_deletions")
+    ).toHaveLength(1);
+    expect(native.deletions.get("hosts:new")).toEqual({
+      kind: "hosts",
+      id: "new",
+      deletedAt: "2026-02-01T00:00:00.000Z",
+    });
+    expect(native.deletions.get("knownHosts:kh")).toBeDefined();
     expect(localStorage.getItem("terminal-workspace-vault-sync")).toContain('"id":"new"');
+
+    await expect(storage.getItem("terminal-workspace-vault-sync")).resolves.toBe(
+      serializeDeletions({
+        hosts: [{ deletedAt: "2026-02-01T00:00:00.000Z", id: "new" }],
+        keys: [],
+        snippets: [],
+        knownHosts: [{ deletedAt: "2026-02-02T00:00:00.000Z", id: "kh" }],
+        identities: [],
+      })
+    );
   });
 
-  it("#146: a failed deletion write rolls back SQLite and does NOT shadow-write localStorage", async () => {
-    const db = new FakeDatabase({ failExecuteOn: /INSERT INTO deletions/ });
-    db.deletions.set("hosts:old", {
-      deleted_at: "2026-01-01T00:00:00.000Z",
+  it("#146: a failed deletion replace rejects and does NOT shadow-write localStorage", async () => {
+    const native = new FakeNative({
+      failCommand: "terminal_workspace_persistence_replace_deletions",
+    });
+    native.deletions.set("hosts:old", {
+      deletedAt: "2026-01-01T00:00:00.000Z",
       id: "old",
       kind: "hosts",
     });
-    const { localStorage, persistence } = await loadPersistence(db);
+    const { localStorage, persistence } = await loadPersistence(native);
     const storage = persistence.createTermsnipDeletionStorage("terminal-workspace-vault-sync");
 
     await expect(
@@ -267,17 +250,22 @@ describe("Tauri SQLite persistence", () => {
           hosts: [{ deletedAt: "2026-02-01T00:00:00.000Z", id: "new" }],
         })
       )
-    ).rejects.toThrow(/execute failed/);
+    ).rejects.toThrow(/replace_deletions failed/);
 
-    // SQLite rolled back to the prior tombstone set...
-    expect(db.deletions.get("hosts:old")).toEqual({
-      deleted_at: "2026-01-01T00:00:00.000Z",
-      id: "old",
-      kind: "hosts",
-    });
-    expect(db.executeCalls).toContain("BEGIN IMMEDIATE TRANSACTION");
-    expect(db.executeCalls).toContain("ROLLBACK");
-    // ...and localStorage was NOT shadow-written with the un-committed tombstone.
+    expect(native.deletions.get("hosts:old")).toBeDefined();
+    expect(localStorage.getItem("terminal-workspace-vault-sync")).toBeNull();
+  });
+
+  it("clears deletions natively and in localStorage", async () => {
+    const native = new FakeNative();
+    native.deletions.set("hosts:a", { deletedAt: "2026-01-01T00:00:00.000Z", id: "a", kind: "hosts" });
+    const { localStorage, persistence } = await loadPersistence(native);
+    localStorage.setItem("terminal-workspace-vault-sync", "x");
+
+    await persistence
+      .createTermsnipDeletionStorage("terminal-workspace-vault-sync")
+      .removeItem("terminal-workspace-vault-sync");
+    expect(native.deletions.size).toBe(0);
     expect(localStorage.getItem("terminal-workspace-vault-sync")).toBeNull();
   });
 });

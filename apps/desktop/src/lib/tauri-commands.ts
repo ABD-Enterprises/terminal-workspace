@@ -6,6 +6,7 @@ import type { CopyKeyToHostResponse, GenerateKeyPayload as GeneratePrivateKeyReq
 import type { KeyMetadata } from "../types/key";
 import type { PortForwardRecord } from "../types/forward";
 import type { BackendHostConnection } from "./backend-contract";
+import type { NativeDeletionRecord, PersistedStoreName } from "./persistence";
 
 export interface TauriCommands {
   "terminal_workspace_read_ssh_config_file": {
@@ -47,6 +48,30 @@ export interface TauriCommands {
   "terminal_workspace_resize_backend_session": {
     request: { sessionId: string; payload: ResizeSessionPayload };
     response: BackendBooleanResponse;
+  };
+  "terminal_workspace_persistence_read_store": {
+    request: { store: PersistedStoreName };
+    response: string | null;
+  };
+  "terminal_workspace_persistence_write_store": {
+    request: { store: PersistedStoreName; payload: string };
+    response: void;
+  };
+  "terminal_workspace_persistence_remove_store": {
+    request: { store: PersistedStoreName };
+    response: void;
+  };
+  "terminal_workspace_persistence_read_deletions": {
+    request: undefined;
+    response: NativeDeletionRecord[];
+  };
+  "terminal_workspace_persistence_replace_deletions": {
+    request: { records: NativeDeletionRecord[] };
+    response: void;
+  };
+  "terminal_workspace_persistence_clear_deletions": {
+    request: undefined;
+    response: void;
   };
   "terminal_workspace_load_host_secrets": {
     request: HostSecretsRequest;

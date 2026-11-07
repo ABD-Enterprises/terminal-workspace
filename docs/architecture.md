@@ -12,7 +12,10 @@ shipping transport and persistence work:
   stream I/O, native SFTP operations, native forwarding, native remote snippet execution, and
   Keychain-backed runtime secret persistence
 - the Tauri shell also owns native key inspection, native key generation, native known-host scans,
-  and SQLite-backed persistence through `tauri-plugin-sql`
+  and SQLite-backed persistence. `tauri-plugin-sql` creates and migrates the database at startup;
+  the renderer reaches it only through the typed `terminal_workspace_persistence_*` commands in
+  `src-tauri/src/persistence.rs`, which own the tables and every SQL statement, and holds no
+  `sql:` permission (#472)
 - the native transport and secret-storage implementation are split out of `src-tauri/src/main.rs` into `src-tauri/src/native_transport.rs`, `src-tauri/src/keychain_support.rs`, and `src-tauri/src/native_transport_fixtures.rs`
 
 The browser preview keeps the Node backend so web/demo review remains possible, but the native app
