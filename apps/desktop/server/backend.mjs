@@ -62,7 +62,10 @@ import { readBoundedRegularFile, writeNewPrivateFile } from "./backend-files.mjs
 import {
   createHostKeyStore,
   createHostKeyVerifier,
+  createTrustedHostKeyVerifier,
+  isRefusedHostKeyAlgorithm,
   resolveAppDataDirectory,
+  weakHostKeyMessage,
 } from "./backend-host-keys.mjs";
 import {
   projectSshConfigResolutionFailure,
@@ -312,13 +315,18 @@ async function createConnectConfig(host) {
 
   // Filled in by the verifier when it refuses the host, so the connect path
   // can report why instead of ssh2's bare "Host denied (verification failed)".
-  let hostKeyFailure = { error: null };
+  let hostKeyFailure;
 
   if (host.knownHostPublicKey) {
-    // An explicitly trusted key always wins and is checked exactly as before.
-    // Nothing is pinned for it: the user already decided what to trust.
-    connectConfig.hostVerifier = (key) =>
-      Buffer.isBuffer(key) && key.toString("base64") === host.knownHostPublicKey;
+    // An explicitly trusted key always wins, except for a refused algorithm
+    // (#475). Nothing is pinned for it: the user already decided what to trust.
+    const verifier = createTrustedHostKeyVerifier({
+      hostname: host.hostname,
+      port: host.port,
+      trustedKey: host.knownHostPublicKey,
+    });
+    connectConfig.hostVerifier = verifier.verify;
+    hostKeyFailure = verifier.failure;
   } else {
     // SEC-2: trust on first use against the durable store.
     //
@@ -1208,6 +1216,7 @@ async function scanKnownHost({ hostname, port }) {
     hostname,
   ]);
 
+  let refusedOnly = false;
   const entries = stdout
     .split("\n")
     .map((line) => line.trim())
@@ -1215,6 +1224,11 @@ async function scanKnownHost({ hostname, port }) {
     .map((line) => {
       const [scannedHost, algorithm, publicKey] = line.split(/\s+/, 3);
       if (!scannedHost || !algorithm || !publicKey) {
+        return undefined;
+      }
+      // #475: never offer a refused algorithm for approval.
+      if (isRefusedHostKeyAlgorithm(algorithm)) {
+        refusedOnly = true;
         return undefined;
       }
 
@@ -1232,7 +1246,9 @@ async function scanKnownHost({ hostname, port }) {
     .filter(Boolean);
 
   if (!entries.length) {
-    throw new Error("No host keys returned from ssh-keyscan");
+    throw new Error(
+      refusedOnly ? weakHostKeyMessage(hostname, port) : "No host keys returned from ssh-keyscan"
+    );
   }
 
   return entries;

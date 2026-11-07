@@ -8,6 +8,7 @@ import {
   sanitizeFilename,
 } from "../../apps/desktop/server/backend-paths.mjs";
 import { globMatches } from "../../apps/desktop/server/backend-glob.mjs";
+import { isRefusedHostKeyAlgorithm } from "../../apps/desktop/server/backend-host-keys.mjs";
 import {
   buildEnvironmentExportPrefix,
   buildExecCommand,
@@ -299,6 +300,12 @@ function toEnvironment(pairs: unknown): Record<string, string> {
 }
 
 describe("#155: JS helpers match the shared cross-backend corpus", () => {
+  it("#475: refusedHostKeyAlgorithms", () => {
+    for (const item of cases("refusedHostKeyAlgorithms")) {
+      expect(isRefusedHostKeyAlgorithm(item.input as string), item.why).toBe(item.refused);
+    }
+  });
+
   it("normalizeRemotePath", () => {
     for (const item of cases("normalizeRemotePath")) {
       expect(normalizeRemotePath(item.input as string), item.why).toBe(item.expected);

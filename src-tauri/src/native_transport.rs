@@ -613,6 +613,7 @@ pub(crate) fn scan_known_host(
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = trim_ssh_output(&String::from_utf8_lossy(&output.stderr));
 
+    let mut refused_only = false;
     let entries = stdout
         .lines()
         .map(str::trim)
@@ -623,6 +624,12 @@ pub(crate) fn scan_known_host(
             let algorithm = parts.next()?.to_string();
             let public_key = parts.next()?.to_string();
             Some((algorithm, public_key))
+        })
+        // #475: never offer a refused algorithm for approval.
+        .filter(|(algorithm, _)| {
+            let refused = crate::native_host_keys::is_refused_host_key_algorithm(algorithm);
+            refused_only |= refused;
+            !refused
         })
         .map(|(algorithm, public_key)| {
             Ok(KnownHostScanResult {
@@ -636,6 +643,12 @@ pub(crate) fn scan_known_host(
         .collect::<Result<Vec<_>, String>>()?;
 
     if entries.is_empty() {
+        if refused_only {
+            return Err(crate::native_host_keys::weak_host_key_message(
+                &request.hostname,
+                request.port,
+            ));
+        }
         return Err(if stderr.is_empty() {
             "No host keys returned from ssh-keyscan".to_string()
         } else {

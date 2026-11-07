@@ -47,6 +47,26 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 /// A durable `host -> (algorithm, base64 key)` map in OpenSSH `known_hosts`
 /// shape: `hostname algorithm base64-key`, one record per line.
+/// #475: host key algorithms refused outright, whether first seen, pinned or
+/// explicitly approved. DSA keys are 1024-bit and signed with SHA-1. `ssh-rsa`
+/// is deliberately not here: modern servers sign with rsa-sha2-256/512 while
+/// the key blob still says `ssh-rsa`. Mirrored by `REFUSED_HOST_KEY_ALGORITHMS`
+/// in apps/desktop/server/backend-host-keys.mjs; the shared conformance corpus
+/// pins both.
+pub(crate) const REFUSED_HOST_KEY_ALGORITHMS: [&str; 1] = ["ssh-dss"];
+
+pub(crate) fn is_refused_host_key_algorithm(algorithm: &str) -> bool {
+    REFUSED_HOST_KEY_ALGORITHMS.contains(&algorithm)
+}
+
+pub(crate) fn weak_host_key_message(hostname: &str, port: impl std::fmt::Display) -> String {
+    format!(
+        "{hostname}:{port} offered only a DSA (ssh-dss) host key, which is too weak to trust, \
+         so the connection was refused and credentials were not sent. Ask the server's \
+         administrator to add an Ed25519 or ECDSA host key."
+    )
+}
+
 pub(crate) struct NativeHostKeyStore {
     path: PathBuf,
     /// Sidecar, not the trust file itself: `ssh` rewrites `known_hosts` on some

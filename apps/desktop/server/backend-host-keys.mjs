@@ -253,6 +253,28 @@ export function hostKeyVerificationFailureMessage(hostname, port) {
  * host is unreachable" and "the key changed" — so it gets its own type, and
  * the message is built here from the host label and a fixed explanation.
  */
+/**
+ * #475: host key algorithms refused outright, whether first seen, pinned or
+ * explicitly approved. DSA keys are 1024-bit and signed with SHA-1. `ssh-rsa`
+ * is deliberately not here: modern servers sign with rsa-sha2-256/512 while
+ * the key blob still says `ssh-rsa`. Mirrored by
+ * `REFUSED_HOST_KEY_ALGORITHMS` in src-tauri/src/native_host_keys.rs, and both
+ * are pinned by the shared conformance corpus.
+ */
+export const REFUSED_HOST_KEY_ALGORITHMS = Object.freeze(["ssh-dss"]);
+
+export function isRefusedHostKeyAlgorithm(algorithm) {
+  return REFUSED_HOST_KEY_ALGORITHMS.includes(String(algorithm ?? ""));
+}
+
+export function weakHostKeyMessage(hostname, port) {
+  return (
+    `${safeHostLabel(hostname, port)} offered only a DSA (ssh-dss) host key, which is too weak ` +
+    "to trust, so the connection was refused and credentials were not sent. Ask the server's " +
+    "administrator to add an Ed25519 or ECDSA host key."
+  );
+}
+
 export class HostKeyRejectedError extends Error {
   constructor(message, options) {
     super(message, options);
@@ -280,6 +302,13 @@ export function createHostKeyVerifier({ hostname, port, store }) {
   const failure = { error: null };
 
   const verify = (key, callback) => {
+    // #475: refused before the store is consulted, so a DSA key is never
+    // pinned and an existing DSA pin no longer matches anything.
+    if (isRefusedHostKeyAlgorithm(hostKeyAlgorithmName(key))) {
+      failure.error = new HostKeyRejectedError(weakHostKeyMessage(hostname, port));
+      callback(false);
+      return;
+    }
     store
       .verifyOrPin({ hostname, port, keyBlob: key })
       .then((result) => {
@@ -306,6 +335,28 @@ export function createHostKeyVerifier({ hostname, port, store }) {
       });
   };
 
+  return { verify, failure };
+}
+
+/**
+ * Build ssh2's `hostVerifier` for a host whose key the user explicitly
+ * approved. That key always wins and nothing is pinned, except that a refused
+ * algorithm (#475) is never accepted, even if it was approved earlier. Same
+ * `{ verify, failure }` shape as `createHostKeyVerifier`, so the connect path
+ * can report why.
+ */
+export function createTrustedHostKeyVerifier({ hostname, port, trustedKey }) {
+  const failure = { error: null };
+  const verify = (key) => {
+    if (!Buffer.isBuffer(key)) {
+      return false;
+    }
+    if (isRefusedHostKeyAlgorithm(hostKeyAlgorithmName(key))) {
+      failure.error = new HostKeyRejectedError(weakHostKeyMessage(hostname, port));
+      return false;
+    }
+    return key.toString("base64") === trustedKey;
+  };
   return { verify, failure };
 }
 
