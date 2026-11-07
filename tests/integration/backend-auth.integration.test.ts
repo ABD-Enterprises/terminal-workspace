@@ -260,6 +260,7 @@ describe("backend auth helper", () => {
       mkdirSync(join(dir, "backend"), { mode: 0o700 });
       writeFileSync(tokenFile(dir, 18792), `${KNOWN_TOKEN}\n`, { mode: 0o600 });
       const result = loadOrCreateBackendToken({ port: 18792, env: {}, stateDir: dir });
+      result.publish();
       expect(result.token).not.toBe(KNOWN_TOKEN);
       expect(result.source).toBe("generated");
       expect(readFileSync(tokenFile(dir, 18792), "utf8").trim()).toBe(result.token);
@@ -273,6 +274,7 @@ describe("backend auth helper", () => {
       mkdirSync(join(dir, "backend"), { mode: 0o700 });
       symlinkSync(target, tokenFile(dir, 18794));
       const result = loadOrCreateBackendToken({ port: 18794, env: {}, stateDir: dir });
+      result.publish();
       expect(readFileSync(target, "utf8")).toBe("original\n");
       expect(lstatSync(result.sidecarPath).isSymbolicLink()).toBe(false);
       expect(readFileSync(result.sidecarPath, "utf8").trim()).toBe(result.token);
@@ -312,6 +314,8 @@ describe("backend auth helper", () => {
         env: {},
         stateDir: dir,
       });
+      expect(existsSync(tokenFile(dir, 18793))).toBe(false);
+      result.publish();
       expect(result.token).toMatch(/^[0-9a-f]{64}$/);
       expect(result.source).toBe("generated");
       expect(result.sidecarPath).toBe(tokenFile(dir, 18793));
@@ -326,7 +330,9 @@ describe("backend auth helper", () => {
       const { loadOrCreateBackendToken } = await loadAuth();
       const dir = makeTmpdir();
       const first = loadOrCreateBackendToken({ port: 18797, env: {}, stateDir: dir });
+      first.publish();
       const second = loadOrCreateBackendToken({ port: 18797, env: {}, stateDir: dir });
+      second.publish();
       expect(second.token).not.toBe(first.token);
       expect(readFileSync(second.sidecarPath, "utf8").trim()).toBe(second.token);
     });

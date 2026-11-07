@@ -1699,6 +1699,8 @@ process.on("uncaughtException", (error) => {
 });
 
 let shuttingDown = false;
+let tokenFilePublished = false;
+
 function gracefulShutdown(signal) {
   if (shuttingDown) {
     return;
@@ -1710,7 +1712,9 @@ function gracefulShutdown(signal) {
     websocketServer,
     sessions,
     forwards,
-    sidecarPath: backendAuth.sidecarPath,
+    // Only a file this process wrote: before listen() succeeds, the file at this
+    // path (if any) belongs to another backend on the same port.
+    sidecarPath: tokenFilePublished ? backendAuth.sidecarPath : null,
   });
   process.exit(0);
 }
@@ -1731,5 +1735,13 @@ server.on("error", (error) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
+  // #474: published only now that this process owns the port.
+  try {
+    backendAuth.publish();
+    tokenFilePublished = backendAuth.sidecarPath !== null;
+  } catch (error) {
+    console.error(`[termsnip] backend not started: could not write the token file: ${error.message}`);
+    process.exit(1);
+  }
   console.log(`Terminal Workspace backend listening on http://127.0.0.1:${port}`);
 });

@@ -149,30 +149,36 @@ export function isRequestAuthorized({ headers, allowedOrigins, expectedToken }) 
  * On startup, resolve the per-launch backend auth token:
  *   1. `TERMSNIP_BACKEND_TOKEN` env var (if non-empty and >= MIN_TOKEN_LENGTH).
  *      Nothing is written, and `sidecarPath` is null.
- *   2. Otherwise a fresh 32-byte random hex token, written to
- *      `<stateDir>/backend/backend.<port>.token` with mode 0600 so a developer
- *      can call the backend by hand. The path is logged at startup.
+ *   2. Otherwise a fresh 32-byte random hex token. Calling the returned
+ *      `publish()` writes it to `<stateDir>/backend/backend.<port>.token` with
+ *      mode 0600 so a developer can call the backend by hand. The caller
+ *      publishes only once it owns the port, so a second launch that fails to
+ *      bind never replaces the running backend's file.
  *
  * #474: an existing file is never read back. The token used to live at a
  * predictable path in the temp directory and a pre-existing file there was
  * adopted, so any process able to write that path could choose the token.
  * Nothing in the app reads this file; it is written only for people.
  *
- * Throws, which stops startup, when the directory is not private or the file
- * cannot be created exclusively.
+ * Throws, which stops startup, when the directory is not private; `publish()`
+ * throws when the file cannot be created exclusively.
  */
 export function loadOrCreateBackendToken({ port, env, stateDir }) {
   const fromEnv = env?.TERMSNIP_BACKEND_TOKEN?.trim();
   if (fromEnv && fromEnv.length >= MIN_TOKEN_LENGTH) {
-    return { token: fromEnv, source: "env", sidecarPath: null };
+    return { token: fromEnv, source: "env", sidecarPath: null, publish: () => {} };
   }
 
   const directory = join(stateDir, "backend");
   ensurePrivateDirectory(directory);
   const sidecarPath = join(directory, `backend.${port}.token`);
   const token = randomBytes(32).toString("hex");
-  writeTokenFileExclusively(sidecarPath, `${token}\n`);
-  return { token, source: "generated", sidecarPath };
+  return {
+    token,
+    source: "generated",
+    sidecarPath,
+    publish: () => writeTokenFileExclusively(sidecarPath, `${token}\n`),
+  };
 }
 
 /**

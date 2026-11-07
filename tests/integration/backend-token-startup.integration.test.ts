@@ -96,4 +96,27 @@ describe("backend started with no token in the environment (#474)", () => {
     expect((await status(port, first)).status).toBe(403);
     expect((await status(port, second)).status).toBe(200);
   }, 60_000);
+
+  it("a second launch on the same port fails without touching the running backend's file", async () => {
+    const port = await freePort();
+    const file = join(stateDir, "backend", `backend.${port}.token`);
+    backend = await start(port);
+    const running = readFileSync(file, "utf8").trim();
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      TERMSNIP_BACKEND_PORT: String(port),
+      TERMSNIP_STATE_DIR: stateDir,
+    };
+    delete env.TERMSNIP_BACKEND_TOKEN;
+    const second = spawn(process.execPath, ["apps/desktop/server/backend.mjs"], {
+      env,
+      stdio: "ignore",
+    });
+    const exitCode = await new Promise((resolve) => second.once("exit", resolve));
+    expect(exitCode).toBe(1);
+
+    expect(readFileSync(file, "utf8").trim()).toBe(running);
+    expect((await status(port, running)).status).toBe(200);
+  }, 60_000);
 });
