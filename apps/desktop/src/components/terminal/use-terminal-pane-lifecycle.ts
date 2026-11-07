@@ -13,7 +13,6 @@ import {
   attachTerminalPaneConnectionControls,
   initializeTerminalPaneTransport,
 } from "./terminal-pane-connection-controls";
-import { useAppStore } from "../../store/app-store";
 import {
   attachTerminalPaneInputWiring,
   type TerminalContextMenuPosition,
@@ -167,8 +166,8 @@ export function useTerminalPaneLifecycle({
       fontSize: 13,
       scrollback: 10000,
       theme: initialPaletteRef.current,
-      // #510: a terminal created after the setting changed starts with it.
-      screenReaderMode: useAppStore.getState().terminalScreenReaderMode,
+      // #510: screen reader mode is applied by useTerminalScreenReaderMode in
+      // TerminalPane, which knows whether this pane is the active one.
     });
     const fitAddon = new FitAddon();
     let fitFrameId: number | null = null;

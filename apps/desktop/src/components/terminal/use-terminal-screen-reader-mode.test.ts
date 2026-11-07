@@ -9,9 +9,9 @@ describe("useTerminalScreenReaderMode (#510)", () => {
     useAppStore.setState({ terminalScreenReaderMode: false });
   });
 
-  it("applies the setting to an already-open terminal, both ways", () => {
+  it("applies the setting to an already-open active terminal, both ways", () => {
     const terminalRef = { current: { options: { screenReaderMode: false } } };
-    renderHook(() => useTerminalScreenReaderMode(terminalRef as never));
+    renderHook(() => useTerminalScreenReaderMode(terminalRef as never, true));
     expect(terminalRef.current.options.screenReaderMode).toBe(false);
 
     act(() => useAppStore.getState().setTerminalScreenReaderMode(true));
@@ -21,9 +21,23 @@ describe("useTerminalScreenReaderMode (#510)", () => {
     expect(terminalRef.current.options.screenReaderMode).toBe(false);
   });
 
+  it("keeps a background pane quiet and follows the pane as it becomes active", () => {
+    useAppStore.setState({ terminalScreenReaderMode: true });
+    const terminalRef = { current: { options: { screenReaderMode: true } } };
+    const { rerender } = renderHook(
+      ({ active }: { active: boolean }) => useTerminalScreenReaderMode(terminalRef as never, active),
+      { initialProps: { active: false } }
+    );
+    expect(terminalRef.current.options.screenReaderMode).toBe(false);
+    rerender({ active: true });
+    expect(terminalRef.current.options.screenReaderMode).toBe(true);
+    rerender({ active: false });
+    expect(terminalRef.current.options.screenReaderMode).toBe(false);
+  });
+
   it("does nothing before the terminal exists", () => {
     const terminalRef = { current: null };
     useAppStore.setState({ terminalScreenReaderMode: true });
-    expect(() => renderHook(() => useTerminalScreenReaderMode(terminalRef))).not.toThrow();
+    expect(() => renderHook(() => useTerminalScreenReaderMode(terminalRef, true))).not.toThrow();
   });
 });
