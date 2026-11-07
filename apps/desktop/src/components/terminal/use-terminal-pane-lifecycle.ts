@@ -13,7 +13,10 @@ import {
   attachTerminalPaneConnectionControls,
   initializeTerminalPaneTransport,
 } from "./terminal-pane-connection-controls";
-import { attachTerminalPaneInputWiring } from "./terminal-pane-input-wiring";
+import {
+  attachTerminalPaneInputWiring,
+  type TerminalContextMenuPosition,
+} from "./terminal-pane-input-wiring";
 import { createTerminalPaneMockSession } from "./terminal-pane-mock-session";
 import { createTerminalPaneNativeSessionController } from "./terminal-pane-native-session";
 import { type RuntimeStatusMessage } from "./use-terminal-pane-runtime-status";
@@ -30,6 +33,10 @@ export interface TerminalPaneLifecycleOptions {
   authMethod: HostRecord["authMethod"];
   backendSessionIdRef: MutableRefObject<string | undefined>;
   commandBufferRef: MutableRefObject<string>;
+  /** #507: set by the pane; the lifecycle calls through it. */
+  clipboardNoticeRef: MutableRefObject<(message: string) => void>;
+  /** #507: set by the pane; the lifecycle calls through it. */
+  contextMenuRequestRef: MutableRefObject<(position: TerminalContextMenuPosition) => void>;
   connectedOnceRef: MutableRefObject<boolean>;
   connectingRef: MutableRefObject<boolean>;
   connectionStateRef: MutableRefObject<SessionConnectionState>;
@@ -86,7 +93,9 @@ export function useTerminalPaneLifecycle({
   appendCommandOutput,
   authMethod,
   backendSessionIdRef,
+  clipboardNoticeRef,
   commandBufferRef,
+  contextMenuRequestRef,
   connectedOnceRef,
   connectingRef,
   connectionStateRef,
@@ -331,6 +340,8 @@ export function useTerminalPaneLifecycle({
       commandBufferRef,
       connectionStateRef,
       container,
+      notifyClipboard: (message) => clipboardNoticeRef.current(message),
+      requestContextMenu: (position) => contextMenuRequestRef.current(position),
       runMockCommand,
       setSearchOpen,
       socketRef,

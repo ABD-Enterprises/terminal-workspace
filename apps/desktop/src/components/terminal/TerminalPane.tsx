@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "xterm/css/xterm.css";
 import { detectSystemColorScheme, resolveTerminalTheme, type TerminalThemeMode } from "../../lib/terminal-themes";
 import { cn, formatHostAddress } from "../../lib/utils";
@@ -6,7 +6,9 @@ import { useAppStore } from "../../store/app-store";
 import { useSessionsStore } from "../../store/sessions-store";
 import { type HostRecord } from "../../types/host";
 import { formatSessionConnectionState, type SessionPane } from "../../types/session";
+import { copyTerminalSelection, pasteIntoTerminal, type TerminalContextMenuPosition } from "./terminal-pane-input-wiring";
 import { terminalPaneStateStyles } from "./terminal-pane-state";
+import { TerminalContextMenu } from "./TerminalContextMenu";
 import { useTerminalPaneSession } from "./use-terminal-pane-session";
 
 interface TerminalPaneProps {
@@ -39,7 +41,48 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     () => resolveTerminalTheme(terminalThemeName, systemColorScheme).entry.palette,
     [terminalThemeName, systemColorScheme]
   );
-  const { advanceSearchMatch, closeSearch, containerRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, toggleConnectionRef } = useTerminalPaneSession({ host, pane, resolvedTerminalPalette });
+  const { advanceSearchMatch, clipboardNoticeRef, closeSearch, containerRef, contextMenuRequestRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, terminalRef, toggleConnectionRef } = useTerminalPaneSession({ host, pane, resolvedTerminalPalette });
+
+  // #507: right-click opens this menu instead of pasting into the shell, and
+  // clipboard outcomes are shown rather than swallowed.
+  const [contextMenu, setContextMenu] = useState<{
+    position: TerminalContextMenuPosition;
+    hasSelection: boolean;
+  } | null>(null);
+  // Each outcome gets its own id, so a repeated identical message (two copies
+  // in a row) still restarts the 2.5-second timer instead of inheriting the
+  // first one's.
+  const [clipboardNotice, setClipboardNoticeState] = useState<{ id: number; text: string } | null>(
+    null
+  );
+  const showClipboardNotice = useCallback((text: string) => {
+    setClipboardNoticeState((current) => ({ id: (current?.id ?? 0) + 1, text }));
+  }, []);
+
+  useEffect(() => {
+    contextMenuRequestRef.current = (position) =>
+      setContextMenu({ position, hasSelection: Boolean(terminalRef.current?.getSelection()) });
+    clipboardNoticeRef.current = showClipboardNotice;
+  }, [clipboardNoticeRef, contextMenuRequestRef, showClipboardNotice, terminalRef]);
+
+  const clipboardNoticeId = clipboardNotice?.id;
+  useEffect(() => {
+    if (clipboardNoticeId === undefined) {
+      return;
+    }
+    const timer = window.setTimeout(() => setClipboardNoticeState(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [clipboardNoticeId]);
+
+  const closeContextMenu = useCallback(
+    ({ restoreFocus }: { restoreFocus: boolean }) => {
+      setContextMenu(null);
+      if (restoreFocus) {
+        terminalRef.current?.focus();
+      }
+    },
+    [terminalRef]
+  );
 
   return (
         <section
@@ -140,6 +183,28 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           ) : null}
           <div className="relative min-h-0 flex-1">
             <div ref={containerRef} className="absolute inset-0 px-3 py-3" />
+            <TerminalContextMenu
+              position={contextMenu?.position ?? null}
+              hasSelection={contextMenu?.hasSelection ?? false}
+              onCopy={() => {
+                if (terminalRef.current) copyTerminalSelection(terminalRef.current, showClipboardNotice);
+              }}
+              onPaste={() => {
+                if (terminalRef.current) pasteIntoTerminal(terminalRef.current, showClipboardNotice);
+              }}
+              onClear={() => terminalRef.current?.clear()}
+              onClose={closeContextMenu}
+            />
+            <p
+              role="status"
+              aria-live="polite"
+              className={cn(
+                "pointer-events-none absolute bottom-3 right-3 z-10 rounded-xl border border-slate-700 bg-slate-950/95 px-3 py-1.5 text-xs text-slate-200 shadow-lg transition-opacity",
+                clipboardNotice ? "opacity-100" : "opacity-0"
+              )}
+            >
+              {clipboardNotice?.text ?? ""}
+            </p>
             {searchOpen ? (
               <div
                 className="absolute right-3 top-3 z-10 flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950/95 px-3 py-2 shadow-lg shadow-slate-950/40 backdrop-blur"
