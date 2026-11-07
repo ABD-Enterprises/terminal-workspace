@@ -49,21 +49,30 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     position: TerminalContextMenuPosition;
     hasSelection: boolean;
   } | null>(null);
-  const [clipboardNotice, setClipboardNotice] = useState<string | null>(null);
+  // Each outcome gets its own id, so a repeated identical message (two copies
+  // in a row) still restarts the 2.5-second timer instead of inheriting the
+  // first one's.
+  const [clipboardNotice, setClipboardNoticeState] = useState<{ id: number; text: string } | null>(
+    null
+  );
+  const showClipboardNotice = useCallback((text: string) => {
+    setClipboardNoticeState((current) => ({ id: (current?.id ?? 0) + 1, text }));
+  }, []);
 
   useEffect(() => {
     contextMenuRequestRef.current = (position) =>
       setContextMenu({ position, hasSelection: Boolean(terminalRef.current?.getSelection()) });
-    clipboardNoticeRef.current = setClipboardNotice;
-  }, [clipboardNoticeRef, contextMenuRequestRef, terminalRef]);
+    clipboardNoticeRef.current = showClipboardNotice;
+  }, [clipboardNoticeRef, contextMenuRequestRef, showClipboardNotice, terminalRef]);
 
+  const clipboardNoticeId = clipboardNotice?.id;
   useEffect(() => {
-    if (!clipboardNotice) {
+    if (clipboardNoticeId === undefined) {
       return;
     }
-    const timer = window.setTimeout(() => setClipboardNotice(null), 2500);
+    const timer = window.setTimeout(() => setClipboardNoticeState(null), 2500);
     return () => window.clearTimeout(timer);
-  }, [clipboardNotice]);
+  }, [clipboardNoticeId]);
 
   const closeContextMenu = useCallback(
     ({ restoreFocus }: { restoreFocus: boolean }) => {
@@ -178,10 +187,10 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
               position={contextMenu?.position ?? null}
               hasSelection={contextMenu?.hasSelection ?? false}
               onCopy={() => {
-                if (terminalRef.current) copyTerminalSelection(terminalRef.current, setClipboardNotice);
+                if (terminalRef.current) copyTerminalSelection(terminalRef.current, showClipboardNotice);
               }}
               onPaste={() => {
-                if (terminalRef.current) pasteIntoTerminal(terminalRef.current, setClipboardNotice);
+                if (terminalRef.current) pasteIntoTerminal(terminalRef.current, showClipboardNotice);
               }}
               onClear={() => terminalRef.current?.clear()}
               onClose={closeContextMenu}
@@ -194,7 +203,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
                 clipboardNotice ? "opacity-100" : "opacity-0"
               )}
             >
-              {clipboardNotice ?? ""}
+              {clipboardNotice?.text ?? ""}
             </p>
             {searchOpen ? (
               <div
