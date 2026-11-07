@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TerminalContextMenu } from "./TerminalContextMenu";
+import { clampMenuPosition, TerminalContextMenu } from "./TerminalContextMenu";
 
 function renderMenu(hasSelection = true) {
   const handlers = {
@@ -83,5 +83,53 @@ describe("TerminalContextMenu (#507)", () => {
     expect(handlers.onPaste).not.toHaveBeenCalled();
     expect(handlers.onCopy).not.toHaveBeenCalled();
     expect(handlers.onClear).not.toHaveBeenCalled();
+  });
+
+  it("stays inside the window when opened near the bottom-right corner", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 160,
+      height: 100,
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 160,
+      bottom: 100,
+      toJSON: () => ({}),
+    } as DOMRect);
+    render(
+      <TerminalContextMenu
+        position={{ x: window.innerWidth - 5, y: window.innerHeight - 5 }}
+        hasSelection
+        onCopy={vi.fn()}
+        onPaste={vi.fn()}
+        onClear={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    const menu = screen.getByRole("menu");
+    expect(parseFloat(menu.style.left)).toBeLessThanOrEqual(window.innerWidth - 160);
+    expect(parseFloat(menu.style.top)).toBeLessThanOrEqual(window.innerHeight - 100);
+    vi.restoreAllMocks();
+  });
+});
+
+describe("clampMenuPosition", () => {
+  const viewport = { width: 800, height: 600 };
+  const size = { width: 160, height: 100 };
+
+  it("leaves a position with room unchanged", () => {
+    expect(clampMenuPosition({ x: 100, y: 120 }, size, viewport)).toEqual({ x: 100, y: 120 });
+  });
+
+  it("pulls the menu back from the right and bottom edges", () => {
+    expect(clampMenuPosition({ x: 790, y: 590 }, size, viewport)).toEqual({ x: 636, y: 496 });
+  });
+
+  it("never goes past the top-left margin, even in a tiny window", () => {
+    expect(clampMenuPosition({ x: 10, y: 10 }, size, { width: 100, height: 80 })).toEqual({
+      x: 4,
+      y: 4,
+    });
   });
 });

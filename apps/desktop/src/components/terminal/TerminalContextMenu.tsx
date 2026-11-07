@@ -8,7 +8,13 @@
 // Space picks one, Escape and an outside click close the menu, and focus
 // returns to the terminal when it closes.
 
-import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { type TerminalContextMenuPosition } from "./terminal-pane-input-wiring";
 
 interface TerminalContextMenuProps {
@@ -18,6 +24,26 @@ interface TerminalContextMenuProps {
   onPaste: () => void;
   onClear: () => void;
   onClose: () => void;
+}
+
+/** Gap kept between the menu and the window edge. */
+const VIEWPORT_MARGIN = 4;
+
+/**
+ * Keep the menu inside the window: a right-click near the bottom or right edge
+ * would otherwise place its lower or right items off-screen.
+ */
+export function clampMenuPosition(
+  position: TerminalContextMenuPosition,
+  size: { width: number; height: number },
+  viewport: { width: number; height: number }
+): TerminalContextMenuPosition {
+  const maxX = viewport.width - size.width - VIEWPORT_MARGIN;
+  const maxY = viewport.height - size.height - VIEWPORT_MARGIN;
+  return {
+    x: Math.max(VIEWPORT_MARGIN, Math.min(position.x, maxX)),
+    y: Math.max(VIEWPORT_MARGIN, Math.min(position.y, maxY)),
+  };
 }
 
 interface MenuItem {
@@ -35,6 +61,23 @@ export function TerminalContextMenu({
   onClose,
 }: TerminalContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const [placed, setPlaced] = useState<TerminalContextMenuPosition | null>(null);
+
+  // Measure before paint and move the menu inside the window if needed.
+  useLayoutEffect(() => {
+    if (!position || !menuRef.current) {
+      setPlaced(null);
+      return;
+    }
+    const rect = menuRef.current.getBoundingClientRect();
+    setPlaced(
+      clampMenuPosition(
+        position,
+        { width: rect.width, height: rect.height },
+        { width: window.innerWidth, height: window.innerHeight }
+      )
+    );
+  }, [position]);
 
   // Focus the first enabled item when the menu opens.
   useEffect(() => {
@@ -116,7 +159,7 @@ export function TerminalContextMenu({
       aria-label="Terminal actions"
       onKeyDown={onKeyDown}
       className="fixed z-50 min-w-[160px] rounded-2xl border border-slate-700 bg-slate-900/95 p-1 shadow-2xl backdrop-blur"
-      style={{ left: position.x, top: position.y }}
+      style={{ left: (placed ?? position).x, top: (placed ?? position).y }}
     >
       {items.map((item) => (
         <button
