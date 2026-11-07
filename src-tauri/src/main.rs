@@ -4950,6 +4950,14 @@ fn main() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
+            // #472: let an in-flight save finish before the process exits.
+            // Exit follows every quit path, including app_handle.exit below.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(store) = app_handle.try_state::<persistence::PersistenceStore>() {
+                    store.close_blocking();
+                }
+                return;
+            }
             if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
                 let exit_guard = app_handle.state::<AppExitDrainGuard>();
                 if exit_guard.in_progress.swap(true, Ordering::AcqRel) {

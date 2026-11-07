@@ -127,6 +127,15 @@ impl PersistenceStore {
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
+
+    /// Close the pool, waiting for any operation already holding a connection
+    /// to finish, so a write that started before quit is committed rather than
+    /// cut off when the process exits. Later calls fail with `PoolClosed`.
+    /// The SQL plugin does the same for its own pools on `RunEvent::Exit`;
+    /// this pool is the app's, so the app closes it.
+    pub fn close_blocking(&self) {
+        tauri::async_runtime::block_on(self.pool.close());
+    }
 }
 
 fn statements_for(store: &str) -> Result<&'static StoreStatements, String> {
@@ -315,6 +324,52 @@ mod tests {
         })
         .join();
         assert!(opened.is_ok(), "open_lazy panicked outside a Tokio context");
+    }
+
+    /// #472: quitting must not cut off a save that is already running. Close
+    /// has to wait for the connection it holds, and the save must be on disk
+    /// afterwards.
+    #[test]
+    fn closing_waits_for_an_in_flight_save_and_keeps_it() {
+        let root = TempRoot::new();
+        let store = std::sync::Arc::new(tauri::async_runtime::block_on(migrated_store(&root)));
+
+        let started = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let writer = {
+            let store = store.clone();
+            let started = started.clone();
+            std::thread::spawn(move || {
+                tauri::async_runtime::block_on(async move {
+                    let mut connection = store.pool().acquire().await.expect("connection");
+                    started.wait();
+                    // Hold the connection, as a slow save would.
+                    std::thread::sleep(Duration::from_millis(300));
+                    sqlx::query(
+                        "INSERT INTO hosts_store (id, payload, updated_at) \
+                         VALUES ('state', 'saved-before-quit', datetime('now'))",
+                    )
+                    .execute(&mut *connection)
+                    .await
+                    .expect("in-flight save");
+                })
+            })
+        };
+
+        started.wait();
+        let begun = std::time::Instant::now();
+        store.close_blocking();
+        assert!(
+            begun.elapsed() >= Duration::from_millis(200),
+            "close returned before the in-flight save released its connection"
+        );
+        writer.join().expect("writer thread");
+        assert!(store.pool().is_closed());
+
+        let reopened = PersistenceStore::open_lazy(&root.0.join("terminalworkspace.db"));
+        let saved =
+            tauri::async_runtime::block_on(read_store(reopened.pool(), "terminal-workspace-hosts"))
+                .expect("read after reopen");
+        assert_eq!(saved.as_deref(), Some("saved-before-quit"));
     }
 
     #[tokio::test]
