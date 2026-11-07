@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -17,6 +18,18 @@ const capabilitiesPath = fileURLToPath(
   new URL("../../src-tauri/capabilities/default.json", import.meta.url),
 );
 
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+
+function listSourceFiles(directory: string): string[] {
+  return readdirSync(directory).flatMap((entry) => {
+    const path = join(directory, entry);
+    if (statSync(path).isDirectory()) {
+      return listSourceFiles(path);
+    }
+    return /\.(ts|tsx)$/.test(entry) ? [path] : [];
+  });
+}
+
 type Capability = {
   identifier: string;
   windows: string[];
@@ -30,9 +43,10 @@ function loadDefaultCapability(): Capability {
 describe("src-tauri/capabilities/default.json", () => {
   // #236: the table is now the COMPLETE census of ACL-controlled Tauri commands
   // this renderer can reach. Verified by scanning apps/desktop/src for every
-  // @tauri-apps import: only four modules are reachable (api/event and
-  // api/window via dynamic import, plugin-log, plugin-sql), and only these seven
-  // distinct IPC calls exist. Custom `terminal_workspace_*` commands are NOT
+  // @tauri-apps import: only three modules are reachable (api/event and
+  // api/window via dynamic import, and plugin-log), and only these distinct IPC
+  // calls exist. #472: persistence no longer uses plugin-sql from the renderer;
+  // it calls typed terminal_workspace_persistence_* commands instead. Custom `terminal_workspace_*` commands are NOT
   // ACL-gated by this file — no capability grants them today and the app works.
   const REQUIRED: Array<{ command: string; permission: string; callSite: string }> = [
     {
@@ -58,21 +72,6 @@ describe("src-tauri/capabilities/default.json", () => {
     {
       command: "log.warn/error",
       permission: "log:default",
-      callSite: "apps/desktop/src/lib/persistence.ts",
-    },
-    {
-      command: "Database.load",
-      permission: "sql:allow-load",
-      callSite: "apps/desktop/src/lib/persistence.ts",
-    },
-    {
-      command: "db.select",
-      permission: "sql:allow-select",
-      callSite: "apps/desktop/src/lib/persistence.ts",
-    },
-    {
-      command: "db.execute",
-      permission: "sql:allow-execute",
       callSite: "apps/desktop/src/lib/persistence.ts",
     },
   ];
@@ -102,6 +101,22 @@ describe("src-tauri/capabilities/default.json", () => {
         "call site to the table, or drop the permission — bundled sets like core:default pull in " +
         "a large surface this app never uses.",
     ).toEqual(expected);
+  });
+
+  it("#472: grants the renderer no SQL plugin permission at all", () => {
+    // Any sql: permission hands the renderer a database path or raw SQL
+    // (load, select, execute), which reaches files outside the app directory
+    // through ATTACH DATABASE or VACUUM INTO.
+    const { permissions } = loadDefaultCapability();
+    expect(permissions.filter((permission) => permission.startsWith("sql:"))).toEqual([]);
+  });
+
+  it("#472: the renderer never imports the SQL plugin", () => {
+    const sourceRoot = join(repoRoot, "apps/desktop/src");
+    const offenders = listSourceFiles(sourceRoot).filter((file) =>
+      readFileSync(file, "utf8").includes("@tauri-apps/plugin-sql")
+    );
+    expect(offenders).toEqual([]);
   });
 
   it("still targets the main window", () => {

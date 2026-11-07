@@ -37,6 +37,7 @@ mod ipc_types;
 mod keychain_support;
 mod native_host_keys;
 mod native_transport;
+mod persistence;
 mod sftp;
 
 use crate::native_host_keys::{HostKeyVerdict, NativeHostKeyStore, SharedNativeHostKeyStore};
@@ -3093,6 +3094,60 @@ async fn terminal_workspace_execute_snippet_on_hosts(
         .map_err(|error| error.to_string())?
 }
 
+// #472: the renderer's only route to SQLite. Fixed tables and fixed statements,
+// so it can no longer name a database file or run SQL of its own.
+#[tauri::command]
+async fn terminal_workspace_persistence_read_store(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+    request: persistence::StoreRequest,
+) -> Result<Option<String>, String> {
+    let _in_flight = state.in_flight().await;
+    persistence::read_store(state.pool(), &request.store).await
+}
+
+#[tauri::command]
+async fn terminal_workspace_persistence_write_store(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+    request: persistence::StoreWriteRequest,
+) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
+    persistence::write_store(state.pool(), &request.store, &request.payload).await
+}
+
+#[tauri::command]
+async fn terminal_workspace_persistence_remove_store(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+    request: persistence::StoreRequest,
+) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
+    persistence::remove_store(state.pool(), &request.store).await
+}
+
+#[tauri::command]
+async fn terminal_workspace_persistence_read_deletions(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+) -> Result<Vec<persistence::DeletionRecord>, String> {
+    let _in_flight = state.in_flight().await;
+    persistence::read_deletions(state.pool()).await
+}
+
+#[tauri::command]
+async fn terminal_workspace_persistence_replace_deletions(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+    request: persistence::DeletionsReplaceRequest,
+) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
+    persistence::replace_deletions(state.pool(), &request.records).await
+}
+
+#[tauri::command]
+async fn terminal_workspace_persistence_clear_deletions(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
+    persistence::clear_deletions(state.pool()).await
+}
+
 #[tauri::command]
 async fn terminal_workspace_load_host_secrets(
     request: HostSecretsRequest,
@@ -4825,6 +4880,16 @@ fn main() {
             native_host_keys::publish_durable_known_hosts_path(host_key_store.path().to_path_buf());
             app.manage(SharedNativeHostKeyStore::new(host_key_store));
 
+            // #472: the renderer's typed persistence commands. The SQL plugin's
+            // setup has already created and migrated this file (plugins set up
+            // before this closure runs); the pool connects on first use.
+            let config_dir = app
+                .path()
+                .app_config_dir()
+                .map_err(|error| format!("could not resolve the app config directory: {error}"))?;
+            let database_path = terminal_workspace_database_path(&config_dir)?;
+            app.manage(persistence::PersistenceStore::open_lazy(&database_path));
+
             let handle = app.handle();
             let menu = build_app_menu(handle)?;
             app.set_menu(menu)?;
@@ -4858,6 +4923,12 @@ fn main() {
             terminal_workspace_create_forward,
             terminal_workspace_delete_forward,
             terminal_workspace_execute_snippet_on_hosts,
+            terminal_workspace_persistence_read_store,
+            terminal_workspace_persistence_write_store,
+            terminal_workspace_persistence_remove_store,
+            terminal_workspace_persistence_read_deletions,
+            terminal_workspace_persistence_replace_deletions,
+            terminal_workspace_persistence_clear_deletions,
             terminal_workspace_load_host_secrets,
             terminal_workspace_store_host_secrets,
             terminal_workspace_clear_host_secrets,
@@ -4885,6 +4956,14 @@ fn main() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
+            // #472: let an in-flight save finish before the process exits.
+            // Exit follows every quit path, including app_handle.exit below.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(store) = app_handle.try_state::<persistence::PersistenceStore>() {
+                    store.close_blocking();
+                }
+                return;
+            }
             if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
                 let exit_guard = app_handle.state::<AppExitDrainGuard>();
                 if exit_guard.in_progress.swap(true, Ordering::AcqRel) {
