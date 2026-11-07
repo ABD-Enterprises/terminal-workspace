@@ -177,3 +177,17 @@ describe("#230: the surrounding contract is unchanged", () => {
     expect(source).not.toMatch(/^function sendJson\(/m);
   });
 });
+
+describe("#473: authMethod allowlist contract", () => {
+  it("enforces an explicit allowlist for authMethod in createConnectConfig", async () => {
+    const source = await readFile("apps/desktop/server/backend.mjs", "utf8");
+    expect(source).toContain('const ALLOWED_AUTH_METHODS = new Set(["password", "privateKey", "agent", "none"]);');
+    expect(source).toContain("!ALLOWED_AUTH_METHODS.has(host.authMethod)");
+    expect(source).toContain("Invalid or unsupported authMethod:");
+  });
+
+  it("gates agent forwarding strictly to authMethod === 'agent'", async () => {
+    const source = await readFile("apps/desktop/server/backend.mjs", "utf8");
+    expect(source).toContain('if (host.authMethod === "agent" && host.agentForwarding && process.env.SSH_AUTH_SOCK)');
+  });
+});

@@ -291,6 +291,24 @@ async function createConnectConfig(host) {
     );
   }
 
+  // SEC-4: validate authMethod against an explicit allowlist (#473).
+  const ALLOWED_AUTH_METHODS = new Set(["password", "privateKey", "agent", "none"]);
+  if (!host?.authMethod || !ALLOWED_AUTH_METHODS.has(host.authMethod)) {
+    throw new Error(`Invalid or unsupported authMethod: ${host?.authMethod}`);
+  }
+
+  if (host.authMethod === "none") {
+    throw new Error("Host is configured without SSH auth");
+  }
+
+  if (host.authMethod === "password" && !host.password) {
+    throw new Error("Password auth selected but no password provided");
+  }
+
+  if (host.authMethod === "privateKey" && !host.privateKeyPath) {
+    throw new Error("Private key auth selected but no key path provided");
+  }
+
   const connectConfig = {
     host: host.hostname,
     port: host.port,
@@ -330,7 +348,7 @@ async function createConnectConfig(host) {
     hostKeyFailure = verifier.failure;
   }
 
-  if (host.agentForwarding && process.env.SSH_AUTH_SOCK) {
+  if (host.authMethod === "agent" && host.agentForwarding && process.env.SSH_AUTH_SOCK) {
     connectConfig.agent = process.env.SSH_AUTH_SOCK;
     connectConfig.agentForward = true;
   }
@@ -387,6 +405,10 @@ async function createConnectConfig(host) {
         passphraseSecret.scrub();
         connectConfig.passphrase = Buffer.alloc(0);
       });
+    }
+  } else if (host.authMethod === "agent") {
+    if (process.env.SSH_AUTH_SOCK) {
+      connectConfig.agent = process.env.SSH_AUTH_SOCK;
     }
   }
 
@@ -1267,6 +1289,17 @@ const server = createServer(async (request, response) => {
         return;
       }
 
+      const ALLOWED_AUTH_METHODS = new Set(["password", "privateKey", "agent", "none"]);
+      if (!host.authMethod || !ALLOWED_AUTH_METHODS.has(host.authMethod)) {
+        sendJson(response, 400, { error: `Invalid or unsupported authMethod: ${host.authMethod}` });
+        return;
+      }
+
+      if (host.authMethod === "none") {
+        sendJson(response, 400, { error: "Host is configured without SSH auth" });
+        return;
+      }
+
       if (host.authMethod === "password" && !host.password) {
         sendJson(response, 400, { error: "Password auth selected but no password provided" });
         return;
@@ -1274,11 +1307,6 @@ const server = createServer(async (request, response) => {
 
       if (host.authMethod === "privateKey" && !host.privateKeyPath) {
         sendJson(response, 400, { error: "Private key auth selected but no key path provided" });
-        return;
-      }
-
-      if (host.authMethod === "none") {
-        sendJson(response, 400, { error: "Host is configured without SSH auth" });
         return;
       }
 

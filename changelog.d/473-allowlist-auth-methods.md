@@ -1,0 +1,1 @@
+- [SECURITY] Validate authMethod against explicit allowlist and gate agent forwarding (#473)
