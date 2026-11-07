@@ -1,0 +1,1 @@
+- [SECURITY] Stop a web page driving the browser-mode backend: POST routes require a JSON content type and preflight requests are always refused (#470)

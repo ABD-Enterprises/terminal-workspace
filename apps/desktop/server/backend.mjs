@@ -54,6 +54,7 @@ import {
 import { SecretBuffer } from "./secrets.mjs";
 import {
   bufferDetachedOutput,
+  isJsonContentType,
   readJson,
   SFTP_UPLOAD_MAX_BYTES,
 } from "./backend-buffers.mjs";
@@ -1236,6 +1237,14 @@ const server = createServer(async (request, response) => {
 
   const url = new URL(request.url, "http://localhost");
 
+  // #470: a preflight always fails, and it stays that way even if a CORS header
+  // is ever added by mistake elsewhere. Same-origin clients never send one.
+  if (request.method === "OPTIONS") {
+    response.writeHead(405, { Allow: "GET, POST, DELETE" });
+    response.end();
+    return;
+  }
+
   // Auth gate: reject every request whose Origin is not in the allowlist AND
   // does not present a valid per-launch token. See parity-and-hardening
   // review §3.S-4 / §3.S-8. Static asset paths are also gated — the browser
@@ -1249,6 +1258,14 @@ const server = createServer(async (request, response) => {
   });
   if (!authDecision.ok) {
     denyUnauthorized(response, authDecision);
+    return;
+  }
+
+  // #470: an allowed Origin alone must not be enough. Checked here rather than
+  // in readJson so no route's error handling can change the status and a new
+  // route cannot forget it. The body is left unread.
+  if (request.method === "POST" && !isJsonContentType(request.headers["content-type"])) {
+    sendJson(response, 415, { error: "Content-Type must be application/json" });
     return;
   }
 
