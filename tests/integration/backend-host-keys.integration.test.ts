@@ -540,6 +540,62 @@ describe("backend SSH host-key trust", () => {
     });
   });
 
+  describe("#475: host key scans", () => {
+    const ed = `example.internal ssh-ed25519 ${keyBlob("ssh-ed25519").toString("base64")}`;
+    const dsa = `example.internal ssh-dss ${keyBlob("ssh-dss").toString("base64")}`;
+
+    it("never offers a DSA key for approval", async () => {
+      const { parseKeyscanOutput } = await load();
+      const entries = parseKeyscanOutput(`# comment\n${dsa}\n${ed}\n`, {
+        hostname: "example.internal",
+        port: 22,
+      });
+      expect(entries.map((entry: { algorithm: string }) => entry.algorithm)).toEqual([
+        "ssh-ed25519",
+      ]);
+    });
+
+    it("says why when a host offers only DSA, in a message the HTTP layer relays", async () => {
+      const { parseKeyscanOutput, HostKeyRejectedError } = await load();
+      const { respondError } = await import("../../apps/desktop/server/backend-responses.mjs");
+      let thrown: unknown;
+      try {
+        parseKeyscanOutput(`${dsa}\n`, { hostname: "example.internal", port: 22 });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(HostKeyRejectedError);
+
+      let status = 0;
+      let body = "";
+      respondError(
+        {
+          writeHead: (code: number) => {
+            status = code;
+          },
+          end: (text: string) => {
+            body = text;
+          },
+        },
+        thrown
+      );
+      expect(status).toBe(403);
+      expect(JSON.parse(body).error).toContain("too weak to trust");
+    });
+
+    it("keeps the plain error when the scan returned nothing at all", async () => {
+      const { parseKeyscanOutput, HostKeyRejectedError } = await load();
+      expect(() => parseKeyscanOutput("", { hostname: "example.internal", port: 22 })).toThrow(
+        "No host keys returned from ssh-keyscan"
+      );
+      try {
+        parseKeyscanOutput("", { hostname: "example.internal", port: 22 });
+      } catch (error) {
+        expect(error).not.toBeInstanceOf(HostKeyRejectedError);
+      }
+    });
+  });
+
   describe("the ssh2 verifier", () => {
     it("#475: refuses a DSA key on first use, with its own reason, and pins nothing", async () => {
       const { createHostKeyStore, createHostKeyVerifier } = await load();

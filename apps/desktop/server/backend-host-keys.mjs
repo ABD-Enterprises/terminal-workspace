@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 // Durable trust-on-first-use store for the Node backend's SSH host keys.
 //
 // SEC-2 parity gap: the native transport (src-tauri/src/native_host_keys.rs)
@@ -336,6 +337,49 @@ export function createHostKeyVerifier({ hostname, port, store }) {
   };
 
   return { verify, failure };
+}
+
+/**
+ * Turn `ssh-keyscan` output into the host keys offered for approval. A refused
+ * algorithm (#475) is never offered. When that leaves nothing, the refusal is
+ * a `HostKeyRejectedError`, the one error type the HTTP layer relays verbatim,
+ * so the user sees why rather than "Internal server error.".
+ */
+export function parseKeyscanOutput(stdout, { hostname, port }) {
+  let refusedOnly = false;
+  const entries = String(stdout ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => {
+      const [scannedHost, algorithm, publicKey] = line.split(/\s+/, 3);
+      if (!scannedHost || !algorithm || !publicKey) {
+        return undefined;
+      }
+      if (isRefusedHostKeyAlgorithm(algorithm)) {
+        refusedOnly = true;
+        return undefined;
+      }
+      return {
+        hostname,
+        port,
+        algorithm,
+        publicKey,
+        fingerprint: `SHA256:${createHash("sha256")
+          .update(Buffer.from(publicKey, "base64"))
+          .digest("base64")
+          .replace(/=+$/, "")}`,
+      };
+    })
+    .filter(Boolean);
+
+  if (!entries.length) {
+    if (refusedOnly) {
+      throw new HostKeyRejectedError(weakHostKeyMessage(hostname, port));
+    }
+    throw new Error("No host keys returned from ssh-keyscan");
+  }
+  return entries;
 }
 
 /**

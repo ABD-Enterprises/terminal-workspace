@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import {
@@ -63,9 +63,8 @@ import {
   createHostKeyStore,
   createHostKeyVerifier,
   createTrustedHostKeyVerifier,
-  isRefusedHostKeyAlgorithm,
+  parseKeyscanOutput,
   resolveAppDataDirectory,
-  weakHostKeyMessage,
 } from "./backend-host-keys.mjs";
 import {
   projectSshConfigResolutionFailure,
@@ -1216,42 +1215,7 @@ async function scanKnownHost({ hostname, port }) {
     hostname,
   ]);
 
-  let refusedOnly = false;
-  const entries = stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
-    .map((line) => {
-      const [scannedHost, algorithm, publicKey] = line.split(/\s+/, 3);
-      if (!scannedHost || !algorithm || !publicKey) {
-        return undefined;
-      }
-      // #475: never offer a refused algorithm for approval.
-      if (isRefusedHostKeyAlgorithm(algorithm)) {
-        refusedOnly = true;
-        return undefined;
-      }
-
-      return {
-        hostname,
-        port,
-        algorithm,
-        publicKey,
-        fingerprint: `SHA256:${createHash("sha256")
-          .update(Buffer.from(publicKey, "base64"))
-          .digest("base64")
-          .replace(/=+$/, "")}`,
-      };
-    })
-    .filter(Boolean);
-
-  if (!entries.length) {
-    throw new Error(
-      refusedOnly ? weakHostKeyMessage(hostname, port) : "No host keys returned from ssh-keyscan"
-    );
-  }
-
-  return entries;
+  return parseKeyscanOutput(stdout, { hostname, port });
 }
 
 const server = createServer(async (request, response) => {
