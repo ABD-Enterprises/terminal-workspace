@@ -42,10 +42,10 @@ export function usePaneStatusAnnouncement(
     if (!active) {
       setAnnouncement("");
     } else if (tracked.state !== state) {
-      const text = describePaneStatus(state, label);
-      if (text) {
-        setAnnouncement(text);
-      }
+      // A state with nothing to say (connecting, error) clears the region, so
+      // the next identical message (a second "disconnected" in a reconnect
+      // loop) is a real change and is announced again.
+      setAnnouncement(describePaneStatus(state, label) ?? "");
     }
   }
 

@@ -49,4 +49,14 @@ describe("usePaneStatusAnnouncement (#510)", () => {
     expect(describePaneStatus("error", "Prod")).toBeNull();
     expect(describePaneStatus("connecting", "Prod")).toBeNull();
   });
+
+  it("announces a repeated status again after a state with nothing to say", () => {
+    const { result, rerender } = setup("connected");
+    rerender({ state: "disconnected", isActive: true });
+    expect(result.current).toBe("Prod: disconnected.");
+    rerender({ state: "connecting", isActive: true });
+    expect(result.current).toBe("");
+    rerender({ state: "disconnected", isActive: true });
+    expect(result.current).toBe("Prod: disconnected.");
+  });
 });

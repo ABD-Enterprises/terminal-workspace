@@ -47,11 +47,13 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
 
   // #510: screen reader support. The setting reaches open terminals, and
   // connection changes in the active pane are announced once each.
-  // When the terminal reads its own output, it already says what the pane
-  // writes (errors, reconnect notices), so the pane's own announcements step
-  // back rather than say everything twice.
-  const terminalSpeaks = useTerminalScreenReaderMode(terminalRef, screenReaderModeRef, active);
-  const paneAnnounces = active && !terminalSpeaks;
+  // The pane announces status changes and errors in the active pane whether
+  // or not the terminal is reading its own output: status changes are never
+  // written to the terminal, and some errors are not either. With screen
+  // reader mode on, an error the terminal also prints may be heard twice,
+  // which is better than one that is never heard.
+  useTerminalScreenReaderMode(terminalRef, screenReaderModeRef, active);
+  const paneAnnounces = active;
   const statusAnnouncement = usePaneStatusAnnouncement(
     pane.connectionState,
     host.label,
@@ -187,9 +189,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             {statusAnnouncement}
           </p>
           {/* #510: the alert role only in the active pane, so an error in a
-              background split pane does not interrupt what the user is doing,
-              and not while the terminal reads its own output, which already
-              includes the error; the banner stays visible either way. */}
+              background split pane does not interrupt what the user is doing;
+              the banner stays visible either way. */}
           {pane.connectionState === "error" &&
           pane.connectionError &&
           // #510: an unavailable runtime has its own banner below, with the
