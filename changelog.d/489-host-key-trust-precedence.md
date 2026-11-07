@@ -1,0 +1,1 @@
+- [INTERNAL] Document how approved host keys and pinned host keys relate, and pin the rule with tests on both transports (#489)

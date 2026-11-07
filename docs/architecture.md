@@ -36,3 +36,42 @@ The table below maps each frontend transport module to the module that does the 
 | **SFTP Operations** | `components/sftp/FileBrowser.tsx` | Remote file browser UI (listing, rename, delete, upload, download) that calls the SFTP functions in `lib/api.ts` | `sftp.rs` | `backend-sftp.mjs` (deadline-bounded SFTP helper); routes are in `backend.mjs` |
 | **Secrets** | `lib/runtime-secrets.ts`, `lib/native-secrets.ts` | Decides which passwords and passphrases a connection needs, prompts for them, and reads or stores them through the native keychain commands | `keychain_support.rs` (macOS Keychain through the `security` tool) | `secrets.mjs` (zero-fills its in-memory copies; no keychain) |
 | **Conformance Tests** | `tests/integration/security-helper-conformance.integration.test.ts` | Runs the same cases from `tests/fixtures/security-helper-conformance.json` against both backends' path, glob and shell-quoting helpers | `native_transport_conformance_tests.rs` | `backend-shell.mjs`, `backend-paths.mjs`, `backend-glob.mjs` (the helpers under test) |
+
+## Host key trust: two stores, one rule (#489)
+
+There are two records of which host keys to trust, and they are allowed to disagree.
+
+- **Approved keys.** When the user scans a host and approves a key, the renderer keeps it in its
+  known-hosts inventory (`useKnownHostsStore`). Native inventory is persisted in SQLite through the
+  persistence commands, with a localStorage fallback; the browser preview keeps it in localStorage.
+  `buildBackendConnection` (`apps/desktop/src/lib/connections.ts`) passes the approved key with
+  every connection as `knownHostPublicKey` and `knownHostAlgorithm`, jump hops included.
+- **Pins.** A durable `known_hosts`-style file under the app data directory
+  (`src-tauri/src/native_host_keys.rs`; the browser backend resolves the same path in
+  `backend-host-keys.mjs`), written on first use for hosts with no approved key.
+
+**The rule.** For each connection, in this order:
+
+1. A refused algorithm (`ssh-dss`, #475) is refused, whatever the approval or pin says.
+2. If the connection carries an approved key, that key decides alone: a match connects without
+   reading or writing the pin store, and a difference fails with no fallback to the pin.
+3. Otherwise, if the host's policy is `requireTrusted`, the connection is refused.
+4. Otherwise the pin store decides: an unknown host is pinned, a match connects, and a difference
+   fails with a host-key-mismatch error before credentials are sent.
+
+So the stores can hold different keys for a host without harm. An approved key always wins over a
+stale pin, so re-approving a rebuilt host is enough to recover. If an approval is later removed
+while an old pin remains, the user gets the mismatch error, and re-scanning and approving resolves
+it. Nothing merges the two stores, and nothing needs to.
+
+**Where it applies.** The direct native SSH path (`decide_native_host_key` in `main.rs`) and the
+browser backend (`createConnectConfig` → `createTrustedHostKeyVerifier` or `createHostKeyVerifier`)
+follow it exactly. Connections made by the external `ssh` client follow the same shape through
+OpenSSH: a hop with an approved key gets a per-session known-hosts file holding only that key and
+`StrictHostKeyChecking yes`; a hop without one uses the durable pin file with
+`StrictHostKeyChecking accept-new`. Mosh without an approved key leaves `UserKnownHostsFile`
+unspecified, so OpenSSH's own defaults apply there.
+
+Tests that pin this: `decide_native_host_key` precedence tests in `src-tauri/src/main.rs`, the
+"approved key versus pin" cases in `tests/integration/backend-host-keys.integration.test.ts`, and
+the approved-key cases in `apps/desktop/src/lib/connections.test.ts`.

@@ -596,6 +596,53 @@ describe("backend SSH host-key trust", () => {
     });
   });
 
+  describe("#489: approved key versus pin", () => {
+    const pinned = keyBlob("ssh-ed25519", "PINNED");
+    const approved = keyBlob("ssh-ed25519", "APPROVED");
+
+    async function storeWithPin() {
+      const { createHostKeyStore } = await load();
+      const store = createHostKeyStore({ path: storePath });
+      await store.verifyOrPin({ hostname: "example.internal", port: 22, keyBlob: pinned });
+      return store;
+    }
+
+    it("an approved key wins over a different pin and leaves the pin alone", async () => {
+      const { createTrustedHostKeyVerifier } = await load();
+      await storeWithPin();
+      const before = await readFile(storePath, "utf8");
+      const verifier = createTrustedHostKeyVerifier({
+        hostname: "example.internal",
+        port: 22,
+        trustedKey: approved.toString("base64"),
+      });
+      expect(verifier.verify(approved)).toBe(true);
+      expect(await readFile(storePath, "utf8")).toBe(before);
+    });
+
+    it("a key other than the approved one fails even if it matches the pin", async () => {
+      const { createTrustedHostKeyVerifier } = await load();
+      await storeWithPin();
+      const verifier = createTrustedHostKeyVerifier({
+        hostname: "example.internal",
+        port: 22,
+        trustedKey: approved.toString("base64"),
+      });
+      expect(verifier.verify(pinned)).toBe(false);
+    });
+
+    it("with no approved key, the pin decides", async () => {
+      const { createHostKeyVerifier } = await load();
+      const store = await storeWithPin();
+      const verifier = createHostKeyVerifier({ hostname: "example.internal", port: 22, store });
+      const matches = await new Promise<boolean>((resolve) => verifier.verify(pinned, resolve));
+      expect(matches).toBe(true);
+      const changed = await new Promise<boolean>((resolve) => verifier.verify(approved, resolve));
+      expect(changed).toBe(false);
+      expect(verifier.failure.error?.message).toContain("does not match");
+    });
+  });
+
   describe("the ssh2 verifier", () => {
     it("#475: refuses a DSA key on first use, with its own reason, and pins nothing", async () => {
       const { createHostKeyStore, createHostKeyVerifier } = await load();

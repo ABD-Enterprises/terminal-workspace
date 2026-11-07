@@ -6279,6 +6279,83 @@ mod tests {
         assert!(pinned_contents(&store).contains("AAAAEDKEY"));
     }
 
+    // #489: the precedence between an approved key and the pin store, as
+    // documented in docs/architecture.md.
+
+    fn pinned_host(store: &NativeHostKeyStore, key: &str) -> BackendHostConnection {
+        let mut host = minimal_ssh_host();
+        host.known_host_public_key = None;
+        host.known_host_algorithm = None;
+        host.host_key_policy = Some("allowUnknown".to_string());
+        store
+            .verify_or_pin(&known_hosts_host_pattern(&host), "ssh-ed25519", key)
+            .expect("seed a pin");
+        host
+    }
+
+    #[test]
+    fn an_approved_key_wins_over_a_different_pin_and_leaves_the_pin_alone() {
+        let (_root, store) = host_key_test_store();
+        let mut host = pinned_host(&store, "AAAAOLDPIN");
+        let before = pinned_contents(&store);
+
+        host.known_host_algorithm = Some("ssh-ed25519".to_string());
+        host.known_host_public_key = Some("AAAAAPPROVED".to_string());
+        decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAAPPROVED")
+            .expect("the approved key decides, not the stale pin");
+        assert_eq!(
+            pinned_contents(&store),
+            before,
+            "the pin store is not touched"
+        );
+    }
+
+    #[test]
+    fn a_key_other_than_the_approved_one_fails_even_if_it_matches_the_pin() {
+        let (_root, store) = host_key_test_store();
+        let mut host = pinned_host(&store, "AAAAPINNED");
+        host.known_host_algorithm = Some("ssh-ed25519".to_string());
+        host.known_host_public_key = Some("AAAAAPPROVED".to_string());
+
+        let error = decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAPINNED")
+            .expect_err("no fallback to the pin once a key is approved");
+        assert_eq!(error.code, IpcErrorCode::HostKeyMismatch);
+    }
+
+    #[test]
+    fn with_no_approved_key_the_pin_decides() {
+        let (_root, store) = host_key_test_store();
+        let host = pinned_host(&store, "AAAAPINNED");
+
+        decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAPINNED")
+            .expect("the pinned key connects");
+        let error = decide_native_host_key(&host, &store, "ssh-ed25519", "AAAACHANGED")
+            .expect_err("a changed key fails against the pin");
+        assert_eq!(error.code, IpcErrorCode::HostKeyMismatch);
+    }
+
+    #[test]
+    fn re_approving_a_rebuilt_host_recovers_from_a_stale_pin() {
+        let (_root, store) = host_key_test_store();
+        let mut host = pinned_host(&store, "AAAAOLDKEY");
+        // The host was rebuilt: unapproved, the new key is refused by the pin.
+        assert!(decide_native_host_key(&host, &store, "ssh-ed25519", "AAAANEWKEY").is_err());
+
+        // The user re-scans and approves the new key.
+        host.known_host_algorithm = Some("ssh-ed25519".to_string());
+        host.known_host_public_key = Some("AAAANEWKEY".to_string());
+        decide_native_host_key(&host, &store, "ssh-ed25519", "AAAANEWKEY")
+            .expect("re-approval is enough to recover");
+    }
+
+    #[test]
+    fn require_trusted_with_no_approved_key_is_refused_without_consulting_the_pin() {
+        let (_root, store) = host_key_test_store();
+        let mut host = pinned_host(&store, "AAAAPINNED");
+        host.host_key_policy = Some("requireTrusted".to_string());
+        assert!(decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAPINNED").is_err());
+    }
+
     #[test]
     fn a_dsa_host_key_is_refused_even_when_the_user_approved_it() {
         let (_root, store) = host_key_test_store();
