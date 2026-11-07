@@ -22,6 +22,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const terminalThemeName = useAppStore((state) => state.terminalTheme);
   const setPanePersistOutputPreview = useSessionsStore((state) => state.setPanePersistOutputPreview);
   const [systemColorScheme, setSystemColorScheme] = useState<TerminalThemeMode>(() => detectSystemColorScheme());
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -125,9 +126,10 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
               </button>
             </div>
           </header>
-          {pane.connectionState === "error" && pane.connectionError ? (
-            <div role="alert" className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+          {pane.connectionState === "error" && pane.connectionError && dismissedError !== pane.connectionError ? (
+            <div role="alert" className="flex items-center justify-between gap-3 border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p className="font-medium">Connection failed: {pane.connectionError}</p>
+              <button type="button" onClick={() => setDismissedError(pane.connectionError ?? null)} aria-label="Dismiss error notice" className="rounded border border-rose-400/40 px-2 py-0.5 text-[11px] text-rose-200 transition hover:border-rose-400 hover:text-white">Dismiss</button>
             </div>
           ) : null}
           {runtimeStatusMessage && !runtimeStatusMessage.available ? (

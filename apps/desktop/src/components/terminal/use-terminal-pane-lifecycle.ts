@@ -61,7 +61,7 @@ export interface TerminalPaneLifecycleOptions {
   runtimeStatusRef: MutableRefObject<RuntimeStatusMessage | null>;
   setPaneBackendSession: (paneId: string, backendSessionId: string | undefined) => void;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
-  setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
+  setPaneState: (paneId: string, connectionState: SessionConnectionState, connectionError?: string) => void;
   setPaneTransport: (paneId: string, transport: SessionTransport) => void;
   setRuntimeStatusMessage: Dispatch<SetStateAction<RuntimeStatusMessage | null>>;
   setSearchOpen: Dispatch<SetStateAction<boolean>>;

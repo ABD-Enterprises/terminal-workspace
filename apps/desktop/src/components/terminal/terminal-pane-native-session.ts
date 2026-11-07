@@ -44,7 +44,7 @@ export interface TerminalPaneNativeSessionOptions {
   runtimeStatusRef: MutableRefObject<RuntimeStatusMessage | null>;
   setPaneBackendSession: (paneId: string, backendSessionId: string | undefined) => void;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
-  setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
+  setPaneState: (paneId: string, connectionState: SessionConnectionState, connectionError?: string) => void;
   setPaneTransport: (paneId: string, transport: SessionTransport) => void;
   setPendingSecretsState: (announce?: boolean) => void;
   setRuntimeStatusMessage: Dispatch<SetStateAction<RuntimeStatusMessage | null>>;
@@ -189,7 +189,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
     setRuntimeStatusMessage(nextRuntimeStatus);
     if (!runtimeStatus.available) {
       connectionStateRef.current = "error";
-      setPaneState(pane.id, "error");
+      setPaneState(pane.id, "error", runtimeStatus.message);
       if (announce) {
         terminal.writeln(`\r\n${runtimeStatus.message}`);
         if (runtimeStatus.installHint) {
@@ -331,7 +331,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
 
         terminal.writeln(`\r\n${message.message}`);
         connectionStateRef.current = "error";
-        setPaneState(pane.id, "error");
+        setPaneState(pane.id, "error", message.message);
       });
 
       socket.addEventListener("close", () => {
@@ -373,7 +373,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
 
         terminal.writeln(`\r\n${protocolLabel} session transport failed.`);
         connectionStateRef.current = "error";
-        setPaneState(pane.id, "error");
+        setPaneState(pane.id, "error", `${protocolLabel} session transport failed.`);
       });
     } catch (error) {
       const classified = classifySshError(error);
@@ -400,7 +400,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
         terminal.writeln(`\r\n(raw: ${raw})`);
       }
       connectionStateRef.current = "error";
-      setPaneState(pane.id, "error");
+      setPaneState(pane.id, "error", friendly);
     } finally {
       connectingRef.current = false;
     }

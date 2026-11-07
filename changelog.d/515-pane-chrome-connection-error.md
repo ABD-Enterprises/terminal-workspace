@@ -1,0 +1,1 @@
+- [FIX] Promote connection errors into pane header as dismissible inline notice (#515)
