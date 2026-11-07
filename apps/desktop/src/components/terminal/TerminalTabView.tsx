@@ -92,11 +92,14 @@ export function TerminalTabView({
         const isDragSource = dragSourceIndex === index;
         const isDragTarget =
           dragTargetIndex === index && dragSourceIndex !== null && dragSourceIndex !== index;
+        const connectionError =
+          activePane?.connectionState === "error" ? activePane.connectionError : undefined;
 
         return (
           <button
             key={tab.id}
             type="button"
+            title={connectionError ? `Connection error: ${connectionError}` : undefined}
             draggable={draggable}
             onDragStart={(event) => handleDragStart(event, index)}
             onDragOver={(event) => handleDragOver(event, index)}
@@ -133,7 +136,9 @@ export function TerminalTabView({
             <span className="min-w-0">
               <span className="block truncate text-[13px] font-medium text-slate-100">{tab.title}</span>
               <span className="mt-0.5 block truncate text-[11px] text-slate-500">
-                {tab.paneIds.length} pane{tab.paneIds.length === 1 ? "" : "s"} • {host?.hostname}
+                {connectionError
+                  ? `error: ${connectionError}`
+                  : `${tab.paneIds.length} pane${tab.paneIds.length === 1 ? "" : "s"} • ${host?.hostname}`}
               </span>
             </span>
             <span

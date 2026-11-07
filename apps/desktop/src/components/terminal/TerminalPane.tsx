@@ -125,6 +125,11 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
               </button>
             </div>
           </header>
+          {pane.connectionState === "error" && pane.connectionError ? (
+            <div role="alert" className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+              <p className="font-medium">Connection failed: {pane.connectionError}</p>
+            </div>
+          ) : null}
           {runtimeStatusMessage && !runtimeStatusMessage.available ? (
             <div role="alert" className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p>{runtimeStatusMessage.message}</p>
