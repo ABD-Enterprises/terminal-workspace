@@ -163,13 +163,21 @@ async function globSshConfigFiles(pattern, context) {
     // surrogate), so it cannot match any file. Skipping it explicitly keeps
     // the request from failing on a name macOS allowed but UTF-8 cannot
     // represent.
-    return { matches: [] };
+    return { matches: [], truncated: false };
   }
-  const names = await readdir(parentReal);
+  // #486: OpenSSH applies Include glob matches in byte order (glob(3) under
+  // the C locale), and the first setting obtained wins. Order every matching
+  // name by its UTF-8 bytes and only then apply the cap, so the files kept are
+  // the ones OpenSSH would apply first.
+  const names = (await readdir(parentReal))
+    .filter((name) => matcher.test(name))
+    .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
   const matches = [];
+  let truncated = false;
   for (const name of names) {
-    if (!matcher.test(name)) {
-      continue;
+    if (matches.length >= SSH_CONFIG_GLOB_MAX_MATCHES) {
+      truncated = true;
+      break;
     }
     let real;
     try {
@@ -191,13 +199,9 @@ async function globSshConfigFiles(pattern, context) {
       name,
       content,
     });
-    if (matches.length >= SSH_CONFIG_GLOB_MAX_MATCHES) {
-      break;
-    }
   }
 
-  matches.sort((left, right) => left.name.localeCompare(right.name));
-  return { matches };
+  return { matches, truncated };
 }
 
 function isDirectory(attrs, longname = "") {
