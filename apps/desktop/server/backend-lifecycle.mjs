@@ -21,6 +21,13 @@ function closeQuietly(fn) {
  * ports, and a stale token on disk. Idempotent and never throws.
  */
 export function shutdownBackend({ server, websocketServer, sessions, forwards, sidecarPath }) {
+  // #474: remove the token file while this process still holds the port. Once
+  // the HTTP server closes, a new backend can bind the same port and publish
+  // its own file at this path, which a later unlink would delete.
+  if (sidecarPath) {
+    closeQuietly(() => unlinkSync(sidecarPath));
+  }
+
   if (sessions) {
     for (const session of sessions.values()) {
       closeQuietly(() => session.ws?.close());
@@ -40,10 +47,6 @@ export function shutdownBackend({ server, websocketServer, sessions, forwards, s
 
   closeQuietly(() => websocketServer?.close());
   closeQuietly(() => server?.close());
-
-  if (sidecarPath) {
-    closeQuietly(() => unlinkSync(sidecarPath));
-  }
 }
 
 /**

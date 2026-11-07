@@ -59,7 +59,11 @@ import {
   SFTP_UPLOAD_MAX_BYTES,
 } from "./backend-buffers.mjs";
 import { readBoundedRegularFile, writeNewPrivateFile } from "./backend-files.mjs";
-import { createHostKeyStore, createHostKeyVerifier } from "./backend-host-keys.mjs";
+import {
+  createHostKeyStore,
+  createHostKeyVerifier,
+  resolveAppDataDirectory,
+} from "./backend-host-keys.mjs";
 import {
   projectSshConfigResolutionFailure,
   resolveSshConfigPath,
@@ -73,17 +77,23 @@ const distRoot = join(appRoot, "dist");
 const serveStatic = createStaticHandler({ root: distRoot });
 const port = Number.parseInt(process.env.TERMSNIP_BACKEND_PORT ?? "8790", 10);
 
-// Per-launch auth gate. The token is shared with the Tauri shell via env or a
-// 0600 sidecar file in TMPDIR; browser callers are authenticated by a
+// Per-launch auth gate. The token comes from TERMSNIP_BACKEND_TOKEN or is
+// generated fresh, and is also written to a 0600 file in a private app data
+// directory for manual use (#474). Browser callers are authenticated by a
 // matching Origin header. See parity-and-hardening-review §3.S-4 / §3.S-8.
-const backendAuth = loadOrCreateBackendToken({
-  port,
-  env: process.env,
-  tmpdir: os.tmpdir(),
-});
+let backendAuth;
+try {
+  backendAuth = loadOrCreateBackendToken({
+    env: process.env,
+    stateDir: resolveAppDataDirectory(process.env),
+  });
+} catch (error) {
+  console.error(`[termsnip] backend not started: ${error.message}`);
+  process.exit(1);
+}
 const allowedOrigins = parseAllowedOrigins(process.env.TERMSNIP_ALLOWED_ORIGINS);
 console.error(
-  `[termsnip] backend auth gate: token source=${backendAuth.source}, sidecar=${backendAuth.sidecarPath}`
+  `[termsnip] backend auth gate: token source=${backendAuth.source}`
 );
 console.error(`[termsnip] backend allowed origins: ${allowedOrigins.join(", ")}`);
 
@@ -1686,6 +1696,9 @@ process.on("uncaughtException", (error) => {
 });
 
 let shuttingDown = false;
+// Set once this process has written its token file, and only then.
+let publishedTokenPath = null;
+
 function gracefulShutdown(signal) {
   if (shuttingDown) {
     return;
@@ -1697,7 +1710,9 @@ function gracefulShutdown(signal) {
     websocketServer,
     sessions,
     forwards,
-    sidecarPath: backendAuth.sidecarPath,
+    // Only a file this process wrote: before listen() succeeds, the file at this
+    // path (if any) belongs to another backend on the same port.
+    sidecarPath: publishedTokenPath,
   });
   process.exit(0);
 }
@@ -1718,5 +1733,17 @@ server.on("error", (error) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  console.log(`Terminal Workspace backend listening on http://127.0.0.1:${port}`);
+  // #474: published only now that this process owns the port, and named for
+  // the port it actually bound, which differs from `port` when that is 0.
+  const boundPort = server.address().port;
+  try {
+    publishedTokenPath = backendAuth.publish(boundPort);
+  } catch (error) {
+    console.error(`[termsnip] backend not started: could not write the token file: ${error.message}`);
+    process.exit(1);
+  }
+  if (publishedTokenPath) {
+    console.error(`[termsnip] backend token file: ${publishedTokenPath}`);
+  }
+  console.log(`Terminal Workspace backend listening on http://127.0.0.1:${boundPort}`);
 });
