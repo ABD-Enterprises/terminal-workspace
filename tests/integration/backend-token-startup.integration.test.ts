@@ -97,6 +97,57 @@ describe("backend started with no token in the environment (#474)", () => {
     expect((await status(port, second)).status).toBe(200);
   }, 60_000);
 
+  it("two backends asked for port 0 each get their own file, named for the port they bound", async () => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      TERMSNIP_BACKEND_PORT: "0",
+      TERMSNIP_STATE_DIR: stateDir,
+    };
+    delete env.TERMSNIP_BACKEND_TOKEN;
+    const launch = () => {
+      const child = spawn(process.execPath, ["apps/desktop/server/backend.mjs"], {
+        env,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const bound = new Promise<number>((resolve, reject) => {
+        let output = "";
+        child.stdout?.on("data", (chunk) => {
+          output += String(chunk);
+          const match = output.match(/listening on http:\/\/127\.0\.0\.1:(\d+)/);
+          if (match) {
+            resolve(Number(match[1]));
+          }
+        });
+        child.once("exit", () => reject(new Error("backend exited before listening")));
+      });
+      return { child, bound };
+    };
+
+    const first = launch();
+    const second = launch();
+    try {
+      const [firstPort, secondPort] = await Promise.all([first.bound, second.bound]);
+      expect(firstPort).not.toBe(secondPort);
+      const firstFile = join(stateDir, "backend", `backend.${firstPort}.token`);
+      const secondFile = join(stateDir, "backend", `backend.${secondPort}.token`);
+      const firstToken = readFileSync(firstFile, "utf8").trim();
+      const secondToken = readFileSync(secondFile, "utf8").trim();
+      expect(firstToken).not.toBe(secondToken);
+      expect(existsSync(join(stateDir, "backend", "backend.0.token"))).toBe(false);
+
+      await stop(first.child);
+      expect(existsSync(firstFile)).toBe(false);
+      expect(readFileSync(secondFile, "utf8").trim()).toBe(secondToken);
+      expect((await status(secondPort, secondToken)).status).toBe(200);
+    } finally {
+      for (const { child } of [first, second]) {
+        if (child.exitCode === null) {
+          await stop(child);
+        }
+      }
+    }
+  }, 60_000);
+
   it("a second launch on the same port fails without touching the running backend's file", async () => {
     const port = await freePort();
     const file = join(stateDir, "backend", `backend.${port}.token`);

@@ -84,7 +84,6 @@ const port = Number.parseInt(process.env.TERMSNIP_BACKEND_PORT ?? "8790", 10);
 let backendAuth;
 try {
   backendAuth = loadOrCreateBackendToken({
-    port,
     env: process.env,
     stateDir: resolveAppDataDirectory(process.env),
   });
@@ -94,9 +93,7 @@ try {
 }
 const allowedOrigins = parseAllowedOrigins(process.env.TERMSNIP_ALLOWED_ORIGINS);
 console.error(
-  `[termsnip] backend auth gate: token source=${backendAuth.source}, token file=${
-    backendAuth.sidecarPath ?? "none (token from the environment)"
-  }`
+  `[termsnip] backend auth gate: token source=${backendAuth.source}`
 );
 console.error(`[termsnip] backend allowed origins: ${allowedOrigins.join(", ")}`);
 
@@ -1699,7 +1696,8 @@ process.on("uncaughtException", (error) => {
 });
 
 let shuttingDown = false;
-let tokenFilePublished = false;
+// Set once this process has written its token file, and only then.
+let publishedTokenPath = null;
 
 function gracefulShutdown(signal) {
   if (shuttingDown) {
@@ -1714,7 +1712,7 @@ function gracefulShutdown(signal) {
     forwards,
     // Only a file this process wrote: before listen() succeeds, the file at this
     // path (if any) belongs to another backend on the same port.
-    sidecarPath: tokenFilePublished ? backendAuth.sidecarPath : null,
+    sidecarPath: publishedTokenPath,
   });
   process.exit(0);
 }
@@ -1735,13 +1733,17 @@ server.on("error", (error) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  // #474: published only now that this process owns the port.
+  // #474: published only now that this process owns the port, and named for
+  // the port it actually bound, which differs from `port` when that is 0.
+  const boundPort = server.address().port;
   try {
-    backendAuth.publish();
-    tokenFilePublished = backendAuth.sidecarPath !== null;
+    publishedTokenPath = backendAuth.publish(boundPort);
   } catch (error) {
     console.error(`[termsnip] backend not started: could not write the token file: ${error.message}`);
     process.exit(1);
   }
-  console.log(`Terminal Workspace backend listening on http://127.0.0.1:${port}`);
+  if (publishedTokenPath) {
+    console.error(`[termsnip] backend token file: ${publishedTokenPath}`);
+  }
+  console.log(`Terminal Workspace backend listening on http://127.0.0.1:${boundPort}`);
 });

@@ -232,13 +232,12 @@ describe("backend auth helper", () => {
       const { loadOrCreateBackendToken } = await loadAuth();
       const dir = makeTmpdir();
       const result = loadOrCreateBackendToken({
-        port: 18790,
         env: { TERMSNIP_BACKEND_TOKEN: KNOWN_TOKEN },
         stateDir: dir,
       });
       expect(result.token).toBe(KNOWN_TOKEN);
       expect(result.source).toBe("env");
-      expect(result.sidecarPath).toBeNull();
+      expect(result.publish(18790)).toBeNull();
       expect(existsSync(join(dir, "backend"))).toBe(false);
     });
 
@@ -246,7 +245,6 @@ describe("backend auth helper", () => {
       const { loadOrCreateBackendToken } = await loadAuth();
       const dir = makeTmpdir();
       const result = loadOrCreateBackendToken({
-        port: 18791,
         env: { TERMSNIP_BACKEND_TOKEN: "tooshort" },
         stateDir: dir,
       });
@@ -259,8 +257,8 @@ describe("backend auth helper", () => {
       const dir = makeTmpdir();
       mkdirSync(join(dir, "backend"), { mode: 0o700 });
       writeFileSync(tokenFile(dir, 18792), `${KNOWN_TOKEN}\n`, { mode: 0o600 });
-      const result = loadOrCreateBackendToken({ port: 18792, env: {}, stateDir: dir });
-      result.publish();
+      const result = loadOrCreateBackendToken({ env: {}, stateDir: dir });
+      result.publish(18792);
       expect(result.token).not.toBe(KNOWN_TOKEN);
       expect(result.source).toBe("generated");
       expect(readFileSync(tokenFile(dir, 18792), "utf8").trim()).toBe(result.token);
@@ -273,11 +271,11 @@ describe("backend auth helper", () => {
       writeFileSync(target, "original\n", { mode: 0o644 });
       mkdirSync(join(dir, "backend"), { mode: 0o700 });
       symlinkSync(target, tokenFile(dir, 18794));
-      const result = loadOrCreateBackendToken({ port: 18794, env: {}, stateDir: dir });
-      result.publish();
+      const result = loadOrCreateBackendToken({ env: {}, stateDir: dir });
+      const path = result.publish(18794);
       expect(readFileSync(target, "utf8")).toBe("original\n");
-      expect(lstatSync(result.sidecarPath).isSymbolicLink()).toBe(false);
-      expect(readFileSync(result.sidecarPath, "utf8").trim()).toBe(result.token);
+      expect(lstatSync(path).isSymbolicLink()).toBe(false);
+      expect(readFileSync(path, "utf8").trim()).toBe(result.token);
     });
 
     it.skipIf(process.platform === "win32")(
@@ -287,10 +285,8 @@ describe("backend auth helper", () => {
         const dir = makeTmpdir();
         mkdirSync(join(dir, "backend"));
         chmodSync(join(dir, "backend"), 0o750);
-        expect(() => loadOrCreateBackendToken({ port: 18795, env: {}, stateDir: dir })).toThrow(
-          /chmod 700/
-        );
-        expect(existsSync(tokenFile(dir, 18795))).toBe(false);
+        expect(() => loadOrCreateBackendToken({ env: {}, stateDir: dir })).toThrow(/chmod 700/);
+        expect(readdirSync(join(dir, "backend"))).toEqual([]);
       }
     );
 
@@ -300,41 +296,47 @@ describe("backend auth helper", () => {
       const elsewhere = join(dir, "elsewhere");
       mkdirSync(elsewhere, { mode: 0o700 });
       symlinkSync(elsewhere, join(dir, "backend"));
-      expect(() => loadOrCreateBackendToken({ port: 18796, env: {}, stateDir: dir })).toThrow(
+      expect(() => loadOrCreateBackendToken({ env: {}, stateDir: dir })).toThrow(
         /not a real directory/
       );
       expect(readdirSync(elsewhere)).toEqual([]);
     });
 
-    it("generates a token in a 0600 file inside a 0700 directory", async () => {
+    it("writes nothing until publish, then a 0600 file inside a 0700 directory", async () => {
       const { loadOrCreateBackendToken } = await loadAuth();
       const dir = makeTmpdir();
-      const result = loadOrCreateBackendToken({
-        port: 18793,
-        env: {},
-        stateDir: dir,
-      });
-      expect(existsSync(tokenFile(dir, 18793))).toBe(false);
-      result.publish();
+      const result = loadOrCreateBackendToken({ env: {}, stateDir: dir });
+      expect(readdirSync(join(dir, "backend"))).toEqual([]);
+      const path = result.publish(18793);
       expect(result.token).toMatch(/^[0-9a-f]{64}$/);
       expect(result.source).toBe("generated");
-      expect(result.sidecarPath).toBe(tokenFile(dir, 18793));
-      expect(readFileSync(result.sidecarPath, "utf8").trim()).toBe(result.token);
+      expect(path).toBe(tokenFile(dir, 18793));
+      expect(readFileSync(path, "utf8").trim()).toBe(result.token);
       if (process.platform !== "win32") {
-        expect(statSync(result.sidecarPath).mode & 0o777).toBe(0o600);
+        expect(statSync(path).mode & 0o777).toBe(0o600);
         expect(statSync(join(dir, "backend")).mode & 0o777).toBe(0o700);
       }
+    });
+
+    it("refuses to name a token file for port 0 or a non-port (#474)", async () => {
+      const { loadOrCreateBackendToken } = await loadAuth();
+      const dir = makeTmpdir();
+      const result = loadOrCreateBackendToken({ env: {}, stateDir: dir });
+      for (const bad of [0, -1, 1.5, Number.NaN]) {
+        expect(() => result.publish(bad)).toThrow(/Cannot name a token file/);
+      }
+      expect(readdirSync(join(dir, "backend"))).toEqual([]);
     });
 
     it("generates a different token on every launch", async () => {
       const { loadOrCreateBackendToken } = await loadAuth();
       const dir = makeTmpdir();
-      const first = loadOrCreateBackendToken({ port: 18797, env: {}, stateDir: dir });
-      first.publish();
-      const second = loadOrCreateBackendToken({ port: 18797, env: {}, stateDir: dir });
-      second.publish();
+      const first = loadOrCreateBackendToken({ env: {}, stateDir: dir });
+      first.publish(18797);
+      const second = loadOrCreateBackendToken({ env: {}, stateDir: dir });
+      const path = second.publish(18797);
       expect(second.token).not.toBe(first.token);
-      expect(readFileSync(second.sidecarPath, "utf8").trim()).toBe(second.token);
+      expect(readFileSync(path, "utf8").trim()).toBe(second.token);
     });
   });
 });

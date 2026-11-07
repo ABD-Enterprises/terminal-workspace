@@ -148,12 +148,15 @@ export function isRequestAuthorized({ headers, allowedOrigins, expectedToken }) 
 /**
  * On startup, resolve the per-launch backend auth token:
  *   1. `TERMSNIP_BACKEND_TOKEN` env var (if non-empty and >= MIN_TOKEN_LENGTH).
- *      Nothing is written, and `sidecarPath` is null.
- *   2. Otherwise a fresh 32-byte random hex token. Calling the returned
- *      `publish()` writes it to `<stateDir>/backend/backend.<port>.token` with
- *      mode 0600 so a developer can call the backend by hand. The caller
- *      publishes only once it owns the port, so a second launch that fails to
- *      bind never replaces the running backend's file.
+ *      `publish()` writes nothing and returns null.
+ *   2. Otherwise a fresh 32-byte random hex token. `publish(port)` writes it to
+ *      `<stateDir>/backend/backend.<port>.token` with mode 0600, so a developer
+ *      can call the backend by hand, and returns that path.
+ *
+ * The caller publishes only once it owns the port, and passes the port it
+ * actually bound (not the requested one, which may be 0), so a launch that
+ * fails to bind never replaces a running backend's file and two backends never
+ * share one.
  *
  * #474: an existing file is never read back. The token used to live at a
  * predictable path in the temp directory and a pre-existing file there was
@@ -163,21 +166,26 @@ export function isRequestAuthorized({ headers, allowedOrigins, expectedToken }) 
  * Throws, which stops startup, when the directory is not private; `publish()`
  * throws when the file cannot be created exclusively.
  */
-export function loadOrCreateBackendToken({ port, env, stateDir }) {
+export function loadOrCreateBackendToken({ env, stateDir }) {
   const fromEnv = env?.TERMSNIP_BACKEND_TOKEN?.trim();
   if (fromEnv && fromEnv.length >= MIN_TOKEN_LENGTH) {
-    return { token: fromEnv, source: "env", sidecarPath: null, publish: () => {} };
+    return { token: fromEnv, source: "env", publish: () => null };
   }
 
   const directory = join(stateDir, "backend");
   ensurePrivateDirectory(directory);
-  const sidecarPath = join(directory, `backend.${port}.token`);
   const token = randomBytes(32).toString("hex");
   return {
     token,
     source: "generated",
-    sidecarPath,
-    publish: () => writeTokenFileExclusively(sidecarPath, `${token}\n`),
+    publish: (port) => {
+      if (!Number.isInteger(port) || port <= 0) {
+        throw new Error(`Cannot name a token file for port ${port}`);
+      }
+      const path = join(directory, `backend.${port}.token`);
+      writeTokenFileExclusively(path, `${token}\n`);
+      return path;
+    },
   };
 }
 
