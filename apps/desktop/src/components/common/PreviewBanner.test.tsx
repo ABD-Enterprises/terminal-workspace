@@ -2,6 +2,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PreviewBanner } from "./PreviewBanner";
+import type { BackendStatusResponse } from "../../lib/backend-contract";
 import * as backendRuntime from "../../lib/backend-runtime";
 
 describe("PreviewBanner (#502)", () => {
@@ -23,9 +24,8 @@ describe("PreviewBanner (#502)", () => {
   it("renders the standard preview banner when backend is available in browser mode", async () => {
     vi.spyOn(backendRuntime, "isTauriRuntime").mockReturnValue(false);
     vi.spyOn(backendRuntime, "getSessionBackendStatus").mockResolvedValue({
-      status: "ok",
-      sessions: 0,
-    } as unknown as backendRuntime.BackendStatusResponse);
+      ok: true,
+    } satisfies BackendStatusResponse);
 
     render(<PreviewBanner />);
 
