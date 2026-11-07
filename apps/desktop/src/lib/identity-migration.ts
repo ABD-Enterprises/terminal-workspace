@@ -201,3 +201,8 @@ export function applyIdentityAssignments(
   return mutated ? next : hosts;
 }
 
+// Re-exported for tests so the sample-hosts default migration path can be
+// asserted without reaching into the Zustand store.
+export const __sampleMigrationInput: Pick<IdentityMigrationInput, "hosts"> = {
+  hosts: sampleHosts,
+};

@@ -359,6 +359,10 @@ export function hostSupportsPortForwarding(protocol: HostProtocol) {
   return protocol === "ssh";
 }
 
+export function hostSupportsRemoteSnippets(protocol: HostProtocol) {
+  return protocol === "ssh";
+}
+
 export function hostSupportsCredentialPrompt(protocol: HostProtocol) {
   return protocol === "ssh" || protocol === "mosh";
 }
