@@ -4,7 +4,7 @@
 // docs/parity-and-hardening-plan.md P1-S4b.
 
 import { randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -146,37 +146,77 @@ export function isRequestAuthorized({ headers, allowedOrigins, expectedToken }) 
 }
 
 /**
- * On startup, resolve the per-launch backend auth token. Order of precedence:
+ * On startup, resolve the per-launch backend auth token:
  *   1. `TERMSNIP_BACKEND_TOKEN` env var (if non-empty and >= MIN_TOKEN_LENGTH).
- *   2. Existing sidecar file at `${tmpdir}/termsnip-backend.${port}.token`
- *      (so a Tauri / wrapper process that started earlier can hand off a
- *      token to a child backend process — and vice versa).
- *   3. Generate a fresh 32-byte random hex token, write it to the sidecar
- *      with mode 0600, return it.
+ *      Nothing is written, and `sidecarPath` is null.
+ *   2. Otherwise a fresh 32-byte random hex token, written to
+ *      `<stateDir>/backend/backend.<port>.token` with mode 0600 so a developer
+ *      can call the backend by hand. The path is logged at startup.
  *
- * Always returns `{ token, source, sidecarPath }`. The sidecar is left in
- * place so other processes (Tauri's BackendBridge) can read it.
+ * #474: an existing file is never read back. The token used to live at a
+ * predictable path in the temp directory and a pre-existing file there was
+ * adopted, so any process able to write that path could choose the token.
+ * Nothing in the app reads this file; it is written only for people.
+ *
+ * Throws, which stops startup, when the directory is not private or the file
+ * cannot be created exclusively.
  */
-export function loadOrCreateBackendToken({ port, env, tmpdir }) {
+export function loadOrCreateBackendToken({ port, env, stateDir }) {
   const fromEnv = env?.TERMSNIP_BACKEND_TOKEN?.trim();
-  const sidecarPath = join(tmpdir, `termsnip-backend.${port}.token`);
-
   if (fromEnv && fromEnv.length >= MIN_TOKEN_LENGTH) {
-    return { token: fromEnv, source: "env", sidecarPath };
+    return { token: fromEnv, source: "env", sidecarPath: null };
   }
 
-  try {
-    const existing = readFileSync(sidecarPath, "utf8").trim();
-    if (existing.length >= MIN_TOKEN_LENGTH) {
-      return { token: existing, source: "sidecar", sidecarPath };
-    }
-  } catch {
-    // Sidecar does not exist or is unreadable; fall through and create one.
-  }
-
+  const directory = join(stateDir, "backend");
+  ensurePrivateDirectory(directory);
+  const sidecarPath = join(directory, `backend.${port}.token`);
   const token = randomBytes(32).toString("hex");
-  writeFileSync(sidecarPath, `${token}\n`, { mode: 0o600 });
+  writeTokenFileExclusively(sidecarPath, `${token}\n`);
   return { token, source: "generated", sidecarPath };
+}
+
+/**
+ * Create `directory` as 0700 if missing; otherwise require that it is a real
+ * directory (not a symlink), owned by this user, with no group or other access.
+ * A creation mode does nothing for a directory that already exists, so an
+ * existing one is checked rather than trusted. POSIX only: Windows has no
+ * matching mode bits or uid.
+ */
+function ensurePrivateDirectory(directory) {
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const stats = lstatSync(directory);
+  if (!stats.isDirectory()) {
+    throw new Error(`Backend token directory is not a real directory: ${directory}`);
+  }
+  if (process.platform === "win32") {
+    return;
+  }
+  if (typeof process.getuid === "function" && stats.uid !== process.getuid()) {
+    throw new Error(`Backend token directory is owned by another user: ${directory}`);
+  }
+  if ((stats.mode & 0o077) !== 0) {
+    throw new Error(
+      `Backend token directory must not be readable by other users (chmod 700): ${directory}`
+    );
+  }
+}
+
+/**
+ * Create the file with O_EXCL ("wx"), which never follows a symlink. A
+ * leftover from a crashed launch, or a planted symlink, is unlinked (removing
+ * the link itself, never its target) and creation is retried once.
+ */
+function writeTokenFileExclusively(path, contents) {
+  try {
+    writeFileSync(path, contents, { flag: "wx", mode: 0o600 });
+    return;
+  } catch (error) {
+    if (error?.code !== "EEXIST") {
+      throw error;
+    }
+  }
+  unlinkSync(path);
+  writeFileSync(path, contents, { flag: "wx", mode: 0o600 });
 }
 
 export const __testing = {

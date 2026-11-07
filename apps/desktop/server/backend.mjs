@@ -59,7 +59,11 @@ import {
   SFTP_UPLOAD_MAX_BYTES,
 } from "./backend-buffers.mjs";
 import { readBoundedRegularFile, writeNewPrivateFile } from "./backend-files.mjs";
-import { createHostKeyStore, createHostKeyVerifier } from "./backend-host-keys.mjs";
+import {
+  createHostKeyStore,
+  createHostKeyVerifier,
+  resolveAppDataDirectory,
+} from "./backend-host-keys.mjs";
 import {
   projectSshConfigResolutionFailure,
   resolveSshConfigPath,
@@ -73,17 +77,26 @@ const distRoot = join(appRoot, "dist");
 const serveStatic = createStaticHandler({ root: distRoot });
 const port = Number.parseInt(process.env.TERMSNIP_BACKEND_PORT ?? "8790", 10);
 
-// Per-launch auth gate. The token is shared with the Tauri shell via env or a
-// 0600 sidecar file in TMPDIR; browser callers are authenticated by a
+// Per-launch auth gate. The token comes from TERMSNIP_BACKEND_TOKEN or is
+// generated fresh, and is also written to a 0600 file in a private app data
+// directory for manual use (#474). Browser callers are authenticated by a
 // matching Origin header. See parity-and-hardening-review §3.S-4 / §3.S-8.
-const backendAuth = loadOrCreateBackendToken({
-  port,
-  env: process.env,
-  tmpdir: os.tmpdir(),
-});
+let backendAuth;
+try {
+  backendAuth = loadOrCreateBackendToken({
+    port,
+    env: process.env,
+    stateDir: resolveAppDataDirectory(process.env),
+  });
+} catch (error) {
+  console.error(`[termsnip] backend not started: ${error.message}`);
+  process.exit(1);
+}
 const allowedOrigins = parseAllowedOrigins(process.env.TERMSNIP_ALLOWED_ORIGINS);
 console.error(
-  `[termsnip] backend auth gate: token source=${backendAuth.source}, sidecar=${backendAuth.sidecarPath}`
+  `[termsnip] backend auth gate: token source=${backendAuth.source}, token file=${
+    backendAuth.sidecarPath ?? "none (token from the environment)"
+  }`
 );
 console.error(`[termsnip] backend allowed origins: ${allowedOrigins.join(", ")}`);
 
