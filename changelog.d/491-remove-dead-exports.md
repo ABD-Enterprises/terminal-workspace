@@ -1,1 +1,1 @@
-- [CHORE] Remove unreferenced exports hostSupportsRemoteSnippets and __sampleMigrationInput (#538)
+- [INTERNAL] Remove unreferenced exports hostSupportsRemoteSnippets and __sampleMigrationInput (#539)
