@@ -532,6 +532,79 @@ export async function getSessionBackendStatus() {
   return browserFetchJson<BackendStatusResponse>("/api/backend/status");
 }
 
+export type BackendProbeFailureKind = "unreachable" | "unauthorized" | "error";
+
+export class BackendProbeError extends Error {
+  readonly kind: BackendProbeFailureKind;
+  readonly status?: number;
+
+  constructor(kind: BackendProbeFailureKind, message: string, status?: number) {
+    super(message);
+    this.name = "BackendProbeError";
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
+const BACKEND_PROBE_TIMEOUT_MS = 5000;
+
+/**
+ * Browser-mode health probe for the preview banner. It is a POST on purpose:
+ * the backend's auth gate accepts a request only with an allowed Origin header
+ * or a token, and a browser sends Origin on a same-origin POST but not on a
+ * same-origin GET. A 401 or 403 means the backend answered and refused this
+ * page, which is not the same as being unreachable.
+ */
+export async function probeBackendStatus(): Promise<BackendStatusResponse> {
+  if (isTauriRuntime()) {
+    return invokeTauriCommand("terminal_workspace_backend_status");
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), BACKEND_PROBE_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch("/api/backend/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    throw new BackendProbeError("unreachable", getErrorMessage(error));
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new BackendProbeError(
+      "unauthorized",
+      `Backend refused the request (${response.status}).`,
+      response.status
+    );
+  }
+
+  // The dev proxy answers with a 5xx when it cannot reach the backend.
+  if (response.status >= 500) {
+    throw new BackendProbeError(
+      "unreachable",
+      `Backend status check failed (${response.status}).`,
+      response.status
+    );
+  }
+
+  if (!response.ok) {
+    throw new BackendProbeError(
+      "error",
+      `Backend status check failed (${response.status}).`,
+      response.status
+    );
+  }
+
+  return (await response.json()) as BackendStatusResponse;
+}
+
 export async function createSession(host: BackendHostConnection) {
   if (isTauriRuntime()) {
     return invokeTauriCommand("terminal_workspace_create_backend_session", {

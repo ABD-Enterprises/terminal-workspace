@@ -1252,7 +1252,13 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (request.method === "GET" && url.pathname === "/api/backend/status") {
+  // POST is accepted too: browsers attach an Origin header to a same-origin
+  // POST but not to a same-origin GET, so a page can only pass the auth gate
+  // above with a POST. The gate still applies to both methods.
+  if (
+    (request.method === "GET" || request.method === "POST") &&
+    url.pathname === "/api/backend/status"
+  ) {
     sendJson(response, 200, { ok: true });
     return;
   }
