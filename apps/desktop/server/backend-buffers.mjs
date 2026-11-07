@@ -20,6 +20,23 @@ export class PayloadTooLargeError extends Error {
 }
 
 /**
+ * True only when the Content-Type's media type is exactly `application/json`.
+ * Parameters such as `; charset=utf-8` are ignored, so a value that merely
+ * mentions JSON (`text/plain; application/json`) is still refused.
+ *
+ * #470: this is what makes the browser's preflight rules protect the backend.
+ * A page can send a cross-origin POST without a preflight only as `text/plain`,
+ * a form or multipart, and all of those fail here. A JSON content type forces
+ * a preflight, which the backend always refuses.
+ */
+export function isJsonContentType(header) {
+  if (typeof header !== "string") {
+    return false;
+  }
+  return header.split(";", 1)[0].trim().toLowerCase() === "application/json";
+}
+
+/**
  * Read and JSON-parse a request body, rejecting with a 413 PayloadTooLargeError
  * once the accumulated bytes exceed `maxBytes`. Without the cap, a buggy or
  * hostile (but authenticated) renderer POSTing a huge body — e.g. an SFTP
