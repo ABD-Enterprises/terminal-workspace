@@ -62,8 +62,12 @@ There are two records of which host keys to trust, and they are allowed to disag
    fails with a host-key-mismatch error before credentials are sent.
 
 So the stores can hold different keys for a host without harm. An approved key always wins over a
-stale pin, so re-approving a rebuilt host is enough to recover. If an approval is later removed
-while an old pin remains, the user gets the mismatch error, and re-scanning and approving resolves
+stale pin, so re-approving a rebuilt host recovers it, as long as the approved key is the one the
+server actually presents. A scan can list several key types, and the direct native and browser
+handshakes do not limit negotiation to the approved type: approving the RSA key of a server that
+negotiates Ed25519 still fails with a mismatch, and only approving the negotiated key fixes it. If an
+approval is later removed while an old pin remains, an `allowUnknown` host gets the mismatch error
+and a `requireTrusted` host is refused as untrusted; either way, re-scanning and approving resolves
 it. Nothing merges the two stores, and nothing needs to.
 
 **Where it applies.** The direct native SSH path (`decide_native_host_key` in `main.rs`) and the
@@ -77,4 +81,4 @@ unspecified, so OpenSSH's own defaults apply there.
 Tests that pin this: `decide_native_host_key` precedence tests in `src-tauri/src/main.rs`, the
 `selectHostKeyVerifier` cases in `tests/integration/backend-host-keys.integration.test.ts`, the
 approved-key cases in `apps/desktop/src/lib/connections.test.ts`, and the jump-hop restore case in
-`apps/desktop/src/components/terminal/SessionRestoreManager.test.ts`.
+`apps/desktop/src/components/terminal/SessionRestoreManager.test.tsx`.
