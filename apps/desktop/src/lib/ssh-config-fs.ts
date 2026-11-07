@@ -7,6 +7,7 @@ import type {
   SshConfigFileReader,
   SshConfigGlobLister,
   SshConfigGlobMatch,
+  SshConfigGlobResult,
   SshConfigResolutionContext,
 } from "./ssh-config-include";
 
@@ -22,6 +23,8 @@ interface GlobSshConfigFilesRequest extends Partial<SshConfigResolutionContext> 
 
 export interface GlobSshConfigFilesResponse {
   matches: SshConfigGlobMatch[];
+  /** #486: more files matched than the backend's cap; see SshConfigGlobResult. */
+  truncated?: boolean;
 }
 
 /**
@@ -82,7 +85,7 @@ export const globSshConfigFiles: SshConfigGlobLister = async (pattern, context) 
         "terminal_workspace_glob_ssh_config_files",
         { request: { pattern, ...context } satisfies GlobSshConfigFilesRequest }
       );
-      return response.matches;
+      return { matches: response.matches, truncated: response.truncated } satisfies SshConfigGlobResult;
     } catch (error) {
       console.warn(
         "[ssh-config] glob rejected:",
@@ -103,7 +106,7 @@ export const globSshConfigFiles: SshConfigGlobLister = async (pattern, context) 
       return [];
     }
     const data = (await response.json()) as GlobSshConfigFilesResponse;
-    return data.matches ?? [];
+    return { matches: data.matches ?? [], truncated: data.truncated } satisfies SshConfigGlobResult;
   } catch (error) {
     console.warn(
       "[ssh-config] glob rejected:",

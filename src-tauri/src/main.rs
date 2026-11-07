@@ -3709,7 +3709,11 @@ fn glob_ssh_config_files_from_root(
             path: requested_path(),
         })?;
 
-    let mut matches: Vec<SshConfigGlobMatch> = Vec::new();
+    // #486: OpenSSH applies Include glob matches in byte order (glob(3) under
+    // the C locale), and the first setting obtained wins. Collect every
+    // matching name, order them by bytes (`String`'s `Ord`), and only then
+    // apply the cap, so the files kept are the ones OpenSSH would apply first.
+    let mut names: Vec<String> = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_| SshConfigCommandFailure::ReadFailed {
             path: requested_path(),
@@ -3719,10 +3723,20 @@ fn glob_ssh_config_files_from_root(
             Some(name) => name,
             None => continue,
         };
-        if !glob_match(&file_pattern, name) {
-            continue;
+        if glob_match(&file_pattern, name) {
+            names.push(name.to_string());
         }
-        let canonical = match entry.path().canonicalize() {
+    }
+    names.sort();
+
+    let mut matches: Vec<SshConfigGlobMatch> = Vec::new();
+    let mut truncated = false;
+    for name in names {
+        if matches.len() >= SSH_CONFIG_GLOB_MAX_MATCHES {
+            truncated = true;
+            break;
+        }
+        let canonical = match parent_canonical.join(&name).canonicalize() {
             Ok(canonical) => canonical,
             Err(_) => continue,
         };
@@ -3745,17 +3759,12 @@ fn glob_ssh_config_files_from_root(
             // The directory-entry name is the caller's glob expansion result,
             // not a resolved path. It keeps cycle diagnostics actionable without
             // exposing the canonical target of a symlink.
-            name: name.to_string(),
+            name,
             content,
         });
-        if matches.len() >= SSH_CONFIG_GLOB_MAX_MATCHES {
-            break;
-        }
     }
 
-    // OpenSSH applies glob matches in lexical order.
-    matches.sort_by(|left, right| left.name.cmp(&right.name));
-    Ok(GlobSshConfigFilesResponse { matches })
+    Ok(GlobSshConfigFilesResponse { matches, truncated })
 }
 
 #[cfg(test)]
@@ -3979,6 +3988,72 @@ mod ssh_config_command_tests {
         assert!(serialized.contains(&requested_pattern));
         assert!(!serialized.contains(canonical_sentinel));
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn glob_returns_matches_in_openssh_byte_order() {
+        // #486: OpenSSH orders Include matches by bytes, so uppercase sorts
+        // before lowercase and digits compare as text. localeCompare would
+        // put `_x.conf` first and `alpha.conf` before `Beta.conf`.
+        let root = test_root("ssh-config-glob-byte-order");
+        let ssh_root = root.join("ssh-root");
+        let dir = ssh_root.join("conf.d");
+        fs::create_dir_all(&dir).expect("glob directory should be created");
+        let names = [
+            "10.conf",
+            "2.conf",
+            "Beta.conf",
+            "Zebra.conf",
+            "_x.conf",
+            "a b.conf",
+            "alpha.conf",
+            "ä.conf",
+        ];
+        for name in names.iter().rev() {
+            fs::write(dir.join(name), format!("Host {}\n", name.len())).expect("config");
+        }
+        let canonical_ssh_root = fs::canonicalize(&ssh_root).expect("SSH root should canonicalize");
+        let response = glob_ssh_config_files_from_root(
+            &glob_request(format!("{}/*.conf", dir.to_string_lossy())),
+            &canonical_ssh_root,
+            &SshConfigCycleKeySalt([7; 32]),
+            &SshConfigResolutionRegistry::default(),
+        )
+        .expect("glob should succeed");
+        let returned: Vec<&str> = response.matches.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(returned, names.to_vec());
+        assert!(!response.truncated);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn glob_over_the_cap_keeps_the_first_files_in_byte_order_and_says_so() {
+        // #486: the cap used to apply in directory order before any sort, so
+        // a file OpenSSH applies first could be dropped.
+        let root = test_root("ssh-config-glob-cap");
+        let ssh_root = root.join("ssh-root");
+        let dir = ssh_root.join("conf.d");
+        fs::create_dir_all(&dir).expect("glob directory should be created");
+        let total = super::SSH_CONFIG_GLOB_MAX_MATCHES + 20;
+        for index in 0..total {
+            fs::write(dir.join(format!("{index:04}.conf")), "Host x\n").expect("config");
+        }
+        let canonical_ssh_root = fs::canonicalize(&ssh_root).expect("SSH root should canonicalize");
+        let response = glob_ssh_config_files_from_root(
+            &glob_request(format!("{}/*.conf", dir.to_string_lossy())),
+            &canonical_ssh_root,
+            &SshConfigCycleKeySalt([7; 32]),
+            &SshConfigResolutionRegistry::default(),
+        )
+        .expect("glob should succeed");
+        assert!(response.truncated);
+        assert_eq!(response.matches.len(), super::SSH_CONFIG_GLOB_MAX_MATCHES);
+        let expected: Vec<String> = (0..super::SSH_CONFIG_GLOB_MAX_MATCHES)
+            .map(|index| format!("{index:04}.conf"))
+            .collect();
+        let returned: Vec<String> = response.matches.iter().map(|m| m.name.clone()).collect();
+        assert_eq!(returned, expected);
         let _ = fs::remove_dir_all(root);
     }
 

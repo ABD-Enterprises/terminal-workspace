@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { parseSshConfig } from "./ssh-config";
 import {
+  compareOpenSshNames,
   resolveSshIncludes,
   type SshConfigFileReader,
   type SshConfigGlobLister,
@@ -253,6 +255,77 @@ describe("resolveSshIncludes", () => {
     expect(text).toContain("Host prod");
     // 10-staging sorts before 20-prod.
     expect(text.indexOf("Host staging")).toBeLessThan(text.indexOf("Host prod"));
+  });
+
+  it("#486: applies glob matches in OpenSSH byte order, not locale order", async () => {
+    const readFile = vi.fn<SshConfigFileReader>(async () => null);
+    const names = [
+      "10.conf",
+      "2.conf",
+      "Beta.conf",
+      "Zebra.conf",
+      "_x.conf",
+      "a b.conf",
+      "alpha.conf",
+      "ä.conf",
+    ];
+    // Handed over in locale order, which the resolver must not keep.
+    const localeOrder = [...names].sort((left, right) => left.localeCompare(right));
+    expect(localeOrder).not.toEqual(names);
+    const globFiles = globListerFromMap(
+      Object.fromEntries(localeOrder.map((name) => [`~/.ssh/conf.d/${name}`, `# file ${name}\n`]))
+    );
+
+    const { text } = await resolveSshIncludes("Include conf.d/*.conf\n", { readFile, globFiles });
+
+    const applied = [...text.matchAll(/# file (.+)/g)].map((match) => match[1]);
+    expect(applied).toEqual(names);
+  });
+
+  it("#486: the first file in byte order supplies a first-match-wins setting", async () => {
+    const readFile = vi.fn<SshConfigFileReader>(async () => null);
+    const globFiles = globListerFromMap({
+      "~/.ssh/conf.d/alpha.conf": "Host web\n  HostName from-alpha.example.com\n",
+      "~/.ssh/conf.d/Zebra.conf": "Host web\n  HostName from-zebra.example.com\n",
+    });
+
+    const { text } = await resolveSshIncludes("Include conf.d/*.conf\n", { readFile, globFiles });
+    const parsed = parseSshConfig(text);
+
+    // `ssh` uses the first HostName it obtains for `web`, from Zebra.conf.
+    expect(parsed.hosts[0]?.hostname).toBe("from-zebra.example.com");
+  });
+
+  it("#486: says so when the lister hit its cap", async () => {
+    const readFile = vi.fn<SshConfigFileReader>(async () => null);
+    const globFiles: SshConfigGlobLister = async () => ({
+      matches: [{ cycleKey: "k", name: "0000.conf", content: "Host first\n" }],
+      truncated: true,
+    });
+
+    const { text, skipped } = await resolveSshIncludes("Include conf.d/*.conf\n", {
+      readFile,
+      globFiles,
+    });
+
+    expect(text).toContain("Host first");
+    expect(skipped).toEqual([
+      expect.objectContaining({
+        reason: "include-directive",
+        detail: expect.stringContaining("only the first 1 in OpenSSH order were applied"),
+      }),
+    ]);
+  });
+
+  it("compareOpenSshNames orders by code point, including outside the BMP", () => {
+    expect(["b", "B", "_", "1", "\u{1F600}", "\uFFFD"].sort(compareOpenSshNames)).toEqual([
+      "1",
+      "B",
+      "_",
+      "b",
+      "\uFFFD",
+      "\u{1F600}",
+    ]);
   });
 
   it("logs a skip when a glob matches no files", async () => {
