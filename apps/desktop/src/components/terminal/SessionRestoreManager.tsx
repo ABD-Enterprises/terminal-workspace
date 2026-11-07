@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { createBackendSession } from "../../lib/api";
-import { buildBackendConnectionFromKnownHost, findKnownHostMatch } from "../../lib/connections";
+import { buildBackendConnection } from "../../lib/connections";
 import { canRestoreSessionWithoutPrompt, ensureRuntimeSecrets } from "../../lib/runtime-secrets";
 import { useConnectionSecretsStore } from "../../store/connection-secrets-store";
 import { useHostsStore } from "../../store/hosts-store";
@@ -57,22 +57,16 @@ export function SessionRestoreManager() {
           continue;
         }
 
-        const trustedKnownHost = findKnownHostMatch(knownHosts, host);
 
         try {
           restoringPaneIdsRef.current.add(pane.id);
           setPaneTransport(pane.id, "ssh");
           setPaneState(pane.id, "connecting");
           void createBackendSession(
-            buildBackendConnectionFromKnownHost(
-              host,
-              trustedKnownHost
-                ? {
-                    algorithm: trustedKnownHost.algorithm,
-                    publicKey: trustedKnownHost.publicKey,
-                  }
-                : undefined
-            )
+            // #489: the whole approved-key inventory, so a jump hop gets its
+            // own approval too. Passing only the target's approval made a
+            // re-approved jump host fall back to its stale pin on restore.
+            buildBackendConnection(host, knownHosts)
           )
             .then(({ sessionId }) => {
               setPaneBackendSession(pane.id, sessionId);
