@@ -3101,6 +3101,7 @@ async fn terminal_workspace_persistence_read_store(
     state: tauri::State<'_, persistence::PersistenceStore>,
     request: persistence::StoreRequest,
 ) -> Result<Option<String>, String> {
+    let _in_flight = state.in_flight().await;
     persistence::read_store(state.pool(), &request.store).await
 }
 
@@ -3109,6 +3110,7 @@ async fn terminal_workspace_persistence_write_store(
     state: tauri::State<'_, persistence::PersistenceStore>,
     request: persistence::StoreWriteRequest,
 ) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
     persistence::write_store(state.pool(), &request.store, &request.payload).await
 }
 
@@ -3117,6 +3119,7 @@ async fn terminal_workspace_persistence_remove_store(
     state: tauri::State<'_, persistence::PersistenceStore>,
     request: persistence::StoreRequest,
 ) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
     persistence::remove_store(state.pool(), &request.store).await
 }
 
@@ -3124,6 +3127,7 @@ async fn terminal_workspace_persistence_remove_store(
 async fn terminal_workspace_persistence_read_deletions(
     state: tauri::State<'_, persistence::PersistenceStore>,
 ) -> Result<Vec<persistence::DeletionRecord>, String> {
+    let _in_flight = state.in_flight().await;
     persistence::read_deletions(state.pool()).await
 }
 
@@ -3132,6 +3136,7 @@ async fn terminal_workspace_persistence_replace_deletions(
     state: tauri::State<'_, persistence::PersistenceStore>,
     request: persistence::DeletionsReplaceRequest,
 ) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
     persistence::replace_deletions(state.pool(), &request.records).await
 }
 
@@ -3139,6 +3144,7 @@ async fn terminal_workspace_persistence_replace_deletions(
 async fn terminal_workspace_persistence_clear_deletions(
     state: tauri::State<'_, persistence::PersistenceStore>,
 ) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
     persistence::clear_deletions(state.pool()).await
 }
 

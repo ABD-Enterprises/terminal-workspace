@@ -102,6 +102,11 @@ pub struct DeletionsReplaceRequest {
 /// Managed Tauri state: the pool the commands use.
 pub struct PersistenceStore {
     pool: SqlitePool,
+    /// Every command holds a read guard for its whole run, including while it
+    /// waits for a connection; closing takes the write guard first, so quit
+    /// waits for every command already dispatched, not only those that have
+    /// a connection.
+    in_flight: tokio::sync::RwLock<()>,
 }
 
 impl PersistenceStore {
@@ -121,20 +126,30 @@ impl PersistenceStore {
             .busy_timeout(Duration::from_secs(5));
         Self {
             pool: SqlitePoolOptions::new().connect_lazy_with(options),
+            in_flight: tokio::sync::RwLock::new(()),
         }
+    }
+
+    /// Hold this for the whole of a command, so closing waits for it.
+    pub async fn in_flight(&self) -> tokio::sync::RwLockReadGuard<'_, ()> {
+        self.in_flight.read().await
     }
 
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
-    /// Close the pool, waiting for any operation already holding a connection
-    /// to finish, so a write that started before quit is committed rather than
-    /// cut off when the process exits. Later calls fail with `PoolClosed`.
-    /// The SQL plugin does the same for its own pools on `RunEvent::Exit`;
-    /// this pool is the app's, so the app closes it.
+    /// Close the pool after every command already dispatched has finished,
+    /// including one still waiting for a connection, so a save that started
+    /// before quit is committed rather than cut off when the process exits.
+    /// Commands that arrive after this begins fail with `PoolClosed`. The SQL
+    /// plugin closes its own pools on `RunEvent::Exit`; this pool is the app's,
+    /// so the app closes it.
     pub fn close_blocking(&self) {
-        tauri::async_runtime::block_on(self.pool.close());
+        tauri::async_runtime::block_on(async {
+            let _drained = self.in_flight.write().await;
+            self.pool.close().await;
+        });
     }
 }
 
@@ -326,11 +341,11 @@ mod tests {
         assert!(opened.is_ok(), "open_lazy panicked outside a Tokio context");
     }
 
-    /// #472: quitting must not cut off a save that is already running. Close
-    /// has to wait for the connection it holds, and the save must be on disk
-    /// afterwards.
+    /// #472: quitting must not cut off a save that is already running, even
+    /// one that has not got a connection yet. Close has to wait for it, and
+    /// the save must be on disk afterwards.
     #[test]
-    fn closing_waits_for_an_in_flight_save_and_keeps_it() {
+    fn closing_waits_for_a_dispatched_save_that_has_no_connection_yet() {
         let root = TempRoot::new();
         let store = std::sync::Arc::new(tauri::async_runtime::block_on(migrated_store(&root)));
 
@@ -340,17 +355,17 @@ mod tests {
             let started = started.clone();
             std::thread::spawn(move || {
                 tauri::async_runtime::block_on(async move {
-                    let mut connection = store.pool().acquire().await.expect("connection");
+                    // As a command does: take the guard, then the work. No
+                    // connection is held during the delay.
+                    let _in_flight = store.in_flight().await;
                     started.wait();
-                    // Hold the connection, as a slow save would.
                     std::thread::sleep(Duration::from_millis(300));
-                    sqlx::query(
-                        "INSERT INTO hosts_store (id, payload, updated_at) \
-                         VALUES ('state', 'saved-before-quit', datetime('now'))",
+                    write_store(
+                        store.pool(),
+                        "terminal-workspace-hosts",
+                        "saved-before-quit",
                     )
-                    .execute(&mut *connection)
                     .await
-                    .expect("in-flight save");
                 })
             })
         };
@@ -360,10 +375,19 @@ mod tests {
         store.close_blocking();
         assert!(
             begun.elapsed() >= Duration::from_millis(200),
-            "close returned before the in-flight save released its connection"
+            "close returned before the dispatched save finished"
         );
-        writer.join().expect("writer thread");
+        writer
+            .join()
+            .expect("writer thread")
+            .expect("the dispatched save must succeed, not fail with PoolClosed");
         assert!(store.pool().is_closed());
+
+        let late = tauri::async_runtime::block_on(async {
+            let _in_flight = store.in_flight().await;
+            write_store(store.pool(), "terminal-workspace-hosts", "too-late").await
+        });
+        assert!(late.is_err(), "a save after close must fail, not hang");
 
         let reopened = PersistenceStore::open_lazy(&root.0.join("terminalworkspace.db"));
         let saved =
