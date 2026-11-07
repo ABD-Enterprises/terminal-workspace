@@ -343,3 +343,23 @@ fn quoted_values_round_trip_through_a_real_shell() {
         );
     }
 }
+
+#[test]
+fn refused_host_key_algorithms_match_the_shared_corpus() {
+    // #475: the browser backend asserts the same group against
+    // isRefusedHostKeyAlgorithm in backend-host-keys.mjs.
+    let fixture = fixture();
+    for case in cases(&fixture, "refusedHostKeyAlgorithms") {
+        let input = text(case, "input");
+        let refused = case
+            .get("refused")
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| panic!("`refused` must be a bool: {case}"));
+        assert_eq!(
+            crate::native_host_keys::is_refused_host_key_algorithm(&input),
+            refused,
+            "{input:?}: {}",
+            text(case, "why")
+        );
+    }
+}

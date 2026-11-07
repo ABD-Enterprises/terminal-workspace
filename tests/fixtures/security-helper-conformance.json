@@ -754,5 +754,43 @@
       ],
       "why": "a signal-killed command has no process exit code and never uses a numeric sentinel"
     }
+  ],
+  "$refusedHostKeyAlgorithmsComment": "#475: host key algorithms both transports refuse outright, whether first seen, pinned or explicitly approved. ssh-rsa is NOT refused: modern servers sign with rsa-sha2-256/512 while the key blob still says ssh-rsa.",
+  "refusedHostKeyAlgorithms": [
+    {
+      "input": "ssh-dss",
+      "refused": true,
+      "why": "1024-bit DSA signed with SHA-1"
+    },
+    {
+      "input": "ssh-ed25519",
+      "refused": false,
+      "why": "modern and preferred"
+    },
+    {
+      "input": "ecdsa-sha2-nistp256",
+      "refused": false,
+      "why": "ECDSA is accepted"
+    },
+    {
+      "input": "ecdsa-sha2-nistp521",
+      "refused": false,
+      "why": "ECDSA is accepted"
+    },
+    {
+      "input": "ssh-rsa",
+      "refused": false,
+      "why": "blob name for keys signed with rsa-sha2-256/512"
+    },
+    {
+      "input": "SSH-DSS",
+      "refused": false,
+      "why": "algorithm names are case-sensitive; this is not a real name"
+    },
+    {
+      "input": "",
+      "refused": false,
+      "why": "empty is not refused here; unusable keys fail elsewhere"
+    }
   ]
 }

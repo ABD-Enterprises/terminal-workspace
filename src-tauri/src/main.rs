@@ -1480,10 +1480,33 @@ fn verify_native_host_key(
     let (actual_key, key_type) = session
         .host_key()
         .ok_or_else(|| IpcError::internal("SSH server did not present a host key"))?;
+    // #475: the algorithm is checked first inside the decision, before the
+    // approved-key comparison and the pin store, so neither an earlier approval
+    // nor an existing pin lets a refused key through and it is never pinned.
+    let algorithm = host_key_algorithm_name(key_type);
     let presented = BASE64_STANDARD.encode(actual_key);
+    decide_native_host_key(host, store, algorithm, &presented)
+}
+
+/// The host-key decision once the presented key is known, split out of
+/// `verify_native_host_key` so it can be tested without a live SSH session.
+/// Refuses a refused algorithm (#475) first; then an approved key wins; then
+/// trust on first use against the pin store.
+fn decide_native_host_key(
+    host: &BackendHostConnection,
+    store: &NativeHostKeyStore,
+    algorithm: &str,
+    presented: &str,
+) -> Result<(), IpcError> {
+    if native_host_keys::is_refused_host_key_algorithm(algorithm) {
+        return Err(IpcError::internal(native_host_keys::weak_host_key_message(
+            &host.hostname,
+            host.port,
+        )));
+    }
 
     if let Some(expected_key) = host.known_host_public_key.as_ref() {
-        if presented != *expected_key {
+        if presented != expected_key.as_str() {
             return Err(IpcError::new(
                 IpcErrorCode::HostKeyMismatch,
                 format!(
@@ -1503,9 +1526,8 @@ fn verify_native_host_key(
         )));
     }
 
-    let algorithm = host_key_algorithm_name(key_type);
     let pattern = known_hosts_host_pattern(host);
-    match store.verify_or_pin(&pattern, algorithm, &presented)? {
+    match store.verify_or_pin(&pattern, algorithm, presented)? {
         HostKeyVerdict::Pinned | HostKeyVerdict::Matches => Ok(()),
         HostKeyVerdict::Mismatch { .. } => Err(IpcError::new(
             IpcErrorCode::HostKeyMismatch,
@@ -6221,6 +6243,95 @@ mod tests {
             protocol: "ssh".to_string(),
             sftp_root: None,
             username: "deploy".to_string(),
+        }
+    }
+
+    fn host_key_test_store() -> (SqliteTempRoot, NativeHostKeyStore) {
+        let root = SqliteTempRoot::new();
+        let store = NativeHostKeyStore::new(root.path()).expect("host key store");
+        (root, store)
+    }
+
+    fn pinned_contents(store: &NativeHostKeyStore) -> String {
+        fs::read_to_string(store.path()).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_dsa_host_key_is_refused_and_never_pinned_on_first_use() {
+        let (_root, store) = host_key_test_store();
+        let mut host = minimal_ssh_host();
+        host.known_host_public_key = None;
+        host.known_host_algorithm = None;
+        host.host_key_policy = Some("allowUnknown".to_string());
+
+        let error = decide_native_host_key(&host, &store, "ssh-dss", "AAAADSAKEY")
+            .expect_err("a DSA key must be refused");
+        assert!(
+            error.message.contains("too weak to trust"),
+            "{}",
+            error.message
+        );
+        assert_ne!(error.code, IpcErrorCode::HostKeyMismatch);
+        assert!(pinned_contents(&store).is_empty(), "nothing may be pinned");
+
+        decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAEDKEY")
+            .expect("an ed25519 key is still pinned on first use");
+        assert!(pinned_contents(&store).contains("AAAAEDKEY"));
+    }
+
+    #[test]
+    fn a_dsa_host_key_is_refused_even_when_the_user_approved_it() {
+        let (_root, store) = host_key_test_store();
+        let mut host = minimal_ssh_host();
+        host.known_host_algorithm = Some("ssh-dss".to_string());
+        host.known_host_public_key = Some("AAAADSAKEY".to_string());
+
+        let error = decide_native_host_key(&host, &store, "ssh-dss", "AAAADSAKEY")
+            .expect_err("an approved DSA key must still be refused");
+        assert!(
+            error.message.contains("too weak to trust"),
+            "{}",
+            error.message
+        );
+
+        host.known_host_public_key = Some("AAAAEDKEY".to_string());
+        decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAEDKEY")
+            .expect("an approved ed25519 key still passes");
+    }
+
+    #[test]
+    fn a_dsa_host_key_already_pinned_is_refused_and_the_store_is_unchanged() {
+        let (_root, store) = host_key_test_store();
+        let mut host = minimal_ssh_host();
+        host.known_host_public_key = None;
+        host.known_host_algorithm = None;
+        host.host_key_policy = Some("allowUnknown".to_string());
+        // A pin written before this change, when DSA was still accepted.
+        let pattern = known_hosts_host_pattern(&host);
+        store
+            .verify_or_pin(&pattern, "ssh-dss", "AAAADSAKEY")
+            .expect("seed an old DSA pin");
+        let before = pinned_contents(&store);
+
+        let error = decide_native_host_key(&host, &store, "ssh-dss", "AAAADSAKEY")
+            .expect_err("a matching DSA pin must not let the key through");
+        assert!(
+            error.message.contains("too weak to trust"),
+            "{}",
+            error.message
+        );
+        assert_eq!(pinned_contents(&store), before);
+    }
+
+    #[test]
+    fn rsa_and_ecdsa_host_keys_are_still_accepted() {
+        for algorithm in ["ssh-rsa", "ecdsa-sha2-nistp256", "ssh-ed25519"] {
+            let (_root, store) = host_key_test_store();
+            let mut host = minimal_ssh_host();
+            host.known_host_algorithm = Some(algorithm.to_string());
+            host.known_host_public_key = Some("AAAAKEY".to_string());
+            decide_native_host_key(&host, &store, algorithm, "AAAAKEY")
+                .unwrap_or_else(|error| panic!("{algorithm} must pass: {}", error.message));
         }
     }
 

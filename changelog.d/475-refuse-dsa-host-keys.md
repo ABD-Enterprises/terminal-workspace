@@ -1,0 +1,1 @@
+- [SECURITY] Refuse DSA (ssh-dss) host keys in both the native app and the browser backend, even if previously pinned or approved, and stop offering them for approval (#475)
