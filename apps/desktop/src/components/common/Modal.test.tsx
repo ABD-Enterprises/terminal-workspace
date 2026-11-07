@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Modal } from "./Modal";
 
@@ -50,5 +51,70 @@ describe("Modal", () => {
 
     const dialog = screen.getByRole("dialog");
     expect(dialog.getAttribute("aria-describedby")).toBeNull();
+  });
+
+  it("moves initial focus into the dialog on open and traps Tab navigation (#505)", () => {
+    function TestComponent() {
+      const [open, setOpen] = useState(false);
+      return (
+        <div>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open Dialog Trigger
+          </button>
+          <Modal
+            open={open}
+            title="Focus Trap Dialog"
+            onClose={() => setOpen(false)}
+            footer={
+              <div>
+                <button type="button">Action A</button>
+                <button type="button">Action B</button>
+              </div>
+            }
+          >
+            <div>
+              <input type="text" placeholder="First input" />
+            </div>
+          </Modal>
+        </div>
+      );
+    }
+
+    render(<TestComponent />);
+
+    const trigger = screen.getByRole("button", { name: "Open Dialog Trigger" });
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+
+    // Open the modal
+    fireEvent.click(trigger);
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toBeDefined();
+
+    // Verify focus moved inside the dialog (not staying on trigger or backdrop)
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    // Verify backdrop button has tabIndex -1
+    const backdrop = screen.getByLabelText("Close dialog");
+    expect(backdrop.getAttribute("tabindex")).toBe("-1");
+
+    const escButton = screen.getByRole("button", { name: "Esc" });
+    const actionB = screen.getByRole("button", { name: "Action B" });
+
+    // Focus last focusable element and press Tab -> should wrap to first focusable element
+    actionB.focus();
+    expect(document.activeElement).toBe(actionB);
+
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(document.activeElement).toBe(escButton);
+
+    // Press Shift+Tab on first element -> should wrap to last focusable element
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(actionB);
+
+    // Press Esc to close and verify focus restores to trigger
+    fireEvent.click(escButton);
+    expect(document.activeElement).toBe(trigger);
   });
 });
