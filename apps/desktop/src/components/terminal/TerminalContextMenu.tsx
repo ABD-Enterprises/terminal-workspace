@@ -15,6 +15,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { type TerminalContextMenuPosition } from "./terminal-pane-input-wiring";
 
 interface TerminalContextMenuProps {
@@ -23,7 +24,12 @@ interface TerminalContextMenuProps {
   onCopy: () => void;
   onPaste: () => void;
   onClear: () => void;
-  onClose: () => void;
+  /**
+   * `restoreFocus` is false when the menu closed because the user pressed
+   * somewhere else: that press may have focused another pane, and taking focus
+   * back would send their next keystrokes to the wrong session.
+   */
+  onClose: (options: { restoreFocus: boolean }) => void;
 }
 
 /** Gap kept between the menu and the window edge. */
@@ -97,7 +103,7 @@ export function TerminalContextMenu({
     }
     const onMouseDown = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        onClose();
+        onClose({ restoreFocus: false });
       }
     };
     window.addEventListener("mousedown", onMouseDown);
@@ -143,7 +149,7 @@ export function TerminalContextMenu({
       case "Tab":
         event.preventDefault();
         event.stopPropagation();
-        onClose();
+        onClose({ restoreFocus: true });
         return;
       default:
         return;
@@ -152,7 +158,10 @@ export function TerminalContextMenu({
     enabled[next]?.focus();
   };
 
-  return (
+  // Rendered into document.body: an ancestor with a backdrop filter or a
+  // transform becomes the containing block for `position: fixed`, which would
+  // offset the cursor coordinates and break the window clamping.
+  return createPortal(
     <div
       ref={menuRef}
       role="menu"
@@ -169,13 +178,14 @@ export function TerminalContextMenu({
           disabled={item.disabled}
           onClick={() => {
             item.run();
-            onClose();
+            onClose({ restoreFocus: true });
           }}
           className="block w-full rounded-xl px-3 py-1.5 text-left text-xs text-slate-200 transition hover:bg-slate-800 focus:bg-slate-800 focus:outline-none disabled:cursor-not-allowed disabled:text-slate-500 disabled:hover:bg-transparent"
         >
           {item.label}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body
   );
 }

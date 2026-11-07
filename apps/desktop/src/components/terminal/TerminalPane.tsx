@@ -65,10 +65,15 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     return () => window.clearTimeout(timer);
   }, [clipboardNotice]);
 
-  const closeContextMenu = useCallback(() => {
-    setContextMenu(null);
-    terminalRef.current?.focus();
-  }, [terminalRef]);
+  const closeContextMenu = useCallback(
+    ({ restoreFocus }: { restoreFocus: boolean }) => {
+      setContextMenu(null);
+      if (restoreFocus) {
+        terminalRef.current?.focus();
+      }
+    },
+    [terminalRef]
+  );
 
   return (
         <section
