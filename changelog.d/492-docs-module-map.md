@@ -1,1 +1,1 @@
-- [DOCS] Add module map table to docs/architecture.md (#540)
+- [INTERNAL] Add module map table to docs/architecture.md (#540)
