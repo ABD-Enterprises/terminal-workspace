@@ -13,6 +13,7 @@ import {
   attachTerminalPaneConnectionControls,
   initializeTerminalPaneTransport,
 } from "./terminal-pane-connection-controls";
+import { useAppStore } from "../../store/app-store";
 import {
   attachTerminalPaneInputWiring,
   type TerminalContextMenuPosition,
@@ -68,7 +69,7 @@ export interface TerminalPaneLifecycleOptions {
   runtimeStatusRef: MutableRefObject<RuntimeStatusMessage | null>;
   setPaneBackendSession: (paneId: string, backendSessionId: string | undefined) => void;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
-  setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
+  setPaneState: (paneId: string, connectionState: SessionConnectionState, connectionError?: string) => void;
   setPaneTransport: (paneId: string, transport: SessionTransport) => void;
   setRuntimeStatusMessage: Dispatch<SetStateAction<RuntimeStatusMessage | null>>;
   setSearchOpen: Dispatch<SetStateAction<boolean>>;
@@ -166,6 +167,8 @@ export function useTerminalPaneLifecycle({
       fontSize: 13,
       scrollback: 10000,
       theme: initialPaletteRef.current,
+      // #510: a terminal created after the setting changed starts with it.
+      screenReaderMode: useAppStore.getState().terminalScreenReaderMode,
     });
     const fitAddon = new FitAddon();
     let fitFrameId: number | null = null;

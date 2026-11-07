@@ -18,6 +18,8 @@ export function SettingsPreferencesSection() {
   const terminalTheme = useAppStore((state) => state.terminalTheme);
   const setTerminalTheme = useAppStore((state) => state.setTerminalTheme);
   const terminalThemeOptions = listTerminalThemeOptions();
+  const terminalScreenReaderMode = useAppStore((state) => state.terminalScreenReaderMode);
+  const setTerminalScreenReaderMode = useAppStore((state) => state.setTerminalScreenReaderMode);
   // T17-T20 polish toggles.
   const appShellTheme = useAppStore((state) => state.appShellTheme);
   const setAppShellTheme = useAppStore((state) => state.setAppShellTheme);
@@ -72,6 +74,33 @@ export function SettingsPreferencesSection() {
               <p className="mt-2 text-sm leading-5 text-slate-300">
                 Compact keeps the current reduced-scroll operator layout. Comfortable adds a little
                 more padding around the shell chrome.
+              </p>
+            </div>
+
+            <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                Screen reader support
+              </p>
+              <button
+                type="button"
+                aria-pressed={terminalScreenReaderMode}
+                onClick={() => setTerminalScreenReaderMode(!terminalScreenReaderMode)}
+                className={cn(
+                  "mt-2 inline-flex items-center gap-2 rounded-[14px] border px-3 py-2 text-sm transition",
+                  terminalScreenReaderMode
+                    ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-100"
+                    : "border-slate-800 bg-slate-950/70 text-slate-300 hover:border-slate-700 hover:text-white"
+                )}
+              >
+                <span>
+                  {terminalScreenReaderMode
+                    ? "Terminal screen reader support on"
+                    : "Terminal screen reader support off"}
+                </span>
+              </button>
+              <p className="mt-2 text-sm leading-5 text-slate-300">
+                Lets screen readers read terminal output, including in terminals already open. It
+                uses more memory and can slow very busy output, so it is off by default.
               </p>
             </div>
 

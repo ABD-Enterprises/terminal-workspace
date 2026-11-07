@@ -126,4 +126,73 @@ describe("createTerminalPaneNativeSessionController", () => {
     expect(openBackendSessionSocket).toHaveBeenCalledTimes(2);
     expect(openBackendSessionSocket).toHaveBeenLastCalledWith("session-2");
   });
+
+  it("#510: an error carries its real reason into pane state", async () => {
+    const sockets: FakeSocket[] = [];
+    createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
+    openBackendSessionSocket.mockImplementation(async () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    });
+
+    const setPaneState = vi.fn();
+    const controller = createTerminalPaneNativeSessionController({
+      activeHistoryEntryIdRef: ref<string | undefined>(undefined),
+      agentForwarding: false,
+      appendCommandOutput: vi.fn(),
+      authMethod: "none",
+      backendSessionIdRef: ref<string | undefined>(undefined),
+      connectedOnceRef: ref(false),
+      connectingRef: ref(false),
+      connectionStateRef: ref("connecting"),
+      hostname: "example.internal",
+      hostKeyPolicy: "allowUnknown",
+      id: "host-1",
+      intentionalDisconnectRef: ref(false),
+      isDisposed: () => false,
+      label: "Example",
+      pane: {
+        id: "pane-1",
+        hostId: "host-1",
+        title: "Example",
+        connectionState: "connecting",
+        transport: "ssh",
+        queuedCommands: [],
+        reconnectOnRestore: false,
+        persistOutputPreview: true,
+        createdAt: "now",
+        updatedAt: "now",
+      },
+      pendingSecretsNoticeShownRef: ref(false),
+      port: 22,
+      privateKeyPath: "",
+      protocol: "ssh",
+      protocolLabel: "SSH",
+      readLatestHost: () => ({}) as never,
+      reconnectAttemptRef: ref(0),
+      reconnectOnRestoreRef: ref(false),
+      reconnectTimeoutRef: ref<number | null>(null),
+      runtimeStatusRef: ref({ available: true, message: "ready" }),
+      setPaneBackendSession: vi.fn(),
+      setPaneReconnectOnRestore: vi.fn(),
+      setPaneState,
+      setPaneTransport: vi.fn(),
+      setPendingSecretsState: vi.fn(),
+      setRuntimeStatusMessage: vi.fn(),
+      sftpRoot: "/home",
+      socketRef: ref<FakeSocket | null>(null) as never,
+      stableEnvironment: {},
+      terminal: { write: vi.fn(), writeln: vi.fn() },
+      transportRef: ref("mock"),
+      unsupportedTransport: false,
+      useMockTransport: false,
+      username: "ops",
+    });
+
+    await controller.connectNativeSession();
+    sockets[0]!.dispatch("error");
+
+    expect(setPaneState).toHaveBeenCalledWith("pane-1", "error", "SSH session transport failed.");
+  });
 });

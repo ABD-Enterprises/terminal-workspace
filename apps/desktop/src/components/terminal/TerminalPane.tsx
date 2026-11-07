@@ -9,6 +9,8 @@ import { formatSessionConnectionState, type SessionPane } from "../../types/sess
 import { copyTerminalSelection, pasteIntoTerminal, type TerminalContextMenuPosition } from "./terminal-pane-input-wiring";
 import { terminalPaneStateStyles } from "./terminal-pane-state";
 import { TerminalContextMenu } from "./TerminalContextMenu";
+import { usePaneStatusAnnouncement } from "./use-pane-status-announcement";
+import { useTerminalScreenReaderMode } from "./use-terminal-screen-reader-mode";
 import { useTerminalPaneSession } from "./use-terminal-pane-session";
 
 interface TerminalPaneProps {
@@ -42,6 +44,11 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     [terminalThemeName, systemColorScheme]
   );
   const { advanceSearchMatch, clipboardNoticeRef, closeSearch, containerRef, contextMenuRequestRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, terminalRef, toggleConnectionRef } = useTerminalPaneSession({ host, pane, resolvedTerminalPalette });
+
+  // #510: screen reader support. The setting reaches open terminals, and
+  // connection changes in the active pane are announced once each.
+  useTerminalScreenReaderMode(terminalRef);
+  const statusAnnouncement = usePaneStatusAnnouncement(pane.connectionState, host.label, active);
 
   // #507: right-click opens this menu instead of pasting into the shell, and
   // clipboard outcomes are shown rather than swallowed.
@@ -168,13 +175,19 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
               </button>
             </div>
           </header>
+          <p className="sr-only" aria-live="polite" aria-atomic="true">
+            {statusAnnouncement}
+          </p>
+          {/* #510: the alert role only in the active pane, so an error in a
+              background split pane does not interrupt what the user is doing;
+              the banner stays visible either way. */}
           {pane.connectionState === "error" && pane.connectionError ? (
-            <div role="alert" className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+            <div role={active ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p className="font-medium">Connection failed: {pane.connectionError}</p>
             </div>
           ) : null}
           {runtimeStatusMessage && !runtimeStatusMessage.available ? (
-            <div role="alert" className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+            <div role={active ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p>{runtimeStatusMessage.message}</p>
               {runtimeStatusMessage.installHint ? (
                 <p className="mt-1 text-rose-100/80">{runtimeStatusMessage.installHint}</p>
