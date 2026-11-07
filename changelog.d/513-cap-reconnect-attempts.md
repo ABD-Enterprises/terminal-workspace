@@ -1,0 +1,1 @@
+- [FIX] Cap session reconnect attempts to 5 with attempt counter and terminal disconnected state (#513)
