@@ -43,12 +43,20 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     () => resolveTerminalTheme(terminalThemeName, systemColorScheme).entry.palette,
     [terminalThemeName, systemColorScheme]
   );
-  const { advanceSearchMatch, clipboardNoticeRef, closeSearch, containerRef, contextMenuRequestRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, terminalRef, toggleConnectionRef } = useTerminalPaneSession({ host, pane, resolvedTerminalPalette });
+  const { advanceSearchMatch, clipboardNoticeRef, screenReaderModeRef, closeSearch, containerRef, contextMenuRequestRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, terminalRef, toggleConnectionRef } = useTerminalPaneSession({ host, pane, resolvedTerminalPalette });
 
   // #510: screen reader support. The setting reaches open terminals, and
   // connection changes in the active pane are announced once each.
-  useTerminalScreenReaderMode(terminalRef, active);
-  const statusAnnouncement = usePaneStatusAnnouncement(pane.connectionState, host.label, active);
+  // When the terminal reads its own output, it already says what the pane
+  // writes (errors, reconnect notices), so the pane's own announcements step
+  // back rather than say everything twice.
+  const terminalSpeaks = useTerminalScreenReaderMode(terminalRef, screenReaderModeRef, active);
+  const paneAnnounces = active && !terminalSpeaks;
+  const statusAnnouncement = usePaneStatusAnnouncement(
+    pane.connectionState,
+    host.label,
+    paneAnnounces
+  );
 
   // #507: right-click opens this menu instead of pasting into the shell, and
   // clipboard outcomes are shown rather than swallowed.
@@ -179,19 +187,20 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             {statusAnnouncement}
           </p>
           {/* #510: the alert role only in the active pane, so an error in a
-              background split pane does not interrupt what the user is doing;
-              the banner stays visible either way. */}
+              background split pane does not interrupt what the user is doing,
+              and not while the terminal reads its own output, which already
+              includes the error; the banner stays visible either way. */}
           {pane.connectionState === "error" &&
           pane.connectionError &&
           // #510: an unavailable runtime has its own banner below, with the
           // same message; showing both would announce it twice.
           !(runtimeStatusMessage && !runtimeStatusMessage.available) ? (
-            <div role={active ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+            <div role={paneAnnounces ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p className="font-medium">Connection failed: {pane.connectionError}</p>
             </div>
           ) : null}
           {runtimeStatusMessage && !runtimeStatusMessage.available ? (
-            <div role={active ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+            <div role={paneAnnounces ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p>{runtimeStatusMessage.message}</p>
               {runtimeStatusMessage.installHint ? (
                 <p className="mt-1 text-rose-100/80">{runtimeStatusMessage.installHint}</p>

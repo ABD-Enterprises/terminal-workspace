@@ -35,6 +35,8 @@ export interface TerminalPaneLifecycleOptions {
   commandBufferRef: MutableRefObject<string>;
   /** #507: set by the pane; the lifecycle calls through it. */
   clipboardNoticeRef: MutableRefObject<(message: string) => void>;
+  /** #510: whether a terminal created now should start in screen reader mode. */
+  screenReaderModeRef: MutableRefObject<boolean>;
   /** #507: set by the pane; the lifecycle calls through it. */
   contextMenuRequestRef: MutableRefObject<(position: TerminalContextMenuPosition) => void>;
   connectedOnceRef: MutableRefObject<boolean>;
@@ -94,6 +96,7 @@ export function useTerminalPaneLifecycle({
   authMethod,
   backendSessionIdRef,
   clipboardNoticeRef,
+  screenReaderModeRef,
   commandBufferRef,
   contextMenuRequestRef,
   connectedOnceRef,
@@ -166,8 +169,9 @@ export function useTerminalPaneLifecycle({
       fontSize: 13,
       scrollback: 10000,
       theme: initialPaletteRef.current,
-      // #510: screen reader mode is applied by useTerminalScreenReaderMode in
-      // TerminalPane, which knows whether this pane is the active one.
+      // #510: a terminal recreated after a host change starts in the right
+      // mode; useTerminalScreenReaderMode keeps it right afterwards.
+      screenReaderMode: screenReaderModeRef.current,
     });
     const fitAddon = new FitAddon();
     let fitFrameId: number | null = null;
