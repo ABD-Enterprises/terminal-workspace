@@ -1,0 +1,1 @@
+- [FIX] Move initial focus into dialogs, trap Tab navigation, and restore trigger focus on close (#505)
