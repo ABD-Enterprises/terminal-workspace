@@ -1,0 +1,1 @@
+- [FIX] Browser e2e suite stands in for a healthy preview backend on the startup status probe, which otherwise gets a 502 from the Vite proxy when no backend runs (#544)

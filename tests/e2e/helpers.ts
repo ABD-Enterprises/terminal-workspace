@@ -45,7 +45,28 @@ const ALLOWED_CONSOLE_PATTERNS: RegExp[] = [
  */
 export const test = base.extend<{
   consoleErrorGuard: void;
+  backendStatusStub: void;
 }>({
+  /*
+   * The browser e2e suite runs only the Vite dev server (playwright.config.ts
+   * `webServer`), with no preview backend behind its `/api` proxy. The preview
+   * banner probes `/api/backend/status` on startup, and with nothing listening
+   * on the proxy target Vite answers 502 — a real resource error the guard
+   * below would rightly report. Stand in for a healthy backend on that one
+   * route so the suite exercises the UI it was written for. The real backend
+   * path (method, auth gate, status codes) is covered by
+   * tests/integration/backend-status-probe.integration.test.ts, and the banner's
+   * failure states by PreviewBanner.test.tsx.
+   */
+  backendStatusStub: [
+    async ({ page }, use) => {
+      await page.route("**/api/backend/status", (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' })
+      );
+      await use();
+    },
+    { auto: true },
+  ],
   consoleErrorGuard: [
     async ({ page }, use, testInfo) => {
       const violations: string[] = [];
