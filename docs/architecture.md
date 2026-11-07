@@ -44,8 +44,10 @@ There are two records of which host keys to trust, and they are allowed to disag
 - **Approved keys.** When the user scans a host and approves a key, the renderer keeps it in its
   known-hosts inventory (`useKnownHostsStore`). Native inventory is persisted in SQLite through the
   persistence commands, with a localStorage fallback; the browser preview keeps it in localStorage.
-  `buildBackendConnection` (`apps/desktop/src/lib/connections.ts`) passes the approved key with
-  every connection as `knownHostPublicKey` and `knownHostAlgorithm`, jump hops included.
+  `buildBackendConnection` (`apps/desktop/src/lib/connections.ts`) looks up each host's approved
+  key and passes it as `knownHostPublicKey` and `knownHostAlgorithm`, jump hops included, when
+  given the whole inventory. SFTP, snippets and session restore pass the whole inventory; an
+  interactive terminal session passes the target's approval only.
 - **Pins.** A durable `known_hosts`-style file under the app data directory
   (`src-tauri/src/native_host_keys.rs`; the browser backend resolves the same path in
   `backend-host-keys.mjs`), written on first use for hosts with no approved key.
@@ -65,13 +67,14 @@ while an old pin remains, the user gets the mismatch error, and re-scanning and 
 it. Nothing merges the two stores, and nothing needs to.
 
 **Where it applies.** The direct native SSH path (`decide_native_host_key` in `main.rs`) and the
-browser backend (`createConnectConfig` → `createTrustedHostKeyVerifier` or `createHostKeyVerifier`)
-follow it exactly. Connections made by the external `ssh` client follow the same shape through
-OpenSSH: a hop with an approved key gets a per-session known-hosts file holding only that key and
-`StrictHostKeyChecking yes`; a hop without one uses the durable pin file with
+browser backend (`selectHostKeyVerifier` in `backend-host-keys.mjs`, called by
+`createConnectConfig`) follow it exactly. Connections made by the external `ssh` client follow the same shape through
+OpenSSH: a hop with an approved key gets a per-session known-hosts file holding the approved keys of the
+connection's hops and `StrictHostKeyChecking yes`; a hop without one uses the durable pin file with
 `StrictHostKeyChecking accept-new`. Mosh without an approved key leaves `UserKnownHostsFile`
 unspecified, so OpenSSH's own defaults apply there.
 
 Tests that pin this: `decide_native_host_key` precedence tests in `src-tauri/src/main.rs`, the
-"approved key versus pin" cases in `tests/integration/backend-host-keys.integration.test.ts`, and
-the approved-key cases in `apps/desktop/src/lib/connections.test.ts`.
+`selectHostKeyVerifier` cases in `tests/integration/backend-host-keys.integration.test.ts`, the
+approved-key cases in `apps/desktop/src/lib/connections.test.ts`, and the jump-hop restore case in
+`apps/desktop/src/components/terminal/SessionRestoreManager.test.ts`.

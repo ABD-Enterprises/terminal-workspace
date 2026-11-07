@@ -404,6 +404,24 @@ export function createTrustedHostKeyVerifier({ hostname, port, trustedKey }) {
   return { verify, failure };
 }
 
+/**
+ * #489: the browser backend's host-key rule, in one place. An approved key
+ * (`host.knownHostPublicKey`) decides alone and the pin store is never
+ * consulted; without one, the durable store decides by trust on first use.
+ * A refused algorithm (#475) is refused either way. `getStore` is only called
+ * on the second path. Documented in docs/architecture.md.
+ */
+export function selectHostKeyVerifier({ host, getStore }) {
+  if (host.knownHostPublicKey) {
+    return createTrustedHostKeyVerifier({
+      hostname: host.hostname,
+      port: host.port,
+      trustedKey: host.knownHostPublicKey,
+    });
+  }
+  return createHostKeyVerifier({ hostname: host.hostname, port: host.port, store: getStore() });
+}
+
 function sleep(milliseconds) {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
