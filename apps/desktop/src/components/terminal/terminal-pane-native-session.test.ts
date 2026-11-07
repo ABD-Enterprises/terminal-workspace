@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTerminalPaneNativeSessionController } from "./terminal-pane-native-session";
+import { createTerminalPaneNativeSessionController, MAX_RECONNECT_ATTEMPTS } from "./terminal-pane-native-session";
 
 const g = globalThis as unknown as Record<string, unknown>;
 g.window = g;
@@ -125,5 +125,100 @@ describe("createTerminalPaneNativeSessionController", () => {
 
     expect(openBackendSessionSocket).toHaveBeenCalledTimes(2);
     expect(openBackendSessionSocket).toHaveBeenLastCalledWith("session-2");
+  });
+  it("gives up after exceeding MAX_RECONNECT_ATTEMPTS and transitions to terminal disconnected state (#513)", async () => {
+    const sockets: FakeSocket[] = [];
+    createBackendSession.mockImplementation(async () => ({ sessionId: `session-${sockets.length + 1}` }));
+    openBackendSessionSocket.mockImplementation(async () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    });
+
+    const setPaneState = vi.fn();
+    const terminalWriteln = vi.fn();
+    const reconnectAttemptRef = ref(0);
+
+    const socketRef = ref<FakeSocket | null>(null);
+    const controller = createTerminalPaneNativeSessionController({
+      activeHistoryEntryIdRef: ref<string | undefined>(undefined),
+      agentForwarding: false,
+      appendCommandOutput: vi.fn(),
+      authMethod: "none",
+      backendSessionIdRef: ref<string | undefined>(undefined),
+      connectedOnceRef: ref(false),
+      connectingRef: ref(false),
+      connectionStateRef: ref("connecting"),
+      hostname: "example.internal",
+      hostKeyPolicy: "allowUnknown",
+      id: "host-1",
+      intentionalDisconnectRef: ref(false),
+      isDisposed: () => false,
+      label: "Example",
+      pane: {
+        id: "pane-1",
+        hostId: "host-1",
+        title: "Example",
+        connectionState: "connecting",
+        transport: "ssh",
+        queuedCommands: [],
+        reconnectOnRestore: false,
+        persistOutputPreview: true,
+        createdAt: "now",
+        updatedAt: "now",
+      },
+      pendingSecretsNoticeShownRef: ref(false),
+      port: 22,
+      privateKeyPath: "",
+      protocol: "ssh",
+      protocolLabel: "SSH",
+      readLatestHost: () => ({}) as never,
+      reconnectAttemptRef,
+      reconnectOnRestoreRef: ref(false),
+      reconnectTimeoutRef: ref<number | null>(null),
+      runtimeStatusRef: ref({ available: true, message: "ready" }),
+      setPaneBackendSession: vi.fn(),
+      setPaneReconnectOnRestore: vi.fn(),
+      setPaneState,
+      setPaneTransport: vi.fn(),
+      setPendingSecretsState: vi.fn(),
+      setRuntimeStatusMessage: vi.fn(),
+      sftpRoot: "/home",
+      socketRef: socketRef as never,
+      stableEnvironment: {},
+      terminal: { write: vi.fn(), writeln: terminalWriteln },
+      transportRef: ref("mock"),
+      unsupportedTransport: false,
+      useMockTransport: false,
+      username: "ops",
+    });
+
+    await controller.connectNativeSession();
+    sockets[0]!.dispatch("message", {
+      data: JSON.stringify({ type: "status", state: "connected" }),
+    });
+
+    // Simulate 5 failures, each hitting scheduleReconnect
+    for (let i = 0; i < MAX_RECONNECT_ATTEMPTS; i++) {
+      sockets[i]!.dispatch("close");
+      await vi.advanceTimersByTimeAsync(8_000);
+    }
+
+    // Now reconnectAttemptRef is 5, sockets.length is 5
+    expect(reconnectAttemptRef.current).toBe(MAX_RECONNECT_ATTEMPTS);
+
+    // 6th disconnect -> exceeds MAX_RECONNECT_ATTEMPTS
+    sockets[MAX_RECONNECT_ATTEMPTS - 1]!.dispatch("close");
+
+    expect(reconnectAttemptRef.current).toBe(MAX_RECONNECT_ATTEMPTS + 1);
+    expect(setPaneState).toHaveBeenLastCalledWith("pane-1", "disconnected", "SSH connection interrupted.");
+    expect(terminalWriteln).toHaveBeenCalledWith(
+      expect.stringContaining(`reconnect failed after ${MAX_RECONNECT_ATTEMPTS} attempts`)
+    );
+
+    // Advancing timers should not trigger any further backend session attempts
+    const attemptsCount = openBackendSessionSocket.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(openBackendSessionSocket).toHaveBeenCalledTimes(attemptsCount);
   });
 });

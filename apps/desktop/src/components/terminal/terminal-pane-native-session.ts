@@ -1,3 +1,4 @@
+export const MAX_RECONNECT_ATTEMPTS = 5;
 import { type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { type Terminal } from "xterm";
 import {
@@ -137,6 +138,16 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
 
     clearReconnectTimer();
     reconnectAttemptRef.current += 1;
+    if (reconnectAttemptRef.current > MAX_RECONNECT_ATTEMPTS) {
+      connectionStateRef.current = "disconnected";
+      const errorReason = message ?? `${protocolLabel} connection interrupted.`;
+      setPaneState(pane.id, "disconnected", errorReason);
+      terminal.writeln(
+        `\r\n${protocolLabel} reconnect failed after ${MAX_RECONNECT_ATTEMPTS} attempts. Click Reconnect to try again.`
+      );
+      return;
+    }
+
     const reconnectDelayMs = Math.min(
       8_000,
       reconnectAttemptRef.current <= 1 ? 1_500 : reconnectAttemptRef.current * 2_000
@@ -145,7 +156,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
     connectionStateRef.current = "disconnected";
     setPaneState(pane.id, "disconnected");
     terminal.writeln(
-      `\r\n${message ?? `${protocolLabel} connection interrupted.`} Reconnecting in ${Math.ceil(reconnectDelayMs / 1000)}s...`
+      `\r\n${message ?? `${protocolLabel} connection interrupted.`} (Attempt ${reconnectAttemptRef.current}/${MAX_RECONNECT_ATTEMPTS}) Reconnecting in ${Math.ceil(reconnectDelayMs / 1000)}s...`
     );
 
     reconnectTimeoutRef.current = window.setTimeout(() => {
