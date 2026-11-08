@@ -307,7 +307,8 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
       socketRef.current = socket;
 
       socket.addEventListener("message", (event) => {
-        if (isDisposed()) {
+        // A replaced socket (see the close handler) must not touch the pane.
+        if (isDisposed() || socketRef.current !== socket) {
           return;
         }
 
@@ -349,7 +350,14 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
         }
 
         clearBackendSession();
-        if (connectedOnceRef.current || reconnectOnRestoreRef.current) {
+        // The same retry rule as a failed connect: a changed host key is
+        // never retried, the user has to re-scan and trust it first.
+        if (
+          shouldScheduleReconnect(classifySshError(message.message).category, {
+            connectedOnce: connectedOnceRef.current,
+            reconnectOnRestore: reconnectOnRestoreRef.current,
+          })
+        ) {
           scheduleReconnect(message.message);
           return;
         }
@@ -389,7 +397,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
       });
 
       socket.addEventListener("error", () => {
-        if (isDisposed()) {
+        if (isDisposed() || socketRef.current !== socket) {
           return;
         }
 

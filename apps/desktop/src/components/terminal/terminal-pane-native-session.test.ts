@@ -40,7 +40,10 @@ class FakeSocket {
   }
 }
 
-function makeController(setPaneState = vi.fn()) {
+function makeController(
+  setPaneState = vi.fn(),
+  overrides: Partial<Parameters<typeof createTerminalPaneNativeSessionController>[0]> = {}
+) {
   const socketRef = ref<FakeSocket | null>(null);
   return createTerminalPaneNativeSessionController({
     activeHistoryEntryIdRef: ref<string | undefined>(undefined),
@@ -93,6 +96,7 @@ function makeController(setPaneState = vi.fn()) {
     unsupportedTransport: false,
     useMockTransport: false,
     username: "ops",
+    ...overrides,
   });
 }
 
@@ -199,7 +203,7 @@ describe("createTerminalPaneNativeSessionController", () => {
     });
     sockets[0]!.readyState = 3;
     await controller.connectNativeSession();
-    sockets[1]!.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
+    // No "connected" first: the guard must already see the new attempt.
     sockets[1]!.dispatch("message", {
       data: JSON.stringify({ type: "status", state: "disconnected" }),
     });
@@ -235,6 +239,57 @@ describe("createTerminalPaneNativeSessionController", () => {
     sockets[0]!.dispatch("close");
     await vi.advanceTimersByTimeAsync(10_000);
     expect(createBackendSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("#510: a late error from the socket the retry closed leaves the new session alone", async () => {
+    const sockets: FakeSocket[] = [];
+    createBackendSession
+      .mockResolvedValueOnce({ sessionId: "session-1" })
+      .mockResolvedValueOnce({ sessionId: "session-2" });
+    openBackendSessionSocket.mockImplementation(async () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    });
+    const setPaneBackendSession = vi.fn();
+    const controller = makeController(vi.fn(), { setPaneBackendSession });
+
+    await controller.connectNativeSession();
+    sockets[0]!.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
+    sockets[0]!.dispatch("message", {
+      data: JSON.stringify({ type: "error", message: "SSH connection reset." }),
+    });
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(createBackendSession).toHaveBeenCalledTimes(2);
+    setPaneBackendSession.mockClear();
+
+    sockets[0]!.dispatch("error");
+    sockets[0]!.dispatch("message", {
+      data: JSON.stringify({ type: "status", state: "disconnected" }),
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(setPaneBackendSession).not.toHaveBeenCalled();
+    expect(sockets[1]!.close).not.toHaveBeenCalled();
+    expect(createBackendSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("#510: does not retry when the backend reports a changed host key", async () => {
+    createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
+    const socket = new FakeSocket();
+    openBackendSessionSocket.mockResolvedValue(socket);
+    const setPaneState = vi.fn();
+    const controller = makeController(setPaneState);
+
+    await controller.connectNativeSession();
+    socket.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
+    const refusal =
+      "Host key verification failed for target.internal:22: the presented host key does not match the one first seen for this host.";
+    socket.dispatch("message", { data: JSON.stringify({ type: "error", message: refusal }) });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(createBackendSession).toHaveBeenCalledTimes(1);
+    expect(setPaneState).toHaveBeenLastCalledWith("pane-1", "error", refusal);
   });
 
   it("#510: keeps the retry notice through an error status and then a disconnected status", async () => {
