@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-// #473: the backend accepts only the SSH sign-in methods it supports. These
+// #473: the backend accepts only the SSH sign-in methods it supports, and
+// forwards the SSH agent only for requests that present the token. These
 // run against the real backend process. The target port has nothing listening:
 // a request that got past the check would try to connect and fail with a
 // server error, so a 400 shows the check refused it before any connection.
@@ -72,19 +73,18 @@ function host(authMethod: unknown, extra: Record<string, unknown> = {}) {
     username: "ops",
     authMethod,
     hostKeyPolicy: "allowUnknown",
-    agentForwarding: true,
     ...extra,
   };
 }
 
-function post(path: string, body: unknown) {
+function post(path: string, body: unknown, { withToken = true } = {}) {
+  const headers: Record<string, string> = { Origin: ORIGIN, "Content-Type": "application/json" };
+  if (withToken) {
+    headers.Authorization = `Bearer ${TOKEN}`;
+  }
   return fetch(`${baseUrl}${path}`, {
     method: "POST",
-    headers: {
-      Origin: ORIGIN,
-      Authorization: `Bearer ${TOKEN}`,
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(body),
   });
 }
@@ -111,6 +111,19 @@ describe("#473: only supported SSH sign-in methods reach a connection", () => {
     expect(response.status).toBe(400);
   });
 
+  it("refuses agent forwarding for a request authorized only by its Origin", async () => {
+    const forwarding = host("password", { password: "pw", agentForwarding: true });
+    const response = await post(
+      "/api/backend/sftp/list",
+      { host: forwarding, path: "/" },
+      { withToken: false }
+    );
+    expect(response.status).toBe(403);
+
+    const session = await post("/api/backend/sessions", { host: forwarding }, { withToken: false });
+    expect(session.status).toBe(403);
+  });
+
   it("lets a supported sign-in method through to the connection attempt", async () => {
     // Control: the same request with a password gets past the check and fails
     // only because nothing is listening, so the refusals above are the check.
@@ -119,5 +132,12 @@ describe("#473: only supported SSH sign-in methods reach a connection", () => {
       path: "/",
     });
     expect(response.status).not.toBe(400);
+
+    // And with the token, agent forwarding gets past the checks too.
+    const forwarding = await post("/api/backend/sftp/list", {
+      host: host("password", { password: "pw", agentForwarding: true }),
+      path: "/",
+    });
+    expect([400, 403]).not.toContain(forwarding.status);
   });
 });

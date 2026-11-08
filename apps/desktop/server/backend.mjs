@@ -47,6 +47,7 @@ import {
 } from "./backend-deadline.mjs";
 import { createWithSftp } from "./backend-sftp.mjs";
 import { respondError, sendJson } from "./backend-responses.mjs";
+import { requestAuthContext, sshAuthOptions } from "./backend-ssh-auth.mjs";
 import {
   createBackendCommandOperations,
   waitForSshReady,
@@ -297,27 +298,14 @@ function getHostKeyStore() {
   return hostKeyStore;
 }
 
-// #473: the SSH sign-in methods this backend uses, as an allowlist. Checking
-// only for the known-bad combinations let any other value through (for
-// example "agent"), which reached ssh2 with no password or key and fell back
-// to whatever else ssh2 would try. "none" is not here: a host set to no SSH
-// sign-in is never connected over SSH.
-const CONNECTABLE_AUTH_METHODS = new Set(["password", "privateKey"]);
-
-class UnsupportedAuthMethodError extends Error {
-  constructor(host) {
-    super(`Host ${host?.hostname ?? ""} does not use a supported SSH sign-in method.`);
-    this.name = "UnsupportedAuthMethodError";
-    this.statusCode = 400;
-  }
-}
-
 async function createConnectConfig(host) {
-  // Every SSH connection (sessions, file transfer, each jump hop) is built
-  // here, so the allowlist covers them all.
-  if (!CONNECTABLE_AUTH_METHODS.has(host?.authMethod)) {
-    throw new UnsupportedAuthMethodError(host);
-  }
+  // #473: every SSH connection (sessions, file transfer, remote commands,
+  // each jump hop) is built here, so these rules cover them all. Checked
+  // before anything else, so a refused request opens no connection.
+  const authOptions = sshAuthOptions(host, {
+    authorizedBy: requestAuthContext.getStore()?.authorizedBy,
+    agentSocket: process.env.SSH_AUTH_SOCK,
+  });
 
   // Defense-in-depth: even if a caller bypasses connections.ts (e.g. talks to
   // the backend HTTP API directly), refuse to connect when the host requires
@@ -349,10 +337,7 @@ async function createConnectConfig(host) {
   connectConfig.hostVerifier = verifier.verify;
   hostKeyFailure = verifier.failure;
 
-  if (host.agentForwarding && process.env.SSH_AUTH_SOCK) {
-    connectConfig.agent = process.env.SSH_AUTH_SOCK;
-    connectConfig.agentForward = true;
-  }
+  Object.assign(connectConfig, authOptions);
 
   // Secret-handling: wrap any password / passphrase / private-key bytes in a
   // SecretBuffer and remember a scrub callback for each. The caller is
@@ -1251,6 +1236,9 @@ const server = createServer(async (request, response) => {
     denyUnauthorized(response, authDecision);
     return;
   }
+  // #473: connection code reads how this request was authorized (agent
+  // forwarding needs the token). Applies to the rest of this request only.
+  requestAuthContext.enterWith({ authorizedBy: authDecision.via });
 
   // #470: an allowed Origin alone must not be enough. Checked here rather than
   // in readJson so no route's error handling can change the status and a new
