@@ -415,7 +415,19 @@ describe("#155: JS helpers match the shared cross-backend corpus", () => {
     }
   });
 
-  it("quoted values round-trip through a real shell as one literal word", () => {
+  it("#484: stderrSemantics conformance group declares expected backend behavior", () => {
+    const semantics = cases("stderrSemantics");
+    expect(semantics.length).toBeGreaterThan(0);
+    const nodeCase = semantics.find((s) => s.backend === "node-snippet");
+    expect(nodeCase).toBeDefined();
+    expect(nodeCase?.meaning).toBe("remote-stderr-only");
+
+    const nativeCase = semantics.find((s) => s.backend === "native-snippet");
+    expect(nativeCase).toBeDefined();
+    expect(nativeCase?.meaning).toBe("combined-ssh-process-stderr");
+  });
+
+  it.skipIf(process.platform === "win32")("quoted values round-trip through a real shell as one literal word", () => {
     // Asserting the spelling alone would pass for a spelling that is wrong.
     for (const item of cases("shellSingleQuote")) {
       const input = item.input as string;

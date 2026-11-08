@@ -363,3 +363,24 @@ fn refused_host_key_algorithms_match_the_shared_corpus() {
         );
     }
 }
+
+#[test]
+fn stderr_semantics_match_the_shared_corpus() {
+    // #484: the cross-backend conformance suite records the known intentional
+    // divergence between browser and native snippet stderr representations.
+    let fixture = fixture();
+    let cases = cases(&fixture, "stderrSemantics");
+    assert!(!cases.is_empty(), "stderrSemantics must not be empty");
+
+    let node_case = cases
+        .iter()
+        .find(|c| text(c, "backend") == "node-snippet")
+        .expect("node-snippet entry must exist in stderrSemantics");
+    assert_eq!(text(node_case, "meaning"), "remote-stderr-only");
+
+    let native_case = cases
+        .iter()
+        .find(|c| text(c, "backend") == "native-snippet")
+        .expect("native-snippet entry must exist in stderrSemantics");
+    assert_eq!(text(native_case, "meaning"), "combined-ssh-process-stderr");
+}
