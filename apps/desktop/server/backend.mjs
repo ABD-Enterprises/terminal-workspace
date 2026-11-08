@@ -297,7 +297,28 @@ function getHostKeyStore() {
   return hostKeyStore;
 }
 
+// #473: the SSH sign-in methods this backend uses, as an allowlist. Checking
+// only for the known-bad combinations let any other value through (for
+// example "agent"), which reached ssh2 with no password or key and fell back
+// to whatever else ssh2 would try. "none" is not here: a host set to no SSH
+// sign-in is never connected over SSH.
+const CONNECTABLE_AUTH_METHODS = new Set(["password", "privateKey"]);
+
+class UnsupportedAuthMethodError extends Error {
+  constructor(host) {
+    super(`Host ${host?.hostname ?? ""} does not use a supported SSH sign-in method.`);
+    this.name = "UnsupportedAuthMethodError";
+    this.statusCode = 400;
+  }
+}
+
 async function createConnectConfig(host) {
+  // Every SSH connection (sessions, file transfer, each jump hop) is built
+  // here, so the allowlist covers them all.
+  if (!CONNECTABLE_AUTH_METHODS.has(host?.authMethod)) {
+    throw new UnsupportedAuthMethodError(host);
+  }
+
   // Defense-in-depth: even if a caller bypasses connections.ts (e.g. talks to
   // the backend HTTP API directly), refuse to connect when the host requires
   // a trusted key and we were not given one. See parity-and-hardening-review §3.S-1.
