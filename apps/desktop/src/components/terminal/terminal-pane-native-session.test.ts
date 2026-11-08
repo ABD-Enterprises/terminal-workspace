@@ -157,6 +157,56 @@ describe("createTerminalPaneNativeSessionController", () => {
     );
   });
 
+  it("#510: keeps a first attempt's error and reason through the statuses that follow it", async () => {
+    createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
+    const socket = new FakeSocket();
+    openBackendSessionSocket.mockResolvedValue(socket);
+    const setPaneState = vi.fn();
+    const controller = makeController(setPaneState);
+
+    await controller.connectNativeSession();
+    socket.dispatch("message", {
+      data: JSON.stringify({ type: "error", message: "Jump host refused the connection." }),
+    });
+    socket.dispatch("message", { data: JSON.stringify({ type: "status", state: "error" }) });
+    socket.dispatch("message", {
+      data: JSON.stringify({ type: "status", state: "disconnected" }),
+    });
+
+    expect(setPaneState).toHaveBeenLastCalledWith(
+      "pane-1",
+      "error",
+      "Jump host refused the connection."
+    );
+  });
+
+  it("#510: a new attempt after an error applies its own statuses", async () => {
+    const sockets: FakeSocket[] = [];
+    createBackendSession
+      .mockResolvedValueOnce({ sessionId: "session-1" })
+      .mockResolvedValueOnce({ sessionId: "session-2" });
+    openBackendSessionSocket.mockImplementation(async () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    });
+    const setPaneState = vi.fn();
+    const controller = makeController(setPaneState);
+
+    await controller.connectNativeSession();
+    sockets[0]!.dispatch("message", {
+      data: JSON.stringify({ type: "error", message: "Refused." }),
+    });
+    sockets[0]!.readyState = 3;
+    await controller.connectNativeSession();
+    sockets[1]!.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
+    sockets[1]!.dispatch("message", {
+      data: JSON.stringify({ type: "status", state: "disconnected" }),
+    });
+
+    expect(setPaneState).toHaveBeenLastCalledWith("pane-1", "disconnected");
+  });
+
   it("#510: keeps the retry notice through an error status and then a disconnected status", async () => {
     createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
     const socket = new FakeSocket();

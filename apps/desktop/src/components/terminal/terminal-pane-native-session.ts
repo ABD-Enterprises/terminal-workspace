@@ -245,6 +245,8 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
     connectingRef.current = true;
     transportRef.current = resolveNativeSessionTransport(protocol);
     setPaneTransport(pane.id, transportRef.current);
+    // Set here, not only by the next render: the status guard below reads it.
+    connectionStateRef.current = "connecting";
     setPaneState(pane.id, "connecting");
 
     if (announce) {
@@ -320,13 +322,14 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
             reconnectAttemptRef.current = 0;
           }
           // #510: a failing session sends its error, then "error" and/or
-          // "disconnected" statuses. When the error already scheduled a
-          // retry, the pane is disconnected with the reason and countdown;
-          // later end-of-session statuses must not replace them with a bare
-          // "disconnected" (or an error banner for a retry in progress).
+          // "disconnected" statuses. Once the error has been handled (a retry
+          // is pending with its reason and countdown, or the pane shows the
+          // error with its reason), those end-of-session statuses must not
+          // replace it with a bare "disconnected". A new attempt sets
+          // "connecting" first, so its own statuses still apply.
           if (
             (message.state === "disconnected" || message.state === "error") &&
-            reconnectTimeoutRef.current !== null
+            (reconnectTimeoutRef.current !== null || connectionStateRef.current === "error")
           ) {
             return;
           }
