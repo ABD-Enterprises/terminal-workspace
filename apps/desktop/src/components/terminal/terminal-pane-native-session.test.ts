@@ -455,6 +455,31 @@ describe("createTerminalPaneNativeSessionController", () => {
     expect(reconnectAttemptRef.current).toBe(0);
   });
 
+  it("#513: Retry works when the give-up came from an error frame on an open socket", async () => {
+    const sockets: FakeSocket[] = [];
+    createBackendSession
+      .mockResolvedValueOnce({ sessionId: "session-1" })
+      .mockResolvedValueOnce({ sessionId: "session-2" });
+    openBackendSessionSocket.mockImplementation(async () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    });
+    const reconnectAttemptRef = ref(0);
+    const controller = makeController(vi.fn(), {
+      reconnectAttemptRef,
+      reconnectOnRestoreRef: ref(true),
+    });
+    await controller.connectNativeSession();
+    reconnectAttemptRef.current = 5;
+    sockets[0]!.dispatch("message", {
+      data: JSON.stringify({ type: "error", message: "SSH connection reset." }),
+    });
+    expect(sockets[0]!.close).toHaveBeenCalled();
+    await controller.connectNativeSession({ announce: true });
+    expect(createBackendSession).toHaveBeenCalledTimes(2);
+  });
+
   it("#510: keeps the retry notice through an error status and then a disconnected status", async () => {
     createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
     const socket = new FakeSocket();

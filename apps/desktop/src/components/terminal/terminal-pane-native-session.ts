@@ -151,6 +151,14 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
       // #513: stop retrying. The pane stays "disconnected" with the last
       // error and a final notice (shown with a Retry button and announced).
       gaveUp = true;
+      // The browser backend leaves its socket open after a failed session; an
+      // open socket would make Retry return without connecting. Close it the
+      // way the retry timer does (its close handler ignores a replaced socket).
+      const endedSocket = socketRef.current;
+      if (endedSocket) {
+        socketRef.current = null;
+        endedSocket.close();
+      }
       const giveUpNotice = `${message ?? `${protocolLabel} connection interrupted.`} ${GIVE_UP_MARKER} ${MAX_RECONNECT_ATTEMPTS} attempts. Select Retry to try again.`;
       connectionStateRef.current = "disconnected";
       setPaneState(pane.id, "disconnected", giveUpNotice);
@@ -360,6 +368,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
             connectedOnceRef.current = true;
             reconnectOnRestoreRef.current = true;
             reconnectAttemptRef.current = 0;
+            gaveUp = false;
           }
           // #510: a failing session sends its error, then "error" and/or
           // "disconnected" statuses. Once the error has been handled (a retry
