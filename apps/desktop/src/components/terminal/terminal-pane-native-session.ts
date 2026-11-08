@@ -378,6 +378,13 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
           clearBackendSession();
         }
 
+        // #510: the session already ended with an error the pane shows and
+        // decided not to retry (for example a changed host key). Its socket
+        // closing afterwards must not start a retry that hides it.
+        if (connectionStateRef.current === "error") {
+          return;
+        }
+
         if (
           !connectedOnceRef.current &&
           reusedExistingSession &&
@@ -388,13 +395,6 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
             allowPendingSecrets: true,
             promptForSecrets: false,
           });
-          return;
-        }
-
-        // #510: the session already ended with an error the pane shows and
-        // decided not to retry (for example a changed host key). Its socket
-        // closing afterwards must not start a retry that hides it.
-        if (connectionStateRef.current === "error") {
           return;
         }
 

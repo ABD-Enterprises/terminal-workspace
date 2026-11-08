@@ -315,6 +315,28 @@ describe("createTerminalPaneNativeSessionController", () => {
     expect(setPaneState).toHaveBeenLastCalledWith("pane-1", "error", refusal);
   });
 
+  it("#510: a restored session refused for a changed host key does not reconnect on close", async () => {
+    createBackendSession.mockResolvedValueOnce({ sessionId: "session-2" });
+    const socket = new FakeSocket();
+    openBackendSessionSocket.mockResolvedValue(socket);
+    const setPaneState = vi.fn();
+    // A pane reattaching to a session the restore manager already created.
+    const controller = makeController(setPaneState, {
+      authMethod: "password",
+      backendSessionIdRef: ref<string | undefined>("session-1"),
+      reconnectOnRestoreRef: ref(true),
+    });
+
+    await controller.connectNativeSession();
+    const refusal = "Host key verification failed for target.internal:22: the presented host key does not match.";
+    socket.dispatch("message", { data: JSON.stringify({ type: "error", message: refusal }) });
+    socket.dispatch("close");
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(createBackendSession).not.toHaveBeenCalled();
+    expect(setPaneState).toHaveBeenLastCalledWith("pane-1", "error", refusal);
+  });
+
   it("#510: a retry whose session cannot be created schedules the next retry", async () => {
     const sockets: FakeSocket[] = [];
     createBackendSession
