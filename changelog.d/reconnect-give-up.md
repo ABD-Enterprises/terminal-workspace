@@ -1,0 +1,1 @@
+- [FIX] A pane that cannot reconnect now gives up after five attempts and shows the last error with a Retry button, instead of retrying forever (#513)
