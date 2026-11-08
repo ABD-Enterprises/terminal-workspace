@@ -7,14 +7,14 @@ import {
   openBackendSessionSocket,
 } from "../../lib/api";
 import { parseSessionFrame } from "../../lib/backend-runtime";
-import { buildBackendConnectionFromKnownHost } from "../../lib/connections";
+import { buildBackendConnection } from "../../lib/connections";
 import { canRestoreSessionWithoutPrompt, ensureRuntimeSecrets } from "../../lib/runtime-secrets";
 import { classifySshError } from "../../lib/ssh-error-classifier";
+import { useKnownHostsStore } from "../../store/known-hosts-store";
 import { type HostRecord } from "../../types/host";
 import { type SessionConnectionState, type SessionPane, type SessionTransport } from "../../types/session";
 import { shouldScheduleReconnect } from "./connect-failure-policy";
 import { type RuntimeStatusMessage } from "./use-terminal-pane-runtime-status";
-import { type TrustedKnownHost } from "./use-terminal-pane-lifecycle";
 
 export interface TerminalPaneNativeSessionOptions {
   activeHistoryEntryIdRef: MutableRefObject<string | undefined>;
@@ -53,7 +53,6 @@ export interface TerminalPaneNativeSessionOptions {
   stableEnvironment: HostRecord["environment"];
   terminal: Pick<Terminal, "write" | "writeln">;
   transportRef: MutableRefObject<SessionTransport>;
-  trustedKnownHost?: TrustedKnownHost;
   unsupportedTransport: boolean;
   useMockTransport: boolean;
   username: HostRecord["username"];
@@ -97,7 +96,6 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
     stableEnvironment,
     terminal,
     transportRef,
-    trustedKnownHost,
     unsupportedTransport,
     useMockTransport,
     username,
@@ -263,7 +261,11 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
         backendSessionIdRef.current ??
         (
           await createBackendSession(
-            buildBackendConnectionFromKnownHost(
+            // The configured jump host and every saved host key, read when
+            // connecting: a session built from the target's fields alone
+            // skipped the jump host and its approved key. Restored sessions
+            // are built the same way (SessionRestoreManager).
+            buildBackendConnection(
               {
                 agentForwarding,
                 authMethod,
@@ -271,6 +273,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
                 hostKeyPolicy,
                 hostname,
                 id,
+                jumpHostId: readLatestHost().jumpHostId,
                 label,
                 port,
                 privateKeyPath,
@@ -278,12 +281,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
                 sftpRoot,
                 username,
               },
-              trustedKnownHost
-                ? {
-                    algorithm: trustedKnownHost.algorithm,
-                    publicKey: trustedKnownHost.publicKey,
-                  }
-                : undefined
+              useKnownHostsStore.getState().knownHosts
             )
           )
         ).sessionId;

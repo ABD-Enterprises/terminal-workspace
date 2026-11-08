@@ -272,7 +272,6 @@ export function useTerminalPaneLifecycle({
       stableEnvironment,
       terminal,
       transportRef,
-      trustedKnownHost,
       unsupportedTransport,
       useMockTransport,
       username,
@@ -389,6 +388,8 @@ export function useTerminalPaneLifecycle({
     label,
     demoModeEnabled,
     protocol,
+    // The controller reads saved keys when it connects; a change to this
+    // host's approved key still rebuilds the session with the new key.
     trustedKnownHost,
     port,
     pane.id,
