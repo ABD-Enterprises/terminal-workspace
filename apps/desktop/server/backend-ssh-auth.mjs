@@ -18,6 +18,10 @@ export const requestAuthContext = new AsyncLocalStorage();
  */
 export const CONNECTABLE_AUTH_METHODS = new Set(["password", "privateKey"]);
 
+/**
+ * The messages are fixed text, with nothing taken from the request, so
+ * respondError can show them to the user: they say what to change.
+ */
 export class SshAuthRefusedError extends Error {
   constructor(message, statusCode) {
     super(message);
@@ -46,7 +50,7 @@ export class SshAuthRefusedError extends Error {
 export function sshAuthOptions(host, { authorizedBy, agentSocket } = {}) {
   if (!CONNECTABLE_AUTH_METHODS.has(host?.authMethod)) {
     throw new SshAuthRefusedError(
-      `Host ${host?.hostname ?? ""} does not use a supported SSH sign-in method.`,
+      "This host's SSH sign-in method is not supported. Choose a password or a private key.",
       400
     );
   }
@@ -58,7 +62,7 @@ export function sshAuthOptions(host, { authorizedBy, agentSocket } = {}) {
   if (host.agentForwarding) {
     if (authorizedBy !== "token") {
       throw new SshAuthRefusedError(
-        `Agent forwarding for ${host.hostname ?? "this host"} needs a request signed with the backend token.`,
+        "SSH agent forwarding is not available in the browser preview. Turn off agent forwarding for this host and its jump host to connect.",
         403
       );
     }

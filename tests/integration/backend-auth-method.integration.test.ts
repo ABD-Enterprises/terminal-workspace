@@ -119,6 +119,8 @@ describe("#473: only supported SSH sign-in methods reach a connection", () => {
       { withToken: false }
     );
     expect(response.status).toBe(403);
+    // The user is told what to change, not just "Invalid request."
+    expect(((await response.json()) as { error: string }).error).toMatch(/Turn off agent forwarding/);
 
     const session = await post("/api/backend/sessions", { host: forwarding }, { withToken: false });
     expect(session.status).toBe(403);

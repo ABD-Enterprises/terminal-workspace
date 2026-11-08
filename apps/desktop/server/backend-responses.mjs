@@ -5,6 +5,7 @@ import { channel } from "node:diagnostics_channel";
 
 import { PayloadTooLargeError } from "./backend-buffers.mjs";
 import { HostKeyRejectedError } from "./backend-host-keys.mjs";
+import { SshAuthRefusedError } from "./backend-ssh-auth.mjs";
 
 /**
  * #230: raw errors are published here instead of logged. A subscriber attached
@@ -67,6 +68,12 @@ export function respondError(response, error, status = 500) {
   // own. Without it the user sees "Internal server error." for a host whose
   // key changed, which is the one case they have to act on.
   if (error instanceof HostKeyRejectedError) {
+    message = error.message;
+  }
+
+  // #473: a refused sign-in method or agent forwarding. Fixed text only (see
+  // SshAuthRefusedError), and it tells the user which host setting to change.
+  if (error instanceof SshAuthRefusedError) {
     message = error.message;
   }
 
