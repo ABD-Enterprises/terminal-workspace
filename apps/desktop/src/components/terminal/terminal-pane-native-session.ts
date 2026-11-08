@@ -319,13 +319,13 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
             reconnectOnRestoreRef.current = true;
             reconnectAttemptRef.current = 0;
           }
-          // #510: the backend follows an error with a "disconnected" status.
-          // When that error already scheduled a retry, the pane is already
-          // disconnected with the reason and countdown; keep them so the
-          // announcement is not replaced by a bare "disconnected".
+          // #510: a failing session sends its error, then "error" and/or
+          // "disconnected" statuses. When the error already scheduled a
+          // retry, the pane is disconnected with the reason and countdown;
+          // later end-of-session statuses must not replace them with a bare
+          // "disconnected" (or an error banner for a retry in progress).
           if (
-            message.state === "disconnected" &&
-            connectionStateRef.current === "disconnected" &&
+            (message.state === "disconnected" || message.state === "error") &&
             reconnectTimeoutRef.current !== null
           ) {
             return;
