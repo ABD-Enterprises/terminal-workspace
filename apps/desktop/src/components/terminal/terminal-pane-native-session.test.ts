@@ -134,6 +134,29 @@ describe("createTerminalPaneNativeSessionController", () => {
     expect(openBackendSessionSocket).toHaveBeenLastCalledWith("session-2");
   });
 
+  it("#510: keeps the retry notice when the backend's disconnected status follows its error", async () => {
+    createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
+    const socket = new FakeSocket();
+    openBackendSessionSocket.mockResolvedValue(socket);
+    const setPaneState = vi.fn();
+    const controller = makeController(setPaneState);
+
+    await controller.connectNativeSession();
+    socket.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
+    socket.dispatch("message", {
+      data: JSON.stringify({ type: "error", message: "SSH connection reset." }),
+    });
+    socket.dispatch("message", {
+      data: JSON.stringify({ type: "status", state: "disconnected" }),
+    });
+
+    expect(setPaneState).toHaveBeenLastCalledWith(
+      "pane-1",
+      "disconnected",
+      "SSH connection reset. Reconnecting in 2s."
+    );
+  });
+
   it("#510: an error carries its real reason into pane state", async () => {
     const sockets: FakeSocket[] = [];
     createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
