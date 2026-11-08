@@ -1,0 +1,1 @@
+- [SECURITY] The browser-mode backend accepts only supported SSH sign-in methods and refuses any other with a 400 before connecting (#559)
