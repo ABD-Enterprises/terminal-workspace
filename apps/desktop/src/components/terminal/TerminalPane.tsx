@@ -108,6 +108,14 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             active ? "border-emerald-400/50 shadow-lg shadow-emerald-950/20" : "border-slate-800/80"
           )}
           onClick={onActivate}
+          // #510: keyboard and screen reader focus moving into a pane makes it
+          // the active pane too, so screen reader mode and announcements
+          // follow the terminal the user is actually in.
+          onFocus={() => {
+            if (!active) {
+              onActivate();
+            }
+          }}
         >
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 px-4 py-3">
             <div className="min-w-0">
