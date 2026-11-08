@@ -14,6 +14,7 @@ export interface TerminalPaneConnectionControlsOptions {
     announce?: boolean;
     allowPendingSecrets?: boolean;
     promptForSecrets?: boolean;
+    automatic?: boolean;
   }) => Promise<void>;
   connectionStateRef: MutableRefObject<SessionConnectionState>;
   dispatchCommandRef: MutableRefObject<(command: string) => void>;
