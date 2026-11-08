@@ -57,7 +57,8 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
   const statusAnnouncement = usePaneStatusAnnouncement(
     pane.connectionState,
     host.label,
-    paneAnnounces
+    paneAnnounces,
+    pane.connectionState === "disconnected" ? pane.connectionError : undefined
   );
 
   // #507: right-click opens this menu instead of pasting into the shell, and

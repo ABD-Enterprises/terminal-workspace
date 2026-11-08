@@ -40,7 +40,7 @@ class FakeSocket {
   }
 }
 
-function makeController() {
+function makeController(setPaneState = vi.fn()) {
   const socketRef = ref<FakeSocket | null>(null);
   return createTerminalPaneNativeSessionController({
     activeHistoryEntryIdRef: ref<string | undefined>(undefined),
@@ -81,7 +81,7 @@ function makeController() {
     runtimeStatusRef: ref({ available: true, message: "ready" }),
     setPaneBackendSession: vi.fn(),
     setPaneReconnectOnRestore: vi.fn(),
-    setPaneState: vi.fn(),
+    setPaneState,
     setPaneTransport: vi.fn(),
     setPendingSecretsState: vi.fn(),
     setRuntimeStatusMessage: vi.fn(),
@@ -114,13 +114,20 @@ describe("createTerminalPaneNativeSessionController", () => {
       sockets.push(socket);
       return socket;
     });
-    const controller = makeController();
+    const setPaneState = vi.fn();
+    const controller = makeController(setPaneState);
 
     await controller.connectNativeSession();
     sockets[0]!.dispatch("message", {
       data: JSON.stringify({ type: "status", state: "connected" }),
     });
     sockets[0]!.dispatch("close");
+    // #510: the retry notice reaches pane state, where it is announced.
+    expect(setPaneState).toHaveBeenCalledWith(
+      "pane-1",
+      "disconnected",
+      "SSH connection interrupted. Reconnecting in 2s."
+    );
     await vi.advanceTimersByTimeAsync(1_500);
 
     expect(openBackendSessionSocket).toHaveBeenCalledTimes(2);

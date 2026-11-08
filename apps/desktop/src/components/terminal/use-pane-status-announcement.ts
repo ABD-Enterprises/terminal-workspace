@@ -8,13 +8,15 @@ import { type SessionConnectionState } from "../../types/session";
  */
 export function describePaneStatus(
   state: SessionConnectionState,
-  label: string
+  label: string,
+  detail?: string
 ): string | null {
   switch (state) {
     case "connected":
       return `${label}: connected.`;
     case "disconnected":
-      return `${label}: disconnected.`;
+      // `detail` is an automatic reconnect's reason and retry notice.
+      return detail ? `${label}: disconnected. ${detail}` : `${label}: disconnected.`;
     case "pendingSecrets":
       return `${label}: needs a password or passphrase to connect.`;
     default:
@@ -32,20 +34,21 @@ export function describePaneStatus(
 export function usePaneStatusAnnouncement(
   state: SessionConnectionState,
   label: string,
-  active: boolean
+  active: boolean,
+  detail?: string
 ): string {
-  const [tracked, setTracked] = useState({ state, active });
+  const [tracked, setTracked] = useState({ state, active, detail });
   const [announcement, setAnnouncement] = useState("");
 
-  if (tracked.state !== state || tracked.active !== active) {
-    setTracked({ state, active });
+  if (tracked.state !== state || tracked.active !== active || tracked.detail !== detail) {
+    setTracked({ state, active, detail });
     if (!active) {
       setAnnouncement("");
-    } else if (tracked.state !== state) {
+    } else if (tracked.state !== state || tracked.detail !== detail) {
       // A state with nothing to say (connecting, error) clears the region, so
       // the next identical message (a second "disconnected" in a reconnect
       // loop) is a real change and is announced again.
-      setAnnouncement(describePaneStatus(state, label) ?? "");
+      setAnnouncement(describePaneStatus(state, label, detail) ?? "");
     }
   }
 

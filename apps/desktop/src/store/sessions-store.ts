@@ -89,6 +89,9 @@ function sanitizePersistedWorkspace(
             ...normalizedPane,
             backendSessionId: undefined,
             connectionState: "disconnected" as const,
+            // #510: a reason belongs to the live state it came with; a pane
+            // reset to disconnected must not carry an old one.
+            connectionError: undefined,
             queuedCommands: [],
             reconnectOnRestore:
               normalizedPane.connectionState === "connected" || normalizedPane.reconnectOnRestore,
@@ -340,7 +343,15 @@ export function updatePaneConnectionState(
       ...state.panes,
       [paneId]: touchPane(pane, {
         connectionState,
-        connectionError: connectionState === "error" ? (connectionError ?? pane.connectionError) : undefined,
+        // #510: an error keeps its reason until the state changes. A
+        // disconnect keeps only a reason given with it (an automatic
+        // reconnect's notice), so the pane can announce it.
+        connectionError:
+          connectionState === "error"
+            ? (connectionError ?? pane.connectionError)
+            : connectionState === "disconnected"
+              ? connectionError
+              : undefined,
         reconnectOnRestore: connectionState === "connected" || pane.reconnectOnRestore,
       }),
     },

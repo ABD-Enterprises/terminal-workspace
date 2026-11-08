@@ -142,11 +142,12 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
       reconnectAttemptRef.current <= 1 ? 1_500 : reconnectAttemptRef.current * 2_000
     );
 
+    // #510: the reason and the retry go into pane state too, not only into the
+    // terminal, so the pane's status announcement can say them.
+    const reconnectNotice = `${message ?? `${protocolLabel} connection interrupted.`} Reconnecting in ${Math.ceil(reconnectDelayMs / 1000)}s.`;
     connectionStateRef.current = "disconnected";
-    setPaneState(pane.id, "disconnected");
-    terminal.writeln(
-      `\r\n${message ?? `${protocolLabel} connection interrupted.`} Reconnecting in ${Math.ceil(reconnectDelayMs / 1000)}s...`
-    );
+    setPaneState(pane.id, "disconnected", reconnectNotice);
+    terminal.writeln(`\r\n${reconnectNotice}..`);
 
     reconnectTimeoutRef.current = window.setTimeout(() => {
       reconnectTimeoutRef.current = null;

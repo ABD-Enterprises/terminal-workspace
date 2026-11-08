@@ -50,6 +50,27 @@ describe("usePaneStatusAnnouncement (#510)", () => {
     expect(describePaneStatus("connecting", "Prod")).toBeNull();
   });
 
+  it("says why an automatic reconnect is happening, and each new notice", () => {
+    const { result, rerender } = renderHook(
+      ({ state, detail }: { state: SessionConnectionState; detail?: string }) =>
+        usePaneStatusAnnouncement(state, "Prod", true, detail),
+      {
+        initialProps: {
+          state: "connected" as SessionConnectionState,
+          detail: undefined as string | undefined,
+        },
+      }
+    );
+    rerender({ state: "disconnected", detail: "SSH connection interrupted. Reconnecting in 2s." });
+    expect(result.current).toBe(
+      "Prod: disconnected. SSH connection interrupted. Reconnecting in 2s."
+    );
+    rerender({ state: "disconnected", detail: "SSH connection interrupted. Reconnecting in 4s." });
+    expect(result.current).toBe(
+      "Prod: disconnected. SSH connection interrupted. Reconnecting in 4s."
+    );
+  });
+
   it("announces a repeated status again after a state with nothing to say", () => {
     const { result, rerender } = setup("connected");
     rerender({ state: "disconnected", isActive: true });
