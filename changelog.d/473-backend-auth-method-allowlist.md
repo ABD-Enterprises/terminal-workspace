@@ -1,0 +1,1 @@
+- [SECURITY] The browser-mode backend signs in only with the method a host names, refuses any other method, and forwards the SSH agent only for requests that present the backend token (#559)

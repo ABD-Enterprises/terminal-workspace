@@ -47,6 +47,7 @@ import {
 } from "./backend-deadline.mjs";
 import { createWithSftp } from "./backend-sftp.mjs";
 import { respondError, sendJson } from "./backend-responses.mjs";
+import { requestAuthContext, sshAuthOptions } from "./backend-ssh-auth.mjs";
 import {
   createBackendCommandOperations,
   waitForSshReady,
@@ -298,6 +299,14 @@ function getHostKeyStore() {
 }
 
 async function createConnectConfig(host) {
+  // #473: every SSH connection (sessions, file transfer, remote commands,
+  // each jump hop) is built here, so these rules cover them all. Checked
+  // before anything else, so a refused request opens no connection.
+  const authOptions = sshAuthOptions(host, {
+    authorizedBy: requestAuthContext.getStore()?.authorizedBy,
+    agentSocket: process.env.SSH_AUTH_SOCK,
+  });
+
   // Defense-in-depth: even if a caller bypasses connections.ts (e.g. talks to
   // the backend HTTP API directly), refuse to connect when the host requires
   // a trusted key and we were not given one. See parity-and-hardening-review §3.S-1.
@@ -328,10 +337,7 @@ async function createConnectConfig(host) {
   connectConfig.hostVerifier = verifier.verify;
   hostKeyFailure = verifier.failure;
 
-  if (host.agentForwarding && process.env.SSH_AUTH_SOCK) {
-    connectConfig.agent = process.env.SSH_AUTH_SOCK;
-    connectConfig.agentForward = true;
-  }
+  Object.assign(connectConfig, authOptions);
 
   // Secret-handling: wrap any password / passphrase / private-key bytes in a
   // SecretBuffer and remember a scrub callback for each. The caller is
@@ -1230,6 +1236,9 @@ const server = createServer(async (request, response) => {
     denyUnauthorized(response, authDecision);
     return;
   }
+  // #473: connection code reads how this request was authorized (agent
+  // forwarding needs the token). Applies to the rest of this request only.
+  requestAuthContext.enterWith({ authorizedBy: authDecision.via });
 
   // #470: an allowed Origin alone must not be enough. Checked here rather than
   // in readJson so no route's error handling can change the status and a new
