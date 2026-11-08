@@ -47,6 +47,7 @@ import {
 } from "./backend-deadline.mjs";
 import { createWithSftp } from "./backend-sftp.mjs";
 import { respondError, sendJson } from "./backend-responses.mjs";
+import { requestAuthContext, sshAuthOptions } from "./backend-ssh-auth.mjs";
 import {
   createBackendCommandOperations,
   waitForSshReady,
@@ -61,10 +62,9 @@ import {
 import { readBoundedRegularFile, writeNewPrivateFile } from "./backend-files.mjs";
 import {
   createHostKeyStore,
-  createHostKeyVerifier,
-  createTrustedHostKeyVerifier,
   parseKeyscanOutput,
   resolveAppDataDirectory,
+  selectHostKeyVerifier,
 } from "./backend-host-keys.mjs";
 import {
   projectSshConfigResolutionFailure,
@@ -299,6 +299,14 @@ function getHostKeyStore() {
 }
 
 async function createConnectConfig(host) {
+  // #473: every SSH connection (sessions, file transfer, remote commands,
+  // each jump hop) is built here, so these rules cover them all. Checked
+  // before anything else, so a refused request opens no connection.
+  const authOptions = sshAuthOptions(host, {
+    authorizedBy: requestAuthContext.getStore()?.authorizedBy,
+    agentSocket: process.env.SSH_AUTH_SOCK,
+  });
+
   // Defense-in-depth: even if a caller bypasses connections.ts (e.g. talks to
   // the backend HTTP API directly), refuse to connect when the host requires
   // a trusted key and we were not given one. See parity-and-hardening-review §3.S-1.
@@ -319,43 +327,17 @@ async function createConnectConfig(host) {
   // Filled in by the verifier when it refuses the host, so the connect path
   // can report why instead of ssh2's bare "Host denied (verification failed)".
   let hostKeyFailure;
+  // #489: an approved key decides alone; otherwise trust on first use
+  // against the durable store (SEC-2). `hostVerifier` is NEVER left undefined:
+  // ssh2's default accepts whatever answers the socket. The verifier runs
+  // during the handshake, before authentication, so a refused host never
+  // receives the password or the private key, and it fills in `failure` so
+  // the connect path can report why.
+  const verifier = selectHostKeyVerifier({ host, getStore: getHostKeyStore });
+  connectConfig.hostVerifier = verifier.verify;
+  hostKeyFailure = verifier.failure;
 
-  if (host.knownHostPublicKey) {
-    // An explicitly trusted key always wins, except for a refused algorithm
-    // (#475). Nothing is pinned for it: the user already decided what to trust.
-    const verifier = createTrustedHostKeyVerifier({
-      hostname: host.hostname,
-      port: host.port,
-      trustedKey: host.knownHostPublicKey,
-    });
-    connectConfig.hostVerifier = verifier.verify;
-    hostKeyFailure = verifier.failure;
-  } else {
-    // SEC-2: trust on first use against the durable store.
-    //
-    // `hostVerifier` is NEVER left undefined. ssh2's default branch accepts
-    // whatever answers the socket without checking it, which is how a host
-    // whose policy is not `requireTrusted` ended up MITM-able in browser mode
-    // on every connect — and, because nothing was recorded, on every later
-    // connect too.
-    //
-    // The verifier runs during the handshake, before authentication, so a
-    // refused host never receives the password or the private key.
-    const verifier = createHostKeyVerifier({
-      hostname: host.hostname,
-      port: host.port,
-      store: getHostKeyStore(),
-    });
-    connectConfig.hostVerifier = verifier.verify;
-    // The verifier mutates its own `failure` in place, so this reference is
-    // how the connect path learns why the host was refused.
-    hostKeyFailure = verifier.failure;
-  }
-
-  if (host.agentForwarding && process.env.SSH_AUTH_SOCK) {
-    connectConfig.agent = process.env.SSH_AUTH_SOCK;
-    connectConfig.agentForward = true;
-  }
+  Object.assign(connectConfig, authOptions);
 
   // Secret-handling: wrap any password / passphrase / private-key bytes in a
   // SecretBuffer and remember a scrub callback for each. The caller is
@@ -1254,6 +1236,9 @@ const server = createServer(async (request, response) => {
     denyUnauthorized(response, authDecision);
     return;
   }
+  // #473: connection code reads how this request was authorized (agent
+  // forwarding needs the token). Applies to the rest of this request only.
+  requestAuthContext.enterWith({ authorizedBy: authDecision.via });
 
   // #470: an allowed Origin alone must not be enough. Checked here rather than
   // in readJson so no route's error handling can change the status and a new

@@ -16,7 +16,7 @@ import { existsSync as existsSyncSync } from "node:fs";
 import { mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let module: any;
@@ -593,6 +593,65 @@ describe("backend SSH host-key trust", () => {
       } catch (error) {
         expect(error).not.toBeInstanceOf(HostKeyRejectedError);
       }
+    });
+  });
+
+  describe("#489: approved key versus pin (selectHostKeyVerifier)", () => {
+    const pinned = keyBlob("ssh-ed25519", "PINNED");
+    const approved = keyBlob("ssh-ed25519", "APPROVED");
+    const host = (knownHostPublicKey?: string) => ({
+      hostname: "example.internal",
+      port: 22,
+      knownHostPublicKey,
+    });
+
+    async function storeWithPin() {
+      const { createHostKeyStore } = await load();
+      const store = createHostKeyStore({ path: storePath });
+      await store.verifyOrPin({ hostname: "example.internal", port: 22, keyBlob: pinned });
+      return store;
+    }
+
+    function check(verify: (key: Buffer, done: (ok: boolean) => void) => boolean | void, key: Buffer) {
+      return new Promise<boolean>((resolve) => {
+        const result = verify(key, resolve);
+        if (typeof result === "boolean") {
+          resolve(result);
+        }
+      });
+    }
+
+    it("an approved key wins over a different pin, and the store is never consulted", async () => {
+      const { selectHostKeyVerifier } = await load();
+      await storeWithPin();
+      const before = await readFile(storePath, "utf8");
+      const getStore = vi.fn();
+      const verifier = selectHostKeyVerifier({
+        host: host(approved.toString("base64")),
+        getStore,
+      });
+      expect(await check(verifier.verify, approved)).toBe(true);
+      expect(getStore).not.toHaveBeenCalled();
+      expect(await readFile(storePath, "utf8")).toBe(before);
+    });
+
+    it("a key other than the approved one fails even if it matches the pin", async () => {
+      const { selectHostKeyVerifier } = await load();
+      const store = await storeWithPin();
+      const verifier = selectHostKeyVerifier({
+        host: host(approved.toString("base64")),
+        getStore: () => store,
+      });
+      expect(await check(verifier.verify, pinned)).toBe(false);
+    });
+
+    it("with no approved key, the pin decides", async () => {
+      const { selectHostKeyVerifier } = await load();
+      const store = await storeWithPin();
+      const verifier = selectHostKeyVerifier({ host: host(undefined), getStore: () => store });
+      expect(await check(verifier.verify, pinned)).toBe(true);
+      expect(await check(verifier.verify, approved)).toBe(false);
+      expect(verifier.failure.error?.message).toContain("does not match");
     });
   });
 

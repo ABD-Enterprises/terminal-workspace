@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useHostsStore } from "../../store/hosts-store";
+import { useKnownHostsStore } from "../../store/known-hosts-store";
+import type { HostRecord } from "../../types/host";
 import { createTerminalPaneNativeSessionController } from "./terminal-pane-native-session";
 
 const g = globalThis as unknown as Record<string, unknown>;
 g.window = g;
 g.WebSocket = { OPEN: 1 };
+// The persisted host and key stores write here when a test seeds them.
+g.localStorage = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined };
 
 const createBackendSession = vi.fn();
 const getProtocolRuntimeStatus = vi.fn();
@@ -40,10 +45,9 @@ class FakeSocket {
   }
 }
 
-function makeController(
-  setPaneState = vi.fn(),
-  overrides: Partial<Parameters<typeof createTerminalPaneNativeSessionController>[0]> = {}
-) {
+type ControllerOptions = Parameters<typeof createTerminalPaneNativeSessionController>[0];
+
+function makeController(setPaneState = vi.fn(), overrides: Partial<ControllerOptions> = {}) {
   const socketRef = ref<FakeSocket | null>(null);
   return createTerminalPaneNativeSessionController({
     activeHistoryEntryIdRef: ref<string | undefined>(undefined),
@@ -430,5 +434,62 @@ describe("createTerminalPaneNativeSessionController", () => {
     sockets[0]!.dispatch("error");
 
     expect(setPaneState).toHaveBeenCalledWith("pane-1", "error", "SSH session transport failed.");
+  });
+
+  it("opens a new session through the configured jump host with each hop's saved key", async () => {
+    useHostsStore.setState({
+      hosts: [
+        {
+          id: "jump",
+          label: "Jump",
+          hostname: "jump.internal",
+          port: 22,
+          username: "ops",
+          protocol: "ssh",
+          authMethod: "password",
+          privateKeyPath: "",
+          hostKeyPolicy: "allowUnknown",
+          agentForwarding: false,
+          environment: {},
+        } as unknown as HostRecord,
+      ],
+    });
+    useKnownHostsStore.setState({
+      knownHosts: [
+        {
+          id: "example.internal:22:ssh-ed25519",
+          hostname: "example.internal",
+          port: 22,
+          algorithm: "ssh-ed25519",
+          publicKey: "AAAATARGET",
+          fingerprint: "SHA256:target",
+          trustedAt: "now",
+          updatedAt: "now",
+        },
+        {
+          id: "jump.internal:22:ssh-ed25519",
+          hostname: "jump.internal",
+          port: 22,
+          algorithm: "ssh-ed25519",
+          publicKey: "AAAAJUMP",
+          fingerprint: "SHA256:jump",
+          trustedAt: "now",
+          updatedAt: "now",
+        },
+      ],
+    });
+    createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
+    openBackendSessionSocket.mockResolvedValue(new FakeSocket());
+    const controller = makeController(vi.fn(), {
+      readLatestHost: () => ({ jumpHostId: "jump" }) as HostRecord,
+    });
+
+    await controller.connectNativeSession();
+
+    const connection = createBackendSession.mock.calls[0]?.[0];
+    expect(connection?.knownHostPublicKey).toBe("AAAATARGET");
+    // Before this fix a new session left out the jump host entirely.
+    expect(connection?.jumpHost?.hostname).toBe("jump.internal");
+    expect(connection?.jumpHost?.knownHostPublicKey).toBe("AAAAJUMP");
   });
 });

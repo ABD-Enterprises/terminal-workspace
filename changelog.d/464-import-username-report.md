@@ -1,0 +1,1 @@
+- [FIX] The SSH config import report now names imported hosts that have no username, and the collapsed advanced-settings label names what is set instead of giving a count (#464)

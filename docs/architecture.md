@@ -36,3 +36,49 @@ The table below maps each frontend transport module to the module that does the 
 | **SFTP Operations** | `components/sftp/FileBrowser.tsx` | Remote file browser UI (listing, rename, delete, upload, download) that calls the SFTP functions in `lib/api.ts` | `sftp.rs` | `backend-sftp.mjs` (deadline-bounded SFTP helper); routes are in `backend.mjs` |
 | **Secrets** | `lib/runtime-secrets.ts`, `lib/native-secrets.ts` | Decides which passwords and passphrases a connection needs, prompts for them, and reads or stores them through the native keychain commands | `keychain_support.rs` (macOS Keychain through the `security` tool) | `secrets.mjs` (zero-fills its in-memory copies; no keychain) |
 | **Conformance Tests** | `tests/integration/security-helper-conformance.integration.test.ts` | Runs the same cases from `tests/fixtures/security-helper-conformance.json` against both backends' path, glob and shell-quoting helpers | `native_transport_conformance_tests.rs` | `backend-shell.mjs`, `backend-paths.mjs`, `backend-glob.mjs` (the helpers under test) |
+
+## Host key trust: two stores, one rule (#489)
+
+There are two records of which host keys to trust, and they are allowed to disagree.
+
+- **Approved keys.** When the user scans a host and approves a key, the renderer keeps it in its
+  known-hosts inventory (`useKnownHostsStore`). Native inventory is persisted in SQLite through the
+  persistence commands, with a localStorage fallback; the browser preview keeps it in localStorage.
+  `buildBackendConnection` (`apps/desktop/src/lib/connections.ts`) looks up each host's approved
+  key and passes it as `knownHostPublicKey` and `knownHostAlgorithm`, jump hops included, when
+  given the whole inventory. SFTP, snippets and session restore pass the whole inventory; an
+  interactive terminal session passes the target's approval only.
+- **Pins.** A durable `known_hosts`-style file under the app data directory
+  (`src-tauri/src/native_host_keys.rs`; the browser backend resolves the same path in
+  `backend-host-keys.mjs`), written on first use for hosts with no approved key.
+
+**The rule.** For each connection, in this order:
+
+1. A refused algorithm (`ssh-dss`, #475) is refused, whatever the approval or pin says.
+2. If the connection carries an approved key, that key decides alone: a match connects without
+   reading or writing the pin store, and a difference fails with no fallback to the pin.
+3. Otherwise, if the host's policy is `requireTrusted`, the connection is refused.
+4. Otherwise the pin store decides: an unknown host is pinned, a match connects, and a difference
+   fails with a host-key-mismatch error before credentials are sent.
+
+So the stores can hold different keys for a host without harm. An approved key always wins over a
+stale pin, so re-approving a rebuilt host recovers it, as long as the approved key is the one the
+server actually presents. A scan can list several key types, and the direct native and browser
+handshakes do not limit negotiation to the approved type: approving the RSA key of a server that
+negotiates Ed25519 still fails with a mismatch, and only approving the negotiated key fixes it. If an
+approval is later removed while an old pin remains, an `allowUnknown` host gets the mismatch error
+and a `requireTrusted` host is refused as untrusted; either way, re-scanning and approving resolves
+it. Nothing merges the two stores, and nothing needs to.
+
+**Where it applies.** The direct native SSH path (`decide_native_host_key` in `main.rs`) and the
+browser backend (`selectHostKeyVerifier` in `backend-host-keys.mjs`, called by
+`createConnectConfig`) follow it exactly. Connections made by the external `ssh` client follow the same shape through
+OpenSSH: a hop with an approved key gets a per-session known-hosts file holding the approved keys of the
+connection's hops and `StrictHostKeyChecking yes`; a hop without one uses the durable pin file with
+`StrictHostKeyChecking accept-new`. Mosh without an approved key leaves `UserKnownHostsFile`
+unspecified, so OpenSSH's own defaults apply there.
+
+Tests that pin this: `decide_native_host_key` precedence tests in `src-tauri/src/main.rs`, the
+`selectHostKeyVerifier` cases in `tests/integration/backend-host-keys.integration.test.ts`, the
+approved-key cases in `apps/desktop/src/lib/connections.test.ts`, and the jump-hop restore case in
+`apps/desktop/src/components/terminal/SessionRestoreManager.test.tsx`.
