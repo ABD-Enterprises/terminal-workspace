@@ -12,6 +12,7 @@ import { TerminalContextMenu } from "./TerminalContextMenu";
 import { usePaneStatusAnnouncement } from "./use-pane-status-announcement";
 import { useTerminalScreenReaderMode } from "./use-terminal-screen-reader-mode";
 import { useTerminalPaneSession } from "./use-terminal-pane-session";
+import { isReconnectGiveUpNotice } from "./terminal-pane-native-session";
 
 interface TerminalPaneProps {
   host: HostRecord;
@@ -207,6 +208,21 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           !(runtimeStatusMessage && !runtimeStatusMessage.available) ? (
             <div role={paneAnnounces ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p className="font-medium">Connection failed: {pane.connectionError}</p>
+            </div>
+          ) : null}
+          {pane.connectionState === "disconnected" && isReconnectGiveUpNotice(pane.connectionError) ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-400/20 bg-amber-400/10 px-4 py-2 text-xs text-amber-100">
+              <p className="font-medium">{pane.connectionError}</p>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleConnectionRef.current();
+                }}
+                className="rounded-2xl border border-amber-300/50 px-3 py-1 text-xs text-amber-50 transition hover:border-amber-200"
+              >
+                Retry
+              </button>
             </div>
           ) : null}
           {runtimeStatusMessage && !runtimeStatusMessage.available ? (

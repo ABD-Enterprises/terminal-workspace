@@ -366,6 +366,95 @@ describe("createTerminalPaneNativeSessionController", () => {
     expect(createBackendSession).toHaveBeenCalledTimes(3);
   });
 
+  async function giveUpScenario() {
+    const sockets: FakeSocket[] = [];
+    createBackendSession
+      .mockResolvedValueOnce({ sessionId: "session-1" })
+      .mockRejectedValue(new Error("connect ECONNREFUSED"));
+    openBackendSessionSocket.mockImplementation(async () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    });
+    const setPaneState = vi.fn();
+    const reconnectAttemptRef = ref(0);
+    const reconnectTimeoutRef = ref<number | null>(null);
+    const connectingRef = ref(false);
+    const writeln = vi.fn();
+    const controller = makeController(setPaneState, {
+      reconnectAttemptRef,
+      reconnectTimeoutRef,
+      connectingRef,
+      terminal: { write: vi.fn(), writeln },
+    });
+    await controller.connectNativeSession();
+    sockets[0]!.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
+    sockets[0]!.dispatch("close");
+    await vi.advanceTimersByTimeAsync(60_000);
+    return { controller, sockets, setPaneState, reconnectAttemptRef, reconnectTimeoutRef, connectingRef, writeln };
+  }
+
+  it("#513: gives up after five automatic attempts and leaves a final notice", async () => {
+    const { setPaneState, reconnectTimeoutRef, connectingRef, writeln } = await giveUpScenario();
+    // One first connect plus five automatic retries, and no more.
+    expect(createBackendSession).toHaveBeenCalledTimes(6);
+    expect(setPaneState).toHaveBeenLastCalledWith(
+      "pane-1",
+      "disconnected",
+      expect.stringContaining("Giving up after 5 attempts")
+    );
+    expect(setPaneState.mock.lastCall?.[2]).toContain("Connection refused");
+    expect(reconnectTimeoutRef.current).toBeNull();
+    expect(connectingRef.current).toBe(false);
+    expect(writeln).toHaveBeenLastCalledWith(expect.stringContaining("Giving up after 5 attempts"));
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(createBackendSession).toHaveBeenCalledTimes(6);
+  });
+
+  it("#513: late statuses and socket events do not undo the give-up notice", async () => {
+    const { sockets, setPaneState, reconnectTimeoutRef } = await giveUpScenario();
+    const calls = setPaneState.mock.calls.length;
+    const last = sockets[0]!;
+    last.dispatch("message", { data: JSON.stringify({ type: "status", state: "disconnected" }) });
+    last.dispatch("error");
+    last.dispatch("close");
+    expect(setPaneState.mock.calls.length).toBe(calls);
+    expect(reconnectTimeoutRef.current).toBeNull();
+  });
+
+  it("#513: Retry starts a fresh run of attempts", async () => {
+    const { controller, reconnectAttemptRef } = await giveUpScenario();
+    expect(reconnectAttemptRef.current).toBe(5);
+    await controller.connectNativeSession({ announce: true });
+    expect(createBackendSession).toHaveBeenCalledTimes(7);
+    await vi.advanceTimersByTimeAsync(60_000);
+    // The failed retry scheduled automatic attempts again: 5 more.
+    expect(createBackendSession).toHaveBeenCalledTimes(12);
+  });
+
+  it("#513: a successful connect resets the attempt counter", async () => {
+    const sockets: FakeSocket[] = [];
+    createBackendSession
+      .mockResolvedValueOnce({ sessionId: "session-1" })
+      .mockRejectedValueOnce(new Error("connect ECONNREFUSED"))
+      .mockResolvedValueOnce({ sessionId: "session-3" });
+    openBackendSessionSocket.mockImplementation(async () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    });
+    const reconnectAttemptRef = ref(0);
+    const controller = makeController(vi.fn(), { reconnectAttemptRef });
+    await controller.connectNativeSession();
+    sockets[0]!.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
+    sockets[0]!.dispatch("close");
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(reconnectAttemptRef.current).toBe(2);
+    await vi.advanceTimersByTimeAsync(8_000);
+    sockets[1]!.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
+    expect(reconnectAttemptRef.current).toBe(0);
+  });
+
   it("#510: keeps the retry notice through an error status and then a disconnected status", async () => {
     createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
     const socket = new FakeSocket();

@@ -16,6 +16,15 @@ import { type SessionConnectionState, type SessionPane, type SessionTransport } 
 import { shouldScheduleReconnect } from "./connect-failure-policy";
 import { type RuntimeStatusMessage } from "./use-terminal-pane-runtime-status";
 
+/** #513: automatic reconnect attempts before the pane gives up. */
+export const MAX_RECONNECT_ATTEMPTS = 5;
+const GIVE_UP_MARKER = "Giving up after";
+
+/** #513: whether a pane's disconnected notice is the final "gave up" one. */
+export function isReconnectGiveUpNotice(notice: string | undefined): boolean {
+  return Boolean(notice && notice.includes(GIVE_UP_MARKER));
+}
+
 export interface TerminalPaneNativeSessionOptions {
   activeHistoryEntryIdRef: MutableRefObject<string | undefined>;
   agentForwarding: HostRecord["agentForwarding"];
@@ -119,6 +128,10 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
     reconnectTimeoutRef.current = null;
   };
 
+  // #513: set once the automatic attempts ran out; cleared by the next
+  // connect that the user starts (Retry / Reconnect).
+  let gaveUp = false;
+
   const scheduleReconnect = (message?: string) => {
     if (
       isDisposed() ||
@@ -129,11 +142,21 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
     ) {
       return;
     }
-    if (reconnectTimeoutRef.current !== null || connectingRef.current) {
+    if (reconnectTimeoutRef.current !== null || connectingRef.current || gaveUp) {
       return;
     }
 
     clearReconnectTimer();
+    if (reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
+      // #513: stop retrying. The pane stays "disconnected" with the last
+      // error and a final notice (shown with a Retry button and announced).
+      gaveUp = true;
+      const giveUpNotice = `${message ?? `${protocolLabel} connection interrupted.`} ${GIVE_UP_MARKER} ${MAX_RECONNECT_ATTEMPTS} attempts. Select Retry to try again.`;
+      connectionStateRef.current = "disconnected";
+      setPaneState(pane.id, "disconnected", giveUpNotice);
+      terminal.writeln(`\r\n${giveUpNotice}`);
+      return;
+    }
     reconnectAttemptRef.current += 1;
     const reconnectDelayMs = Math.min(
       8_000,
@@ -163,6 +186,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
         announce: true,
         allowPendingSecrets: true,
         promptForSecrets: false,
+        automatic: true,
       });
     }, reconnectDelayMs);
   };
@@ -171,10 +195,12 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
     announce = false,
     allowPendingSecrets = false,
     promptForSecrets = true,
+    automatic = false,
   }: {
     announce?: boolean;
     allowPendingSecrets?: boolean;
     promptForSecrets?: boolean;
+    automatic?: boolean;
   } = {}) => {
     if (connectingRef.current || socketRef.current?.readyState === WebSocket.OPEN) {
       return;
@@ -186,6 +212,11 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
 
     intentionalDisconnectRef.current = false;
     clearReconnectTimer();
+    if (!automatic) {
+      // #513: a connect the user started gets a fresh run of attempts.
+      gaveUp = false;
+      reconnectAttemptRef.current = 0;
+    }
 
     const runtimeStatus =
       runtimeStatusRef.current ?? (await getProtocolRuntimeStatus(protocol));
@@ -338,7 +369,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
           // "connecting" first, so its own statuses still apply.
           if (
             (message.state === "disconnected" || message.state === "error") &&
-            (reconnectTimeoutRef.current !== null || connectionStateRef.current === "error")
+            (reconnectTimeoutRef.current !== null || gaveUp || connectionStateRef.current === "error")
           ) {
             return;
           }
@@ -394,6 +425,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
           void connectNativeSession({
             allowPendingSecrets: true,
             promptForSecrets: false,
+            automatic: true,
           });
           return;
         }
