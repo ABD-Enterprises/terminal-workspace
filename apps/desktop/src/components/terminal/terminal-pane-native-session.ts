@@ -218,6 +218,12 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
       return;
     }
 
+    // #513: after giving up, only the user starts a new attempt. Automatic
+    // callers (the retry timer, ensure-connected for a queued command) stay out.
+    if (automatic && gaveUp) {
+      return;
+    }
+
     intentionalDisconnectRef.current = false;
     clearReconnectTimer();
     if (!automatic) {

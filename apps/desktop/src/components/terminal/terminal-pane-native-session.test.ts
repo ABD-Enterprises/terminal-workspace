@@ -480,6 +480,15 @@ describe("createTerminalPaneNativeSessionController", () => {
     expect(createBackendSession).toHaveBeenCalledTimes(2);
   });
 
+  it("#513: an automatic connect after giving up does nothing; only the user restarts", async () => {
+    const { controller, setPaneState } = await giveUpScenario();
+    const calls = createBackendSession.mock.calls.length;
+    const stateCalls = setPaneState.mock.calls.length;
+    await controller.connectNativeSession({ announce: true, automatic: true });
+    expect(createBackendSession).toHaveBeenCalledTimes(calls);
+    expect(setPaneState.mock.calls.length).toBe(stateCalls);
+  });
+
   it("#510: keeps the retry notice through an error status and then a disconnected status", async () => {
     createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
     const socket = new FakeSocket();

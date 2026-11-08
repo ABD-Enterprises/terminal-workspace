@@ -136,6 +136,8 @@ export function attachTerminalPaneConnectionControls({
         announce: true,
         allowPendingSecrets:
           connectionStateRef.current === "pendingSecrets" || reconnectOnRestoreRef.current,
+        // #513: not a user retry; it must not reset the give-up limit.
+        automatic: true,
       });
     }
   };
