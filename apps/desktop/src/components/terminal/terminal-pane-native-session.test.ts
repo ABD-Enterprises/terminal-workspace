@@ -207,6 +207,36 @@ describe("createTerminalPaneNativeSessionController", () => {
     expect(setPaneState).toHaveBeenLastCalledWith("pane-1", "disconnected");
   });
 
+  it("#510: retries after the backend reports a failure and leaves its socket open", async () => {
+    const sockets: FakeSocket[] = [];
+    createBackendSession
+      .mockResolvedValueOnce({ sessionId: "session-1" })
+      .mockResolvedValueOnce({ sessionId: "session-2" });
+    openBackendSessionSocket.mockImplementation(async () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    });
+    const controller = makeController();
+
+    await controller.connectNativeSession();
+    sockets[0]!.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
+    sockets[0]!.dispatch("message", {
+      data: JSON.stringify({ type: "error", message: "SSH connection reset." }),
+    });
+    sockets[0]!.dispatch("message", {
+      data: JSON.stringify({ type: "status", state: "disconnected" }),
+    });
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(sockets[0]!.close).toHaveBeenCalled();
+    expect(createBackendSession).toHaveBeenCalledTimes(2);
+    // The ended socket's close event must not schedule a second retry.
+    sockets[0]!.dispatch("close");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(createBackendSession).toHaveBeenCalledTimes(2);
+  });
+
   it("#510: keeps the retry notice through an error status and then a disconnected status", async () => {
     createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
     const socket = new FakeSocket();

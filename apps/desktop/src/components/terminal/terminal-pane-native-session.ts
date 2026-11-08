@@ -151,6 +151,16 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
 
     reconnectTimeoutRef.current = window.setTimeout(() => {
       reconnectTimeoutRef.current = null;
+      // #510: the browser backend reports a failed session and leaves its
+      // socket open. An open socket makes connectNativeSession return without
+      // retrying, which left the "Reconnecting" notice up for good. The
+      // session is over, so close the socket; its close handler ignores a
+      // socket that is no longer the current one.
+      const endedSocket = socketRef.current;
+      if (endedSocket) {
+        socketRef.current = null;
+        endedSocket.close();
+      }
       void connectNativeSession({
         announce: true,
         allowPendingSecrets: true,
@@ -350,7 +360,10 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
       });
 
       socket.addEventListener("close", () => {
-        if (isDisposed()) {
+        // A socket that is no longer the current one was closed on purpose
+        // (a manual disconnect, unmount, or the retry above), and whoever
+        // closed it has already cleaned up; it must not schedule a retry.
+        if (isDisposed() || socketRef.current !== socket) {
           return;
         }
 
