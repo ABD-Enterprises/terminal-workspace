@@ -93,6 +93,8 @@ export function useTerminalPaneSession({ host, pane, resolvedTerminalPalette }: 
   const commandBufferRef = useRef("");
   // #507: the pane points these at its own state setters.
   const clipboardNoticeRef = useRef<(message: string) => void>(() => {});
+  // #510: kept current by TerminalPane through useTerminalScreenReaderMode.
+  const screenReaderModeRef = useRef(false);
   const contextMenuRequestRef = useRef<(position: TerminalContextMenuPosition) => void>(() => {});
   const transportRef = useRef<SessionTransport>(pane.transport);
   const connectionStateRef = useRef(pane.connectionState);
@@ -169,6 +171,7 @@ export function useTerminalPaneSession({ host, pane, resolvedTerminalPalette }: 
     authMethod,
     backendSessionIdRef,
     clipboardNoticeRef,
+    screenReaderModeRef,
     commandBufferRef,
     contextMenuRequestRef,
     connectedOnceRef,
@@ -228,5 +231,5 @@ export function useTerminalPaneSession({ host, pane, resolvedTerminalPalette }: 
     socketRef,
   });
 
-  return { advanceSearchMatch, clipboardNoticeRef, closeSearch, containerRef, contextMenuRequestRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, terminalRef, toggleConnectionRef };
+  return { advanceSearchMatch, clipboardNoticeRef, screenReaderModeRef, closeSearch, containerRef, contextMenuRequestRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, terminalRef, toggleConnectionRef };
 }

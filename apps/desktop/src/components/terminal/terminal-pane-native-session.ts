@@ -44,7 +44,7 @@ export interface TerminalPaneNativeSessionOptions {
   runtimeStatusRef: MutableRefObject<RuntimeStatusMessage | null>;
   setPaneBackendSession: (paneId: string, backendSessionId: string | undefined) => void;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
-  setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
+  setPaneState: (paneId: string, connectionState: SessionConnectionState, connectionError?: string) => void;
   setPaneTransport: (paneId: string, transport: SessionTransport) => void;
   setPendingSecretsState: (announce?: boolean) => void;
   setRuntimeStatusMessage: Dispatch<SetStateAction<RuntimeStatusMessage | null>>;
@@ -140,14 +140,25 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
       reconnectAttemptRef.current <= 1 ? 1_500 : reconnectAttemptRef.current * 2_000
     );
 
+    // #510: the reason and the retry go into pane state too, not only into the
+    // terminal, so the pane's status announcement can say them.
+    const reconnectNotice = `${message ?? `${protocolLabel} connection interrupted.`} Reconnecting in ${Math.ceil(reconnectDelayMs / 1000)}s.`;
     connectionStateRef.current = "disconnected";
-    setPaneState(pane.id, "disconnected");
-    terminal.writeln(
-      `\r\n${message ?? `${protocolLabel} connection interrupted.`} Reconnecting in ${Math.ceil(reconnectDelayMs / 1000)}s...`
-    );
+    setPaneState(pane.id, "disconnected", reconnectNotice);
+    terminal.writeln(`\r\n${reconnectNotice}..`);
 
     reconnectTimeoutRef.current = window.setTimeout(() => {
       reconnectTimeoutRef.current = null;
+      // #510: the browser backend reports a failed session and leaves its
+      // socket open. An open socket makes connectNativeSession return without
+      // retrying, which left the "Reconnecting" notice up for good. The
+      // session is over, so close the socket; its close handler ignores a
+      // socket that is no longer the current one.
+      const endedSocket = socketRef.current;
+      if (endedSocket) {
+        socketRef.current = null;
+        endedSocket.close();
+      }
       void connectNativeSession({
         announce: true,
         allowPendingSecrets: true,
@@ -187,7 +198,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
     setRuntimeStatusMessage(nextRuntimeStatus);
     if (!runtimeStatus.available) {
       connectionStateRef.current = "error";
-      setPaneState(pane.id, "error");
+      setPaneState(pane.id, "error", runtimeStatus.message);
       if (announce) {
         terminal.writeln(`\r\n${runtimeStatus.message}`);
         if (runtimeStatus.installHint) {
@@ -242,6 +253,8 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
     connectingRef.current = true;
     transportRef.current = resolveNativeSessionTransport(protocol);
     setPaneTransport(pane.id, transportRef.current);
+    // Set here, not only by the next render: the status guard below reads it.
+    connectionStateRef.current = "connecting";
     setPaneState(pane.id, "connecting");
 
     if (announce) {
@@ -292,7 +305,8 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
       socketRef.current = socket;
 
       socket.addEventListener("message", (event) => {
-        if (isDisposed()) {
+        // A replaced socket (see the close handler) must not touch the pane.
+        if (isDisposed() || socketRef.current !== socket) {
           return;
         }
 
@@ -316,30 +330,59 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
             reconnectOnRestoreRef.current = true;
             reconnectAttemptRef.current = 0;
           }
+          // #510: a failing session sends its error, then "error" and/or
+          // "disconnected" statuses. Once the error has been handled (a retry
+          // is pending with its reason and countdown, or the pane shows the
+          // error with its reason), those end-of-session statuses must not
+          // replace it with a bare "disconnected". A new attempt sets
+          // "connecting" first, so its own statuses still apply.
+          if (
+            (message.state === "disconnected" || message.state === "error") &&
+            (reconnectTimeoutRef.current !== null || connectionStateRef.current === "error")
+          ) {
+            return;
+          }
           connectionStateRef.current = message.state;
           setPaneState(pane.id, message.state);
           return;
         }
 
         clearBackendSession();
-        if (connectedOnceRef.current || reconnectOnRestoreRef.current) {
+        // The same retry rule as a failed connect: a changed host key is
+        // never retried, the user has to re-scan and trust it first.
+        if (
+          shouldScheduleReconnect(classifySshError(message.message).category, {
+            connectedOnce: connectedOnceRef.current,
+            reconnectOnRestore: reconnectOnRestoreRef.current,
+          })
+        ) {
           scheduleReconnect(message.message);
           return;
         }
 
         terminal.writeln(`\r\n${message.message}`);
         connectionStateRef.current = "error";
-        setPaneState(pane.id, "error");
+        setPaneState(pane.id, "error", message.message);
       });
 
       socket.addEventListener("close", () => {
-        if (isDisposed()) {
+        // A socket that is no longer the current one was closed on purpose
+        // (a manual disconnect, unmount, or the retry above), and whoever
+        // closed it has already cleaned up; it must not schedule a retry.
+        if (isDisposed() || socketRef.current !== socket) {
           return;
         }
 
         socketRef.current = null;
         if (backendSessionIdRef.current === sessionId) {
           clearBackendSession();
+        }
+
+        // #510: the session already ended with an error the pane shows and
+        // decided not to retry (for example a changed host key). Its socket
+        // closing afterwards must not start a retry that hides it.
+        if (connectionStateRef.current === "error") {
+          return;
         }
 
         if (
@@ -359,7 +402,13 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
       });
 
       socket.addEventListener("error", () => {
-        if (isDisposed()) {
+        // A replaced socket, or a session that already ended with an error
+        // the pane shows (see the close handler), must not retry or replace it.
+        if (
+          isDisposed() ||
+          socketRef.current !== socket ||
+          connectionStateRef.current === "error"
+        ) {
           return;
         }
 
@@ -371,9 +420,13 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
 
         terminal.writeln(`\r\n${protocolLabel} session transport failed.`);
         connectionStateRef.current = "error";
-        setPaneState(pane.id, "error");
+        setPaneState(pane.id, "error", `${protocolLabel} session transport failed.`);
       });
     } catch (error) {
+      // #510: this attempt is over. Clear the flag before deciding on a
+      // retry: scheduleReconnect does nothing while an attempt is in
+      // progress, which left a failed retry stuck on "connecting".
+      connectingRef.current = false;
       const classified = classifySshError(error);
       const raw = classified.raw || (error instanceof Error ? error.message : String(error));
       const friendly = classified.hint
@@ -398,7 +451,7 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
         terminal.writeln(`\r\n(raw: ${raw})`);
       }
       connectionStateRef.current = "error";
-      setPaneState(pane.id, "error");
+      setPaneState(pane.id, "error", friendly);
     } finally {
       connectingRef.current = false;
     }

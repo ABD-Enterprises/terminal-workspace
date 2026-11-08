@@ -122,6 +122,7 @@ describe("useTerminalPaneLifecycle unmount", () => {
         authMethod: host.authMethod,
         backendSessionIdRef: ref<string | undefined>(undefined),
         clipboardNoticeRef: ref<(message: string) => void>(() => {}),
+        screenReaderModeRef: ref(true),
         commandBufferRef: ref(""),
         contextMenuRequestRef: ref<(position: { x: number; y: number }) => void>(() => {}),
         connectedOnceRef: ref(false),
@@ -178,6 +179,8 @@ describe("useTerminalPaneLifecycle unmount", () => {
     expect(terminalConstructorArgs).toHaveBeenCalledWith(
       expect.objectContaining({
         scrollback: 10000,
+        // #510: a terminal created while the pane should read aloud starts so.
+        screenReaderMode: true,
       })
     );
 

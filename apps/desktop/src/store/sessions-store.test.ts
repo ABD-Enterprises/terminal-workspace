@@ -149,6 +149,28 @@ describe("sessions store helpers", () => {
     expect(reconnecting.panes[paneId]?.connectionError).toBeUndefined();
   });
 
+  it("#510: a disconnect keeps only the reason given with it", () => {
+    const opened = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      sampleHosts[0]
+    );
+    const paneId = opened.tabs[0]!.paneIds[0]!;
+
+    const errored = updatePaneConnectionState(opened, paneId, "error", "Connection timed out");
+    const plainDisconnect = updatePaneConnectionState(errored, paneId, "disconnected");
+    expect(plainDisconnect.panes[paneId]?.connectionError).toBeUndefined();
+
+    const retrying = updatePaneConnectionState(
+      opened,
+      paneId,
+      "disconnected",
+      "SSH connection interrupted. Reconnecting in 2s."
+    );
+    expect(retrying.panes[paneId]?.connectionError).toBe(
+      "SSH connection interrupted. Reconnecting in 2s."
+    );
+  });
+
   it("keeps reconnect intent when a restored pane is waiting on runtime secrets", () => {
     const opened = openSessionWorkspace(
       { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },

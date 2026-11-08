@@ -136,6 +136,13 @@ export function FingerprintTrustPrompt() {
       className="max-w-xl"
     >
       {pendingRequest ? (
+        // #510: say that a decision is needed even before the dialog takes
+        // focus; an alert inserted with its text is announced on arrival.
+        <p role="alert" className="sr-only">
+          Host key approval needed for {pendingRequest.hostLabel}.
+        </p>
+      ) : null}
+      {pendingRequest ? (
         <FingerprintTrustPromptForm
           key={`${pendingRequest.hostId}:${pendingRequest.port}`}
           pendingRequest={pendingRequest}

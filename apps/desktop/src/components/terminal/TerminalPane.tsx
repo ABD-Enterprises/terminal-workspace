@@ -9,6 +9,8 @@ import { formatSessionConnectionState, type SessionPane } from "../../types/sess
 import { copyTerminalSelection, pasteIntoTerminal, type TerminalContextMenuPosition } from "./terminal-pane-input-wiring";
 import { terminalPaneStateStyles } from "./terminal-pane-state";
 import { TerminalContextMenu } from "./TerminalContextMenu";
+import { usePaneStatusAnnouncement } from "./use-pane-status-announcement";
+import { useTerminalScreenReaderMode } from "./use-terminal-screen-reader-mode";
 import { useTerminalPaneSession } from "./use-terminal-pane-session";
 
 interface TerminalPaneProps {
@@ -41,7 +43,23 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     () => resolveTerminalTheme(terminalThemeName, systemColorScheme).entry.palette,
     [terminalThemeName, systemColorScheme]
   );
-  const { advanceSearchMatch, clipboardNoticeRef, closeSearch, containerRef, contextMenuRequestRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, terminalRef, toggleConnectionRef } = useTerminalPaneSession({ host, pane, resolvedTerminalPalette });
+  const { advanceSearchMatch, clipboardNoticeRef, screenReaderModeRef, closeSearch, containerRef, contextMenuRequestRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, terminalRef, toggleConnectionRef } = useTerminalPaneSession({ host, pane, resolvedTerminalPalette });
+
+  // #510: screen reader support. The setting reaches open terminals, and
+  // connection changes in the active pane are announced once each.
+  // The pane announces status changes and errors in the active pane whether
+  // or not the terminal is reading its own output: status changes are never
+  // written to the terminal, and some errors are not either. With screen
+  // reader mode on, an error the terminal also prints may be heard twice,
+  // which is better than one that is never heard.
+  useTerminalScreenReaderMode(terminalRef, screenReaderModeRef, active);
+  const paneAnnounces = active;
+  const statusAnnouncement = usePaneStatusAnnouncement(
+    pane.connectionState,
+    host.label,
+    paneAnnounces,
+    pane.connectionState === "disconnected" ? pane.connectionError : undefined
+  );
 
   // #507: right-click opens this menu instead of pasting into the shell, and
   // clipboard outcomes are shown rather than swallowed.
@@ -91,6 +109,14 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             active ? "border-emerald-400/50 shadow-lg shadow-emerald-950/20" : "border-slate-800/80"
           )}
           onClick={onActivate}
+          // #510: keyboard and screen reader focus moving into a pane makes it
+          // the active pane too, so screen reader mode and announcements
+          // follow the terminal the user is actually in.
+          onFocus={() => {
+            if (!active) {
+              onActivate();
+            }
+          }}
         >
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 px-4 py-3">
             <div className="min-w-0">
@@ -168,13 +194,23 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
               </button>
             </div>
           </header>
-          {pane.connectionState === "error" && pane.connectionError ? (
-            <div role="alert" className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+          <p className="sr-only" aria-live="polite" aria-atomic="true">
+            {statusAnnouncement}
+          </p>
+          {/* #510: the alert role only in the active pane, so an error in a
+              background split pane does not interrupt what the user is doing;
+              the banner stays visible either way. */}
+          {pane.connectionState === "error" &&
+          pane.connectionError &&
+          // #510: an unavailable runtime has its own banner below, with the
+          // same message; showing both would announce it twice.
+          !(runtimeStatusMessage && !runtimeStatusMessage.available) ? (
+            <div role={paneAnnounces ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p className="font-medium">Connection failed: {pane.connectionError}</p>
             </div>
           ) : null}
           {runtimeStatusMessage && !runtimeStatusMessage.available ? (
-            <div role="alert" className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+            <div role={paneAnnounces ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p>{runtimeStatusMessage.message}</p>
               {runtimeStatusMessage.installHint ? (
                 <p className="mt-1 text-rose-100/80">{runtimeStatusMessage.installHint}</p>

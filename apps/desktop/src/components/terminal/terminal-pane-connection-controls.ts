@@ -30,7 +30,7 @@ export interface TerminalPaneConnectionControlsOptions {
   clearReconnectTimer: () => void;
   disconnectNativeSession: () => Promise<void>;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
-  setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
+  setPaneState: (paneId: string, connectionState: SessionConnectionState, connectionError?: string) => void;
   setPaneTransport: (paneId: string, transport: SessionTransport) => void;
   setPendingSecretsState: (announce?: boolean) => void;
   socketRef: MutableRefObject<SessionSocketLike | null>;
@@ -74,7 +74,7 @@ export function attachTerminalPaneConnectionControls({
       connectionStateRef.current = "error";
       transportRef.current = "unsupported";
       setPaneTransport(pane.id, "unsupported");
-      setPaneState(pane.id, "error");
+      setPaneState(pane.id, "error", "This saved protocol is not executable yet.");
       terminal.writeln("\r\nThis saved protocol is not executable yet.");
       return;
     }
