@@ -296,7 +296,7 @@ describe("createTerminalPaneNativeSessionController", () => {
     expect(setPaneState).toHaveBeenLastCalledWith("pane-1", "error", refusal);
   });
 
-  it("#510: a changed host key stays refused when its socket then closes", async () => {
+  it("#510: a changed host key stays refused when its socket then errors and closes", async () => {
     createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
     const socket = new FakeSocket();
     openBackendSessionSocket.mockResolvedValue(socket);
@@ -307,6 +307,7 @@ describe("createTerminalPaneNativeSessionController", () => {
     socket.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
     const refusal = "Host key verification failed for target.internal:22: the presented host key does not match.";
     socket.dispatch("message", { data: JSON.stringify({ type: "error", message: refusal }) });
+    socket.dispatch("error");
     socket.dispatch("close");
     await vi.advanceTimersByTimeAsync(10_000);
 

@@ -402,7 +402,13 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
       });
 
       socket.addEventListener("error", () => {
-        if (isDisposed() || socketRef.current !== socket) {
+        // A replaced socket, or a session that already ended with an error
+        // the pane shows (see the close handler), must not retry or replace it.
+        if (
+          isDisposed() ||
+          socketRef.current !== socket ||
+          connectionStateRef.current === "error"
+        ) {
           return;
         }
 
