@@ -292,6 +292,53 @@ describe("createTerminalPaneNativeSessionController", () => {
     expect(setPaneState).toHaveBeenLastCalledWith("pane-1", "error", refusal);
   });
 
+  it("#510: a changed host key stays refused when its socket then closes", async () => {
+    createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
+    const socket = new FakeSocket();
+    openBackendSessionSocket.mockResolvedValue(socket);
+    const setPaneState = vi.fn();
+    const controller = makeController(setPaneState);
+
+    await controller.connectNativeSession();
+    socket.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
+    const refusal = "Host key verification failed for target.internal:22: the presented host key does not match.";
+    socket.dispatch("message", { data: JSON.stringify({ type: "error", message: refusal }) });
+    socket.dispatch("close");
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(createBackendSession).toHaveBeenCalledTimes(1);
+    expect(setPaneState).toHaveBeenLastCalledWith("pane-1", "error", refusal);
+  });
+
+  it("#510: a retry whose session cannot be created schedules the next retry", async () => {
+    const sockets: FakeSocket[] = [];
+    createBackendSession
+      .mockResolvedValueOnce({ sessionId: "session-1" })
+      .mockRejectedValueOnce(new Error("connect ECONNREFUSED"))
+      .mockResolvedValueOnce({ sessionId: "session-3" });
+    openBackendSessionSocket.mockImplementation(async () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    });
+    const setPaneState = vi.fn();
+    const controller = makeController(setPaneState);
+
+    await controller.connectNativeSession();
+    sockets[0]!.dispatch("message", { data: JSON.stringify({ type: "status", state: "connected" }) });
+    sockets[0]!.dispatch("close");
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(createBackendSession).toHaveBeenCalledTimes(2);
+    // The failed retry is announced and the next one is on its way.
+    expect(setPaneState).toHaveBeenLastCalledWith(
+      "pane-1",
+      "disconnected",
+      expect.stringContaining("Reconnecting in")
+    );
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(createBackendSession).toHaveBeenCalledTimes(3);
+  });
+
   it("#510: keeps the retry notice through an error status and then a disconnected status", async () => {
     createBackendSession.mockResolvedValueOnce({ sessionId: "session-1" });
     const socket = new FakeSocket();

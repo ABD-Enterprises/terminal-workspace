@@ -393,6 +393,13 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
           return;
         }
 
+        // #510: the session already ended with an error the pane shows and
+        // decided not to retry (for example a changed host key). Its socket
+        // closing afterwards must not start a retry that hides it.
+        if (connectionStateRef.current === "error") {
+          return;
+        }
+
         scheduleReconnect();
       });
 
@@ -412,6 +419,10 @@ export function createTerminalPaneNativeSessionController(options: TerminalPaneN
         setPaneState(pane.id, "error", `${protocolLabel} session transport failed.`);
       });
     } catch (error) {
+      // #510: this attempt is over. Clear the flag before deciding on a
+      // retry: scheduleReconnect does nothing while an attempt is in
+      // progress, which left a failed retry stuck on "connecting".
+      connectingRef.current = false;
       const classified = classifySshError(error);
       const raw = classified.raw || (error instanceof Error ? error.message : String(error));
       const friendly = classified.hint
