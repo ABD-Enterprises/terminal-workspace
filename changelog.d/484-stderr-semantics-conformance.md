@@ -1,1 +1,1 @@
-- [TEST] Assert stderrSemantics conformance group across native and browser test suites (#484)
+- [INTERNAL] Assert stderrSemantics conformance group across native and browser test suites (#484)
