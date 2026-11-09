@@ -1,0 +1,1 @@
+- [DOCS] Documented `main.rs` production vs test breakdown and transport session lifecycle refactoring targets in `docs/architecture.md` (#487).
