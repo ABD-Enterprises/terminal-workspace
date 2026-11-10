@@ -165,4 +165,38 @@ describe("Modal", () => {
     // Focus should be restored to the trigger button, NOT fall to body (#505)
     expect(document.activeElement).toBe(trigger);
   });
+
+  it("keeps autoFocus working when a mounted Modal is reopened (#505)", () => {
+    function ReopenTestComponent() {
+      const [open, setOpen] = useState(false);
+      return (
+        <div>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open Rename
+          </button>
+          <Modal open={open} title="Rename" onClose={() => setOpen(false)}>
+            <input aria-label="New name" autoFocus />
+          </Modal>
+        </div>
+      );
+    }
+
+    render(<ReopenTestComponent />);
+    const trigger = screen.getByRole("button", { name: "Open Rename" });
+
+    // First open: the autoFocus input holds focus; Escape closes and restores the trigger.
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(document.activeElement).toBe(screen.getByLabelText("New name"));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(document.activeElement).toBe(trigger);
+
+    // Second open: the old trigger must not be refocused over the input's autoFocus, and the
+    // focus-in effect must not fall back to the header "Esc" button.
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(document.activeElement).toBe(screen.getByLabelText("New name"));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(document.activeElement).toBe(trigger);
+  });
 });

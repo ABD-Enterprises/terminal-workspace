@@ -41,14 +41,25 @@ export function Modal({
     }
   }
 
-  // Restore focus to trigger element when dialog closes (#505).
+  // Restore focus to the trigger element when the dialog closes (#505). The cleanup must run
+  // only when `open` changes (or the Modal unmounts while open), never because the remembered
+  // element changed: callers keep the Modal mounted and toggle `open`, so a cleanup keyed on the
+  // element would refocus the old trigger after the next open's autoFocus had run.
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
+    previousFocusRef.current = previouslyFocusedElement;
+  }, [previouslyFocusedElement]);
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
     return () => {
-      if (previouslyFocusedElement && typeof previouslyFocusedElement.focus === "function") {
-        previouslyFocusedElement.focus();
+      const target = previousFocusRef.current;
+      if (target && typeof target.focus === "function") {
+        target.focus();
       }
     };
-  }, [open, previouslyFocusedElement]);
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
