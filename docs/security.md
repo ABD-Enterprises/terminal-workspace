@@ -24,13 +24,12 @@
 - The Node backend refuses a request body that is not `application/json`, refuses every CORS
   preflight, and sends no `Access-Control-*` header on any response. A page the user visits can
   therefore neither send a body the backend will parse nor talk the backend into answering.
-- The Node backend acts only on the three authentication methods the host type defines
-  (`none`, `password`, `privateKey`). An unrecognised value is refused rather than carried into the
-  SSH configuration.
+- The Node backend connects only with password or private-key authentication. A host with
+  no authentication selected, or an unrecognised method, is refused before a connection opens.
 - Agent forwarding is refused by the Node backend unless it was started with
-  `TERMSNIP_ALLOW_AGENT_FORWARDING=1`. The host record that asks for it arrives in the request
-  body, so the authorisation has to come from the operator who started the backend, not from the
-  caller.
+  `TERMSNIP_ALLOW_AGENT_FORWARDING=1` and the request supplies the backend token. An allowed
+  browser Origin alone is never enough. The environment switch adds operator approval to the
+  existing token requirement.
 
 ## Current Boundaries
 

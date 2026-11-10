@@ -11,10 +11,10 @@ src-tauri/target/
 #
 # capabilities.json and acl-manifests.json are deliberately NOT ignored: they are
 # the only place the app's EFFECTIVE permission surface is visible. Our capability
-# grants the sql permissions by name ("sql:allow-select", "sql:allow-execute"),
-# and only acl-manifests.json records what each named permission expands to. A
-# tauri-plugin-sql bump that widened one of them would change the app's real
-# database permissions without altering one character of capabilities/default.json,
+# grants explicit core permissions and the log:default set, and only
+# acl-manifests.json records what each permission expands to. A plugin bump that
+# widened one of them would change the app's real permissions without altering
+# one character of capabilities/default.json,
 # and the build would still pass — build validation checks schema conformance, not
 # breadth. Committing these two is what puts that change in front of a reviewer.
 # Note this only surfaces drift; making it an actual gate needs a CI `git diff

@@ -258,7 +258,7 @@ async function main() {
     });
     check("an unsupported authMethod is refused",
       unsupportedAuth.status === 400 &&
-        unsupportedAuth.json?.error === "Unsupported authentication method.",
+        unsupportedAuth.json?.error === "This host's SSH sign-in method is not supported. Choose a password or a private key.",
       `status ${unsupportedAuth.status} body ${unsupportedAuth.text.slice(0, 200)}`);
 
     // Agent forwarding hands the local ssh-agent to the remote host. The host
@@ -272,7 +272,7 @@ async function main() {
     });
     check("agent forwarding is refused unless the backend allows it",
       agentForwarding.status === 403 &&
-        agentForwarding.json?.error === "Agent forwarding is disabled on this backend.",
+        agentForwarding.json?.error === "SSH agent forwarding is not available in the browser preview. Turn off agent forwarding for this host and its jump host to connect.",
       `status ${agentForwarding.status} body ${agentForwarding.text.slice(0, 200)}`);
 
     console.log("[client] SSH config glob success boundary");
