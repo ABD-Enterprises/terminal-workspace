@@ -1,0 +1,2 @@
+- [FIX] Honor the project-pinned pnpm version even when a different global version is installed. (#565)
+- [SECURITY] Update bundled SQLite to 3.54.1 through manifest-only SQLx driver backports, fixing RUSTSEC-2026-0459. (#565)

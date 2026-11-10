@@ -3173,7 +3173,7 @@ async fn terminal_workspace_persistence_clear_deletions(
 #[tauri::command]
 async fn terminal_workspace_load_host_secrets(
     request: HostSecretsRequest,
-) -> Result<HostSecretsResponse, String> {
+) -> Result<HostSecretsResponse, IpcError> {
     tauri::async_runtime::spawn_blocking(move || {
         let password = read_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id);
         let passphrase = read_keychain_secret(KEYCHAIN_PASSPHRASE_SERVICE, &request.host_id);
@@ -3195,13 +3195,13 @@ async fn terminal_workspace_load_host_secrets(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcError::internal(error.to_string()))?
 }
 
 #[tauri::command]
 async fn terminal_workspace_store_host_secrets(
     request: StoreHostSecretsRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcError> {
     tauri::async_runtime::spawn_blocking(move || {
         store_keychain_secret(
             KEYCHAIN_PASSWORD_SERVICE,
@@ -3220,13 +3220,13 @@ async fn terminal_workspace_store_host_secrets(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcError::internal(error.to_string()))?
 }
 
 #[tauri::command]
 async fn terminal_workspace_clear_host_secrets(
     request: HostSecretsRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcError> {
     tauri::async_runtime::spawn_blocking(move || {
         delete_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id)?;
         delete_keychain_secret(KEYCHAIN_PASSPHRASE_SERVICE, &request.host_id)?;
@@ -3237,7 +3237,7 @@ async fn terminal_workspace_clear_host_secrets(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcError::internal(error.to_string()))?
 }
 
 /// Read the passphrase for a private key by SSH key fingerprint. Multiple
@@ -3247,7 +3247,7 @@ async fn terminal_workspace_clear_host_secrets(
 #[tauri::command]
 async fn terminal_workspace_load_key_passphrase(
     request: KeyPassphraseRequest,
-) -> Result<KeyPassphraseResponse, String> {
+) -> Result<KeyPassphraseResponse, IpcError> {
     validate_key_fingerprint(&request.fingerprint)?;
     tauri::async_runtime::spawn_blocking(move || {
         Ok(KeyPassphraseResponse {
@@ -3259,13 +3259,13 @@ async fn terminal_workspace_load_key_passphrase(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcError::internal(error.to_string()))?
 }
 
 #[tauri::command]
 async fn terminal_workspace_store_key_passphrase(
     request: StoreKeyPassphraseRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcError> {
     validate_key_fingerprint(&request.fingerprint)?;
     tauri::async_runtime::spawn_blocking(move || {
         store_keychain_secret(
@@ -3279,13 +3279,13 @@ async fn terminal_workspace_store_key_passphrase(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcError::internal(error.to_string()))?
 }
 
 #[tauri::command]
 async fn terminal_workspace_clear_key_passphrase(
     request: KeyPassphraseRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcError> {
     validate_key_fingerprint(&request.fingerprint)?;
     tauri::async_runtime::spawn_blocking(move || {
         delete_keychain_secret(KEYCHAIN_KEY_PASSPHRASE_SERVICE, &request.fingerprint)?;
@@ -3295,7 +3295,7 @@ async fn terminal_workspace_clear_key_passphrase(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcError::internal(error.to_string()))?
 }
 
 /// Read the passphrase for a reusable Identity (P2-DM1 batch 3). Replaces
@@ -3305,7 +3305,7 @@ async fn terminal_workspace_clear_key_passphrase(
 #[tauri::command]
 async fn terminal_workspace_load_identity_passphrase(
     request: IdentityPassphraseRequest,
-) -> Result<IdentityPassphraseResponse, String> {
+) -> Result<IdentityPassphraseResponse, IpcError> {
     validate_identity_id(&request.identity_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         Ok(IdentityPassphraseResponse {
@@ -3317,13 +3317,13 @@ async fn terminal_workspace_load_identity_passphrase(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcError::internal(error.to_string()))?
 }
 
 #[tauri::command]
 async fn terminal_workspace_store_identity_passphrase(
     request: StoreIdentityPassphraseRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcError> {
     validate_identity_id(&request.identity_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         store_keychain_secret(
@@ -3337,13 +3337,13 @@ async fn terminal_workspace_store_identity_passphrase(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcError::internal(error.to_string()))?
 }
 
 #[tauri::command]
 async fn terminal_workspace_clear_identity_passphrase(
     request: IdentityPassphraseRequest,
-) -> Result<BackendBooleanResponse, String> {
+) -> Result<BackendBooleanResponse, IpcError> {
     validate_identity_id(&request.identity_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         delete_keychain_secret(KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE, &request.identity_id)?;
@@ -3353,7 +3353,7 @@ async fn terminal_workspace_clear_identity_passphrase(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcError::internal(error.to_string()))?
 }
 
 /// Read a single OpenSSH config file from the user's ~/.ssh/ tree. Used by

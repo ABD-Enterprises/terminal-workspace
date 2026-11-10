@@ -20,20 +20,45 @@ export class PayloadTooLargeError extends Error {
 }
 
 /**
- * True only when the Content-Type's media type is exactly `application/json`.
- * Parameters such as `; charset=utf-8` are ignored, so a value that merely
- * mentions JSON (`text/plain; application/json`) is still refused.
+ * The only media type a control payload may use.
  *
- * #470: this is what makes the browser's preflight rules protect the backend.
- * A page can send a cross-origin POST without a preflight only as `text/plain`,
- * a form or multipart, and all of those fail here. A JSON content type forces
- * a preflight, which the backend always refuses.
+ * A browser sends a *simple* cross-origin request — one that skips the CORS
+ * preflight — only when the content type is `text/plain`,
+ * `application/x-www-form-urlencoded` or `multipart/form-data`. Requiring
+ * JSON means a page the user visits cannot get a body parsed at all; a page
+ * that sends `application/json` anyway forces a preflight, and the backend
+ * refuses preflights (no CORS headers are ever sent).
  */
-export function isJsonContentType(header) {
-  if (typeof header !== "string") {
+export const JSON_CONTENT_TYPE = "application/json";
+
+/**
+ * A body that arrived with a content type the backend does not accept.
+ *
+ * Carries a 415 so `respondError` maps it to the right status. The message is
+ * deliberately not relayed to the client (#230): the status says enough, and
+ * the request's own headers are not safe to echo.
+ */
+export class UnsupportedMediaTypeError extends Error {
+  constructor() {
+    super(`Request body must be ${JSON_CONTENT_TYPE}.`);
+    this.name = "UnsupportedMediaTypeError";
+    this.statusCode = 415;
+  }
+}
+
+/**
+ * Whether a Content-Type header names JSON.
+ *
+ * Parameters are ignored (`application/json; charset=utf-8` is JSON), and the
+ * comparison is case-insensitive because the media type is case-insensitive.
+ */
+export function isJsonContentType(contentType) {
+  const raw = Array.isArray(contentType) ? contentType[0] : contentType;
+  if (typeof raw !== "string") {
     return false;
   }
-  return header.split(";", 1)[0].trim().toLowerCase() === "application/json";
+  const mediaType = raw.split(";", 1)[0].trim().toLowerCase();
+  return mediaType === JSON_CONTENT_TYPE;
 }
 
 /**
@@ -43,6 +68,11 @@ export function isJsonContentType(header) {
  * upload's base64 contents — buffers the whole payload in memory and can OOM
  * the single backend process that owns every session.
  *
+ * The body must also arrive as JSON: a request whose Content-Type is one of
+ * the browser's *simple* content types is a cross-origin request that skipped
+ * the preflight, and refusing it is what keeps a page the user visits from
+ * driving the backend. See `isJsonContentType`.
+ *
  * Uses event-based reading rather than `for await`: throwing out of a
  * `for await` over an http IncomingMessage destroys the socket, so the caller's
  * response.end() would hit a dead connection and the client would see
@@ -50,6 +80,10 @@ export function isJsonContentType(header) {
  * down the socket, so the caller can still send the status.
  */
 export function readJson(request, maxBytes = REQUEST_BODY_MAX_BYTES) {
+  if (!isJsonContentType(request?.headers?.["content-type"])) {
+    return Promise.reject(new UnsupportedMediaTypeError());
+  }
+
   return new Promise((resolve, reject) => {
     let settled = false;
     const finish = (fn, value) => {
