@@ -1,0 +1,1 @@
+- [FIX] Add a Dismiss button to the pane's connection-failed notice; the notice comes back on the next failure (#515)

@@ -62,6 +62,14 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     pane.connectionState === "disconnected" ? pane.connectionError : undefined
   );
 
+  // #515: the connection-failed notice can be dismissed. Dismissal is remembered per error text
+  // and cleared once the pane leaves the error state, so a new failure (even with the same
+  // text) shows the notice again.
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+  if (pane.connectionState !== "error" && dismissedError !== null) {
+    setDismissedError(null);
+  }
+
   // #507: right-click opens this menu instead of pasting into the shell, and
   // clipboard outcomes are shown rather than swallowed.
   const [contextMenu, setContextMenu] = useState<{
@@ -203,11 +211,23 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
               the banner stays visible either way. */}
           {pane.connectionState === "error" &&
           pane.connectionError &&
+          pane.connectionError !== dismissedError &&
           // #510: an unavailable runtime has its own banner below, with the
           // same message; showing both would announce it twice.
           !(runtimeStatusMessage && !runtimeStatusMessage.available) ? (
-            <div role={paneAnnounces ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+            <div role={paneAnnounces ? "alert" : undefined} className="flex flex-wrap items-center justify-between gap-2 border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p className="font-medium">Connection failed: {pane.connectionError}</p>
+              <button
+                type="button"
+                aria-label="Dismiss error notice"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setDismissedError(pane.connectionError ?? null);
+                }}
+                className="rounded-2xl border border-rose-300/50 px-3 py-1 text-xs text-rose-50 transition hover:border-rose-200"
+              >
+                Dismiss
+              </button>
             </div>
           ) : null}
           {pane.connectionState === "disconnected" && isReconnectGiveUpNotice(pane.connectionError) ? (
