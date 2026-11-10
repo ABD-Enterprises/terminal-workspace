@@ -1,0 +1,1 @@
+- [FIX] Screen reader support: a Settings switch turns on terminal output for screen readers, connection changes in the active pane are announced, errors carry their real reason, and the host key prompt announces itself (#510)

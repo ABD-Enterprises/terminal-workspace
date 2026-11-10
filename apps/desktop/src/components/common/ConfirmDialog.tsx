@@ -6,6 +6,12 @@ interface ConfirmDialogProps {
   title: string;
   description: string;
   confirmLabel?: string;
+  cancelLabel?: string;
+  /**
+   * Which button receives initial focus when the dialog opens.
+   * Defaults to "cancel" to prevent accidental destructive actions (#512).
+   */
+  defaultFocus?: "cancel" | "confirm";
   onCancel: () => void;
   onConfirm: () => void;
 }
@@ -29,15 +35,17 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  defaultFocus = "cancel",
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
-  // Enter triggers the destructive action. Esc is already wired by the
-  // Modal's own Esc button + the backdrop click. Skipped when the user
-  // is typing in an input inside the dialog body.
-  // See QWEN review keyboard-first item.
+  // Esc is already wired by the Modal's own Esc button + the backdrop click.
+  // Enter only triggers confirmation when defaultFocus is explicitly set to
+  // "confirm" (#512: destructive dialogs default focus to Cancel so reflexively
+  // pressing Enter safely dismisses the dialog rather than executing irreversible deletion).
   useEffect(() => {
-    if (!open) {
+    if (!open || defaultFocus !== "confirm") {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
@@ -57,7 +65,7 @@ export function ConfirmDialog({
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [onConfirm, open]);
+  }, [defaultFocus, onConfirm, open]);
 
   return (
     <Modal
@@ -71,14 +79,15 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onCancel}
+            autoFocus={defaultFocus === "cancel"}
             className="rounded-2xl border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white"
           >
-            Cancel
+            {cancelLabel}
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            autoFocus
+            autoFocus={defaultFocus === "confirm"}
             className="rounded-2xl bg-rose-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-400"
           >
             {confirmLabel}

@@ -89,6 +89,9 @@ function sanitizePersistedWorkspace(
             ...normalizedPane,
             backendSessionId: undefined,
             connectionState: "disconnected" as const,
+            // #510: a reason belongs to the live state it came with; a pane
+            // reset to disconnected must not carry an old one.
+            connectionError: undefined,
             queuedCommands: [],
             reconnectOnRestore:
               normalizedPane.connectionState === "connected" || normalizedPane.reconnectOnRestore,
@@ -326,7 +329,8 @@ export function removeSessionPane(
 export function updatePaneConnectionState(
   state: SessionWorkspaceState,
   paneId: string,
-  connectionState: SessionConnectionState
+  connectionState: SessionConnectionState,
+  connectionError?: string
 ): SessionWorkspaceState {
   const pane = state.panes[paneId];
   if (!pane) {
@@ -339,6 +343,15 @@ export function updatePaneConnectionState(
       ...state.panes,
       [paneId]: touchPane(pane, {
         connectionState,
+        // #510: an error keeps its reason until the state changes. A
+        // disconnect keeps only a reason given with it (an automatic
+        // reconnect's notice), so the pane can announce it.
+        connectionError:
+          connectionState === "error"
+            ? (connectionError ?? pane.connectionError)
+            : connectionState === "disconnected"
+              ? connectionError
+              : undefined,
         reconnectOnRestore: connectionState === "connected" || pane.reconnectOnRestore,
       }),
     },
@@ -648,7 +661,11 @@ export interface SessionsState extends SessionWorkspaceState {
   closePane: (tabId: string, paneId: string) => void;
   closePanesForHost: (hostId: string) => void;
   selectPane: (tabId: string, paneId: string) => void;
-  setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
+  setPaneState: (
+    paneId: string,
+    connectionState: SessionConnectionState,
+    connectionError?: string
+  ) => void;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
   setPanePersistOutputPreview: (paneId: string, persistOutputPreview: boolean) => void;
   setPaneTransport: (paneId: string, transport: SessionTransport) => void;
@@ -744,8 +761,8 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => removeSessionPane(state, tabId, paneId));
       },
       selectPane: (tabId, paneId) => set((state) => setActiveSessionPane(state, tabId, paneId)),
-      setPaneState: (paneId, connectionState) =>
-        set((state) => updatePaneConnectionState(state, paneId, connectionState)),
+      setPaneState: (paneId, connectionState, connectionError) =>
+        set((state) => updatePaneConnectionState(state, paneId, connectionState, connectionError)),
       setPaneReconnectOnRestore: (paneId, reconnectOnRestore) =>
         set((state) => updatePaneReconnectPreference(state, paneId, reconnectOnRestore)),
       setPanePersistOutputPreview: (paneId, persistOutputPreview) =>

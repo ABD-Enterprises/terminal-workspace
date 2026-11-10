@@ -54,7 +54,7 @@ export function CommandPaletteDialog({
               closeCommandPalette();
             }}
           />
-          <div className="relative z-10 w-full max-w-3xl rounded-[24px] border border-slate-700/70 bg-slate-900/95 p-3.5 shadow-2xl shadow-slate-950/70">
+          <div role="dialog" aria-modal="true" aria-label="Command palette" className="relative z-10 w-full max-w-3xl rounded-[24px] border border-slate-700/70 bg-slate-900/95 p-3.5 shadow-2xl shadow-slate-950/70">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-300">

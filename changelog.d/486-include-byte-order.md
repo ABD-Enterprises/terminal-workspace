@@ -1,0 +1,1 @@
+- [FIX] Apply SSH config Include glob matches in OpenSSH's byte order, and keep the files OpenSSH would apply first when more than 256 match; configs mixing upper- and lowercase names may now resolve differently, matching `ssh` (#486)

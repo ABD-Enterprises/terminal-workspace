@@ -1,25 +1,23 @@
-import Database from "@tauri-apps/plugin-sql";
 import type { StateStorage } from "zustand/middleware";
-import { isTauriRuntime } from "./backend-runtime";
+import { invokeTauriCommand, isTauriRuntime } from "./backend-runtime";
 import type { VaultDeletionMap } from "../store/vault-sync-store";
 
-// #129: the native startup path copies the legacy termsnip.db database to this
-// file before tauri-plugin-sql opens it.
-const DATABASE_URL = "sqlite:terminalworkspace.db";
-
+// #472: native persistence goes through typed commands in
+// src-tauri/src/persistence.rs, which own the table names and every SQL
+// statement. The renderer can no longer name a database file or run SQL.
+//
 // #115: persisted-store localStorage keys moved from the legacy `termsnip-*`
 // namespace to `terminal-workspace-*`. `getLocalStorageItem` forward-migrates
 // each legacy value to the new key on first read and keeps the legacy key for
-// one release so a rollback still finds the data. The SQLite table names below
-// are unchanged — native data lives there and is unaffected by the key rename.
-const STORE_TABLES = {
-  "terminal-workspace-hosts": "hosts_store",
-  "terminal-workspace-keys": "keys_store",
-  "terminal-workspace-known-hosts": "known_hosts_store",
-  "terminal-workspace-identities": "identities_store",
-  "terminal-workspace-snippets": "snippets_store",
-  "terminal-workspace-runbooks": "runbooks_store",
-} as const;
+// one release so a rollback still finds the data. These store names are also
+// the names the native commands accept; each maps to one SQLite table there.
+export type PersistedStoreName =
+  | "terminal-workspace-hosts"
+  | "terminal-workspace-keys"
+  | "terminal-workspace-known-hosts"
+  | "terminal-workspace-identities"
+  | "terminal-workspace-snippets"
+  | "terminal-workspace-runbooks";
 
 const LEGACY_STORAGE_PREFIX = "termsnip-";
 const STORAGE_PREFIX = "terminal-workspace-";
@@ -34,13 +32,8 @@ function legacyStorageKeyFor(name: string): string | null {
 
 const DELETION_KINDS = ["hosts", "keys", "snippets", "knownHosts", "identities"] as const;
 
-type PersistedStoreName = keyof typeof STORE_TABLES;
 type DeletionKind = (typeof DELETION_KINDS)[number];
 type LogLevel = "error" | "warn";
-
-interface StorePayloadRow {
-  payload: string;
-}
 
 function writeFrontendLog(level: LogLevel, message: string) {
   void import("@tauri-apps/plugin-log")
@@ -48,13 +41,12 @@ function writeFrontendLog(level: LogLevel, message: string) {
     .catch(() => undefined);
 }
 
-interface DeletionRow {
-  deleted_at: string;
+/** One row of the native `deletions` table, as the native commands return it. */
+export interface NativeDeletionRecord {
+  deletedAt: string;
   id: string;
   kind: DeletionKind;
 }
-
-let databasePromise: Promise<Database> | undefined;
 
 function getLocalStorageItem(name: string) {
   if (typeof window === "undefined") {
@@ -93,33 +85,6 @@ function removeLocalStorageItem(name: string) {
   }
 }
 
-/**
- * The app's database handle.
- *
- * `Database.get` rather than `Database.load`: `load` invokes the plugin's
- * `load` command, which opens whatever path the caller names and creates the
- * file if it is missing — so the capability that permits it turns a renderer
- * compromise into a file create/overwrite primitive outside the app's
- * directory. `get` hands back the same handle without that command; the
- * plugin already preloads the pool for DATABASE_URL (see the `plugins.sql`
- * `preload` list in tauri.conf.json), and the plugin's setup blocks until that
- * preload has finished, so the pool is always there when the first query
- * arrives.
- */
-function loadDatabase() {
-  // `Promise.resolve().then(...)` rather than `Promise.resolve(Database.get(...))`:
-  // the argument would be evaluated eagerly, so a throw inside `get` would
-  // escape this function synchronously instead of rejecting the promise the
-  // callers await.
-  databasePromise ??= Promise.resolve()
-    .then(() => Database.get(DATABASE_URL))
-    .catch((error) => {
-      databasePromise = undefined;
-      throw error;
-    });
-  return databasePromise;
-}
-
 function emptyDeletionMap(): VaultDeletionMap {
   return {
     hosts: [],
@@ -139,11 +104,11 @@ function parsePersistedDeletions(value: string): VaultDeletionMap {
   };
 }
 
-function serializeDeletionRows(rows: DeletionRow[]) {
+function serializeDeletionRows(rows: NativeDeletionRecord[]) {
   const deletions = emptyDeletionMap();
   for (const row of rows) {
     deletions[row.kind].push({
-      deletedAt: row.deleted_at,
+      deletedAt: row.deletedAt,
       id: row.id,
     });
   }
@@ -155,13 +120,9 @@ function serializeDeletionRows(rows: DeletionRow[]) {
 }
 
 async function getNativeStoreItem(name: PersistedStoreName) {
-  const tableName = STORE_TABLES[name];
-  const db = await loadDatabase();
-  const rows = await db.select<StorePayloadRow[]>(
-    `SELECT payload FROM ${tableName} WHERE id = $1 LIMIT 1`,
-    ["state"]
-  );
-  const payload = rows[0]?.payload ?? null;
+  const payload = await invokeTauriCommand("terminal_workspace_persistence_read_store", {
+    request: { store: name },
+  });
   if (payload !== null) {
     return payload;
   }
@@ -175,24 +136,14 @@ async function getNativeStoreItem(name: PersistedStoreName) {
 }
 
 async function setNativeStoreItem(name: PersistedStoreName, value: string) {
-  const tableName = STORE_TABLES[name];
-  const db = await loadDatabase();
-  await db.execute(
-    `INSERT INTO ${tableName} (id, payload, updated_at)
-       VALUES ($1, $2, datetime('now'))
-       ON CONFLICT(id) DO UPDATE SET
-         payload = excluded.payload,
-         updated_at = excluded.updated_at`,
-    ["state", value]
-  );
+  await invokeTauriCommand("terminal_workspace_persistence_write_store", {
+    request: { store: name, payload: value },
+  });
   setLocalStorageItem(name, value);
 }
 
 async function getNativeDeletionItem(name: string) {
-  const db = await loadDatabase();
-  const rows = await db.select<DeletionRow[]>(
-    "SELECT kind, id, deleted_at FROM deletions ORDER BY deleted_at DESC"
-  );
+  const rows = await invokeTauriCommand("terminal_workspace_persistence_read_deletions");
   if (rows.length > 0) {
     return serializeDeletionRows(rows);
   }
@@ -205,39 +156,30 @@ async function getNativeDeletionItem(name: string) {
   return localPayload;
 }
 
+// The native command replaces every record in one transaction and rolls the
+// whole replace back if any record fails.
 async function setNativeDeletionItem(value: string) {
-  const db = await loadDatabase();
   const deletions = parsePersistedDeletions(value);
-  await db.execute("BEGIN IMMEDIATE TRANSACTION");
-  try {
-    await db.execute("DELETE FROM deletions");
-
-    for (const kind of DELETION_KINDS) {
-      for (const entry of deletions[kind] ?? []) {
-        await db.execute(
-          `INSERT INTO deletions (kind, id, deleted_at)
-             VALUES ($1, $2, $3)
-             ON CONFLICT(kind, id) DO UPDATE SET deleted_at = excluded.deleted_at`,
-          [kind, entry.id, entry.deletedAt]
-        );
-      }
+  const records: NativeDeletionRecord[] = [];
+  for (const kind of DELETION_KINDS) {
+    for (const entry of deletions[kind] ?? []) {
+      records.push({ kind, id: entry.id, deletedAt: entry.deletedAt });
     }
-    await db.execute("COMMIT");
-  } catch (error) {
-    await db.execute("ROLLBACK").catch(() => undefined);
-    throw error;
   }
+  await invokeTauriCommand("terminal_workspace_persistence_replace_deletions", {
+    request: { records },
+  });
 }
 
 async function removeNativeStoreItem(name: PersistedStoreName) {
-  const db = await loadDatabase();
-  await db.execute(`DELETE FROM ${STORE_TABLES[name]} WHERE id = $1`, ["state"]);
+  await invokeTauriCommand("terminal_workspace_persistence_remove_store", {
+    request: { store: name },
+  });
   removeLocalStorageItem(name);
 }
 
 async function removeNativeDeletionItem() {
-  const db = await loadDatabase();
-  await db.execute("DELETE FROM deletions");
+  await invokeTauriCommand("terminal_workspace_persistence_clear_deletions");
 }
 
 function logPersistenceFallback(action: string, name: string, error: unknown) {

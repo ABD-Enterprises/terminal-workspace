@@ -14,7 +14,7 @@
 //
 // See docs/parity-and-hardening-plan.md P2-DM1.
 
-import { sampleHosts, type HostRecord } from "../types/host";
+import type { HostRecord } from "../types/host";
 import {
   buildIdentityEquivalenceKey,
   deriveIdentityLabel,
@@ -200,9 +200,3 @@ export function applyIdentityAssignments(
   });
   return mutated ? next : hosts;
 }
-
-// Re-exported for tests so the sample-hosts default migration path can be
-// asserted without reaching into the Zustand store.
-export const __sampleMigrationInput: Pick<IdentityMigrationInput, "hosts"> = {
-  hosts: sampleHosts,
-};

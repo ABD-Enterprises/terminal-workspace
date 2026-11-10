@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "xterm/css/xterm.css";
 import { detectSystemColorScheme, resolveTerminalTheme, type TerminalThemeMode } from "../../lib/terminal-themes";
 import { cn, formatHostAddress } from "../../lib/utils";
@@ -6,8 +6,13 @@ import { useAppStore } from "../../store/app-store";
 import { useSessionsStore } from "../../store/sessions-store";
 import { type HostRecord } from "../../types/host";
 import { formatSessionConnectionState, type SessionPane } from "../../types/session";
+import { copyTerminalSelection, pasteIntoTerminal, type TerminalContextMenuPosition } from "./terminal-pane-input-wiring";
 import { terminalPaneStateStyles } from "./terminal-pane-state";
+import { TerminalContextMenu } from "./TerminalContextMenu";
+import { usePaneStatusAnnouncement } from "./use-pane-status-announcement";
+import { useTerminalScreenReaderMode } from "./use-terminal-screen-reader-mode";
 import { useTerminalPaneSession } from "./use-terminal-pane-session";
+import { isReconnectGiveUpNotice } from "./terminal-pane-native-session";
 
 interface TerminalPaneProps {
   host: HostRecord;
@@ -39,7 +44,64 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
     () => resolveTerminalTheme(terminalThemeName, systemColorScheme).entry.palette,
     [terminalThemeName, systemColorScheme]
   );
-  const { advanceSearchMatch, closeSearch, containerRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, toggleConnectionRef } = useTerminalPaneSession({ host, pane, resolvedTerminalPalette });
+  const { advanceSearchMatch, clipboardNoticeRef, screenReaderModeRef, closeSearch, containerRef, contextMenuRequestRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, terminalRef, toggleConnectionRef } = useTerminalPaneSession({ host, pane, resolvedTerminalPalette });
+
+  // #510: screen reader support. The setting reaches open terminals, and
+  // connection changes in the active pane are announced once each.
+  // The pane announces status changes and errors in the active pane whether
+  // or not the terminal is reading its own output: status changes are never
+  // written to the terminal, and some errors are not either. With screen
+  // reader mode on, an error the terminal also prints may be heard twice,
+  // which is better than one that is never heard.
+  useTerminalScreenReaderMode(terminalRef, screenReaderModeRef, active);
+  const paneAnnounces = active;
+  const statusAnnouncement = usePaneStatusAnnouncement(
+    pane.connectionState,
+    host.label,
+    paneAnnounces,
+    pane.connectionState === "disconnected" ? pane.connectionError : undefined
+  );
+
+  // #507: right-click opens this menu instead of pasting into the shell, and
+  // clipboard outcomes are shown rather than swallowed.
+  const [contextMenu, setContextMenu] = useState<{
+    position: TerminalContextMenuPosition;
+    hasSelection: boolean;
+  } | null>(null);
+  // Each outcome gets its own id, so a repeated identical message (two copies
+  // in a row) still restarts the 2.5-second timer instead of inheriting the
+  // first one's.
+  const [clipboardNotice, setClipboardNoticeState] = useState<{ id: number; text: string } | null>(
+    null
+  );
+  const showClipboardNotice = useCallback((text: string) => {
+    setClipboardNoticeState((current) => ({ id: (current?.id ?? 0) + 1, text }));
+  }, []);
+
+  useEffect(() => {
+    contextMenuRequestRef.current = (position) =>
+      setContextMenu({ position, hasSelection: Boolean(terminalRef.current?.getSelection()) });
+    clipboardNoticeRef.current = showClipboardNotice;
+  }, [clipboardNoticeRef, contextMenuRequestRef, showClipboardNotice, terminalRef]);
+
+  const clipboardNoticeId = clipboardNotice?.id;
+  useEffect(() => {
+    if (clipboardNoticeId === undefined) {
+      return;
+    }
+    const timer = window.setTimeout(() => setClipboardNoticeState(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [clipboardNoticeId]);
+
+  const closeContextMenu = useCallback(
+    ({ restoreFocus }: { restoreFocus: boolean }) => {
+      setContextMenu(null);
+      if (restoreFocus) {
+        terminalRef.current?.focus();
+      }
+    },
+    [terminalRef]
+  );
 
   return (
         <section
@@ -48,6 +110,14 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
             active ? "border-emerald-400/50 shadow-lg shadow-emerald-950/20" : "border-slate-800/80"
           )}
           onClick={onActivate}
+          // #510: keyboard and screen reader focus moving into a pane makes it
+          // the active pane too, so screen reader mode and announcements
+          // follow the terminal the user is actually in.
+          onFocus={() => {
+            if (!active) {
+              onActivate();
+            }
+          }}
         >
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 px-4 py-3">
             <div className="min-w-0">
@@ -125,8 +195,38 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
               </button>
             </div>
           </header>
+          <p className="sr-only" aria-live="polite" aria-atomic="true">
+            {statusAnnouncement}
+          </p>
+          {/* #510: the alert role only in the active pane, so an error in a
+              background split pane does not interrupt what the user is doing;
+              the banner stays visible either way. */}
+          {pane.connectionState === "error" &&
+          pane.connectionError &&
+          // #510: an unavailable runtime has its own banner below, with the
+          // same message; showing both would announce it twice.
+          !(runtimeStatusMessage && !runtimeStatusMessage.available) ? (
+            <div role={paneAnnounces ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+              <p className="font-medium">Connection failed: {pane.connectionError}</p>
+            </div>
+          ) : null}
+          {pane.connectionState === "disconnected" && isReconnectGiveUpNotice(pane.connectionError) ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-400/20 bg-amber-400/10 px-4 py-2 text-xs text-amber-100">
+              <p className="font-medium">{pane.connectionError}</p>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleConnectionRef.current();
+                }}
+                className="rounded-2xl border border-amber-300/50 px-3 py-1 text-xs text-amber-50 transition hover:border-amber-200"
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
           {runtimeStatusMessage && !runtimeStatusMessage.available ? (
-            <div role="alert" className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
+            <div role={paneAnnounces ? "alert" : undefined} className="border-b border-rose-400/20 bg-rose-400/10 px-4 py-2 text-xs text-rose-100">
               <p>{runtimeStatusMessage.message}</p>
               {runtimeStatusMessage.installHint ? (
                 <p className="mt-1 text-rose-100/80">{runtimeStatusMessage.installHint}</p>
@@ -135,6 +235,28 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
           ) : null}
           <div className="relative min-h-0 flex-1">
             <div ref={containerRef} className="absolute inset-0 px-3 py-3" />
+            <TerminalContextMenu
+              position={contextMenu?.position ?? null}
+              hasSelection={contextMenu?.hasSelection ?? false}
+              onCopy={() => {
+                if (terminalRef.current) copyTerminalSelection(terminalRef.current, showClipboardNotice);
+              }}
+              onPaste={() => {
+                if (terminalRef.current) pasteIntoTerminal(terminalRef.current, showClipboardNotice);
+              }}
+              onClear={() => terminalRef.current?.clear()}
+              onClose={closeContextMenu}
+            />
+            <p
+              role="status"
+              aria-live="polite"
+              className={cn(
+                "pointer-events-none absolute bottom-3 right-3 z-10 rounded-xl border border-slate-700 bg-slate-950/95 px-3 py-1.5 text-xs text-slate-200 shadow-lg transition-opacity",
+                clipboardNotice ? "opacity-100" : "opacity-0"
+              )}
+            >
+              {clipboardNotice?.text ?? ""}
+            </p>
             {searchOpen ? (
               <div
                 className="absolute right-3 top-3 z-10 flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950/95 px-3 py-2 shadow-lg shadow-slate-950/40 backdrop-blur"

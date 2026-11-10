@@ -292,6 +292,7 @@ async function main() {
         "10-visible.conf,20-alias.conf,30-distinct.conf" &&
         globMatches.every((match) =>
           Object.keys(match).sort().join(",") === "content,cycleKey,name"));
+    check("a glob under the cap says it is not truncated (#486)", glob.json?.truncated === false);
     check("the canonical target sentinel is withheld",
       !glob.text.includes(GLOB_CANONICAL_SENTINEL));
     check("two names for one file share one opaque cycle identity",

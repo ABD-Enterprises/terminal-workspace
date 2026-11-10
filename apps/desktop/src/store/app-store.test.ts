@@ -56,6 +56,22 @@ describe("app store preferences", () => {
   });
 });
 
+describe("#510: terminal screen reader setting", () => {
+  it("is off by default and survives a reload", () => {
+    expect(buildBaselineDefaults({}).terminalScreenReaderMode).toBe(false);
+    expect(buildBaselineDefaults({ terminalScreenReaderMode: true }).terminalScreenReaderMode).toBe(
+      true
+    );
+    const partialize = useAppStore.persist.getOptions().partialize;
+    expect(partialize).toBeDefined();
+    const persisted = partialize?.({
+      ...useAppStore.getState(),
+      terminalScreenReaderMode: true,
+    }) as { terminalScreenReaderMode?: boolean };
+    expect(persisted.terminalScreenReaderMode).toBe(true);
+  });
+});
+
 describe("buildBaselineDefaults", () => {
   it("falls back to runtime-appropriate defaults for an empty payload", () => {
     const baseline = buildBaselineDefaults({});

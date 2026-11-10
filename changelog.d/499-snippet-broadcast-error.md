@@ -1,0 +1,1 @@
+- [FIX] Display on-screen error banner with role="alert" when snippet broadcast fails (#533)

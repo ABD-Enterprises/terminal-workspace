@@ -13,7 +13,10 @@ import {
   attachTerminalPaneConnectionControls,
   initializeTerminalPaneTransport,
 } from "./terminal-pane-connection-controls";
-import { attachTerminalPaneInputWiring } from "./terminal-pane-input-wiring";
+import {
+  attachTerminalPaneInputWiring,
+  type TerminalContextMenuPosition,
+} from "./terminal-pane-input-wiring";
 import { createTerminalPaneMockSession } from "./terminal-pane-mock-session";
 import { createTerminalPaneNativeSessionController } from "./terminal-pane-native-session";
 import { type RuntimeStatusMessage } from "./use-terminal-pane-runtime-status";
@@ -30,6 +33,12 @@ export interface TerminalPaneLifecycleOptions {
   authMethod: HostRecord["authMethod"];
   backendSessionIdRef: MutableRefObject<string | undefined>;
   commandBufferRef: MutableRefObject<string>;
+  /** #507: set by the pane; the lifecycle calls through it. */
+  clipboardNoticeRef: MutableRefObject<(message: string) => void>;
+  /** #510: whether a terminal created now should start in screen reader mode. */
+  screenReaderModeRef: MutableRefObject<boolean>;
+  /** #507: set by the pane; the lifecycle calls through it. */
+  contextMenuRequestRef: MutableRefObject<(position: TerminalContextMenuPosition) => void>;
   connectedOnceRef: MutableRefObject<boolean>;
   connectingRef: MutableRefObject<boolean>;
   connectionStateRef: MutableRefObject<SessionConnectionState>;
@@ -61,7 +70,7 @@ export interface TerminalPaneLifecycleOptions {
   runtimeStatusRef: MutableRefObject<RuntimeStatusMessage | null>;
   setPaneBackendSession: (paneId: string, backendSessionId: string | undefined) => void;
   setPaneReconnectOnRestore: (paneId: string, reconnectOnRestore: boolean) => void;
-  setPaneState: (paneId: string, connectionState: SessionConnectionState) => void;
+  setPaneState: (paneId: string, connectionState: SessionConnectionState, connectionError?: string) => void;
   setPaneTransport: (paneId: string, transport: SessionTransport) => void;
   setRuntimeStatusMessage: Dispatch<SetStateAction<RuntimeStatusMessage | null>>;
   setSearchOpen: Dispatch<SetStateAction<boolean>>;
@@ -86,7 +95,10 @@ export function useTerminalPaneLifecycle({
   appendCommandOutput,
   authMethod,
   backendSessionIdRef,
+  clipboardNoticeRef,
+  screenReaderModeRef,
   commandBufferRef,
+  contextMenuRequestRef,
   connectedOnceRef,
   connectingRef,
   connectionStateRef,
@@ -157,6 +169,9 @@ export function useTerminalPaneLifecycle({
       fontSize: 13,
       scrollback: 10000,
       theme: initialPaletteRef.current,
+      // #510: a terminal recreated after a host change starts in the right
+      // mode; useTerminalScreenReaderMode keeps it right afterwards.
+      screenReaderMode: screenReaderModeRef.current,
     });
     const fitAddon = new FitAddon();
     let fitFrameId: number | null = null;
@@ -263,7 +278,6 @@ export function useTerminalPaneLifecycle({
       stableEnvironment,
       terminal,
       transportRef,
-      trustedKnownHost,
       unsupportedTransport,
       useMockTransport,
       username,
@@ -331,6 +345,8 @@ export function useTerminalPaneLifecycle({
       commandBufferRef,
       connectionStateRef,
       container,
+      notifyClipboard: (message) => clipboardNoticeRef.current(message),
+      requestContextMenu: (position) => contextMenuRequestRef.current(position),
       runMockCommand,
       setSearchOpen,
       socketRef,
@@ -378,6 +394,8 @@ export function useTerminalPaneLifecycle({
     label,
     demoModeEnabled,
     protocol,
+    // The controller reads saved keys when it connects; a change to this
+    // host's approved key still rebuilds the session with the new key.
     trustedKnownHost,
     port,
     pane.id,

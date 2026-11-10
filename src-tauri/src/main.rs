@@ -37,6 +37,7 @@ mod ipc_types;
 mod keychain_support;
 mod native_host_keys;
 mod native_transport;
+mod persistence;
 mod sftp;
 
 use crate::native_host_keys::{HostKeyVerdict, NativeHostKeyStore, SharedNativeHostKeyStore};
@@ -1479,10 +1480,33 @@ fn verify_native_host_key(
     let (actual_key, key_type) = session
         .host_key()
         .ok_or_else(|| IpcError::internal("SSH server did not present a host key"))?;
+    // #475: the algorithm is checked first inside the decision, before the
+    // approved-key comparison and the pin store, so neither an earlier approval
+    // nor an existing pin lets a refused key through and it is never pinned.
+    let algorithm = host_key_algorithm_name(key_type);
     let presented = BASE64_STANDARD.encode(actual_key);
+    decide_native_host_key(host, store, algorithm, &presented)
+}
+
+/// The host-key decision once the presented key is known, split out of
+/// `verify_native_host_key` so it can be tested without a live SSH session.
+/// Refuses a refused algorithm (#475) first; then an approved key wins; then
+/// trust on first use against the pin store.
+fn decide_native_host_key(
+    host: &BackendHostConnection,
+    store: &NativeHostKeyStore,
+    algorithm: &str,
+    presented: &str,
+) -> Result<(), IpcError> {
+    if native_host_keys::is_refused_host_key_algorithm(algorithm) {
+        return Err(IpcError::internal(native_host_keys::weak_host_key_message(
+            &host.hostname,
+            host.port,
+        )));
+    }
 
     if let Some(expected_key) = host.known_host_public_key.as_ref() {
-        if presented != *expected_key {
+        if presented != expected_key.as_str() {
             return Err(IpcError::new(
                 IpcErrorCode::HostKeyMismatch,
                 format!(
@@ -1502,9 +1526,8 @@ fn verify_native_host_key(
         )));
     }
 
-    let algorithm = host_key_algorithm_name(key_type);
     let pattern = known_hosts_host_pattern(host);
-    match store.verify_or_pin(&pattern, algorithm, &presented)? {
+    match store.verify_or_pin(&pattern, algorithm, presented)? {
         HostKeyVerdict::Pinned | HostKeyVerdict::Matches => Ok(()),
         HostKeyVerdict::Mismatch { .. } => Err(IpcError::new(
             IpcErrorCode::HostKeyMismatch,
@@ -3093,6 +3116,60 @@ async fn terminal_workspace_execute_snippet_on_hosts(
         .map_err(|error| error.to_string())?
 }
 
+// #472: the renderer's only route to SQLite. Fixed tables and fixed statements,
+// so it can no longer name a database file or run SQL of its own.
+#[tauri::command]
+async fn terminal_workspace_persistence_read_store(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+    request: persistence::StoreRequest,
+) -> Result<Option<String>, String> {
+    let _in_flight = state.in_flight().await;
+    persistence::read_store(state.pool(), &request.store).await
+}
+
+#[tauri::command]
+async fn terminal_workspace_persistence_write_store(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+    request: persistence::StoreWriteRequest,
+) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
+    persistence::write_store(state.pool(), &request.store, &request.payload).await
+}
+
+#[tauri::command]
+async fn terminal_workspace_persistence_remove_store(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+    request: persistence::StoreRequest,
+) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
+    persistence::remove_store(state.pool(), &request.store).await
+}
+
+#[tauri::command]
+async fn terminal_workspace_persistence_read_deletions(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+) -> Result<Vec<persistence::DeletionRecord>, String> {
+    let _in_flight = state.in_flight().await;
+    persistence::read_deletions(state.pool()).await
+}
+
+#[tauri::command]
+async fn terminal_workspace_persistence_replace_deletions(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+    request: persistence::DeletionsReplaceRequest,
+) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
+    persistence::replace_deletions(state.pool(), &request.records).await
+}
+
+#[tauri::command]
+async fn terminal_workspace_persistence_clear_deletions(
+    state: tauri::State<'_, persistence::PersistenceStore>,
+) -> Result<(), String> {
+    let _in_flight = state.in_flight().await;
+    persistence::clear_deletions(state.pool()).await
+}
+
 #[tauri::command]
 async fn terminal_workspace_load_host_secrets(
     request: HostSecretsRequest,
@@ -3632,7 +3709,11 @@ fn glob_ssh_config_files_from_root(
             path: requested_path(),
         })?;
 
-    let mut matches: Vec<SshConfigGlobMatch> = Vec::new();
+    // #486: OpenSSH applies Include glob matches in byte order (glob(3) under
+    // the C locale), and the first setting obtained wins. Collect every
+    // matching name, order them by bytes (`String`'s `Ord`), and only then
+    // apply the cap, so the files kept are the ones OpenSSH would apply first.
+    let mut names: Vec<String> = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_| SshConfigCommandFailure::ReadFailed {
             path: requested_path(),
@@ -3642,10 +3723,20 @@ fn glob_ssh_config_files_from_root(
             Some(name) => name,
             None => continue,
         };
-        if !glob_match(&file_pattern, name) {
-            continue;
+        if glob_match(&file_pattern, name) {
+            names.push(name.to_string());
         }
-        let canonical = match entry.path().canonicalize() {
+    }
+    names.sort();
+
+    let mut matches: Vec<SshConfigGlobMatch> = Vec::new();
+    let mut truncated = false;
+    for name in names {
+        if matches.len() >= SSH_CONFIG_GLOB_MAX_MATCHES {
+            truncated = true;
+            break;
+        }
+        let canonical = match parent_canonical.join(&name).canonicalize() {
             Ok(canonical) => canonical,
             Err(_) => continue,
         };
@@ -3668,17 +3759,12 @@ fn glob_ssh_config_files_from_root(
             // The directory-entry name is the caller's glob expansion result,
             // not a resolved path. It keeps cycle diagnostics actionable without
             // exposing the canonical target of a symlink.
-            name: name.to_string(),
+            name,
             content,
         });
-        if matches.len() >= SSH_CONFIG_GLOB_MAX_MATCHES {
-            break;
-        }
     }
 
-    // OpenSSH applies glob matches in lexical order.
-    matches.sort_by(|left, right| left.name.cmp(&right.name));
-    Ok(GlobSshConfigFilesResponse { matches })
+    Ok(GlobSshConfigFilesResponse { matches, truncated })
 }
 
 #[cfg(test)]
@@ -3902,6 +3988,72 @@ mod ssh_config_command_tests {
         assert!(serialized.contains(&requested_pattern));
         assert!(!serialized.contains(canonical_sentinel));
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn glob_returns_matches_in_openssh_byte_order() {
+        // #486: OpenSSH orders Include matches by bytes, so uppercase sorts
+        // before lowercase and digits compare as text. localeCompare would
+        // put `_x.conf` first and `alpha.conf` before `Beta.conf`.
+        let root = test_root("ssh-config-glob-byte-order");
+        let ssh_root = root.join("ssh-root");
+        let dir = ssh_root.join("conf.d");
+        fs::create_dir_all(&dir).expect("glob directory should be created");
+        let names = [
+            "10.conf",
+            "2.conf",
+            "Beta.conf",
+            "Zebra.conf",
+            "_x.conf",
+            "a b.conf",
+            "alpha.conf",
+            "ä.conf",
+        ];
+        for name in names.iter().rev() {
+            fs::write(dir.join(name), format!("Host {}\n", name.len())).expect("config");
+        }
+        let canonical_ssh_root = fs::canonicalize(&ssh_root).expect("SSH root should canonicalize");
+        let response = glob_ssh_config_files_from_root(
+            &glob_request(format!("{}/*.conf", dir.to_string_lossy())),
+            &canonical_ssh_root,
+            &SshConfigCycleKeySalt([7; 32]),
+            &SshConfigResolutionRegistry::default(),
+        )
+        .expect("glob should succeed");
+        let returned: Vec<&str> = response.matches.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(returned, names.to_vec());
+        assert!(!response.truncated);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn glob_over_the_cap_keeps_the_first_files_in_byte_order_and_says_so() {
+        // #486: the cap used to apply in directory order before any sort, so
+        // a file OpenSSH applies first could be dropped.
+        let root = test_root("ssh-config-glob-cap");
+        let ssh_root = root.join("ssh-root");
+        let dir = ssh_root.join("conf.d");
+        fs::create_dir_all(&dir).expect("glob directory should be created");
+        let total = super::SSH_CONFIG_GLOB_MAX_MATCHES + 20;
+        for index in 0..total {
+            fs::write(dir.join(format!("{index:04}.conf")), "Host x\n").expect("config");
+        }
+        let canonical_ssh_root = fs::canonicalize(&ssh_root).expect("SSH root should canonicalize");
+        let response = glob_ssh_config_files_from_root(
+            &glob_request(format!("{}/*.conf", dir.to_string_lossy())),
+            &canonical_ssh_root,
+            &SshConfigCycleKeySalt([7; 32]),
+            &SshConfigResolutionRegistry::default(),
+        )
+        .expect("glob should succeed");
+        assert!(response.truncated);
+        assert_eq!(response.matches.len(), super::SSH_CONFIG_GLOB_MAX_MATCHES);
+        let expected: Vec<String> = (0..super::SSH_CONFIG_GLOB_MAX_MATCHES)
+            .map(|index| format!("{index:04}.conf"))
+            .collect();
+        let returned: Vec<String> = response.matches.iter().map(|m| m.name.clone()).collect();
+        assert_eq!(returned, expected);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -4825,6 +4977,16 @@ fn main() {
             native_host_keys::publish_durable_known_hosts_path(host_key_store.path().to_path_buf());
             app.manage(SharedNativeHostKeyStore::new(host_key_store));
 
+            // #472: the renderer's typed persistence commands. The SQL plugin's
+            // setup has already created and migrated this file (plugins set up
+            // before this closure runs); the pool connects on first use.
+            let config_dir = app
+                .path()
+                .app_config_dir()
+                .map_err(|error| format!("could not resolve the app config directory: {error}"))?;
+            let database_path = terminal_workspace_database_path(&config_dir)?;
+            app.manage(persistence::PersistenceStore::open_lazy(&database_path));
+
             let handle = app.handle();
             let menu = build_app_menu(handle)?;
             app.set_menu(menu)?;
@@ -4858,6 +5020,12 @@ fn main() {
             terminal_workspace_create_forward,
             terminal_workspace_delete_forward,
             terminal_workspace_execute_snippet_on_hosts,
+            terminal_workspace_persistence_read_store,
+            terminal_workspace_persistence_write_store,
+            terminal_workspace_persistence_remove_store,
+            terminal_workspace_persistence_read_deletions,
+            terminal_workspace_persistence_replace_deletions,
+            terminal_workspace_persistence_clear_deletions,
             terminal_workspace_load_host_secrets,
             terminal_workspace_store_host_secrets,
             terminal_workspace_clear_host_secrets,
@@ -4885,6 +5053,14 @@ fn main() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
+            // #472: let an in-flight save finish before the process exits.
+            // Exit follows every quit path, including app_handle.exit below.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(store) = app_handle.try_state::<persistence::PersistenceStore>() {
+                    store.close_blocking();
+                }
+                return;
+            }
             if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
                 let exit_guard = app_handle.state::<AppExitDrainGuard>();
                 if exit_guard.in_progress.swap(true, Ordering::AcqRel) {
@@ -6142,6 +6318,172 @@ mod tests {
             protocol: "ssh".to_string(),
             sftp_root: None,
             username: "deploy".to_string(),
+        }
+    }
+
+    fn host_key_test_store() -> (SqliteTempRoot, NativeHostKeyStore) {
+        let root = SqliteTempRoot::new();
+        let store = NativeHostKeyStore::new(root.path()).expect("host key store");
+        (root, store)
+    }
+
+    fn pinned_contents(store: &NativeHostKeyStore) -> String {
+        fs::read_to_string(store.path()).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_dsa_host_key_is_refused_and_never_pinned_on_first_use() {
+        let (_root, store) = host_key_test_store();
+        let mut host = minimal_ssh_host();
+        host.known_host_public_key = None;
+        host.known_host_algorithm = None;
+        host.host_key_policy = Some("allowUnknown".to_string());
+
+        let error = decide_native_host_key(&host, &store, "ssh-dss", "AAAADSAKEY")
+            .expect_err("a DSA key must be refused");
+        assert!(
+            error.message.contains("too weak to trust"),
+            "{}",
+            error.message
+        );
+        assert_ne!(error.code, IpcErrorCode::HostKeyMismatch);
+        assert!(pinned_contents(&store).is_empty(), "nothing may be pinned");
+
+        decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAEDKEY")
+            .expect("an ed25519 key is still pinned on first use");
+        assert!(pinned_contents(&store).contains("AAAAEDKEY"));
+    }
+
+    // #489: the precedence between an approved key and the pin store, as
+    // documented in docs/architecture.md.
+
+    fn pinned_host(store: &NativeHostKeyStore, key: &str) -> BackendHostConnection {
+        let mut host = minimal_ssh_host();
+        host.known_host_public_key = None;
+        host.known_host_algorithm = None;
+        host.host_key_policy = Some("allowUnknown".to_string());
+        store
+            .verify_or_pin(&known_hosts_host_pattern(&host), "ssh-ed25519", key)
+            .expect("seed a pin");
+        host
+    }
+
+    #[test]
+    fn an_approved_key_wins_over_a_different_pin_and_leaves_the_pin_alone() {
+        let (_root, store) = host_key_test_store();
+        let mut host = pinned_host(&store, "AAAAOLDPIN");
+        let before = pinned_contents(&store);
+
+        host.known_host_algorithm = Some("ssh-ed25519".to_string());
+        host.known_host_public_key = Some("AAAAAPPROVED".to_string());
+        decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAAPPROVED")
+            .expect("the approved key decides, not the stale pin");
+        assert_eq!(
+            pinned_contents(&store),
+            before,
+            "the pin store is not touched"
+        );
+    }
+
+    #[test]
+    fn a_key_other_than_the_approved_one_fails_even_if_it_matches_the_pin() {
+        let (_root, store) = host_key_test_store();
+        let mut host = pinned_host(&store, "AAAAPINNED");
+        host.known_host_algorithm = Some("ssh-ed25519".to_string());
+        host.known_host_public_key = Some("AAAAAPPROVED".to_string());
+
+        let error = decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAPINNED")
+            .expect_err("no fallback to the pin once a key is approved");
+        assert_eq!(error.code, IpcErrorCode::HostKeyMismatch);
+    }
+
+    #[test]
+    fn with_no_approved_key_the_pin_decides() {
+        let (_root, store) = host_key_test_store();
+        let host = pinned_host(&store, "AAAAPINNED");
+
+        decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAPINNED")
+            .expect("the pinned key connects");
+        let error = decide_native_host_key(&host, &store, "ssh-ed25519", "AAAACHANGED")
+            .expect_err("a changed key fails against the pin");
+        assert_eq!(error.code, IpcErrorCode::HostKeyMismatch);
+    }
+
+    #[test]
+    fn re_approving_a_rebuilt_host_recovers_from_a_stale_pin() {
+        let (_root, store) = host_key_test_store();
+        let mut host = pinned_host(&store, "AAAAOLDKEY");
+        // The host was rebuilt: unapproved, the new key is refused by the pin.
+        assert!(decide_native_host_key(&host, &store, "ssh-ed25519", "AAAANEWKEY").is_err());
+
+        // The user re-scans and approves the new key.
+        host.known_host_algorithm = Some("ssh-ed25519".to_string());
+        host.known_host_public_key = Some("AAAANEWKEY".to_string());
+        decide_native_host_key(&host, &store, "ssh-ed25519", "AAAANEWKEY")
+            .expect("re-approval is enough to recover");
+    }
+
+    #[test]
+    fn require_trusted_with_no_approved_key_is_refused_without_consulting_the_pin() {
+        let (_root, store) = host_key_test_store();
+        let mut host = pinned_host(&store, "AAAAPINNED");
+        host.host_key_policy = Some("requireTrusted".to_string());
+        assert!(decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAPINNED").is_err());
+    }
+
+    #[test]
+    fn a_dsa_host_key_is_refused_even_when_the_user_approved_it() {
+        let (_root, store) = host_key_test_store();
+        let mut host = minimal_ssh_host();
+        host.known_host_algorithm = Some("ssh-dss".to_string());
+        host.known_host_public_key = Some("AAAADSAKEY".to_string());
+
+        let error = decide_native_host_key(&host, &store, "ssh-dss", "AAAADSAKEY")
+            .expect_err("an approved DSA key must still be refused");
+        assert!(
+            error.message.contains("too weak to trust"),
+            "{}",
+            error.message
+        );
+
+        host.known_host_public_key = Some("AAAAEDKEY".to_string());
+        decide_native_host_key(&host, &store, "ssh-ed25519", "AAAAEDKEY")
+            .expect("an approved ed25519 key still passes");
+    }
+
+    #[test]
+    fn a_dsa_host_key_already_pinned_is_refused_and_the_store_is_unchanged() {
+        let (_root, store) = host_key_test_store();
+        let mut host = minimal_ssh_host();
+        host.known_host_public_key = None;
+        host.known_host_algorithm = None;
+        host.host_key_policy = Some("allowUnknown".to_string());
+        // A pin written before this change, when DSA was still accepted.
+        let pattern = known_hosts_host_pattern(&host);
+        store
+            .verify_or_pin(&pattern, "ssh-dss", "AAAADSAKEY")
+            .expect("seed an old DSA pin");
+        let before = pinned_contents(&store);
+
+        let error = decide_native_host_key(&host, &store, "ssh-dss", "AAAADSAKEY")
+            .expect_err("a matching DSA pin must not let the key through");
+        assert!(
+            error.message.contains("too weak to trust"),
+            "{}",
+            error.message
+        );
+        assert_eq!(pinned_contents(&store), before);
+    }
+
+    #[test]
+    fn rsa_and_ecdsa_host_keys_are_still_accepted() {
+        for algorithm in ["ssh-rsa", "ecdsa-sha2-nistp256", "ssh-ed25519"] {
+            let (_root, store) = host_key_test_store();
+            let mut host = minimal_ssh_host();
+            host.known_host_algorithm = Some(algorithm.to_string());
+            host.known_host_public_key = Some("AAAAKEY".to_string());
+            decide_native_host_key(&host, &store, algorithm, "AAAAKEY")
+                .unwrap_or_else(|error| panic!("{algorithm} must pass: {}", error.message));
         }
     }
 

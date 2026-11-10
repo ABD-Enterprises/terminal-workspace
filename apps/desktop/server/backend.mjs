@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import {
@@ -47,6 +47,7 @@ import {
 } from "./backend-deadline.mjs";
 import { createWithSftp } from "./backend-sftp.mjs";
 import { respondError, sendJson } from "./backend-responses.mjs";
+import { requestAuthContext, sshAuthOptions } from "./backend-ssh-auth.mjs";
 import {
   createBackendCommandOperations,
   waitForSshReady,
@@ -54,11 +55,17 @@ import {
 import { SecretBuffer } from "./secrets.mjs";
 import {
   bufferDetachedOutput,
+  isJsonContentType,
   readJson,
   SFTP_UPLOAD_MAX_BYTES,
 } from "./backend-buffers.mjs";
 import { readBoundedRegularFile, writeNewPrivateFile } from "./backend-files.mjs";
-import { createHostKeyStore, createHostKeyVerifier } from "./backend-host-keys.mjs";
+import {
+  createHostKeyStore,
+  parseKeyscanOutput,
+  resolveAppDataDirectory,
+  selectHostKeyVerifier,
+} from "./backend-host-keys.mjs";
 import { assertHostRequestIsAllowed } from "./backend-host-validation.mjs";
 import {
   projectSshConfigResolutionFailure,
@@ -73,17 +80,23 @@ const distRoot = join(appRoot, "dist");
 const serveStatic = createStaticHandler({ root: distRoot });
 const port = Number.parseInt(process.env.TERMSNIP_BACKEND_PORT ?? "8790", 10);
 
-// Per-launch auth gate. The token is shared with the Tauri shell via env or a
-// 0600 sidecar file in TMPDIR; browser callers are authenticated by a
+// Per-launch auth gate. The token comes from TERMSNIP_BACKEND_TOKEN or is
+// generated fresh, and is also written to a 0600 file in a private app data
+// directory for manual use (#474). Browser callers are authenticated by a
 // matching Origin header. See parity-and-hardening-review §3.S-4 / §3.S-8.
-const backendAuth = loadOrCreateBackendToken({
-  port,
-  env: process.env,
-  tmpdir: os.tmpdir(),
-});
+let backendAuth;
+try {
+  backendAuth = loadOrCreateBackendToken({
+    env: process.env,
+    stateDir: resolveAppDataDirectory(process.env),
+  });
+} catch (error) {
+  console.error(`[termsnip] backend not started: ${error.message}`);
+  process.exit(1);
+}
 const allowedOrigins = parseAllowedOrigins(process.env.TERMSNIP_ALLOWED_ORIGINS);
 console.error(
-  `[termsnip] backend auth gate: token source=${backendAuth.source}, sidecar=${backendAuth.sidecarPath}`
+  `[termsnip] backend auth gate: token source=${backendAuth.source}`
 );
 console.error(`[termsnip] backend allowed origins: ${allowedOrigins.join(", ")}`);
 
@@ -153,13 +166,21 @@ async function globSshConfigFiles(pattern, context) {
     // surrogate), so it cannot match any file. Skipping it explicitly keeps
     // the request from failing on a name macOS allowed but UTF-8 cannot
     // represent.
-    return { matches: [] };
+    return { matches: [], truncated: false };
   }
-  const names = await readdir(parentReal);
+  // #486: OpenSSH applies Include glob matches in byte order (glob(3) under
+  // the C locale), and the first setting obtained wins. Order every matching
+  // name by its UTF-8 bytes and only then apply the cap, so the files kept are
+  // the ones OpenSSH would apply first.
+  const names = (await readdir(parentReal))
+    .filter((name) => matcher.test(name))
+    .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
   const matches = [];
+  let truncated = false;
   for (const name of names) {
-    if (!matcher.test(name)) {
-      continue;
+    if (matches.length >= SSH_CONFIG_GLOB_MAX_MATCHES) {
+      truncated = true;
+      break;
     }
     let real;
     try {
@@ -181,13 +202,9 @@ async function globSshConfigFiles(pattern, context) {
       name,
       content,
     });
-    if (matches.length >= SSH_CONFIG_GLOB_MAX_MATCHES) {
-      break;
-    }
   }
 
-  matches.sort((left, right) => left.name.localeCompare(right.name));
-  return { matches };
+  return { matches, truncated };
 }
 
 function isDirectory(attrs, longname = "") {
@@ -283,6 +300,14 @@ function getHostKeyStore() {
 }
 
 async function createConnectConfig(host) {
+  // #473: every SSH connection (sessions, file transfer, remote commands,
+  // each jump hop) is built here, so these rules cover them all. Checked
+  // before anything else, so a refused request opens no connection.
+  const authOptions = sshAuthOptions(host, {
+    authorizedBy: requestAuthContext.getStore()?.authorizedBy,
+    agentSocket: process.env.SSH_AUTH_SOCK,
+  });
+
   // Defense-in-depth: even if a caller bypasses connections.ts (e.g. talks to
   // the backend HTTP API directly), refuse to connect when the host requires
   // a trusted key and we were not given one. See parity-and-hardening-review §3.S-1.
@@ -308,39 +333,18 @@ async function createConnectConfig(host) {
 
   // Filled in by the verifier when it refuses the host, so the connect path
   // can report why instead of ssh2's bare "Host denied (verification failed)".
-  let hostKeyFailure = { error: null };
+  let hostKeyFailure;
+  // #489: an approved key decides alone; otherwise trust on first use
+  // against the durable store (SEC-2). `hostVerifier` is NEVER left undefined:
+  // ssh2's default accepts whatever answers the socket. The verifier runs
+  // during the handshake, before authentication, so a refused host never
+  // receives the password or the private key, and it fills in `failure` so
+  // the connect path can report why.
+  const verifier = selectHostKeyVerifier({ host, getStore: getHostKeyStore });
+  connectConfig.hostVerifier = verifier.verify;
+  hostKeyFailure = verifier.failure;
 
-  if (host.knownHostPublicKey) {
-    // An explicitly trusted key always wins and is checked exactly as before.
-    // Nothing is pinned for it: the user already decided what to trust.
-    connectConfig.hostVerifier = (key) =>
-      Buffer.isBuffer(key) && key.toString("base64") === host.knownHostPublicKey;
-  } else {
-    // SEC-2: trust on first use against the durable store.
-    //
-    // `hostVerifier` is NEVER left undefined. ssh2's default branch accepts
-    // whatever answers the socket without checking it, which is how a host
-    // whose policy is not `requireTrusted` ended up MITM-able in browser mode
-    // on every connect — and, because nothing was recorded, on every later
-    // connect too.
-    //
-    // The verifier runs during the handshake, before authentication, so a
-    // refused host never receives the password or the private key.
-    const verifier = createHostKeyVerifier({
-      hostname: host.hostname,
-      port: host.port,
-      store: getHostKeyStore(),
-    });
-    connectConfig.hostVerifier = verifier.verify;
-    // The verifier mutates its own `failure` in place, so this reference is
-    // how the connect path learns why the host was refused.
-    hostKeyFailure = verifier.failure;
-  }
-
-  if (host.agentForwarding && process.env.SSH_AUTH_SOCK) {
-    connectConfig.agent = process.env.SSH_AUTH_SOCK;
-    connectConfig.agentForward = true;
-  }
+  Object.assign(connectConfig, authOptions);
 
   // Secret-handling: wrap any password / passphrase / private-key bytes in a
   // SecretBuffer and remember a scrub callback for each. The caller is
@@ -1204,34 +1208,7 @@ async function scanKnownHost({ hostname, port }) {
     hostname,
   ]);
 
-  const entries = stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
-    .map((line) => {
-      const [scannedHost, algorithm, publicKey] = line.split(/\s+/, 3);
-      if (!scannedHost || !algorithm || !publicKey) {
-        return undefined;
-      }
-
-      return {
-        hostname,
-        port,
-        algorithm,
-        publicKey,
-        fingerprint: `SHA256:${createHash("sha256")
-          .update(Buffer.from(publicKey, "base64"))
-          .digest("base64")
-          .replace(/=+$/, "")}`,
-      };
-    })
-    .filter(Boolean);
-
-  if (!entries.length) {
-    throw new Error("No host keys returned from ssh-keyscan");
-  }
-
-  return entries;
+  return parseKeyscanOutput(stdout, { hostname, port });
 }
 
 const server = createServer(async (request, response) => {
@@ -1242,6 +1219,14 @@ const server = createServer(async (request, response) => {
   }
 
   const url = new URL(request.url, "http://localhost");
+
+  // #470: a preflight always fails, and it stays that way even if a CORS header
+  // is ever added by mistake elsewhere. Same-origin clients never send one.
+  if (request.method === "OPTIONS") {
+    response.writeHead(405, { Allow: "GET, POST, DELETE" });
+    response.end();
+    return;
+  }
 
   // Auth gate: reject every request whose Origin is not in the allowlist AND
   // does not present a valid per-launch token. See parity-and-hardening
@@ -1258,6 +1243,9 @@ const server = createServer(async (request, response) => {
     denyUnauthorized(response, authDecision);
     return;
   }
+  // #473: connection code reads how this request was authorized (agent
+  // forwarding needs the token). Applies to the rest of this request only.
+  requestAuthContext.enterWith({ authorizedBy: authDecision.via });
 
   // A CORS preflight must always fail. The backend sends no
   // `Access-Control-Allow-*` header on any response, so a preflight that
@@ -1275,7 +1263,21 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (request.method === "GET" && url.pathname === "/api/backend/status") {
+  // #470: an allowed Origin alone must not be enough. Checked here rather than
+  // in readJson so no route's error handling can change the status and a new
+  // route cannot forget it. The body is left unread.
+  if (request.method === "POST" && !isJsonContentType(request.headers["content-type"])) {
+    sendJson(response, 415, { error: "Content-Type must be application/json" });
+    return;
+  }
+
+  // POST is accepted too: browsers attach an Origin header to a same-origin
+  // POST but not to a same-origin GET, so a page can only pass the auth gate
+  // above with a POST. The gate still applies to both methods.
+  if (
+    (request.method === "GET" || request.method === "POST") &&
+    url.pathname === "/api/backend/status"
+  ) {
     sendJson(response, 200, { ok: true });
     return;
   }
@@ -1692,6 +1694,9 @@ process.on("uncaughtException", (error) => {
 });
 
 let shuttingDown = false;
+// Set once this process has written its token file, and only then.
+let publishedTokenPath = null;
+
 function gracefulShutdown(signal) {
   if (shuttingDown) {
     return;
@@ -1703,7 +1708,9 @@ function gracefulShutdown(signal) {
     websocketServer,
     sessions,
     forwards,
-    sidecarPath: backendAuth.sidecarPath,
+    // Only a file this process wrote: before listen() succeeds, the file at this
+    // path (if any) belongs to another backend on the same port.
+    sidecarPath: publishedTokenPath,
   });
   process.exit(0);
 }
@@ -1724,5 +1731,17 @@ server.on("error", (error) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  console.log(`Terminal Workspace backend listening on http://127.0.0.1:${port}`);
+  // #474: published only now that this process owns the port, and named for
+  // the port it actually bound, which differs from `port` when that is 0.
+  const boundPort = server.address().port;
+  try {
+    publishedTokenPath = backendAuth.publish(boundPort);
+  } catch (error) {
+    console.error(`[termsnip] backend not started: could not write the token file: ${error.message}`);
+    process.exit(1);
+  }
+  if (publishedTokenPath) {
+    console.error(`[termsnip] backend token file: ${publishedTokenPath}`);
+  }
+  console.log(`Terminal Workspace backend listening on http://127.0.0.1:${boundPort}`);
 });

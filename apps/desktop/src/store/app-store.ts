@@ -24,6 +24,8 @@ interface AppState {
   sectionShortcutsEnabled: boolean;
   demoModeEnabled: boolean;
   terminalTheme: TerminalThemeName;
+  /** #510: xterm's screenReaderMode for every terminal. Off by default. */
+  terminalScreenReaderMode: boolean;
   vaultId: string;
   deviceId: string;
   lastAppliedSnapshotId: string | null;
@@ -61,6 +63,7 @@ interface AppState {
   setSectionShortcutsEnabled: (enabled: boolean) => void;
   setDemoModeEnabled: (enabled: boolean) => void;
   setTerminalTheme: (theme: TerminalThemeName) => void;
+  setTerminalScreenReaderMode: (enabled: boolean) => void;
   setVaultId: (vaultId: string) => void;
   setLastAppliedSnapshotId: (snapshotId: string | null) => void;
   markImportCalloutSeen: () => void;
@@ -88,6 +91,8 @@ interface PersistedAppState {
   sectionShortcutsEnabled: boolean;
   workspaceDensity: WorkspaceDensity;
   terminalTheme: TerminalThemeName;
+  /** #510: xterm's screenReaderMode for every terminal. Off by default. */
+  terminalScreenReaderMode: boolean;
   vaultId: string;
   deviceId: string;
   lastAppliedSnapshotId: string | null;
@@ -126,6 +131,7 @@ export function buildBaselineDefaults(state: Partial<PersistedAppState>): Persis
     sectionShortcutsEnabled: state.sectionShortcutsEnabled ?? true,
     demoModeEnabled: state.demoModeEnabled ?? getDefaultDemoModeEnabled(),
     terminalTheme: safeTerminalTheme,
+    terminalScreenReaderMode: state.terminalScreenReaderMode ?? false,
     vaultId: state.vaultId ?? createPersistentId(),
     deviceId: state.deviceId ?? createPersistentId(),
     lastAppliedSnapshotId: state.lastAppliedSnapshotId ?? null,
@@ -194,6 +200,7 @@ export const useAppStore = create<AppState>()(
       sectionShortcutsEnabled: true,
       demoModeEnabled: getDefaultDemoModeEnabled(),
       terminalTheme: DEFAULT_TERMINAL_THEME,
+      terminalScreenReaderMode: false,
       vaultId: createPersistentId(),
       deviceId: createPersistentId(),
       lastAppliedSnapshotId: null,
@@ -217,6 +224,7 @@ export const useAppStore = create<AppState>()(
         set({
           terminalTheme: isKnownTheme(terminalTheme) ? terminalTheme : DEFAULT_TERMINAL_THEME,
         }),
+      setTerminalScreenReaderMode: (terminalScreenReaderMode) => set({ terminalScreenReaderMode }),
       setVaultId: (vaultId) => set({ vaultId }),
       setLastAppliedSnapshotId: (lastAppliedSnapshotId) => set({ lastAppliedSnapshotId }),
       markImportCalloutSeen: () => set({ sawImportCallout: true }),
@@ -245,6 +253,7 @@ export const useAppStore = create<AppState>()(
         sectionShortcutsEnabled: state.sectionShortcutsEnabled,
         demoModeEnabled: state.demoModeEnabled,
         terminalTheme: state.terminalTheme,
+        terminalScreenReaderMode: state.terminalScreenReaderMode,
         vaultId: state.vaultId,
         deviceId: state.deviceId,
         lastAppliedSnapshotId: state.lastAppliedSnapshotId,

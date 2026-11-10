@@ -1,0 +1,1 @@
+- [SECURITY] Generate the browser-mode backend's token fresh on every launch and keep its file in a private app data directory, so another process can no longer choose it or redirect it (#474)

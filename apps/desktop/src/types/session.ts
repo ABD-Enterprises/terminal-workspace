@@ -36,6 +36,7 @@ export interface SessionPane {
   hostId: string;
   title: string;
   connectionState: SessionConnectionState;
+  connectionError?: string;
   transport: SessionTransport;
   backendSessionId?: string;
   queuedCommands: QueuedPaneCommand[];

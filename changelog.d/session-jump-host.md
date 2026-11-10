@@ -1,0 +1,1 @@
+- [FIX] New terminal sessions connect through the host's configured jump host instead of straight to the target (#560)

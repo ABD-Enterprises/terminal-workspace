@@ -121,17 +121,18 @@ function HostEditorContent({
   const supportsTrustedKeys = hostSupportsTrustedKeys(values.protocol);
 
   // #464: trust, jump-host and favorite state all render behind this
-  // disclosure, so a collapsed editor hides them entirely. Counting the
-  // ones actually in effect keeps that state legible without expanding.
-  // Scoped to the three fields the issue names: agent forwarding, group,
-  // tags, notes and environment also live here but were deliberately left
-  // out. The default trust policy counts — it is real state even on a
-  // fresh Add Host form.
-  const advancedSetCount = [
-    supportsTrustedKeys && values.hostKeyPolicy === "requireTrusted",
-    supportsJumpHosts && values.jumpHostId !== "",
-    values.favorite,
-  ].filter(Boolean).length;
+  // disclosure, so a collapsed editor hides them entirely. Naming the ones
+  // in effect keeps that state legible without expanding. Only these three
+  // are named: group, tags, identity label, SFTP root, agent forwarding,
+  // environment and notes also live here but are not summarised, so the
+  // label names what is set rather than giving a count that reads as a
+  // total. The default trust policy is named too: it is real state even on
+  // a fresh Add Host form.
+  const advancedSetLabels = [
+    supportsTrustedKeys && values.hostKeyPolicy === "requireTrusted" ? "trusted key required" : null,
+    supportsJumpHosts && values.jumpHostId !== "" ? "jump host" : null,
+    values.favorite ? "favorite" : null,
+  ].filter((label): label is string => label !== null);
   const supportsSftp = hostSupportsSftp(values.protocol);
   const supportsNetworkFields = values.protocol !== "localShell";
   const requiresUsername = protocolRequiresUsername(values.protocol);
@@ -599,7 +600,7 @@ function HostEditorContent({
       >
         <span>
           {showAdvanced ? "Hide advanced settings" : "Show advanced settings"}
-          {!showAdvanced && advancedSetCount > 0 ? ` — ${advancedSetCount} set` : ""}
+          {!showAdvanced && advancedSetLabels.length > 0 ? `: ${advancedSetLabels.join(", ")}` : ""}
         </span>
         <span aria-hidden="true" className="text-xs text-slate-500">
           {showAdvanced ? "▴" : "▾"}

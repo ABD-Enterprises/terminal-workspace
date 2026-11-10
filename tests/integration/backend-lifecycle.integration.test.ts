@@ -80,6 +80,28 @@ describe("backend lifecycle", () => {
     expect(existsSync(sidecarPath)).toBe(false);
   });
 
+  it("#474: shutdownBackend removes the token file before releasing the port", async () => {
+    const { shutdownBackend } = await loadLifecycle();
+    const dir = mkdtempSync(join(tmpdir(), "backend-lifecycle-"));
+    tmpDirs.push(dir);
+    const sidecarPath = join(dir, "token");
+    writeFileSync(sidecarPath, "secret\n");
+
+    // Once the server closes, a successor may bind the port and publish its own
+    // file at this path, so the file must already be gone by then.
+    let fileExistedAtClose: boolean | undefined;
+    shutdownBackend({
+      server: {
+        close: () => {
+          fileExistedAtClose = existsSync(sidecarPath);
+        },
+      },
+      sidecarPath,
+    });
+
+    expect(fileExistedAtClose).toBe(false);
+  });
+
   it("shutdownBackend never throws even when a close step fails or fields are missing", async () => {
     const { shutdownBackend } = await loadLifecycle();
     const sessions = new Map([

@@ -603,4 +603,7 @@ pub struct SshConfigGlobMatch {
 #[serde(rename_all = "camelCase")]
 pub struct GlobSshConfigFilesResponse {
     pub matches: Vec<SshConfigGlobMatch>,
+    /// #486: true when more files matched than the cap allows; `matches` then
+    /// holds the first ones in byte order, which OpenSSH would apply first.
+    pub truncated: bool,
 }

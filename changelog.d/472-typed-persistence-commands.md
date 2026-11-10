@@ -1,0 +1,1 @@
+- [SECURITY] The app window now reaches its saved data only through fixed native commands; it can no longer open other database files or run its own SQL (#472)

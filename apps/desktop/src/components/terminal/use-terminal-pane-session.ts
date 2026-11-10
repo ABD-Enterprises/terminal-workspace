@@ -13,6 +13,7 @@ import { useSessionsStore } from "../../store/sessions-store";
 import { formatHostProtocol, hostSupportsTrustedKeys, type HostRecord } from "../../types/host";
 import { type SessionPane, type SessionTransport } from "../../types/session";
 
+import { type TerminalContextMenuPosition } from "./terminal-pane-input-wiring";
 import { useTerminalPaneLifecycle } from "./use-terminal-pane-lifecycle";
 import { useTerminalPaneQueuedCommands } from "./use-terminal-pane-queued-commands";
 import { useTerminalPaneRuntimeStatus } from "./use-terminal-pane-runtime-status";
@@ -90,6 +91,11 @@ export function useTerminalPaneSession({ host, pane, resolvedTerminalPalette }: 
 
   const socketRef = useRef<SessionSocketLike | null>(null);
   const commandBufferRef = useRef("");
+  // #507: the pane points these at its own state setters.
+  const clipboardNoticeRef = useRef<(message: string) => void>(() => {});
+  // #510: kept current by TerminalPane through useTerminalScreenReaderMode.
+  const screenReaderModeRef = useRef(false);
+  const contextMenuRequestRef = useRef<(position: TerminalContextMenuPosition) => void>(() => {});
   const transportRef = useRef<SessionTransport>(pane.transport);
   const connectionStateRef = useRef(pane.connectionState);
   const backendSessionIdRef = useRef<string | undefined>(pane.backendSessionId);
@@ -164,7 +170,10 @@ export function useTerminalPaneSession({ host, pane, resolvedTerminalPalette }: 
     appendCommandOutput,
     authMethod,
     backendSessionIdRef,
+    clipboardNoticeRef,
+    screenReaderModeRef,
     commandBufferRef,
+    contextMenuRequestRef,
     connectedOnceRef,
     connectingRef,
     connectionStateRef,
@@ -222,5 +231,5 @@ export function useTerminalPaneSession({ host, pane, resolvedTerminalPalette }: 
     socketRef,
   });
 
-  return { advanceSearchMatch, closeSearch, containerRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, terminalRef, toggleConnectionRef };
+  return { advanceSearchMatch, clipboardNoticeRef, screenReaderModeRef, closeSearch, containerRef, contextMenuRequestRef, runtimeStatusMessage, searchActiveIndex, searchCaseSensitive, searchInputRef, searchMatches, searchOpen, searchQuery, setSearchCaseSensitive, setSearchQuery, terminalRef, toggleConnectionRef };
 }

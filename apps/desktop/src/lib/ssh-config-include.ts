@@ -59,19 +59,45 @@ export interface SshConfigGlobMatch {
 /**
  * Expand an OpenSSH glob Include pattern (e.g. `~/.ssh/conf.d/*`) into the
  * concrete files it matches, returning each file's content. Implementations
- * MUST refuse any pattern or match that resolves outside `~/.ssh/` and should
- * return the matches in a stable order (OpenSSH applies matches lexically).
- * Returning `[]` means "no matches / not available" — the caller logs a skip.
+ * MUST refuse any pattern or match that resolves outside `~/.ssh/`. The
+ * caller orders matches itself (byte order, as OpenSSH does). A lister that
+ * caps its results should pick the first files in that order and set
+ * `truncated` (#486). Returning `[]` means "no matches / not available" — the
+ * caller logs a skip.
  *
  * #93: the native binding wraps `terminal_workspace_glob_ssh_config_files`; the HTTP
  * backend exposes `/api/backend/ssh-config/glob`; demo mode returns a seeded
  * fixture. When no lister is supplied, glob Includes fall back to the previous
  * "log and skip" behavior.
  */
+export interface SshConfigGlobResult {
+  matches: SshConfigGlobMatch[];
+  /** More files matched than the lister returns. */
+  truncated?: boolean;
+}
+
 export type SshConfigGlobLister = (
   pattern: string,
   context?: SshConfigResolutionContext
-) => Promise<SshConfigGlobMatch[]>;
+) => Promise<SshConfigGlobMatch[] | SshConfigGlobResult>;
+
+/**
+ * #486: OpenSSH applies Include glob matches in byte order (glob(3) sorts
+ * with the C locale), so uppercase sorts before lowercase and `_` after both
+ * digits and uppercase. UTF-8 byte order is Unicode code point order, which
+ * plain `<` on JS strings does not give for characters outside the BMP.
+ */
+export function compareOpenSshNames(left: string, right: string): number {
+  const a = Array.from(left, (character) => character.codePointAt(0) ?? 0);
+  const b = Array.from(right, (character) => character.codePointAt(0) ?? 0);
+  const length = Math.min(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    if (a[index] !== b[index]) {
+      return a[index] - b[index];
+    }
+  }
+  return a.length - b.length;
+}
 
 export interface ResolveSshIncludesOptions {
   readFile: SshConfigFileReader;
@@ -198,9 +224,9 @@ async function expandText(
       if (hasGlobChar(entry)) {
         // #93: globs are valid OpenSSH. When a glob lister is available we
         // ask the backend (native / HTTP / demo) to expand the pattern —
-        // refusing anything outside ~/.ssh — and inline each match in
-        // lexical order, exactly as OpenSSH does. Without a lister we keep
-        // the old "log and skip" behavior.
+        // refusing anything outside ~/.ssh — and inline each match in byte
+        // order, as OpenSSH does (#486). Without a lister we keep the old
+        // "log and skip" behavior.
         if (!options.globFiles) {
           skipped.push({
             reason: "include-directive",
@@ -210,8 +236,11 @@ async function expandText(
         }
         const pattern = normalizePath(entry, currentBaseDir);
         let matches: SshConfigGlobMatch[];
+        let truncated: boolean;
         try {
-          matches = await options.globFiles(pattern, resolutionContext(entry, currentFile));
+          const listed = await options.globFiles(pattern, resolutionContext(entry, currentFile));
+          matches = Array.isArray(listed) ? listed : listed.matches;
+          truncated = !Array.isArray(listed) && listed.truncated === true;
         } catch (error) {
           skipped.push({
             reason: "include-directive",
@@ -226,7 +255,15 @@ async function expandText(
           });
           continue;
         }
-        const ordered = [...matches].sort((left, right) => left.name.localeCompare(right.name));
+        if (truncated) {
+          skipped.push({
+            reason: "include-directive",
+            detail: `Include ${entry} matched more files than can be read; only the first ${matches.length} in OpenSSH order were applied`,
+          });
+        }
+        const ordered = [...matches].sort((left, right) =>
+          compareOpenSshNames(left.name, right.name)
+        );
         for (const matchEntry of ordered) {
           if (visited.has(matchEntry.cycleKey)) {
             skipped.push({

@@ -133,6 +133,44 @@ describe("sessions store helpers", () => {
     expect(disconnected.panes[paneId]?.reconnectOnRestore).toBe(false);
   });
 
+  it("stores and clears connection error when updating pane connection state (#501)", () => {
+    const opened = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      sampleHosts[0]
+    );
+    const paneId = opened.tabs[0]!.paneIds[0]!;
+
+    const errored = updatePaneConnectionState(opened, paneId, "error", "Connection timed out after 10000ms");
+    expect(errored.panes[paneId]?.connectionState).toBe("error");
+    expect(errored.panes[paneId]?.connectionError).toBe("Connection timed out after 10000ms");
+
+    const reconnecting = updatePaneConnectionState(errored, paneId, "connecting");
+    expect(reconnecting.panes[paneId]?.connectionState).toBe("connecting");
+    expect(reconnecting.panes[paneId]?.connectionError).toBeUndefined();
+  });
+
+  it("#510: a disconnect keeps only the reason given with it", () => {
+    const opened = openSessionWorkspace(
+      { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },
+      sampleHosts[0]
+    );
+    const paneId = opened.tabs[0]!.paneIds[0]!;
+
+    const errored = updatePaneConnectionState(opened, paneId, "error", "Connection timed out");
+    const plainDisconnect = updatePaneConnectionState(errored, paneId, "disconnected");
+    expect(plainDisconnect.panes[paneId]?.connectionError).toBeUndefined();
+
+    const retrying = updatePaneConnectionState(
+      opened,
+      paneId,
+      "disconnected",
+      "SSH connection interrupted. Reconnecting in 2s."
+    );
+    expect(retrying.panes[paneId]?.connectionError).toBe(
+      "SSH connection interrupted. Reconnecting in 2s."
+    );
+  });
+
   it("keeps reconnect intent when a restored pane is waiting on runtime secrets", () => {
     const opened = openSessionWorkspace(
       { tabs: [], panes: {}, activeTabId: undefined, lastRestoredAt: undefined },

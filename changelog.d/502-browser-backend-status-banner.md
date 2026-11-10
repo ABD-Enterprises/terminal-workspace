@@ -1,0 +1,1 @@
+- [FIX] Probe backend status on startup in browser mode and surface unreachable banner (#544)

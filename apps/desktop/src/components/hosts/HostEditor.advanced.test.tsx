@@ -48,12 +48,12 @@ afterEach(cleanup);
 
 describe("HostEditor advanced disclosure", () => {
   // Exact-string name match: a regex like /Show advanced settings/ also
-  // matches "... — 1 set", which would let this pass if the count rendered
+  // matches "...: favorite", which would let this pass if the label rendered
   // unconditionally.
   it("shows no count when trust is relaxed and no other advanced value is set", () => {
     render(<HostEditor open host={makeHost({})} onClose={() => {}} onSave={() => {}} />);
     expect(screen.getByRole("button", { name: "Show advanced settings" })).toBeTruthy();
-    expect(screen.queryByText(/\d+ set/)).toBeNull();
+    expect(screen.queryByText(/Show advanced settings:/)).toBeNull();
   });
 
   it("counts the default trust requirement on a host that has not been edited", () => {
@@ -61,7 +61,7 @@ describe("HostEditor advanced disclosure", () => {
     // reports 1 set before any edit. Intended: the trust requirement is
     // real state the collapsed disclosure hides, however it got there.
     render(<HostEditor open host={makeHost({ hostKeyPolicy: "requireTrusted" })} onClose={() => {}} onSave={() => {}} />);
-    expect(screen.getByRole("button", { name: "Show advanced settings — 1 set" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show advanced settings: trusted key required" })).toBeTruthy();
   });
 
   it("counts the default trust requirement on a fresh Add Host form with no host bound", () => {
@@ -69,14 +69,14 @@ describe("HostEditor advanced disclosure", () => {
     // editingHost is null). emptyHostFormValues carries the default trust
     // policy, so the collapsed disclosure must report it here too.
     render(<HostEditor open onClose={() => {}} onSave={() => {}} />);
-    expect(screen.getByRole("button", { name: "Show advanced settings — 1 set" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show advanced settings: trusted key required" })).toBeTruthy();
   });
 
   it("counts a favorite pin while collapsed", () => {
     render(
       <HostEditor open host={makeHost({ favorite: true })} onClose={() => {}} onSave={() => {}} />,
     );
-    expect(screen.getByRole("button", { name: "Show advanced settings — 1 set" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show advanced settings: favorite" })).toBeTruthy();
   });
 
   it("counts a jump host while collapsed", () => {
@@ -88,7 +88,7 @@ describe("HostEditor advanced disclosure", () => {
         onSave={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: "Show advanced settings — 1 set" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show advanced settings: jump host" })).toBeTruthy();
   });
 
   it("counts multiple set values", () => {
@@ -100,7 +100,25 @@ describe("HostEditor advanced disclosure", () => {
         onSave={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: "Show advanced settings — 2 set" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show advanced settings: trusted key required, favorite" })).toBeTruthy();
+  });
+
+  it("#464: a telnet host does not advertise trust or jump-host state it cannot use", () => {
+    // Both protocol gates: telnet supports neither trusted keys nor jump
+    // hosts, so a stored requireTrusted policy and jump host must not show.
+    render(
+      <HostEditor
+        open
+        host={makeHost({
+          protocol: "telnet",
+          hostKeyPolicy: "requireTrusted",
+          jumpHostId: "host-bastion",
+        })}
+        onClose={() => {}}
+        onSave={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Show advanced settings" })).toBeTruthy();
   });
 
   it("expands to the plain Hide label once opened", () => {
