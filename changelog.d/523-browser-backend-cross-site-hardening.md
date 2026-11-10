@@ -1,0 +1,1 @@
+- [SECURITY] Require JSON request bodies, explicitly refuse CORS preflights, and require operator opt-in as well as a backend token before forwarding the SSH agent. (#565)
