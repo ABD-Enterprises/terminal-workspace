@@ -1,1 +1,1 @@
-- [REFACTOR] Migrated the 9 keychain secrets commands (`load/store/clear_host_secrets`, `*_key_passphrase`, `*_identity_passphrase`) to return typed `IpcError` across the IPC boundary (#485).
+- [INTERNAL] Migrated the 9 keychain secrets commands (`load/store/clear_host_secrets`, `*_key_passphrase`, `*_identity_passphrase`) to return typed `IpcError` across the IPC boundary (#485).
