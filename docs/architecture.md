@@ -82,3 +82,15 @@ Tests that pin this: `decide_native_host_key` precedence tests in `src-tauri/src
 `selectHostKeyVerifier` cases in `tests/integration/backend-host-keys.integration.test.ts`, the
 approved-key cases in `apps/desktop/src/lib/connections.test.ts`, and the jump-hop restore case in
 `apps/desktop/src/components/terminal/SessionRestoreManager.test.tsx`.
+
+## Native Backend Structure and Refactoring Targets (`main.rs`) (#487)
+
+While `src-tauri/src/main.rs` is large (~6,900 lines), over one third of the file (~2,400 lines) is test code (`native_transport_conformance_tests`, `native_transport_fixtures`, inline test modules).
+
+Of the remaining production code:
+- **Tauri IPC Command Handlers**: 38 registered handlers across 637 body lines (~14% of production code). Only two handlers exceed 30 lines.
+- **Session Lifecycle & Transport**: 157 helper functions (~3,900 lines, ~86% of production code) manage transport loops, session lifecycle, host key negotiation, and menu/status building.
+
+Future refactoring should target transport and session lifecycle boundaries rather than splitting by IPC command:
+- Session loops (`run_jump_host_session_loop`, `run_external_command_session_loop`, `run_native_session_loop`) belong in a transport session runtime module.
+- Host key negotiation and blocking operations belong in dedicated transport/config modules (following the precedent set by `src-tauri/src/sftp.rs` and `src-tauri/src/persistence.rs`).
