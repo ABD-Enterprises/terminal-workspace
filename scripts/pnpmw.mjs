@@ -13,14 +13,25 @@ const [, pinnedVersion] = packageManager.split("@");
 const args = process.argv.slice(2);
 
 const candidates = [
-  { command: "pnpm", args },
-  { command: "corepack", args: ["pnpm", ...args] },
+  { command: "pnpm", args, versionArgs: ["--version"] },
+  { command: "corepack", args: ["pnpm", ...args], versionArgs: ["pnpm", "--version"] },
   pinnedVersion
     ? { command: "npx", args: ["--yes", `pnpm@${pinnedVersion}`, ...args] }
     : { command: "npx", args: ["--yes", "pnpm", ...args] },
 ];
 
 for (const candidate of candidates) {
+  // A globally installed pnpm can be a different major that ignores project
+  // settings. Only use it (or corepack) when it resolves the declared version.
+  if (pinnedVersion && candidate.versionArgs) {
+    const version = spawnSync(candidate.command, candidate.versionArgs, {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    if (version.status !== 0 || version.stdout.trim() !== pinnedVersion) {
+      continue;
+    }
+  }
   const result = spawnSync(candidate.command, candidate.args, {
     cwd: rootDir,
     stdio: "inherit",

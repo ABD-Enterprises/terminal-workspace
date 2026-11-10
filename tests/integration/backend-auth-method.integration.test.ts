@@ -43,6 +43,7 @@ beforeAll(async () => {
       TERMSNIP_BACKEND_TOKEN: TOKEN,
       TERMSNIP_ALLOWED_ORIGINS: ORIGIN,
       TERMSNIP_STATE_DIR: stateDir,
+      TERMSNIP_ALLOW_AGENT_FORWARDING: "1",
     },
     stdio: "ignore",
   });
@@ -135,7 +136,7 @@ describe("#473: only supported SSH sign-in methods reach a connection", () => {
     });
     expect(response.status).not.toBe(400);
 
-    // And with the token, agent forwarding gets past the checks too.
+    // With operator approval and the token, forwarding gets past the checks.
     const forwarding = await post("/api/backend/sftp/list", {
       host: host("password", { password: "pw", agentForwarding: true }),
       path: "/",

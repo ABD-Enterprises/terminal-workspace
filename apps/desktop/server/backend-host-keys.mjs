@@ -26,7 +26,9 @@ import { createHash } from "node:crypto";
 // left holding a truncated record. That is the native store's behaviour too —
 // it refuses the write rather than retrying into the file, because a retry
 // could interleave with another writer's record. The truncated line is then
-// read as a mismatch, which refuses the host rather than trusting it.
+// read back as a mismatch, or — if the truncation landed early enough to
+// leave the record short of its fields — as a malformed store. Either way the
+// host is refused rather than trusted, until the record is removed.
 //
 // Concurrency. The native store takes an `flock` on a `known_hosts.lock`
 // sidecar. Node has no `flock`, so this module uses its own exclusive-create

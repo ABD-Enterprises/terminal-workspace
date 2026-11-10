@@ -37,3 +37,9 @@ tauri-plugin-sql = { version = "=2.6.0", features = ["sqlite"] } # #180: WAL boo
 tauri-plugin-updater = "2"
 tokio = { version = "1", features = ["macros", "sync"] }
 sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runtime-tokio"] }
+
+# Temporary manifest-only backports until both SQLx driver releases accept the
+# fixed SQLite. Keep the two driver versions required by the app and plugin.
+[patch.crates-io]
+sqlx-sqlite-08 = { package = "sqlx-sqlite", path = "vendor/sqlx-sqlite-0.8.6" }
+sqlx-sqlite-09 = { package = "sqlx-sqlite", path = "vendor/sqlx-sqlite-0.9.0" }
