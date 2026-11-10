@@ -93,11 +93,30 @@ function removeLocalStorageItem(name: string) {
   }
 }
 
+/**
+ * The app's database handle.
+ *
+ * `Database.get` rather than `Database.load`: `load` invokes the plugin's
+ * `load` command, which opens whatever path the caller names and creates the
+ * file if it is missing — so the capability that permits it turns a renderer
+ * compromise into a file create/overwrite primitive outside the app's
+ * directory. `get` hands back the same handle without that command; the
+ * plugin already preloads the pool for DATABASE_URL (see the `plugins.sql`
+ * `preload` list in tauri.conf.json), and the plugin's setup blocks until that
+ * preload has finished, so the pool is always there when the first query
+ * arrives.
+ */
 function loadDatabase() {
-  databasePromise ??= Database.load(DATABASE_URL).catch((error) => {
-    databasePromise = undefined;
-    throw error;
-  });
+  // `Promise.resolve().then(...)` rather than `Promise.resolve(Database.get(...))`:
+  // the argument would be evaluated eagerly, so a throw inside `get` would
+  // escape this function synchronously instead of rejecting the promise the
+  // callers await.
+  databasePromise ??= Promise.resolve()
+    .then(() => Database.get(DATABASE_URL))
+    .catch((error) => {
+      databasePromise = undefined;
+      throw error;
+    });
   return databasePromise;
 }
 

@@ -1,0 +1,2 @@
+- [SECURITY] The Node backend now refuses a request body that is not `application/json`, refuses every CORS preflight, and sends no `Access-Control-*` header, so a page the user visits can neither get a body parsed nor talk the backend into answering (#523)
+- [SECURITY] The Node backend acts only on the `none`, `password` and `privateKey` authentication methods, and honours agent forwarding only when it was started with `TERMSNIP_ALLOW_AGENT_FORWARDING=1` — the host record asking for it is caller-controlled, so the authorisation comes from the operator instead (#523)

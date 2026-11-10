@@ -61,11 +61,6 @@ describe("src-tauri/capabilities/default.json", () => {
       callSite: "apps/desktop/src/lib/persistence.ts",
     },
     {
-      command: "Database.load",
-      permission: "sql:allow-load",
-      callSite: "apps/desktop/src/lib/persistence.ts",
-    },
-    {
       command: "db.select",
       permission: "sql:allow-select",
       callSite: "apps/desktop/src/lib/persistence.ts",
@@ -108,5 +103,39 @@ describe("src-tauri/capabilities/default.json", () => {
     const capability = loadDefaultCapability();
     expect(capability.identifier).toBe("default");
     expect(capability.windows).toContain("main");
+  });
+
+  it("does not grant sql:allow-load", () => {
+    // The plugin's `load` command opens whatever path the caller names and
+    // creates the file if it is missing (LoadOptions::auto_create defaults to
+    // true), so the grant is a file create/overwrite primitive outside the
+    // app's directory for a renderer that can be compromised. The app uses
+    // `Database.get`, which reaches the pool the plugin preloads instead.
+    const { permissions } = loadDefaultCapability();
+
+    expect(
+      permissions,
+      "sql:allow-load lets the renderer open SQLite databases at arbitrary paths. Use Database.get, " +
+        "which resolves the preloaded pool, and keep the grant off.",
+    ).not.toContain("sql:allow-load");
+  });
+
+  it("resolves the database without the load command", () => {
+    // The permission and the call site have to agree: the renderer must not
+    // call `Database.load`, because that is the command the grant was removed
+    // to block.
+    //
+    // This asserts the source text, which catches the obvious form. The
+    // behavioural guard is `persistence.test.ts`: its mock of the plugin
+    // exports only `get`, so a call to `load` fails there outright. The two
+    // are layered on purpose — the source assertion says what the code is
+    // supposed to look like, and the mock says what it must do.
+    const persistenceSource = readFileSync(
+      fileURLToPath(new URL("../../apps/desktop/src/lib/persistence.ts", import.meta.url)),
+      "utf8",
+    );
+
+    expect(persistenceSource).toContain("Database.get(DATABASE_URL)");
+    expect(persistenceSource).not.toContain("Database.load(");
   });
 });
