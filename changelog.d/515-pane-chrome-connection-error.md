@@ -1,1 +1,1 @@
-- [FIX] Promote connection errors into pane header as dismissible inline notice (#515)
+- [FIX] Add a Dismiss button to the pane's connection-failed notice; the notice comes back on the next failure (#515)
