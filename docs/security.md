@@ -31,6 +31,10 @@
   browser Origin alone is never enough. The environment switch adds operator approval to the
   existing token requirement.
 
+- Native SFTP rejects control characters in every command before launching its interactive
+  client. Quoting a filename does not contain a newline or prevent terminal line editing;
+  such paths are refused rather than allowed to become local SFTP commands.
+
 ## Current Boundaries
 
 - Browser mode still uses the Node backend for SSH-adjacent operations by design.
