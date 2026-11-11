@@ -23,10 +23,10 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  # Public repository: the hosted fallback keeps CI starting when the runner
-  # variable is empty, as it is for pull requests opened from forks.
+  # Public PRs execute untrusted code: always use disposable hosted runners.
+  # Repository variables must not redirect these jobs onto a persistent host.
   validate:
-    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
@@ -101,12 +101,10 @@ jobs:
             test-results
 
   # #128: compile + test the Rust crate so a broken native build can no longer
-  # ship "green". Build and test only, no signing: the runner comes from
-  # vars.MACOS_RUNNER_LABELS (macos-latest when written, 2026-10-25); if the
-  # variable points at a self-hosted Apple Silicon macOS pool, the job runs on
-  # that pool instead.
+  # ship "green". Build and test only, no signing. Public PR code runs on a
+  # disposable hosted machine; signing stays on its separate dedicated runner.
   rust-validate:
-    runs-on: ${{ fromJSON(vars.MACOS_RUNNER_LABELS || '["macos-latest"]') }}
+    runs-on: macos-latest
     timeout-minutes: 30
 
     steps:
@@ -336,7 +334,7 @@ jobs:
         run: bash scripts/native-trust-tooling-test.sh
 
   native-ssh-fixtures:
-    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
