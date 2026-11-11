@@ -72,12 +72,12 @@ describe("release signing input pipe", () => {
     const script = block.split("\n").map((line) => line.replace(/^ {10}/u, "")).join("\n");
     const directory = mkdtempSync(join(tmpdir(), "tw-certificate-test-"));
     const path = join(directory, "certificate.p12");
-    const run = () => spawnSync("python3", ["-c", script], {
-      env: { ...process.env, CERT_PATH: path, MACOS_CERTIFICATE_P12_BASE64: Buffer.from("fixture-certificate").toString("base64") },
+    const run = (certificatePath: string) => spawnSync("python3", ["-c", script], {
+      env: { ...process.env, CERT_PATH: certificatePath, MACOS_CERTIFICATE_P12_BASE64: Buffer.from("fixture-certificate").toString("base64") },
       encoding: "utf8", timeout: 20_000,
     });
     try {
-      expect(run().status).toBe(0);
+      expect(run(path).status).toBe(0);
       const descriptor = openSync(path, "r");
       try {
         expect(fstatSync(descriptor).mode & 0o777).toBe(0o600);
@@ -85,15 +85,16 @@ describe("release signing input pipe", () => {
       } finally {
         closeSync(descriptor);
       }
-      writeFileSync(path, "existing-file");
-      chmodSync(path, 0o644);
-      expect(run().status).not.toBe(0);
-      expect(readFileSync(path, "utf8")).toBe("existing-file");
-      rmSync(path);
+      const existingPath = join(directory, "existing.p12");
+      writeFileSync(existingPath, "existing-file");
+      chmodSync(existingPath, 0o644);
+      expect(run(existingPath).status).not.toBe(0);
+      expect(readFileSync(existingPath, "utf8")).toBe("existing-file");
       const target = join(directory, "target");
+      const linkPath = join(directory, "linked.p12");
       writeFileSync(target, "untouched");
-      symlinkSync(target, path);
-      expect(run().status).not.toBe(0);
+      symlinkSync(target, linkPath);
+      expect(run(linkPath).status).not.toBe(0);
       expect(readFileSync(target, "utf8")).toBe("untouched");
     } finally {
       rmSync(directory, { recursive: true, force: true });
