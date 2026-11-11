@@ -358,3 +358,7 @@ export function forgetCachedConnectionSecrets() {
 export function resetConnectionSecretsStoreForTests() {
   forgetCachedConnectionSecrets();
 }
+
+export function getConnectionSecretsGeneration() {
+  return cacheGeneration;
+}

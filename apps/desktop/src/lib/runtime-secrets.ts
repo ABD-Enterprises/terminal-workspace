@@ -2,6 +2,7 @@ import { requestConnectionSecretsPrompt } from "../store/connection-secret-promp
 import { isDemoModeEnabled } from "../store/app-store";
 import {
   getHostConnectionSecrets,
+  getConnectionSecretsGeneration,
   hydrateHostConnectionSecrets,
 } from "../store/connection-secrets-store";
 import { useHostsStore } from "../store/hosts-store";
@@ -77,11 +78,13 @@ export async function ensureRuntimeSecrets(
   }
 
   const interactive = options?.interactive ?? true;
+  const generation = getConnectionSecretsGeneration();
 
   for (const entry of resolveConnectionChain(host)) {
     if (interactive) {
       await hydrateHostConnectionSecrets(entry.id);
     }
+    if (generation !== getConnectionSecretsGeneration()) return false;
     const requirement = getHostSecretRequirement(entry);
 
     if (!requirement.needsPassword && !requirement.needsPassphrase) {
@@ -102,7 +105,7 @@ export async function ensureRuntimeSecrets(
       needsPassphrase: requirement.needsPassphrase,
     });
 
-    if (!approved) {
+    if (!approved || generation !== getConnectionSecretsGeneration()) {
       return false;
     }
   }
