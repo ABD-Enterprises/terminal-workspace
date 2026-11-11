@@ -3,8 +3,8 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use rfd::{AsyncMessageDialog, MessageButtons, MessageDialogResult};
 use tauri::Manager;
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use crate::{IpcError, IpcErrorCode};
 
@@ -49,15 +49,25 @@ pub(crate) fn require_credential_consent(app: &tauri::AppHandle) -> Result<(), I
         )
     })?;
     approve_once(&PROMPT_OPEN, || {
-        app.dialog()
-            .message("Allow this app to read a saved SSH password or passphrase?\n\nOnly allow this if you intended to use saved credentials. The credential will be available to the app for this session.")
-            .title("Use saved SSH credentials")
-            .parent(&window)
-            .buttons(MessageDialogButtons::OkCancelCustom(
-                "Allow once".into(),
-                "Cancel".into(),
-            ))
-            .blocking_show()
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        // Create the native sheet on the UI thread and await its result off
+        // that thread. Using rfd directly avoids installing JavaScript hooks
+        // (the dialog plugin replaces window.confirm with an async function).
+        if app.run_on_main_thread(move || {
+            let result = AsyncMessageDialog::new()
+                .set_description("Allow this app to read a saved SSH password or passphrase?\n\nOnly allow this if you intended to use saved credentials. The credential will be available to the app for this session.")
+                .set_title("Use saved SSH credentials")
+                .set_parent(&window)
+                .set_buttons(MessageButtons::OkCancelCustom("Allow once".into(), "Cancel".into()))
+                .show();
+            tauri::async_runtime::spawn(async move {
+                let approved = matches!(result.await, MessageDialogResult::Custom(label) if label == "Allow once");
+                let _ = send.send(approved);
+            });
+        }).is_err() {
+            return false;
+        }
+        receive.recv().unwrap_or(false)
     })
 }
 

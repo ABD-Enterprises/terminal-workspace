@@ -37,7 +37,7 @@ tauri-plugin-sql = { version = "=2.6.0", features = ["sqlite"] } # #180: WAL boo
 tauri-plugin-updater = "2"
 tokio = { version = "1", features = ["macros", "sync"] }
 sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runtime-tokio"] }
-tauri-plugin-dialog = "2"
+rfd = { version = "0.17", default-features = false, features = ["gtk3"] }
 
 # Temporary manifest-only backports until both SQLx driver releases accept the
 # fixed SQLite. Keep the two driver versions required by the app and plugin.

@@ -4965,7 +4965,6 @@ fn main() {
         // #86: auto-updater. Endpoints + signing pubkey come from
         // tauri.conf.json#plugins.updater; the commands below drive it.
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_dialog::init())
         .manage(new_ssh_config_cycle_key_salt())
         .manage(SshConfigResolutionRegistry::default())
         .manage(NativeSessionRegistry::default())
