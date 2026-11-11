@@ -32,6 +32,7 @@ use tauri::menu::{AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, Subm
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tokio::sync::mpsc::{channel, error::TrySendError, Sender};
+mod credential_consent;
 mod ipc_error;
 mod ipc_types;
 mod keychain_support;
@@ -3172,11 +3173,17 @@ async fn terminal_workspace_persistence_clear_deletions(
 
 #[tauri::command]
 async fn terminal_workspace_load_host_secrets(
+    app: AppHandle,
     request: HostSecretsRequest,
 ) -> Result<HostSecretsResponse, IpcError> {
     tauri::async_runtime::spawn_blocking(move || {
         let password = read_keychain_secret(KEYCHAIN_PASSWORD_SERVICE, &request.host_id);
         let passphrase = read_keychain_secret(KEYCHAIN_PASSPHRASE_SERVICE, &request.host_id);
+        if matches!(&password, KeychainRead::Found(value) if !value.is_empty())
+            || matches!(&passphrase, KeychainRead::Found(value) if !value.is_empty())
+        {
+            credential_consent::require_credential_consent(&app)?;
+        }
         // A locked/denied keychain must not masquerade as "no secret stored"
         // (which would silently drop to an empty password and then fail auth
         // with no explanation). Surface it so the renderer can prompt instead.
@@ -3246,17 +3253,18 @@ async fn terminal_workspace_clear_host_secrets(
 /// exists. See parity-and-hardening-plan.md P1-S5.
 #[tauri::command]
 async fn terminal_workspace_load_key_passphrase(
+    app: AppHandle,
     request: KeyPassphraseRequest,
 ) -> Result<KeyPassphraseResponse, IpcError> {
     validate_key_fingerprint(&request.fingerprint)?;
     tauri::async_runtime::spawn_blocking(move || {
-        Ok(KeyPassphraseResponse {
-            passphrase: load_keychain_secret(
-                KEYCHAIN_KEY_PASSPHRASE_SERVICE,
-                &request.fingerprint,
-            )?
-            .unwrap_or_default(),
-        })
+        let passphrase =
+            load_keychain_secret(KEYCHAIN_KEY_PASSPHRASE_SERVICE, &request.fingerprint)?
+                .unwrap_or_default();
+        if !passphrase.is_empty() {
+            credential_consent::require_credential_consent(&app)?;
+        }
+        Ok(KeyPassphraseResponse { passphrase })
     })
     .await
     .map_err(|error| IpcError::internal(error.to_string()))?
@@ -3304,17 +3312,18 @@ async fn terminal_workspace_clear_key_passphrase(
 /// strict generalisation. Returns an empty string when no entry exists.
 #[tauri::command]
 async fn terminal_workspace_load_identity_passphrase(
+    app: AppHandle,
     request: IdentityPassphraseRequest,
 ) -> Result<IdentityPassphraseResponse, IpcError> {
     validate_identity_id(&request.identity_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        Ok(IdentityPassphraseResponse {
-            passphrase: load_keychain_secret(
-                KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE,
-                &request.identity_id,
-            )?
-            .unwrap_or_default(),
-        })
+        let passphrase =
+            load_keychain_secret(KEYCHAIN_IDENTITY_PASSPHRASE_SERVICE, &request.identity_id)?
+                .unwrap_or_default();
+        if !passphrase.is_empty() {
+            credential_consent::require_credential_consent(&app)?;
+        }
+        Ok(IdentityPassphraseResponse { passphrase })
     })
     .await
     .map_err(|error| IpcError::internal(error.to_string()))?
@@ -4956,6 +4965,7 @@ fn main() {
         // #86: auto-updater. Endpoints + signing pubkey come from
         // tauri.conf.json#plugins.updater; the commands below drive it.
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(new_ssh_config_cycle_key_salt())
         .manage(SshConfigResolutionRegistry::default())
         .manage(NativeSessionRegistry::default())
