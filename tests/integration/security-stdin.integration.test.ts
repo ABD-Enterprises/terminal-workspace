@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, fstatSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -78,8 +78,13 @@ describe("release signing input pipe", () => {
     });
     try {
       expect(run().status).toBe(0);
-      expect(statSync(path).mode & 0o777).toBe(0o600);
-      expect(readFileSync(path, "utf8")).toBe("fixture-certificate");
+      const descriptor = openSync(path, "r");
+      try {
+        expect(fstatSync(descriptor).mode & 0o777).toBe(0o600);
+        expect(readFileSync(descriptor, "utf8")).toBe("fixture-certificate");
+      } finally {
+        closeSync(descriptor);
+      }
       writeFileSync(path, "existing-file");
       chmodSync(path, 0o644);
       expect(run().status).not.toBe(0);
