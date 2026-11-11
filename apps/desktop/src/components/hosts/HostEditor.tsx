@@ -734,7 +734,8 @@ function HostEditorContent({
       ) : null}
       <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm leading-6 text-slate-300">
         Session environment uses one <span className="font-mono text-[12px]">KEY=VALUE</span> pair
-        per line. Agent forwarding reuses the current <span className="font-mono text-[12px]">$SSH_AUTH_SOCK</span> only
+        per line and is supported for SSH and local shell sessions only. Remove environment
+        settings before opening Mosh, Telnet, or serial sessions. Agent forwarding reuses the current <span className="font-mono text-[12px]">$SSH_AUTH_SOCK</span> only
         when it exists locally. {hostSupportsLiveTransport(values.protocol)
           ? `${formatHostProtocol(values.protocol)} sessions can be opened natively from this inventory entry.`
           : "This protocol is inventory-only in the current build."}
