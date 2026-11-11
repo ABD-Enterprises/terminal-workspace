@@ -78,13 +78,17 @@ export async function ensureRuntimeSecrets(
   }
 
   const interactive = options?.interactive ?? true;
-  const generation = getConnectionSecretsGeneration();
+  const chain = resolveConnectionChain(host);
+  const generations = chain.map((entry) => getConnectionSecretsGeneration(entry.id));
+  const isCurrent = () => chain.every((entry, index) =>
+    generations[index] === getConnectionSecretsGeneration(entry.id)
+  );
 
-  for (const entry of resolveConnectionChain(host)) {
+  for (const entry of chain) {
     if (interactive) {
       await hydrateHostConnectionSecrets(entry.id);
     }
-    if (generation !== getConnectionSecretsGeneration()) return false;
+    if (!isCurrent()) return false;
     const requirement = getHostSecretRequirement(entry);
 
     if (!requirement.needsPassword && !requirement.needsPassphrase) {
@@ -105,7 +109,7 @@ export async function ensureRuntimeSecrets(
       needsPassphrase: requirement.needsPassphrase,
     });
 
-    if (!approved || generation !== getConnectionSecretsGeneration()) {
+    if (!approved || !isCurrent()) {
       return false;
     }
   }

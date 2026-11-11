@@ -1,3 +1,4 @@
+import { useConnectionSecretPromptStore } from "./connection-secret-prompt-store";
 import { create } from "zustand";
 import { isTauriRuntime } from "../lib/backend-runtime";
 import { resolveHostIdentity } from "../lib/host-identity-resolver";
@@ -34,6 +35,7 @@ interface ConnectionSecretsState {
 
 let cacheGeneration = 0;
 const hostGenerations = new Map<string, number>();
+const hostCancellations = new Map<string, number>();
 
 function invalidateHostHydration(hostId: string) {
   hostGenerations.set(hostId, (hostGenerations.get(hostId) ?? 0) + 1);
@@ -270,6 +272,9 @@ export const useConnectionSecretsStore = create<ConnectionSecretsState>((set, ge
   },
   clearHostSecrets: (hostId) => {
     invalidateHostHydration(hostId);
+    hostCancellations.set(hostId, (hostCancellations.get(hostId) ?? 0) + 1);
+    const prompt = useConnectionSecretPromptStore.getState();
+    if (prompt.pendingRequest?.hostId === hostId) prompt.clearPrompt(false);
     set((state) => {
       const nextSecrets = { ...state.secretsByHostId };
       delete nextSecrets[hostId];
@@ -349,6 +354,7 @@ export function getHostConnectionSecrets(hostId: string) {
 export function forgetCachedConnectionSecrets() {
   cacheGeneration += 1;
   hostGenerations.clear();
+  hostCancellations.clear();
   hydrationPromises.clear();
   useConnectionSecretsStore.setState({
     secretsByHostId: {},
@@ -359,6 +365,6 @@ export function resetConnectionSecretsStoreForTests() {
   forgetCachedConnectionSecrets();
 }
 
-export function getConnectionSecretsGeneration() {
-  return cacheGeneration;
+export function getConnectionSecretsGeneration(hostId: string) {
+  return `${cacheGeneration}:${hostCancellations.get(hostId) ?? 0}`;
 }

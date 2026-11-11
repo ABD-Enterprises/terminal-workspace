@@ -87,3 +87,10 @@ it("abandons a connection if inventory changes during manual entry", async () =>
   mocks.prompt.mockImplementation(async () => { mocks.generation += 1; return true; });
   expect(await ensureRuntimeSecrets(host, "Connect")).toBe(false);
 });
+
+it("abandons even a credential-free connection when its host is cleared during approval", async () => {
+  mocks.hydrate.mockImplementation(async () => { mocks.generation += 1; });
+  const keyHost = { ...host, authMethod: "privateKey", privateKeyPath: "/fixture/key" } as HostRecord;
+  mocks.hosts = [keyHost];
+  expect(await ensureRuntimeSecrets(keyHost, "Connect")).toBe(false);
+});

@@ -32,6 +32,21 @@ afterEach(async () => {
 });
 
 describe("connection secrets store", () => {
+  it("cancels a cleared host's manual prompt without cancelling another host", async () => {
+    runtimeMocks.isTauriRuntime.mockReturnValue(false);
+    const store = await loadStoreModule();
+    const { useConnectionSecretPromptStore } = await import("./connection-secret-prompt-store");
+    const pending = useConnectionSecretPromptStore.getState().openPrompt({
+      hostId: "cleared-host", hostLabel: "Fixture", hostname: "fixture.invalid", username: "fixture",
+      actionLabel: "Connect", needsPassword: true, needsPassphrase: false,
+    });
+    store.useConnectionSecretsStore.getState().clearHostSecrets("other-host");
+    expect(useConnectionSecretPromptStore.getState().pendingRequest?.hostId).toBe("cleared-host");
+    store.useConnectionSecretsStore.getState().clearHostSecrets("cleared-host");
+    expect(await pending).toBe(false);
+    expect(useConnectionSecretPromptStore.getState().pendingRequest).toBeUndefined();
+  });
+
   it("does not restore a cleared password when an earlier approval finishes", async () => {
     runtimeMocks.isTauriRuntime.mockReturnValue(true);
     runtimeMocks.clearNativeHostSecrets.mockResolvedValue(undefined);
