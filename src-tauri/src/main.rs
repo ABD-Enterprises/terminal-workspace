@@ -3070,10 +3070,11 @@ async fn terminal_workspace_install_update_and_restart(
 #[tauri::command]
 async fn terminal_workspace_scan_known_host(
     request: KnownHostScanRequest,
-) -> Result<KnownHostScanResponse, String> {
+) -> Result<KnownHostScanResponse, IpcError> {
     tauri::async_runtime::spawn_blocking(move || scan_known_host(&request))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| IpcError::internal(error.to_string()))?
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
@@ -3089,14 +3090,15 @@ async fn terminal_workspace_create_forward(
     native_sessions: State<'_, NativeSessionRegistry>,
     native_forwards: State<'_, NativeForwardRegistry>,
     request: CreateForwardPayload,
-) -> Result<PortForwardRecord, String> {
+) -> Result<PortForwardRecord, IpcError> {
     let native_sessions = native_sessions.inner().clone();
     let native_forwards = native_forwards.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         create_native_forward(&native_sessions, &native_forwards, request)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| IpcError::internal(error.to_string()))?
+    .map_err(IpcError::from)
 }
 
 #[tauri::command]
@@ -3110,10 +3112,11 @@ fn terminal_workspace_delete_forward(
 #[tauri::command]
 async fn terminal_workspace_execute_snippet_on_hosts(
     request: SnippetExecutionRequest,
-) -> Result<SnippetExecutionResponse, String> {
+) -> Result<SnippetExecutionResponse, IpcError> {
     tauri::async_runtime::spawn_blocking(move || execute_native_snippet_request(request))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| IpcError::internal(error.to_string()))?
+        .map_err(IpcError::from)
 }
 
 // #472: the renderer's only route to SQLite. Fixed tables and fixed statements,
