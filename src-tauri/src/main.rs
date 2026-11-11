@@ -877,6 +877,12 @@ fn validate_telnet_host(host: &BackendHostConnection) -> Result<(), String> {
 fn validate_mosh_host(host: &BackendHostConnection) -> Result<(), String> {
     validate_network_host(host, true)?;
 
+    // Mosh passes user@host on to OpenSSH as well as parsing it itself.
+    // A leading dash must never turn a saved login into either tool's option.
+    if host.username.starts_with('-') {
+        return Err("Mosh username cannot start with '-'".to_string());
+    }
+
     if host.auth_method == "password" && host.password.is_empty() {
         return Err("Password auth selected but no password provided".to_string());
     }
@@ -955,6 +961,14 @@ fn build_external_command_session_spec(
     host: &BackendHostConnection,
     session_id: &str,
 ) -> Result<ExternalCommandSessionSpec, String> {
+    // These entries describe remote/device connections, not permission to
+    // configure a local interpreter or loader (for example PERL5OPT in mosh).
+    // Reject rather than silently apply or discard saved environment settings.
+    if host.protocol != "localShell" && get_channel_environment(&host.environment).is_some() {
+        return Err(
+            "Session environment is supported only for SSH and local shell sessions. Remove environment settings from this connection.".to_string(),
+        );
+    }
     match host.protocol.as_str() {
         "localShell" => {
             let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
@@ -981,7 +995,6 @@ fn build_external_command_session_spec(
             let mut command = CommandBuilder::new(executable);
             command.arg(host.hostname.clone());
             command.arg(host.port.to_string());
-            configure_command_environment(&mut command, host);
 
             Ok(ExternalCommandSessionSpec {
                 command,
@@ -991,7 +1004,7 @@ fn build_external_command_session_spec(
             })
         }
         "serial" => {
-            let mut command = if let Some(executable) = resolve_command_path_with_override(
+            let command = if let Some(executable) = resolve_command_path_with_override(
                 Some("TERMSNIP_SCREEN_PATH"),
                 &["/usr/bin/screen", "screen"],
             ) {
@@ -1017,7 +1030,6 @@ fn build_external_command_session_spec(
                     "Serial runtime requires either `screen` or `cu` to be installed".to_string(),
                 );
             };
-            configure_command_environment(&mut command, host);
 
             Ok(ExternalCommandSessionSpec {
                 command,
@@ -1047,12 +1059,12 @@ fn build_external_command_session_spec(
                 None => None,
             };
             let mut command = CommandBuilder::new(executable);
-            command.arg(format!("{}@{}", host.username, host.hostname));
             command.arg(format!(
                 "--ssh={}",
                 build_mosh_ssh_command(host, known_hosts_path.as_ref())?
             ));
-            configure_command_environment(&mut command, host);
+            command.arg("--");
+            command.arg(format!("{}@{}", host.username, host.hostname));
 
             Ok(ExternalCommandSessionSpec {
                 command,
@@ -6625,6 +6637,58 @@ mod tests {
         host.known_host_algorithm = None;
         host.host_key_policy = Some("allowUnknown".to_string());
         assert!(validate_mosh_host(&host).is_ok());
+    }
+
+    #[test]
+    fn remote_launchers_refuse_saved_local_process_environment() {
+        for protocol in ["mosh", "telnet", "serial"] {
+            for key in [
+                "PERL5OPT",
+                "PATH",
+                "DYLD_INSERT_LIBRARIES",
+                "SSH_AUTH_SOCK",
+                "LANG",
+            ] {
+                let mut host = minimal_ssh_host();
+                host.protocol = protocol.to_string();
+                host.environment = Some(HashMap::from([(key.to_string(), "fixture".to_string())]));
+                let error = match build_external_command_session_spec(&host, "environment-fixture")
+                {
+                    Ok(_) => panic!("saved environment reached a local launcher"),
+                    Err(error) => error,
+                };
+                assert!(error.contains("Session environment is supported only"));
+            }
+        }
+    }
+
+    #[test]
+    fn local_shell_keeps_explicit_session_environment() {
+        let mut host = minimal_ssh_host();
+        host.protocol = "localShell".to_string();
+        host.environment = Some(HashMap::from([(
+            "TRUST_BOUNDARY_FIXTURE".to_string(),
+            "retained".to_string(),
+        )]));
+        let spec = build_external_command_session_spec(&host, "local-environment-fixture")
+            .expect("local shell supports explicit environment");
+        assert_eq!(
+            spec.command.get_env("TRUST_BOUNDARY_FIXTURE"),
+            Some(std::ffi::OsStr::new("retained"))
+        );
+    }
+
+    #[test]
+    fn mosh_rejects_login_names_that_become_program_options() {
+        let mut host = minimal_ssh_host();
+        host.protocol = "mosh".to_string();
+        host.host_key_policy = Some("allowUnknown".to_string());
+        for username in ["--local", "--client=/tmp/fixture", "-oProxyCommand=fixture"] {
+            host.username = username.to_string();
+            assert!(validate_session_target(&host).is_err());
+        }
+        host.username = "ordinary-user".to_string();
+        assert!(validate_session_target(&host).is_ok());
     }
 
     #[test]

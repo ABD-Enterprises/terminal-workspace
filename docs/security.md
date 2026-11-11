@@ -31,6 +31,12 @@
   browser Origin alone is never enough. The environment switch adds operator approval to the
   existing token requirement.
 
+- Native Mosh, Telnet, and serial connections refuse saved session environment overrides:
+  those settings must not configure local interpreters, loaders, or executable search paths.
+  SSH applies session variables on the remote side; local shell sessions deliberately support
+  local environment settings. Mosh login names cannot begin with a dash, and its destination
+  follows an explicit end-of-options separator.
+
 ## Current Boundaries
 
 - Browser mode still uses the Node backend for SSH-adjacent operations by design.

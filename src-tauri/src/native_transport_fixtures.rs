@@ -1882,7 +1882,7 @@ fn native_external_protocol_runtime_fixture_flow() {
     let mosh_path = bin_dir.join("mosh-fixture");
     write_fixture_executable(
         &mosh_path,
-        "#!/bin/sh\nprintf 'MOSH:%s:%s\\n' \"$1\" \"$2\"\nprintf 'password:'\nIFS= read -r secret || exit 1\nprintf 'MOSH_AUTH:%s\\n' \"$secret\"\n",
+        "#!/bin/sh\n[ \"$2\" = \"--\" ] || exit 2\nprintf 'MOSH:%s:%s\\n' \"$3\" \"$1\"\nprintf 'password:'\nIFS= read -r secret || exit 1\nprintf 'MOSH_AUTH:%s\\n' \"$secret\"\n",
     );
 
     let _telnet_override = ScopedEnvVar::set("TERMSNIP_TELNET_PATH", &telnet_path);
