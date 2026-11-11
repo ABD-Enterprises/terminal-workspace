@@ -27,7 +27,7 @@ fi
 # output, including the supposedly-ignored advisory. So the ignores are passed
 # explicitly here, and the drift check below is what keeps the two in sync.
 IGNORE_IDS=(
-  RUSTSEC-2023-0071 # rsa — Marvin Attack; no fixed release exists
+  RUSTSEC-2023-0071 # rsa — optional MySQL backend only; must remain unbuilt
   RUSTSEC-2026-0235 # rkyv — lockfile-only, never compiled into this app
 )
 
@@ -44,6 +44,22 @@ if [[ "$CONFIG_IDS" != "$CLI_IDS" ]]; then
   echo "[native-audit] Update both, and justify any new ignore in audit.toml." >&2
   exit 1
 fi
+
+# These exceptions are valid only while the packages stay outside the app's
+# normal/build dependency graph. Check the graph on every audit rather than
+# relying on a past cargo-tree observation in audit.toml. A failed graph read
+# is not evidence of absence, and must not let the ignored audit proceed.
+for package in rsa rkyv; do
+  if ! dependency_tree="$(cargo tree --locked --edges normal,build --invert "$package" --prefix none)"; then
+    echo "[native-audit] Could not verify the unused-package exception for $package." >&2
+    exit 1
+  fi
+  if [[ -n "$dependency_tree" ]]; then
+    echo "[native-audit] $package is now in the app's dependency graph; its advisory exception is no longer valid." >&2
+    echo "[native-audit] Upgrade the affected dependency and remove the exception before continuing." >&2
+    exit 1
+  fi
+done
 
 IGNORE_ARGS=()
 for id in "${IGNORE_IDS[@]}"; do
