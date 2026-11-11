@@ -32,6 +32,36 @@ afterEach(async () => {
 });
 
 describe("connection secrets store", () => {
+  it("does not restore a cleared password when an earlier approval finishes", async () => {
+    runtimeMocks.isTauriRuntime.mockReturnValue(true);
+    runtimeMocks.clearNativeHostSecrets.mockResolvedValue(undefined);
+    let finish!: (value: { password: string; passphrase: string }) => void;
+    runtimeMocks.loadNativeHostSecrets.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const store = await loadStoreModule();
+    const pending = store.hydrateHostConnectionSecrets("boundary-host");
+    store.useConnectionSecretsStore.getState().clearHostSecrets("boundary-host");
+    finish({ password: "old-password", passphrase: "" });
+    expect(await pending).toBeUndefined();
+    expect(store.getHostConnectionSecrets("boundary-host").password).toBe("");
+  });
+
+  it("does not let an old approval cross an inventory reset or replace a newer approval", async () => {
+    runtimeMocks.isTauriRuntime.mockReturnValue(true);
+    const finishes: Array<(value: { password: string; passphrase: string }) => void> = [];
+    runtimeMocks.loadNativeHostSecrets.mockImplementation(() => new Promise((resolve) => { finishes.push(resolve); }));
+    const store = await loadStoreModule();
+    const oldApproval = store.hydrateHostConnectionSecrets("boundary-host");
+    store.forgetCachedConnectionSecrets();
+    const newApproval = store.hydrateHostConnectionSecrets("boundary-host");
+    finishes[0]({ password: "old-password", passphrase: "" });
+    expect(await oldApproval).toBeUndefined();
+    const sharedNewApproval = store.hydrateHostConnectionSecrets("boundary-host");
+    expect(runtimeMocks.loadNativeHostSecrets).toHaveBeenCalledTimes(2);
+    finishes[1]({ password: "new-password", passphrase: "" });
+    expect(await newApproval).toMatchObject({ password: "new-password" });
+    expect(await sharedNewApproval).toMatchObject({ password: "new-password" });
+  });
+
   it("hydrates native secrets once and caches them in tauri mode", async () => {
     runtimeMocks.isTauriRuntime.mockReturnValue(true);
     runtimeMocks.loadNativeHostSecrets.mockResolvedValue({

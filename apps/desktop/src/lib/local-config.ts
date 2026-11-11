@@ -1,3 +1,4 @@
+import { forgetCachedConnectionSecrets } from "../store/connection-secrets-store";
 import { sortHostCollection, useHostsStore } from "../store/hosts-store";
 import { useAppStore } from "../store/app-store";
 import { useIdentitiesStore } from "../store/identities-store";
@@ -912,6 +913,9 @@ export function applyImportedLocalConfigBundle(bundle: unknown, options: ApplyLo
     identities: appliedIdentities,
   });
 
+  // Imported IDs are not permission to reuse credentials approved for the
+  // previous inventory. Also invalidate any pending native approval result.
+  forgetCachedConnectionSecrets();
   useHostsStore.setState((state) => ({ ...state, hosts: appliedHosts }));
   useKeysStore.setState((state) => ({ ...state, keys: appliedKeys }));
   useSnippetsStore.setState((state) => ({ ...state, snippets: appliedSnippets }));

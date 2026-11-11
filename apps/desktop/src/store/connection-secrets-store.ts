@@ -32,6 +32,14 @@ interface ConnectionSecretsState {
   clearHostSecrets: (hostId: string) => void;
 }
 
+let cacheGeneration = 0;
+const hostGenerations = new Map<string, number>();
+
+function invalidateHostHydration(hostId: string) {
+  hostGenerations.set(hostId, (hostGenerations.get(hostId) ?? 0) + 1);
+  hydrationPromises.delete(hostId);
+}
+
 const hydrationPromises = new Map<string, Promise<ConnectionSecretRecord | undefined>>();
 
 function hasConnectionSecrets(values: ConnectionSecretValues) {
@@ -70,13 +78,17 @@ function logSecretPersistenceError(
 async function loadSecretsWithMultiStageMigration(
   hostId: string,
   identityId: string | undefined,
-  fingerprint: string | undefined
+  fingerprint: string | undefined,
+  isCurrent: () => boolean
 ): Promise<ConnectionSecretValues> {
+  const empty = { password: "", passphrase: "" };
   const perHost = await loadNativeHostSecrets(hostId);
+  if (!isCurrent()) return empty;
 
   // Stage 1: per-identity (canonical).
   if (identityId) {
     const identityPassphrase = await loadNativeIdentityPassphrase(identityId);
+    if (!isCurrent()) return empty;
     if (identityPassphrase) {
       return { password: perHost.password, passphrase: identityPassphrase };
     }
@@ -86,6 +98,7 @@ async function loadSecretsWithMultiStageMigration(
   // identity, migrate forward to the identity service.
   if (fingerprint) {
     const keyedPassphrase = await loadNativeKeyPassphrase(fingerprint);
+    if (!isCurrent()) return empty;
     if (keyedPassphrase) {
       if (identityId) {
         try {
@@ -107,6 +120,7 @@ async function loadSecretsWithMultiStageMigration(
     if (identityId) {
       try {
         await storeNativeIdentityPassphrase(identityId, perHost.passphrase);
+        if (!isCurrent()) return empty;
         await storeNativeHostSecrets(hostId, {
           password: perHost.password,
           passphrase: "",
@@ -117,6 +131,7 @@ async function loadSecretsWithMultiStageMigration(
     } else if (fingerprint) {
       try {
         await storeNativeKeyPassphrase(fingerprint, perHost.passphrase);
+        if (!isCurrent()) return empty;
         await storeNativeHostSecrets(hostId, {
           password: perHost.password,
           passphrase: "",
@@ -177,10 +192,17 @@ export const useConnectionSecretsStore = create<ConnectionSecretsState>((set, ge
       return pendingHydration;
     }
 
+    const generation = cacheGeneration;
+    const hostGeneration = hostGenerations.get(hostId) ?? 0;
+    const isCurrent = () => generation === cacheGeneration
+      && hostGeneration === (hostGenerations.get(hostId) ?? 0);
     const fingerprint = resolveHostKeyFingerprint(hostId);
     const identityId = resolveHostIdentity(hostId)?.id;
-    const hydrationPromise = loadSecretsWithMultiStageMigration(hostId, identityId, fingerprint)
+    const hydrationPromise = loadSecretsWithMultiStageMigration(hostId, identityId, fingerprint, isCurrent)
       .then((values) => {
+        if (!isCurrent()) {
+          return undefined;
+        }
         if (!hasConnectionSecrets(values)) {
           return undefined;
         }
@@ -204,13 +226,16 @@ export const useConnectionSecretsStore = create<ConnectionSecretsState>((set, ge
         return undefined;
       })
       .finally(() => {
-        hydrationPromises.delete(hostId);
+        if (hydrationPromises.get(hostId) === hydrationPromise) {
+          hydrationPromises.delete(hostId);
+        }
       });
 
     hydrationPromises.set(hostId, hydrationPromise);
     return hydrationPromise;
   },
   setHostSecrets: (hostId, values) => {
+    invalidateHostHydration(hostId);
     if (hasConnectionSecrets(values)) {
       set((state) => ({
         secretsByHostId: {
@@ -244,6 +269,7 @@ export const useConnectionSecretsStore = create<ConnectionSecretsState>((set, ge
     });
   },
   clearHostSecrets: (hostId) => {
+    invalidateHostHydration(hostId);
     set((state) => {
       const nextSecrets = { ...state.secretsByHostId };
       delete nextSecrets[hostId];
@@ -319,9 +345,16 @@ export function getHostConnectionSecrets(hostId: string) {
   };
 }
 
-export function resetConnectionSecretsStoreForTests() {
+/** Forget approvals cached in this app session when replacing imported inventory. */
+export function forgetCachedConnectionSecrets() {
+  cacheGeneration += 1;
+  hostGenerations.clear();
   hydrationPromises.clear();
   useConnectionSecretsStore.setState({
     secretsByHostId: {},
   });
+}
+
+export function resetConnectionSecretsStoreForTests() {
+  forgetCachedConnectionSecrets();
 }
