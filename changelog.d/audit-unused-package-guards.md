@@ -1,0 +1,1 @@
+- [SECURITY] Fail the Rust audit if either excepted vulnerable package enters the app's dependency graph, and correct the stale RSA exception rationale (#226).
