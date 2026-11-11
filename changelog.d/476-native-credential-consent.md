@@ -1,0 +1,1 @@
+- [SECURITY] Require native approval before returning saved SSH passwords or passphrases to the app, and keep background restoration from prompting for them (#476).

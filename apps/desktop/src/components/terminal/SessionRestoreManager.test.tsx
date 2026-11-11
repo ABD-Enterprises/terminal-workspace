@@ -14,12 +14,16 @@ const createBackendSession = vi.fn<(host: BackendHostConnection) => Promise<{ se
   async () => ({ sessionId: "s-1" })
 );
 
+const secretMocks = vi.hoisted(() => ({
+  ensure: vi.fn(async () => true),
+}));
+
 vi.mock("../../lib/api", () => ({
   createBackendSession: (host: BackendHostConnection) => createBackendSession(host),
 }));
 vi.mock("../../lib/runtime-secrets", () => ({
   canRestoreSessionWithoutPrompt: async () => true,
-  ensureRuntimeSecrets: async () => true,
+  ensureRuntimeSecrets: secretMocks.ensure,
 }));
 
 import { SessionRestoreManager } from "./SessionRestoreManager";
@@ -99,6 +103,25 @@ describe("SessionRestoreManager (#489)", () => {
   afterEach(() => {
     cleanup();
     createBackendSession.mockClear();
+    secretMocks.ensure.mockClear();
+  });
+
+  it("does not prompt when a restored pane waiting for credentials is active", async () => {
+    useHostsStore.setState({ hosts: [host({ id: "waiting" })] });
+    useSessionsStore.setState({
+      tabs: [tab("active", "p-waiting", "waiting")],
+      panes: {
+        "p-waiting": { ...pane("p-waiting", "waiting", true), connectionState: "pendingSecrets" },
+      },
+      activeTabId: "active",
+    });
+    render(<SessionRestoreManager />);
+    // Flush the restore effect's asynchronous work. Native approval must be
+    // reached only from the existing explicit Resume button in TerminalPane.
+    await Promise.resolve();
+    expect(secretMocks.ensure).not.toHaveBeenCalled();
+    expect(createBackendSession).not.toHaveBeenCalled();
+    expect(useSessionsStore.getState().panes["p-waiting"].connectionState).toBe("pendingSecrets");
   });
 
   it("restores a session through a jump host with each hop's own approved key", async () => {
