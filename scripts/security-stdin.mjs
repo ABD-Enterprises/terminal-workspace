@@ -33,8 +33,10 @@ export function runSigningCommand(operation, paths, { env = process.env, spawn =
   };
   let args;
   if (operation === "create-keychain" && paths.length === 1) {
+    // secret-argv-ok: stdin command data only; the process argv below is ["-i"], verified by tests.
     args = [operation, "-p", secret("MACOS_KEYCHAIN_PASSWORD"), paths[0]];
   } else if (operation === "unlock-keychain" && paths.length === 1) {
+    // secret-argv-ok: stdin command data only; the process argv below is ["-i"], verified by tests.
     args = [operation, "-p", secret("MACOS_KEYCHAIN_PASSWORD"), paths[0]];
   } else if (operation === "import" && paths.length === 2) {
     args = [operation, paths[0], "-P", secret("MACOS_CERTIFICATE_PASSWORD"), "-A", "-t", "cert", "-f", "pkcs12", "-k", paths[1]];
