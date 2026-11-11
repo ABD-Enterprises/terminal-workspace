@@ -1,0 +1,1 @@
+- [SECURITY] Prevent saved connection settings from configuring local helper processes and separate Mosh destinations from launch options (#573)

@@ -34,6 +34,11 @@
 - Native SFTP rejects control characters in every command before launching its interactive
   client. Quoting a filename does not contain a newline or prevent terminal line editing;
   such paths are refused rather than allowed to become local SFTP commands.
+- Native Mosh, Telnet, and serial connections refuse saved session environment overrides:
+  those settings must not configure local interpreters, loaders, or executable search paths.
+  SSH applies session variables on the remote side; local shell sessions deliberately support
+  local environment settings. Mosh login names cannot begin with a dash, and its destination
+  follows an explicit end-of-options separator.
 
 ## Current Boundaries
 
