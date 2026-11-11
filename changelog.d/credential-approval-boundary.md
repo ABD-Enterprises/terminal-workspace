@@ -1,0 +1,1 @@
+- [SECURITY] Discard cached credential approvals and cancel pending connection attempts when importing inventory or clearing credentials (#574)
