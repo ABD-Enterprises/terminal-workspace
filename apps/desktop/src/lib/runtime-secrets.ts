@@ -52,19 +52,13 @@ export function getHostSecretRequirement(host: HostRecord): HostSecretRequiremen
   };
 }
 
-async function hydrateConnectionSecrets(host: HostRecord) {
-  for (const entry of resolveConnectionChain(host)) {
-    await hydrateHostConnectionSecrets(entry.id);
-  }
-}
-
 export async function canRestoreSessionWithoutPrompt(host: HostRecord) {
   if (isDemoModeEnabled()) {
     return true;
   }
 
-  await hydrateConnectionSecrets(host);
-
+  // Saved credentials now require native approval. Background restoration
+  // may use only credentials already present in this app session.
   return resolveConnectionChain(host).every((entry) => {
     const requirement = getHostSecretRequirement(entry);
     return !requirement.needsPassword && !requirement.needsPassphrase;
@@ -85,7 +79,9 @@ export async function ensureRuntimeSecrets(
   const interactive = options?.interactive ?? true;
 
   for (const entry of resolveConnectionChain(host)) {
-    await hydrateHostConnectionSecrets(entry.id);
+    if (interactive) {
+      await hydrateHostConnectionSecrets(entry.id);
+    }
     const requirement = getHostSecretRequirement(entry);
 
     if (!requirement.needsPassword && !requirement.needsPassphrase) {

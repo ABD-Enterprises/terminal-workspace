@@ -46,6 +46,20 @@ Local validation still executes repository code with the invoking user's access.
 Review untrusted changes before running them locally, or use a disposable,
 credential-free environment.
 
+## Saved SSH credentials
+
+The native app asks for approval before returning a non-empty saved password or
+passphrase to the renderer. This applies to host, key-fingerprint, and identity
+storage, including legacy entries. Approval covers only that response; competing
+requests are rejected instead of queued behind the same dialog. Missing entries
+do not prompt. Background session restoration uses only credentials already held
+in memory, so a fresh app launch requires an interactive connection.
+
+This limits silent bulk reads of the Keychain. It does not make a compromised
+renderer safe: credentials approved for use, or entered manually, remain in the
+renderer for the app session. Cancel unexpected requests. Dialog approval is
+implemented in Rust; no dialog permission is exposed to the renderer.
+
 ## Safe Harbor
 
 Good-faith research that avoids privacy violations, service disruption, data destruction, and
