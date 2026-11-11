@@ -1,0 +1,1 @@
+- [SECURITY] Reject control characters in file-transfer paths before they can inject commands into the local interactive SFTP client (#575)

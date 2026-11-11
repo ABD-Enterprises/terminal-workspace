@@ -1312,11 +1312,26 @@ pub(crate) fn trim_ssh_output(value: &str) -> String {
         .join("\n")
 }
 
+fn validate_sftp_batch_commands(commands: &[String]) -> Result<(), String> {
+    if commands
+        .iter()
+        .any(|command| command.chars().any(char::is_control))
+    {
+        return Err("SFTP paths cannot contain control characters".to_string());
+    }
+    Ok(())
+}
+
 pub(crate) fn run_sftp_batch_commands(
     host: &BackendHostConnection,
     context: &NativeSshControlContext,
     commands: &[String],
 ) -> Result<String, String> {
+    // Paths are data, but this client reads commands through a terminal.
+    // Quotes do not contain newlines; other terminal controls can edit or
+    // interrupt the line before sftp parses it. Refuse the whole batch before
+    // starting a process or sending any command.
+    validate_sftp_batch_commands(commands)?;
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -2233,6 +2248,41 @@ mod tests {
         process,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn sftp_refuses_control_characters_before_starting_a_client() {
+        let host = test_host(Path::new("/unused-fixture-key"), "");
+        let context = NativeSshControlContext {
+            config_path: PathBuf::from("/unused-fixture-config"),
+            session_dir: PathBuf::from("/unused-fixture-directory"),
+            target_alias: "unused-fixture".to_string(),
+        };
+        for control in [
+            '\n', '\r', '\0', '\t', '\u{3}', '\u{15}', '\u{1b}', '\u{7f}', '\u{9b}',
+        ] {
+            let path = format!("/remote/file{control}!printf fixture");
+            for verb in ["ls -la", "mkdir", "rm", "rmdir", "get", "put", "rename"] {
+                let commands = vec![format!("@{verb} {}", escape_sftp_argument(&path))];
+                assert_eq!(
+                    run_sftp_batch_commands(&host, &context, &commands).unwrap_err(),
+                    "SFTP paths cannot contain control characters"
+                );
+            }
+        }
+        assert!(validate_sftp_batch_commands(&[
+            format!(
+                "@get {} {}",
+                escape_sftp_argument("/remote/a file-雪"),
+                escape_sftp_argument("/local/a file")
+            ),
+            format!(
+                "@rename {} {}",
+                escape_sftp_argument("/remote/old"),
+                escape_sftp_argument("/remote/new")
+            ),
+        ])
+        .is_ok());
+    }
 
     /// Run `/bin/sh -c <script>` and return trimmed-free stdout verbatim.
     fn sh_stdout(script: &str) -> String {
