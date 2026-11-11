@@ -1,0 +1,1 @@
+- [SECURITY] Update anyhow, event-listener, and rustix to patched releases that remove three memory-safety advisories from the Rust dependency audit (#226).
