@@ -1,0 +1,1 @@
+- [SECURITY] Send release setup passwords through a private input pipe instead of process arguments, refuse stale certificate files, and remove the certificate immediately after import (#478).

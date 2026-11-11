@@ -148,17 +148,20 @@ jobs:
 
           cert_data = base64.b64decode(os.environ["MACOS_CERTIFICATE_P12_BASE64"])
           cert_path = os.environ["CERT_PATH"]
-          fd = os.open(cert_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+          # Never reuse a stale permissive file or follow a pre-existing link.
+          fd = os.open(cert_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
           with open(fd, "wb") as f:
               f.write(cert_data)
           PY
-          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          trap 'rm -f -- "$CERT_PATH"' EXIT
+          node ./scripts/security-stdin.mjs create-keychain "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          node ./scripts/security-stdin.mjs unlock-keychain "$KEYCHAIN_PATH"
+          node ./scripts/security-stdin.mjs import "$CERT_PATH" "$KEYCHAIN_PATH"
+          rm -f -- "$CERT_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH"
           security default-keychain -s "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          node ./scripts/security-stdin.mjs set-key-partition-list "$KEYCHAIN_PATH"
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
       - name: Build signed release bundle
