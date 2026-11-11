@@ -37,14 +37,14 @@ test files, package scripts, build tooling, or any command it runs. Host validat
 self-hosted runner can become remote code execution with that runner's filesystem, environment,
 network, and credential permissions.
 
-ORC strongly recommends `validation.isolation=container`, which runs local validation in the
-network-denied container sandbox when Docker or Podman is available. If ORC falls back to
-`validation.isolation=host`, use a minimal-permission runner with no broad cloud, package-registry,
-or production credentials, and treat the warning as a security exception to remove before accepting
-untrusted public PRs.
+Public pull-request validation and CodeQL jobs explicitly use GitHub-hosted,
+disposable runners. Repository runner-label variables cannot redirect these jobs
+onto a persistent shared host. Signing remains on its separate dedicated runner
+and is never part of pull-request validation.
 
-See the ORC validation isolation documentation for the container-vs-host trade-off and the
-recommended public-repo posture.
+Local validation still executes repository code with the invoking user's access.
+Review untrusted changes before running them locally, or use a disposable,
+credential-free environment.
 
 ## Safe Harbor
 

@@ -1,0 +1,1 @@
+- [SECURITY] Pin public pull-request validation and CodeQL to disposable hosted runners so runner-label variables cannot redirect untrusted builds onto persistent hosts (#477).
