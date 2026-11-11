@@ -3,6 +3,7 @@ import type { HostRecord } from "../types/host";
 
 const mocks = vi.hoisted(() => ({
   hydrate: vi.fn(),
+  generation: 0,
   secrets: vi.fn(),
   prompt: vi.fn(),
   hosts: [] as HostRecord[],
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../store/app-store", () => ({ isDemoModeEnabled: () => false }));
 vi.mock("../store/connection-secrets-store", () => ({
   getHostConnectionSecrets: mocks.secrets,
+  getConnectionSecretsGeneration: () => mocks.generation,
   hydrateHostConnectionSecrets: mocks.hydrate,
 }));
 vi.mock("../store/connection-secret-prompt-utils", () => ({
@@ -29,6 +31,7 @@ const host = { id: "fixture-host", authMethod: "password" } as HostRecord;
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.generation = 0;
   mocks.hosts = [host];
   mocks.secrets.mockReturnValue({ password: "", passphrase: "" });
 });
@@ -72,4 +75,22 @@ it("still permits manual entry when saved credentials were not released", async 
   expect(await ensureRuntimeSecrets(host, "Connect")).toBe(false);
   expect(mocks.hydrate).toHaveBeenCalledWith(host.id);
   expect(mocks.prompt).toHaveBeenCalledOnce();
+});
+
+it("abandons a connection if inventory changes during native approval", async () => {
+  mocks.hydrate.mockImplementation(async () => { mocks.generation += 1; });
+  expect(await ensureRuntimeSecrets(host, "Connect")).toBe(false);
+  expect(mocks.prompt).not.toHaveBeenCalled();
+});
+
+it("abandons a connection if inventory changes during manual entry", async () => {
+  mocks.prompt.mockImplementation(async () => { mocks.generation += 1; return true; });
+  expect(await ensureRuntimeSecrets(host, "Connect")).toBe(false);
+});
+
+it("abandons even a credential-free connection when its host is cleared during approval", async () => {
+  mocks.hydrate.mockImplementation(async () => { mocks.generation += 1; });
+  const keyHost = { ...host, authMethod: "privateKey", privateKeyPath: "/fixture/key" } as HostRecord;
+  mocks.hosts = [keyHost];
+  expect(await ensureRuntimeSecrets(keyHost, "Connect")).toBe(false);
 });

@@ -1,3 +1,5 @@
+import { useConnectionSecretPromptStore } from "../store/connection-secret-prompt-store";
+import { useConnectionSecretsStore, getHostConnectionSecrets, forgetCachedConnectionSecrets } from "../store/connection-secrets-store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyImportedLocalConfigBundle,
@@ -39,6 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  forgetCachedConnectionSecrets();
   useAppStore.setState(baseAppState);
   useHostsStore.setState(baseHostState);
   useKeysStore.setState(baseKeyState);
@@ -52,6 +55,22 @@ afterEach(() => {
 });
 
 describe("local config", () => {
+  it("forgets cached credentials when an import reuses a host ID for a different endpoint", async () => {
+    const bundle = buildLocalConfigBundle();
+    const host = bundle.hosts[0];
+    expect(host).toBeDefined();
+    useConnectionSecretsStore.getState().setHostSecrets(host.id, { password: "old-password", passphrase: "" });
+    const approval = useConnectionSecretPromptStore.getState().openPrompt({
+      hostId: host.id, hostLabel: host.label, hostname: host.hostname, username: host.username,
+      actionLabel: "Connect", needsPassword: true, needsPassphrase: false,
+    });
+    host.hostname = "replacement.invalid";
+    applyImportedLocalConfigBundle(bundle);
+    expect(getHostConnectionSecrets(host.id).password).toBe("");
+    expect(await approval).toBe(false);
+    expect(useConnectionSecretPromptStore.getState().pendingRequest).toBeUndefined();
+  });
+
   it("exports the current durable config bundle", () => {
     const staleDeletedAt = new Date(
       Date.now() - (VAULT_TOMBSTONE_RETENTION_DAYS + 1) * 24 * 60 * 60 * 1000

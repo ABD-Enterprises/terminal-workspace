@@ -32,6 +32,51 @@ afterEach(async () => {
 });
 
 describe("connection secrets store", () => {
+  it("cancels a cleared host's manual prompt without cancelling another host", async () => {
+    runtimeMocks.isTauriRuntime.mockReturnValue(false);
+    const store = await loadStoreModule();
+    const { useConnectionSecretPromptStore } = await import("./connection-secret-prompt-store");
+    const pending = useConnectionSecretPromptStore.getState().openPrompt({
+      hostId: "cleared-host", hostLabel: "Fixture", hostname: "fixture.invalid", username: "fixture",
+      actionLabel: "Connect", needsPassword: true, needsPassphrase: false,
+    });
+    store.useConnectionSecretsStore.getState().clearHostSecrets("other-host");
+    expect(useConnectionSecretPromptStore.getState().pendingRequest?.hostId).toBe("cleared-host");
+    store.useConnectionSecretsStore.getState().clearHostSecrets("cleared-host");
+    expect(await pending).toBe(false);
+    expect(useConnectionSecretPromptStore.getState().pendingRequest).toBeUndefined();
+  });
+
+  it("does not restore a cleared password when an earlier approval finishes", async () => {
+    runtimeMocks.isTauriRuntime.mockReturnValue(true);
+    runtimeMocks.clearNativeHostSecrets.mockResolvedValue(undefined);
+    let finish!: (value: { password: string; passphrase: string }) => void;
+    runtimeMocks.loadNativeHostSecrets.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const store = await loadStoreModule();
+    const pending = store.hydrateHostConnectionSecrets("boundary-host");
+    store.useConnectionSecretsStore.getState().clearHostSecrets("boundary-host");
+    finish({ password: "old-password", passphrase: "" });
+    expect(await pending).toBeUndefined();
+    expect(store.getHostConnectionSecrets("boundary-host").password).toBe("");
+  });
+
+  it("does not let an old approval cross an inventory reset or replace a newer approval", async () => {
+    runtimeMocks.isTauriRuntime.mockReturnValue(true);
+    const finishes: Array<(value: { password: string; passphrase: string }) => void> = [];
+    runtimeMocks.loadNativeHostSecrets.mockImplementation(() => new Promise((resolve) => { finishes.push(resolve); }));
+    const store = await loadStoreModule();
+    const oldApproval = store.hydrateHostConnectionSecrets("boundary-host");
+    store.forgetCachedConnectionSecrets();
+    const newApproval = store.hydrateHostConnectionSecrets("boundary-host");
+    finishes[0]({ password: "old-password", passphrase: "" });
+    expect(await oldApproval).toBeUndefined();
+    const sharedNewApproval = store.hydrateHostConnectionSecrets("boundary-host");
+    expect(runtimeMocks.loadNativeHostSecrets).toHaveBeenCalledTimes(2);
+    finishes[1]({ password: "new-password", passphrase: "" });
+    expect(await newApproval).toMatchObject({ password: "new-password" });
+    expect(await sharedNewApproval).toMatchObject({ password: "new-password" });
+  });
+
   it("hydrates native secrets once and caches them in tauri mode", async () => {
     runtimeMocks.isTauriRuntime.mockReturnValue(true);
     runtimeMocks.loadNativeHostSecrets.mockResolvedValue({
