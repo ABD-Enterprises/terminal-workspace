@@ -1,0 +1,1 @@
+- [SECURITY] Replace three withdrawn (yanked) Rust dependency versions, including the SSH library, with their fixed releases (#577)
