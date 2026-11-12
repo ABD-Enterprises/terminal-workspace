@@ -46,7 +46,7 @@ export function pasteIntoTerminal(terminal: ClipboardTerminal, notify: (message:
   );
 }
 
-export interface TerminalPaneInputWiringOptions {
+interface TerminalPaneInputWiringOptions {
   commandBufferRef: MutableRefObject<string>;
   connectionStateRef: MutableRefObject<SessionConnectionState>;
   container: HTMLDivElement;
@@ -61,7 +61,7 @@ export interface TerminalPaneInputWiringOptions {
   transportRef: MutableRefObject<SessionTransport>;
 }
 
-export interface TerminalPaneInputWiring {
+interface TerminalPaneInputWiring {
   dataDisposable: IDisposable;
   selectionDisposable: IDisposable;
   contextMenuHandler: (event: MouseEvent) => void;

@@ -15,17 +15,17 @@ import { shouldShowUpdateBanner, useAppStore } from "../../store/app-store";
 
 const UPDATE_INSTALL_PROGRESS_EVENT_NAME = "terminal_workspace://update-install-progress";
 
-export type UpdateInstallProgressEvent =
+type UpdateInstallProgressEvent =
   | { phase: "downloading"; downloaded: number; total: number | null }
   | { phase: "installing" };
 
-export type UpdateInstallProgressState =
+type UpdateInstallProgressState =
   | { phase: "idle" }
   | { phase: "downloading"; downloaded: number; total: number | null }
   | { phase: "installing" }
   | { phase: "failed"; reason: string };
 
-export type UpdateInstallProgressAction =
+type UpdateInstallProgressAction =
   | { type: "started" }
   | { type: "progress"; progress: UpdateInstallProgressEvent }
   | { type: "failed"; reason: string }

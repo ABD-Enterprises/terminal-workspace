@@ -9,12 +9,12 @@ import {
   type TerminalThemeName,
 } from "../lib/terminal-themes";
 
-export type WorkspaceDensity = "compact" | "comfortable";
+type WorkspaceDensity = "compact" | "comfortable";
 /**
  * T20: app-shell theme. "system" follows prefers-color-scheme in
  * real time; "light" / "dark" override.
  */
-export type AppShellTheme = "system" | "light" | "dark";
+type AppShellTheme = "system" | "light" | "dark";
 
 interface AppState {
   sidebarSearch: string;

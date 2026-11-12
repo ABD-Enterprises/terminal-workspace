@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { createTermsnipDeletionStorage } from "../lib/persistence";
 
-export type VaultSyncEntityKind =
+type VaultSyncEntityKind =
   | "hosts"
   | "keys"
   | "snippets"

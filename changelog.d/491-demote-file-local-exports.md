@@ -1,0 +1,1 @@
+- [INTERNAL] Demote file-local type exports to internal declarations and remove unreferenced IdentityUsage interface (#491)

@@ -16,7 +16,7 @@ import { create } from "zustand";
 
 export type ConnectErrorTone = "error" | "warning";
 
-export interface ConnectErrorState {
+interface ConnectErrorState {
   /** The message to show, or null when there is nothing to report. */
   message: string | null;
   /**

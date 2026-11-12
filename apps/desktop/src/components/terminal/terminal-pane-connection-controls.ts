@@ -5,7 +5,7 @@ import { canRestoreSessionWithoutPrompt } from "../../lib/runtime-secrets";
 import { type HostRecord } from "../../types/host";
 import { type SessionConnectionState, type SessionPane, type SessionTransport } from "../../types/session";
 
-export interface TerminalPaneConnectionControlsOptions {
+interface TerminalPaneConnectionControlsOptions {
   activeHistoryEntryIdRef: MutableRefObject<string | undefined>;
   authMethod: HostRecord["authMethod"];
   backendSessionIdRef: MutableRefObject<string | undefined>;

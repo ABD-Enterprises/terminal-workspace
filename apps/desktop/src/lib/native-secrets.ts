@@ -1,6 +1,6 @@
 import { invokeTauriCommand, isTauriRuntime } from "./backend-runtime";
 
-export interface NativeHostSecrets {
+interface NativeHostSecrets {
   password: string;
   passphrase: string;
 }

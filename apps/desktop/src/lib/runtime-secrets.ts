@@ -9,7 +9,7 @@ import { useHostsStore } from "../store/hosts-store";
 import { useKeysStore } from "../store/keys-store";
 import type { HostRecord } from "../types/host";
 
-export interface HostSecretRequirement {
+interface HostSecretRequirement {
   needsPassword: boolean;
   needsPassphrase: boolean;
 }

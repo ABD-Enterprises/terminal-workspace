@@ -13,7 +13,7 @@ function sortRunbooks(runbooks: RunbookRecord[]) {
   return [...runbooks].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
-export interface RunbooksState {
+interface RunbooksState {
   runbooks: RunbookRecord[];
   createRunbook: (values: RunbookFormValues) => string;
   updateRunbook: (runbookId: string, values: RunbookFormValues) => string;

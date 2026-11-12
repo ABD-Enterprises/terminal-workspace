@@ -1,13 +1,13 @@
 import type { LocalConfigBundle, LocalConfigImportStrategy } from "./local-config";
 
-export interface VaultSyncCountSummary {
+interface VaultSyncCountSummary {
   hosts: number;
   keys: number;
   snippets: number;
   knownHosts: number;
 }
 
-export interface VaultSyncEnvelopeHeader {
+interface VaultSyncEnvelopeHeader {
   // #451: the schema identifier moved from "termsnip-vault-sync" to
   // "terminal-workspace-sync"; both stay at version 1 and both parse.
   schema: "terminal-workspace-sync";
@@ -22,7 +22,7 @@ export interface VaultSyncEnvelopeHeader {
   deletionCounts: VaultSyncCountSummary;
 }
 
-export interface VaultSyncCipherPayload {
+interface VaultSyncCipherPayload {
   algorithm: "AES-256-GCM";
   keyId: string;
   nonce: string;
@@ -30,7 +30,7 @@ export interface VaultSyncCipherPayload {
   authTag: string;
 }
 
-export interface VaultSyncEnvelope {
+interface VaultSyncEnvelope {
   header: VaultSyncEnvelopeHeader;
   cipher: VaultSyncCipherPayload;
   digest: {
@@ -39,7 +39,7 @@ export interface VaultSyncEnvelope {
   };
 }
 
-export interface VaultSyncLocalContext {
+interface VaultSyncLocalContext {
   vaultId: string;
   lastAppliedSnapshotId: string | null;
 }

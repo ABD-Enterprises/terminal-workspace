@@ -6,7 +6,7 @@ import { emptyHostFormValues } from "../types/host";
  * been resolved into per-host inherited options (so `Host *` defaults flow
  * down into every concrete alias).
  */
-export interface ImportedSshConfigHost {
+interface ImportedSshConfigHost {
   alias: string;
   hostname: string;
   username: string;
@@ -20,7 +20,7 @@ export interface SshConfigImportSkip {
   detail: string;
 }
 
-export interface SshConfigImportResult {
+interface SshConfigImportResult {
   /** Concrete hosts the user can be offered for import. */
   hosts: ImportedSshConfigHost[];
   /** Anything we silently dropped, with a reason — so callers can show a report. */

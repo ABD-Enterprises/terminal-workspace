@@ -650,7 +650,7 @@ export function appendPaneCommandHistoryOutput(
   };
 }
 
-export interface SessionsState extends SessionWorkspaceState {
+interface SessionsState extends SessionWorkspaceState {
   commandHistory: SessionCommandHistoryEntry[];
   openSession: (host: HostRecord) => string;
   duplicateSession: (host: HostRecord, baseTitle?: string) => string;

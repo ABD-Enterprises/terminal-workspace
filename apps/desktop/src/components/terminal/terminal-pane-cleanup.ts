@@ -4,7 +4,7 @@ import { type IDisposable, type Terminal } from "xterm";
 import { type SessionSocketLike } from "../../lib/api";
 import { clearViewportRefreshFrame, getPrivateViewport } from "./terminal-pane-viewport";
 
-export interface TerminalPaneCleanupOptions {
+interface TerminalPaneCleanupOptions {
   clearReconnectTimer: () => void;
   container: HTMLDivElement;
   contextMenuHandler: (event: MouseEvent) => void;

@@ -13,13 +13,13 @@ import { useKnownHostsStore } from "../store/known-hosts-store";
 import { requestFingerprintTrustPrompt } from "../store/fingerprint-trust-prompt-store";
 import { hostSupportsTrustedKeys, type HostRecord } from "../types/host";
 
-export interface EnsureTrustedHostKeyOptions {
+interface EnsureTrustedHostKeyOptions {
   /** Skip the modal prompt — used by background restore, which never wants
    *  to surface a popup. Returns false instead when trust is missing. */
   interactive?: boolean;
 }
 
-export interface EnsureTrustedHostKeyResult {
+interface EnsureTrustedHostKeyResult {
   ok: boolean;
   /** Reason for failure, surfaced in error UIs. */
   reason?:

@@ -25,7 +25,7 @@ export function isReconnectGiveUpNotice(notice: string | undefined): boolean {
   return Boolean(notice && notice.includes(GIVE_UP_MARKER));
 }
 
-export interface TerminalPaneNativeSessionOptions {
+interface TerminalPaneNativeSessionOptions {
   activeHistoryEntryIdRef: MutableRefObject<string | undefined>;
   agentForwarding: HostRecord["agentForwarding"];
   appendCommandOutput: (historyEntryId: string, outputPreview: string) => void;

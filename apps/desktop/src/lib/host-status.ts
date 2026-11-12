@@ -15,7 +15,7 @@
 
 import type { SessionConnectionState, SessionPane } from "../types/session";
 
-export type HostConnectionStatus = "connected" | "connecting" | "idle";
+type HostConnectionStatus = "connected" | "connecting" | "idle";
 
 export function deriveHostConnectionStatus(
   hostId: string,

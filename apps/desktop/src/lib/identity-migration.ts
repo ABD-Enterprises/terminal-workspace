@@ -22,7 +22,7 @@ import {
 } from "../types/identity";
 import type { KeyRecord } from "../types/key";
 
-export interface IdentityMigrationInput {
+interface IdentityMigrationInput {
   hosts: HostRecord[];
   keys: KeyRecord[];
   existingIdentities: IdentityRecord[];
@@ -38,7 +38,7 @@ export interface IdentityMigrationInput {
   now?: () => string;
 }
 
-export interface IdentityMigrationResult {
+interface IdentityMigrationResult {
   /** Identities that should be added to the store (existing identities are
    *  reused via `assignmentsByHostId`, not duplicated here). */
   identitiesToAdd: IdentityRecord[];

@@ -20,7 +20,7 @@ import type { KeyRecord } from "../types/key";
 import type { KnownHostRecord } from "../types/known-host";
 import type { SnippetRecord } from "../types/snippet";
 
-export interface LocalVaultMetadata {
+interface LocalVaultMetadata {
   schema: "local-first-vault";
   vaultId: string;
   sourceDeviceId: string;
@@ -144,12 +144,12 @@ export interface LocalConfigImportAnalysis {
   mergePlan: LocalConfigMergePlan | null;
 }
 
-export interface PreparedLocalConfigImport {
+interface PreparedLocalConfigImport {
   bundle: ImportedLocalConfigBundle;
   analysis: LocalConfigImportAnalysis;
 }
 
-export interface LocalConfigMergeSection {
+interface LocalConfigMergeSection {
   added: number;
   updated: number;
   removed: number;
@@ -159,7 +159,7 @@ export interface LocalConfigMergeSection {
   conflictingIds: string[];
 }
 
-export interface LocalConfigMergePlan {
+interface LocalConfigMergePlan {
   applicable: boolean;
   hasConflicts: boolean;
   hosts: LocalConfigMergeSection;
@@ -200,7 +200,7 @@ type ImportedLocalConfigBundle =
   | Version2LocalConfigBundle
   | LegacyLocalConfigBundle;
 
-export interface ApplyLocalConfigOptions {
+interface ApplyLocalConfigOptions {
   mode?: "replace" | "merge";
   conflictResolution?: "keep-local" | "prefer-imported";
 }

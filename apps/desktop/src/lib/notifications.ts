@@ -10,7 +10,7 @@
 
 import { useAppStore } from "../store/app-store";
 
-export type NotificationKind = "session-disconnected" | "snippet-finished";
+type NotificationKind = "session-disconnected" | "snippet-finished";
 
 interface NotifyArgs {
   kind: NotificationKind;
