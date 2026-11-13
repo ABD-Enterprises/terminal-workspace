@@ -76,6 +76,24 @@ html[data-app-theme="light"] {
 }
 
 /*
+ * #UX-2: dialogs stay dark in every theme. Their contents are written for a
+ * dark surface (pale slate/amber text), so the Modal frame re-declares the
+ * dark shell tokens for itself and everything inside it.
+ */
+.tw-modal-surface {
+  color-scheme: dark;
+  --shell-base: #07111b;
+  --shell-panel: #0d1724;
+  --shell-border: #1f2c42;
+  --shell-text: #ebf2ff;
+  --shell-muted: #8ea0bd;
+  --shell-accent: #76e4c3;
+  --shell-accent-ink: #06281f;
+  --shell-danger: #fb7185;
+  --shell-danger-strong: #f43f5e;
+}
+
+/*
  * #110: density tokens. Compact vs comfortable is driven from ONE source —
  * the `data-density` attribute set on the sidebar — instead of per-element
  * compact/comfortable ternaries. Components read these variables (e.g.
@@ -190,4 +208,63 @@ select {
 :where(a[href], button, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
   outline: 2px solid var(--shell-accent);
   outline-offset: 2px;
+}
+
+/*
+ * #UX-1 (Phase 1): honor macOS Reduce Motion. The standard recipe — collapse
+ * every animation/transition to an imperceptible instant. Individual
+ * components don't need their own gates.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * #UX-1 (Phase 1): narrow-window sidebar collapse, driven by a container
+ * query on the shell — no JS, and it reacts to any width change (window
+ * resize or split-pane drag). Below the threshold the sidebar becomes a
+ * 64px icon rail: the brand header, search, and host sections yield to
+ * content (HIG: sidebars defer to content) and every surviving control
+ * keeps its accessible name via aria-label/title.
+ */
+.tw-shell {
+  container-type: inline-size;
+  container-name: shell;
+}
+
+@container shell (max-width: 1100px) {
+  aside {
+    --sidebar-w: 64px;
+  }
+
+  aside .sidebar-aux {
+    display: none;
+  }
+
+  /* Host list sections inside the single scroll region. */
+  aside .sidebar-scroll > section {
+    display: none;
+  }
+
+  /* Nav rows become centered icon buttons. */
+  aside nav a {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  aside nav a .sidebar-label {
+    display: none;
+  }
+
+  /* Quick-launch becomes an icon-only button; the ❯ glyph is the affordance. */
+  aside .sidebar-icon-only {
+    display: inline-flex;
+  }
 }

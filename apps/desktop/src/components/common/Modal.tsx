@@ -158,7 +158,7 @@ export function Modal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-6 py-10 backdrop-blur-xs">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-xs sm:px-6 sm:py-10">
       <button
         type="button"
         tabIndex={-1}
@@ -176,9 +176,16 @@ export function Modal({
         Cancel + Create buttons were unreachable - reported by the user
         with a 13" MBP screenshot of the Add host modal.
 
-        #UX-2: the chrome reads shell theme tokens (--shell-*) so dialogs
-        follow light/dark like the rest of the app instead of hardcoded
-        slate that renders identically (and wrongly) in both themes.
+        #UX-1: use dynamic viewport units (dvh) and tighter padding on small
+        screens, so the clamp stays honest when the browser/Tauri chrome
+        shrinks the visual viewport and when the user sizes the window near
+        the new minimum (960x600).
+
+        #UX-2: the chrome reads shell theme tokens (--shell-*) and the frame
+        carries .tw-modal-surface, which pins those tokens to their dark
+        values. Dialog contents (forms, prompts) are written for a dark
+        surface (pale slate/amber text), so the dialog stays dark in both
+        themes instead of turning white under pale text.
       */}
       <div
         ref={dialogRef}
@@ -188,7 +195,7 @@ export function Modal({
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
         className={cn(
-          "relative z-10 flex max-h-[calc(100vh-5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[32px] border border-[color:var(--shell-border)] bg-[color:var(--shell-panel)] shadow-2xl shadow-slate-950/40 outline-none",
+          "tw-modal-surface relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[32px] border border-[color:var(--shell-border)] bg-[color:var(--shell-panel)] shadow-2xl shadow-slate-950/70 outline-none sm:max-h-[calc(100dvh-5rem)]",
           className
         )}
       >
