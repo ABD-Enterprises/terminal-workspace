@@ -111,4 +111,20 @@ describe("parseLiveSessionRefusal", () => {
 
     expect(parseLiveSessionRefusal(new Error("live-sessions:0"))).toBeNull();
   });
+
+  it("unwraps a typed IpcError object rejection (#485)", async () => {
+    const { parseLiveSessionRefusal } = await loadModule();
+
+    expect(
+      parseLiveSessionRefusal({
+        code: "internal",
+        message:
+          "Installing this update restarts the app and will close 2 live SSH session(s). " +
+          "Confirm to continue. live-sessions:2",
+      }),
+    ).toBe(2);
+    expect(
+      parseLiveSessionRefusal({ code: "internal", message: "No update is available to install" }),
+    ).toBeNull();
+  });
 });

@@ -1,0 +1,1 @@
+- [FIX] Unwrap typed `IpcError` object rejections in the update banner so the live-sessions refusal marker is detected and failure text is readable (#580)
