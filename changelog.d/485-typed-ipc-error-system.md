@@ -1,0 +1,1 @@
+- [INTERNAL] Migrated system and maintenance commands (`terminal_workspace_backend_status`, `terminal_workspace_copy_key_to_host`, `terminal_workspace_set_dock_badge`, `terminal_workspace_check_for_updates`, `terminal_workspace_install_update_and_restart`) to return typed `IpcError` across the IPC boundary (#485).

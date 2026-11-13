@@ -8,6 +8,7 @@
 
 import { useEffect, useReducer, useState } from "react";
 import {
+  errorMessageFromUnknown,
   installUpdateAndRestart,
   parseLiveSessionRefusal,
 } from "../../lib/auto-update";
@@ -152,7 +153,7 @@ export function UpdateAvailableBanner() {
       // install rejected into nothing and the banner just sat there.
       dispatchInstallProgress({
         type: "failed",
-        reason: error instanceof Error ? error.message : String(error),
+        reason: errorMessageFromUnknown(error),
       });
     } finally {
       // On the success path this never runs — the process has already been

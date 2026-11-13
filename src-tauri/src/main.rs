@@ -2608,7 +2608,7 @@ fn terminal_workspace_protocol_runtime_status(
 /// Backend status check. P2-NET: the native shell owns SSH/SFTP/forwarding,
 /// snippets, key tooling, and persistence, so no Node backend is contacted.
 #[tauri::command]
-async fn terminal_workspace_backend_status() -> Result<BackendStatusResponse, String> {
+async fn terminal_workspace_backend_status() -> Result<BackendStatusResponse, IpcError> {
     Ok(BackendStatusResponse {
         ok: true,
         backend_base_url: String::new(),
@@ -2899,7 +2899,7 @@ fn copy_key_to_host_blocking(
 async fn terminal_workspace_copy_key_to_host(
     native_host_keys: State<'_, SharedNativeHostKeyStore>,
     request: CopyKeyToHostRequest,
-) -> Result<CopyKeyToHostResponse, String> {
+) -> Result<CopyKeyToHostResponse, IpcError> {
     let host_key_store = native_host_keys.inner().clone();
     let hostname = request.host.hostname.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -2916,7 +2916,7 @@ async fn terminal_workspace_copy_key_to_host(
 async fn terminal_workspace_set_dock_badge(
     request: SetDockBadgeRequest,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let count_opt = if request.count > 0 {
         Some(request.count)
     } else {
@@ -2925,7 +2925,7 @@ async fn terminal_workspace_set_dock_badge(
     if let Some(window) = app.get_webview_window("main") {
         window
             .set_badge_count(count_opt)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| IpcError::internal(error.to_string()))?;
     }
     Ok(())
 }
@@ -2975,10 +2975,16 @@ fn emit_update_install_progress_event(app: &AppHandle, event: UpdateInstallProgr
 async fn terminal_workspace_check_for_updates(
     app: tauri::AppHandle,
     _request: UpdateCheckRequest,
-) -> Result<UpdateCheckResult, String> {
+) -> Result<UpdateCheckResult, IpcError> {
     use tauri_plugin_updater::UpdaterExt;
-    let updater = app.updater().map_err(|error| error.to_string())?;
-    match updater.check().await.map_err(|error| error.to_string())? {
+    let updater = app
+        .updater()
+        .map_err(|error| IpcError::internal(error.to_string()))?;
+    match updater
+        .check()
+        .await
+        .map_err(|error| IpcError::internal(error.to_string()))?
+    {
         Some(update) => Ok(UpdateCheckResult {
             available: true,
             version: Some(update.version.clone()),
@@ -3001,7 +3007,7 @@ async fn terminal_workspace_install_update_and_restart(
     app: tauri::AppHandle,
     native_sessions: State<'_, NativeSessionRegistry>,
     request: InstallUpdateRequest,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     use tauri_plugin_updater::UpdaterExt;
 
     // #148: the session count is checked TWICE, and the second one is the one
@@ -3017,19 +3023,21 @@ async fn terminal_workspace_install_update_and_restart(
     if !request.force {
         let live = live_native_session_count(native_sessions.inner());
         if live > 0 {
-            return Err(format!(
+            return Err(IpcError::internal(format!(
                 "Installing this update restarts the app and will close {live} live SSH \
                  session(s). Confirm to continue. {LIVE_SESSIONS_REFUSAL_MARKER}{live}"
-            ));
+            )));
         }
     }
 
-    let updater = app.updater().map_err(|error| error.to_string())?;
+    let updater = app
+        .updater()
+        .map_err(|error| IpcError::internal(error.to_string()))?;
     let update = updater
         .check()
         .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "No update is available to install".to_string())?;
+        .map_err(|error| IpcError::internal(error.to_string()))?
+        .ok_or_else(|| IpcError::internal("No update is available to install".to_string()))?;
 
     // #239: downloading can take tens of seconds, so report cumulative bytes
     // while a total is known and explicitly switch phases before installation.
@@ -3059,7 +3067,7 @@ async fn terminal_workspace_install_update_and_restart(
             },
         )
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| IpcError::internal(error.to_string()))?;
 
     // #148: re-check immediately before the restart. The update is downloaded
     // and staged at this point, so refusing here is not a failure — Tauri applies
@@ -3069,11 +3077,11 @@ async fn terminal_workspace_install_update_and_restart(
     if !request.force {
         let live = live_native_session_count(native_sessions.inner());
         if live > 0 {
-            return Err(format!(
+            return Err(IpcError::internal(format!(
                 "The update is downloaded and will be applied the next time you quit and \
                  reopen the app. Restarting now would close {live} live SSH session(s). \
                  {LIVE_SESSIONS_REFUSAL_MARKER}{live}"
-            ));
+            )));
         }
     }
 
