@@ -65,6 +65,11 @@ describe("src-tauri/capabilities/default.json", () => {
       callSite: "apps/desktop/src/components/layout/AppShell.tsx",
     },
     {
+      command: "window.close",
+      permission: "core:window:allow-close",
+      callSite: "apps/desktop/src/components/layout/AppShell.tsx (Cmd+W with no tabs)",
+    },
+    {
       command: "log.attachConsole",
       permission: "log:default",
       callSite: "apps/desktop/src/main.tsx",
