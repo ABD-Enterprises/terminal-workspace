@@ -1,0 +1,1 @@
+- [INTERNAL] Migrated network and host commands (`terminal_workspace_scan_known_host`, `terminal_workspace_create_forward`, `terminal_workspace_execute_snippet_on_hosts`) to return typed `IpcError` across the IPC boundary (#485).
