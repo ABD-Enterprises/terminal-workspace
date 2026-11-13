@@ -3138,52 +3138,64 @@ async fn terminal_workspace_execute_snippet_on_hosts(
 async fn terminal_workspace_persistence_read_store(
     state: tauri::State<'_, persistence::PersistenceStore>,
     request: persistence::StoreRequest,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, IpcError> {
     let _in_flight = state.in_flight().await;
-    persistence::read_store(state.pool(), &request.store).await
+    persistence::read_store(state.pool(), &request.store)
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 async fn terminal_workspace_persistence_write_store(
     state: tauri::State<'_, persistence::PersistenceStore>,
     request: persistence::StoreWriteRequest,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let _in_flight = state.in_flight().await;
-    persistence::write_store(state.pool(), &request.store, &request.payload).await
+    persistence::write_store(state.pool(), &request.store, &request.payload)
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 async fn terminal_workspace_persistence_remove_store(
     state: tauri::State<'_, persistence::PersistenceStore>,
     request: persistence::StoreRequest,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let _in_flight = state.in_flight().await;
-    persistence::remove_store(state.pool(), &request.store).await
+    persistence::remove_store(state.pool(), &request.store)
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 async fn terminal_workspace_persistence_read_deletions(
     state: tauri::State<'_, persistence::PersistenceStore>,
-) -> Result<Vec<persistence::DeletionRecord>, String> {
+) -> Result<Vec<persistence::DeletionRecord>, IpcError> {
     let _in_flight = state.in_flight().await;
-    persistence::read_deletions(state.pool()).await
+    persistence::read_deletions(state.pool())
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 async fn terminal_workspace_persistence_replace_deletions(
     state: tauri::State<'_, persistence::PersistenceStore>,
     request: persistence::DeletionsReplaceRequest,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let _in_flight = state.in_flight().await;
-    persistence::replace_deletions(state.pool(), &request.records).await
+    persistence::replace_deletions(state.pool(), &request.records)
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 async fn terminal_workspace_persistence_clear_deletions(
     state: tauri::State<'_, persistence::PersistenceStore>,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let _in_flight = state.in_flight().await;
-    persistence::clear_deletions(state.pool()).await
+    persistence::clear_deletions(state.pool())
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
