@@ -28,19 +28,11 @@ export function ConnectErrorBanner() {
           : "flex flex-wrap items-center justify-between gap-3 border-b border-rose-400/40 bg-rose-400/10 px-4 py-2"
       }
     >
-      <p
-        className={
-          isWarning
-            ? "text-callout font-medium text-amber-100"
-            : "text-callout font-medium text-rose-100"
-        }
-      >
-        {message}
-      </p>
+      <p className="text-callout font-medium text-[color:var(--shell-text)]">{message}</p>
       <button
         type="button"
         onClick={clearConnectError}
-        className="rounded-control border border-slate-700 px-3 py-1 text-callout text-slate-200 transition hover:border-slate-500 hover:text-white"
+        className="rounded-control border border-[color:var(--shell-border)] px-3 py-1 text-callout text-[color:var(--shell-text)] transition hover:border-[color:var(--shell-muted)]"
       >
         Dismiss
       </button>

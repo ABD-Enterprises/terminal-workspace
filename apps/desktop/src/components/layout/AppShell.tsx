@@ -168,6 +168,18 @@ export function AppShell() {
         case "menu:close-tab": {
           if (activeSessionTab) {
             closeTab(activeSessionTab.id);
+            break;
+          }
+          // #UX-2: macOS convention — ⌘W closes the tab, and once no tabs
+          // remain it closes the window. Previously the item silently did
+          // nothing on an empty workspace.
+          if (isTauriRuntime()) {
+            void import("@tauri-apps/api/window")
+              .then(({ getCurrentWindow }) => getCurrentWindow().close())
+              .catch(() => {
+                // Window API unavailable (unit tests, browser build) —
+                // nothing to close anyway.
+              });
           }
           break;
         }

@@ -158,7 +158,7 @@ export function Modal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-xs sm:px-6 sm:py-10">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs sm:px-6 sm:py-10">
       <button
         type="button"
         tabIndex={-1}
@@ -180,6 +180,10 @@ export function Modal({
         screens, so the clamp stays honest when the browser/Tauri chrome
         shrinks the visual viewport and when the user sizes the window near
         the new minimum (960x600).
+
+        #UX-2: the chrome reads shell theme tokens (--shell-*) so dialogs
+        follow light/dark like the rest of the app instead of hardcoded
+        slate that renders identically (and wrongly) in both themes.
       */}
       <div
         ref={dialogRef}
@@ -189,29 +193,29 @@ export function Modal({
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
         className={cn(
-          "relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[32px] border border-slate-700/70 bg-slate-900 shadow-2xl shadow-slate-950/70 outline-none sm:max-h-[calc(100dvh-5rem)]",
+          "relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[32px] border border-[color:var(--shell-border)] bg-[color:var(--shell-panel)] shadow-2xl shadow-slate-950/40 outline-none sm:max-h-[calc(100dvh-5rem)]",
           className
         )}
       >
         <div className="flex shrink-0 items-start justify-between gap-4 px-6 pt-6 pb-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.26em] text-emerald-300">
+            <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[color:var(--shell-accent)]">
               Local Workspace
             </p>
-            <h2 id={titleId} className="mt-2 text-2xl font-semibold text-slate-50">{title}</h2>
-            {description ? <p id={descriptionId} className="mt-2 text-sm text-slate-400">{description}</p> : null}
+            <h2 id={titleId} className="mt-2 text-2xl font-semibold text-[color:var(--shell-text)]">{title}</h2>
+            {description ? <p id={descriptionId} className="mt-2 text-sm text-[color:var(--shell-muted)]">{description}</p> : null}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-2xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-200 transition hover:border-slate-500 hover:text-white"
+            className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-base)] px-3 py-2 text-sm text-[color:var(--shell-text)] transition hover:border-[color:var(--shell-muted)]"
           >
             Esc
           </button>
         </div>
         {children ? <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">{children}</div> : null}
         {footer ? (
-          <div className="shrink-0 border-t border-slate-800 bg-slate-900 px-6 py-5">
+          <div className="shrink-0 border-t border-[color:var(--shell-border)] bg-[color:var(--shell-panel)] px-6 py-5">
             {footer}
           </div>
         ) : null}

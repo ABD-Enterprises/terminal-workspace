@@ -68,6 +68,8 @@ interface AppState {
   setLastAppliedSnapshotId: (snapshotId: string | null) => void;
   markImportCalloutSeen: () => void;
   markFirstRunTourSeen: () => void;
+  /** #UX-2: re-show the one-shot first-run tour (Settings affordance). */
+  replayFirstRunTour: () => void;
   setAppShellTheme: (theme: AppShellTheme) => void;
   setNotificationsEnabled: (enabled: boolean) => void;
   setDockBadgeEnabled: (enabled: boolean) => void;
@@ -229,6 +231,7 @@ export const useAppStore = create<AppState>()(
       setLastAppliedSnapshotId: (lastAppliedSnapshotId) => set({ lastAppliedSnapshotId }),
       markImportCalloutSeen: () => set({ sawImportCallout: true }),
       markFirstRunTourSeen: () => set({ sawFirstRunTour: true }),
+      replayFirstRunTour: () => set({ sawFirstRunTour: false }),
       setAppShellTheme: (appShellTheme) => set({ appShellTheme }),
       setNotificationsEnabled: (notificationsEnabled) => set({ notificationsEnabled }),
       setDockBadgeEnabled: (dockBadgeEnabled) => set({ dockBadgeEnabled }),
