@@ -13,6 +13,7 @@ export function SettingsPreferencesSection() {
   const setWorkspaceDensity = useAppStore((state) => state.setWorkspaceDensity);
   const sectionShortcutsEnabled = useAppStore((state) => state.sectionShortcutsEnabled);
   const setSectionShortcutsEnabled = useAppStore((state) => state.setSectionShortcutsEnabled);
+  const replayFirstRunTour = useAppStore((state) => state.replayFirstRunTour);
   const demoModeEnabled = useAppStore((state) => state.demoModeEnabled);
   const setDemoModeEnabled = useAppStore((state) => state.setDemoModeEnabled);
   const terminalTheme = useAppStore((state) => state.terminalTheme);
@@ -123,6 +124,24 @@ export function SettingsPreferencesSection() {
               <p className="mt-2 text-sm leading-5 text-slate-300">
                 When enabled, {formatPrimaryShortcut("1")} through {formatPrimaryShortcut(String(navigationItems.length))}{" "}
                 jump sections and the shell keeps a single shortcut hint in the header.
+              </p>
+            </div>
+
+            <div className="rounded-[16px] border border-slate-800 bg-slate-900/60 p-3">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                First-run tour
+              </p>
+              <button
+                type="button"
+                onClick={replayFirstRunTour}
+                className="mt-2 inline-flex items-center gap-2 rounded-[14px] border border-slate-800 bg-slate-950/70 px-3 py-2 text-sm text-slate-300 transition hover:border-slate-700 hover:text-white"
+              >
+                <span>Replay welcome tour</span>
+              </button>
+              <p className="mt-2 text-sm leading-5 text-slate-300">
+                Shows the one-shot welcome card again — the one that points at the{" "}
+                <kbd className="font-mono">?</kbd> cheatsheet and the command palette. It dismisses
+                itself on your next navigation.
               </p>
             </div>
 

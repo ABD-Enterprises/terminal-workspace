@@ -23,7 +23,7 @@ export function DemoModeBanner() {
     <div
       role="status"
       aria-label="Demo mode"
-      className="border-b border-amber-300/40 bg-amber-300/10 px-4 py-2 text-sm font-semibold text-amber-100"
+      className="border-b border-amber-300/40 bg-amber-300/10 px-4 py-2 text-sm font-semibold text-[color:var(--shell-text)]"
     >
       Demo mode — connections are simulated and the output you see is fabricated, not real.
     </div>

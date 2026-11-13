@@ -220,6 +220,7 @@ export function TerminalPane({ host, pane, active, onActivate, onSplit, onClose 
               <button
                 type="button"
                 aria-label="Dismiss error notice"
+                title="Dismiss error notice"
                 onClick={(event) => {
                   event.stopPropagation();
                   setDismissedError(pane.connectionError ?? null);

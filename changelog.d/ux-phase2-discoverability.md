@@ -1,0 +1,1 @@
+- [FEATURE] Phase 2 UX pass: dialogs and banners now follow the shell light/dark tokens, ConfirmDialog gains a destructive/primary tone, ⌘W closes the window when no tabs remain, and the first-run tour is replayable from Settings

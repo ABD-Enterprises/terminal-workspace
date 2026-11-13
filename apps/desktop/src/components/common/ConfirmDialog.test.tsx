@@ -101,4 +101,34 @@ describe("ConfirmDialog", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
+
+  it("renders the accent style for tone=primary and the danger style by default", () => {
+    const { unmount } = render(
+      <ConfirmDialog
+        open={true}
+        title="Proceed"
+        description="Non-destructive action."
+        confirmLabel="Proceed"
+        tone="primary"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("button", { name: "Proceed" }).className).toContain("var(--shell-accent)");
+    unmount();
+
+    render(
+      <ConfirmDialog
+        open={true}
+        title="Delete"
+        description="Irreversible action."
+        confirmLabel="Delete"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("button", { name: "Delete" }).className).toContain(
+      "var(--shell-danger-strong)"
+    );
+  });
 });

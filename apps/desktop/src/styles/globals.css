@@ -58,6 +58,9 @@ html[data-app-theme="dark"] {
   --shell-text: #ebf2ff;
   --shell-muted: #8ea0bd;
   --shell-accent: #76e4c3;
+  --shell-accent-ink: #06281f;
+  --shell-danger: #fb7185;
+  --shell-danger-strong: #f43f5e;
 }
 
 html[data-app-theme="light"] {
@@ -68,6 +71,8 @@ html[data-app-theme="light"] {
   --shell-text: #122033;
   --shell-muted: #5c708a;
   --shell-accent: #1a9474;
+  --shell-danger: #be123c;
+  --shell-danger-strong: #e11d48;
 }
 
 /*
