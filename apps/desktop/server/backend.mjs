@@ -14,11 +14,9 @@ import {
 } from "node:fs/promises";
 import { connect as connectNet, createServer as createNetServer } from "node:net";
 import { basename, dirname, join, normalize, posix as posixPath } from "node:path";
-import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import { Client } from "ssh2";
 import { WebSocketServer } from "ws";
 import {
   isRequestAuthorized,
@@ -29,30 +27,23 @@ import {
   describeServerListenError,
   shutdownBackend,
 } from "./backend-lifecycle.mjs";
-import { resolveRemotePath, sanitizeFilename } from "./backend-paths.mjs";
 import { globMatcher } from "./backend-glob.mjs";
 import { createStaticHandler } from "./backend-static.mjs";
 import {
   buildExecCommand,
-  buildInteractiveShellCommand,
   getChannelEnvironment,
   shellSingleQuote,
 } from "./backend-shell.mjs";
 import {
   REMOTE_COMMAND_TIMEOUT_MS,
-  SFTP_DOWNLOAD_IDLE_TIMEOUT_MS,
-  SFTP_DOWNLOAD_TOTAL_TIMEOUT_MS,
-  SFTP_UPLOAD_TIMEOUT_MS,
   withDeadline,
 } from "./backend-deadline.mjs";
 import { createWithSftp } from "./backend-sftp.mjs";
 import { respondError, sendJson } from "./backend-responses.mjs";
-import { requestAuthContext, sshAuthOptions } from "./backend-ssh-auth.mjs";
+import { requestAuthContext } from "./backend-ssh-auth.mjs";
 import {
   createBackendCommandOperations,
-  waitForSshReady,
 } from "./backend-command-operations.mjs";
-import { SecretBuffer } from "./secrets.mjs";
 import {
   bufferDetachedOutput,
   isJsonContentType,
@@ -64,9 +55,7 @@ import {
   createHostKeyStore,
   parseKeyscanOutput,
   resolveAppDataDirectory,
-  selectHostKeyVerifier,
 } from "./backend-host-keys.mjs";
-import { assertHostRequestIsAllowed } from "./backend-host-validation.mjs";
 import {
   projectSshConfigResolutionFailure,
   resolveSshConfigPath,
@@ -74,6 +63,8 @@ import {
   SshConfigResolutionRegistry,
 } from "./ssh-config-resolution.mjs";
 
+import { createSshSessionManager } from "./backend-ssh-session.mjs";
+import { createSftpOperations } from "./backend-sftp-ops.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appRoot = normalize(join(__dirname, ".."));
 const distRoot = join(appRoot, "dist");
@@ -106,9 +97,6 @@ function denyUnauthorized(response, decision) {
 }
 
 const sessions = new Map();
-const FILE_TYPE_MASK = 0o170000;
-const DIRECTORY_TYPE = 0o040000;
-const LINK_TYPE = 0o120000;
 const execFileAsync = promisify(execFile);
 const forwards = new Map();
 
@@ -207,38 +195,6 @@ async function globSshConfigFiles(pattern, context) {
   return { matches, truncated };
 }
 
-function isDirectory(attrs, longname = "") {
-  if (typeof attrs?.mode === "number") {
-    return (attrs.mode & FILE_TYPE_MASK) === DIRECTORY_TYPE;
-  }
-
-  return longname.startsWith("d");
-}
-
-function isLink(attrs, longname = "") {
-  if (typeof attrs?.mode === "number") {
-    return (attrs.mode & FILE_TYPE_MASK) === LINK_TYPE;
-  }
-
-  return longname.startsWith("l");
-}
-
-function formatPermissions(mode) {
-  if (typeof mode !== "number") {
-    return undefined;
-  }
-
-  return (mode & 0o777).toString(8).padStart(3, "0");
-}
-
-function toIsoTimestamp(unixSeconds) {
-  if (typeof unixSeconds !== "number" || Number.isNaN(unixSeconds)) {
-    return undefined;
-  }
-
-  return new Date(unixSeconds * 1000).toISOString();
-}
-
 function getErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -299,520 +255,28 @@ function getHostKeyStore() {
   return hostKeyStore;
 }
 
-async function createConnectConfig(host) {
-  // #473: every SSH connection (sessions, file transfer, remote commands,
-  // each jump hop) is built here, so these rules cover them all. Checked
-  // before anything else, so a refused request opens no connection.
-  const authOptions = sshAuthOptions(host, {
-    authorizedBy: requestAuthContext.getStore()?.authorizedBy,
-    agentSocket: process.env.SSH_AUTH_SOCK,
-  });
-
-  // Defense-in-depth: even if a caller bypasses connections.ts (e.g. talks to
-  // the backend HTTP API directly), refuse to connect when the host requires
-  // a trusted key and we were not given one. See parity-and-hardening-review §3.S-1.
-  if (host.hostKeyPolicy === "requireTrusted" && !host.knownHostPublicKey) {
-    throw new Error(
-      `Trusted host key required for ${host.hostname}:${host.port} but none was provided. Scan and trust the host first.`
-    );
-  }
-
-  // The host record arrives in the request body, so the parts the backend must
-  // not take on trust are checked before anything is done with it: an
-  // unrecognised authMethod, and agent forwarding the backend was not
-  // authorised to perform. See backend-host-validation.mjs.
-  assertHostRequestIsAllowed(host);
-
-  const connectConfig = {
-    host: host.hostname,
-    port: host.port,
-    username: host.username,
-    tryKeyboard: false,
-    readyTimeout: 10000,
-  };
-
-  // Filled in by the verifier when it refuses the host, so the connect path
-  // can report why instead of ssh2's bare "Host denied (verification failed)".
-  let hostKeyFailure;
-  // #489: an approved key decides alone; otherwise trust on first use
-  // against the durable store (SEC-2). `hostVerifier` is NEVER left undefined:
-  // ssh2's default accepts whatever answers the socket. The verifier runs
-  // during the handshake, before authentication, so a refused host never
-  // receives the password or the private key, and it fills in `failure` so
-  // the connect path can report why.
-  const verifier = selectHostKeyVerifier({ host, getStore: getHostKeyStore });
-  connectConfig.hostVerifier = verifier.verify;
-  hostKeyFailure = verifier.failure;
-
-  Object.assign(connectConfig, authOptions);
-
-  // Secret-handling: wrap any password / passphrase / private-key bytes in a
-  // SecretBuffer and remember a scrub callback for each. The caller is
-  // responsible for invoking `scrub()` on the returned bundle after
-  // ssh2's `client.connect()` has consumed the values (i.e. on both the
-  // ready and error edges). See parity-and-hardening-review §3.S-3 / plan
-  // P1-S3.
-  const cleanups = [];
-  const scrubBundle = () => {
-    while (cleanups.length > 0) {
-      const fn = cleanups.pop();
-      try {
-        fn();
-      } catch {
-        // Ignore — best-effort cleanup must not throw.
-      }
-    }
-  };
-
-  if (host.authMethod === "password") {
-    // ssh2 only accepts a string for the password field (the implementation
-    // explicitly checks `typeof === 'string'`). We keep our own copy as a
-    // SecretBuffer; the string version is materialised here, lives on
-    // connectConfig.password until scrub, and ssh2 will internalise its own
-    // copy synchronously when client.connect() runs.
-    const passwordSecret = SecretBuffer.fromString(host.password ?? "");
-    connectConfig.password = passwordSecret.asString();
-    cleanups.push(() => {
-      passwordSecret.scrub();
-      // Drop our reference to the materialised string so the V8 heap copy
-      // becomes garbage-collectable (does not zero the V8 string itself).
-      connectConfig.password = "";
-    });
-  } else if (host.authMethod === "privateKey") {
-    // Read the private key as a Buffer (the default for fs.readFile without
-    // an encoding) so we can fill it with zeros after ssh2 has parsed it.
-    const keyBuffer = await readFile(expandHome(host.privateKeyPath));
-    connectConfig.privateKey = keyBuffer;
-    cleanups.push(() => {
-      keyBuffer.fill(0);
-      connectConfig.privateKey = Buffer.alloc(0);
-    });
-
-    if (host.passphrase) {
-      // ssh2's parseKey accepts Buffer for the passphrase (used by
-      // bcrypt_pbkdf and crypto.createHash().update()), so we can pass the
-      // SecretBuffer's underlying Buffer directly.
-      const passphraseSecret = SecretBuffer.fromString(host.passphrase);
-      connectConfig.passphrase = passphraseSecret.asBuffer();
-      cleanups.push(() => {
-        passphraseSecret.scrub();
-        connectConfig.passphrase = Buffer.alloc(0);
-      });
-    }
-  }
-
-  return { config: connectConfig, scrub: scrubBundle, hostKeyFailure };
-}
-
-async function openJumpSocket(host, setStage) {
-  const jumpClient = await connectClient(host.jumpHost, setStage);
-
-  try {
-    const socket = await new Promise((resolve, reject) => {
-      jumpClient.forwardOut("127.0.0.1", 0, host.hostname, host.port, (error, stream) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve(stream);
-      });
-    });
-
-    return { jumpClient, socket };
-  } catch (error) {
-    jumpClient.end();
-    throw error;
-  }
-}
-
-async function connectClient(host, setStage) {
-  setStage?.("configuration");
-  const client = new Client();
-  const { config: connectConfig, scrub, hostKeyFailure } = await createConnectConfig(host);
-  setStage?.("connect");
-  const jumpConnection = host.jumpHost ? await openJumpSocket(host, setStage) : undefined;
-
-  if (jumpConnection?.socket) {
-    connectConfig.sock = jumpConnection.socket;
-  }
-
-  try {
-    return await waitForSshReady(
-      client,
-      connectConfig,
-      jumpConnection?.jumpClient,
-      setStage
-    );
-  } catch (error) {
-    // A refused host key is reported with the reason, not ssh2's bare
-    // "Host denied (verification failed)".
-    if (hostKeyFailure.error) {
-      throw hostKeyFailure.error;
-    }
-    throw error;
-  } finally {
-    // Whether the SSH handshake succeeded or failed, ssh2 has already read
-    // password / passphrase / private-key bytes off connectConfig (the
-    // copies happen synchronously inside client.connect()). Wipe our
-    // copies so they do not sit on the heap for the lifetime of the
-    // session. ssh2 keeps its own internal copy of `password` (out of our
-    // scrub reach) — see parity-and-hardening-review §3.S-3.
-    scrub();
-  }
-}
+const {
+  connectClient,
+  createSshSession,
+} = createSshSessionManager({
+  sessions,
+  getHostKeyStore,
+  closeForwardsForSession,
+  broadcast,
+  failSession,
+  expandHome,
+});
 
 const withSftp = createWithSftp({ connectClient });
 
-async function createSshSession(host) {
-  const session = {
-    id: randomUUID(),
-    host,
-    client: new Client(),
-    jumpClient: null,
-    stream: null,
-    ws: null,
-    state: "connecting",
-    buffer: [],
-    bufferBytes: 0,
-    droppedBytes: 0,
-    // Set when the session fails, and replayed to a websocket that attaches
-    // after the failure. See failSession.
-    failureMessage: null,
-  };
-  // M05 / #87: connectClient (the short-lived path) properly destructures
-  // both fields and runs scrub() in finally. createSshSession (the
-  // long-lived path) previously discarded the scrub callback entirely —
-  // password / passphrase / private-key bytes sat on the heap for the
-  // session's whole lifetime. Capture both, scrub right after connect()
-  // returns synchronously (ssh2 has consumed the secrets by then per the
-  // contract documented in connectClient's finally block).
-  const { config: connectConfig, scrub: scrubConfig, hostKeyFailure } =
-    await createConnectConfig(host);
-  const jumpConnection = host.jumpHost ? await openJumpSocket(host) : undefined;
-
-  if (jumpConnection?.socket) {
-    connectConfig.sock = jumpConnection.socket;
-    session.jumpClient = jumpConnection.jumpClient;
-  }
-
-  session.client.on("ready", () => {
-    const shellWindow = {
-      term: "xterm-256color",
-      cols: 120,
-      rows: 36,
-    };
-    const shellEnvironment = getChannelEnvironment(host.environment);
-    const interactiveShellCommand = buildInteractiveShellCommand(host.environment);
-    const onShellReady = (error, stream) => {
-      if (error) {
-        failSession(session, error);
-        return;
-      }
-
-      session.stream = stream;
-      session.state = "connected";
-      broadcast(session, {
-        type: "status",
-        state: "connected",
-      });
-
-      stream.on("data", (chunk) => {
-        broadcast(session, {
-          type: "data",
-          data: chunk.toString("utf8"),
-        });
-      });
-
-      stream.on("close", async () => {
-        // M09 / #91: closeForwardsForSession used to run concurrently
-        // with sessions.delete(session.id), which let forward
-        // onConnection handlers reference a deleted sessionId and
-        // error out. Await the forward cleanup BEFORE removing the
-        // session from the map. The client.end() + jumpClient.end()
-        // calls are idempotent; they can run regardless of state.
-        session.state = "disconnected";
-        broadcast(session, {
-          type: "status",
-          state: "disconnected",
-        });
-        try {
-          await closeForwardsForSession(session.id);
-        } finally {
-          sessions.delete(session.id);
-          session.client.end();
-          session.jumpClient?.end();
-        }
-      });
-    };
-
-    if (interactiveShellCommand) {
-      session.client.exec(
-        interactiveShellCommand,
-        shellEnvironment ? { env: shellEnvironment, pty: shellWindow } : { pty: shellWindow },
-        onShellReady
-      );
-    } else if (shellEnvironment) {
-      session.client.shell(shellWindow, { env: shellEnvironment }, onShellReady);
-    } else {
-      session.client.shell(shellWindow, onShellReady);
-    }
-  });
-
-  session.client.on("error", (error) => {
-    session.jumpClient?.end();
-    // A refused host key is reported with the reason, not ssh2's bare
-    // "Host denied (verification failed)".
-    failSession(session, hostKeyFailure.error ?? error);
-  });
-
-  session.client.on("close", () => {
-    if (session.state !== "disconnected") {
-      session.state = "disconnected";
-      broadcast(session, {
-        type: "status",
-        state: "disconnected",
-      });
-    }
-    void closeForwardsForSession(session.id);
-    session.jumpClient?.end();
-  });
-
-  try {
-    session.client.connect(connectConfig);
-  } finally {
-    // ssh2 reads password / passphrase / privateKey synchronously inside
-    // client.connect() (same contract connectClient relies on). Wipe our
-    // copies so they do not sit on the heap for the session lifetime.
-    scrubConfig();
-  }
-  sessions.set(session.id, session);
-  return session;
-}
-
-async function listRemoteDirectory(host, pathname) {
-  return withSftp(host, async ({ sftp }) => {
-    const targetPath = resolveRemotePath(host.sftpRoot ?? "/", pathname);
-    const entries = await new Promise((resolve, reject) => {
-      sftp.readdir(targetPath, (error, list) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve(list ?? []);
-      });
-    });
-
-    return {
-      path: targetPath,
-      entries: entries
-        .filter((entry) => entry.filename !== "." && entry.filename !== "..")
-        .map((entry) => ({
-          name: entry.filename,
-          path: resolveRemotePath(targetPath, entry.filename),
-          kind: isDirectory(entry.attrs, entry.longname) ? "directory" : "file",
-          size: entry.attrs?.size ?? 0,
-          permissions: formatPermissions(entry.attrs?.mode),
-          modifiedAt: toIsoTimestamp(entry.attrs?.mtime),
-          linked: isLink(entry.attrs, entry.longname),
-        }))
-        .sort((left, right) => {
-          if (left.kind !== right.kind) {
-            return left.kind === "directory" ? -1 : 1;
-          }
-
-          return left.name.localeCompare(right.name);
-        }),
-    };
-  });
-}
-
-async function createRemoteDirectory(host, pathname) {
-  return withSftp(host, async ({ sftp }) => {
-    const targetPath = resolveRemotePath(host.sftpRoot ?? "/", pathname);
-
-    await new Promise((resolve, reject) => {
-      sftp.mkdir(targetPath, (error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve();
-      });
-    });
-
-    return targetPath;
-  });
-}
-
-async function renameRemoteEntry(host, currentPath, nextPath) {
-  return withSftp(host, async ({ sftp }) => {
-    const sourcePath = resolveRemotePath(host.sftpRoot ?? "/", currentPath);
-    const targetPath = resolveRemotePath(host.sftpRoot ?? "/", nextPath);
-
-    await new Promise((resolve, reject) => {
-      sftp.rename(sourcePath, targetPath, (error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve();
-      });
-    });
-
-    return targetPath;
-  });
-}
-
-async function deleteRemoteEntry(host, pathname, isDirectoryEntry) {
-  return withSftp(host, async ({ sftp }) => {
-    const targetPath = resolveRemotePath(host.sftpRoot ?? "/", pathname);
-
-    await new Promise((resolve, reject) => {
-      const done = (error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve();
-      };
-
-      if (isDirectoryEntry) {
-        sftp.rmdir(targetPath, done);
-      } else {
-        sftp.unlink(targetPath, done);
-      }
-    });
-  });
-}
-
-async function uploadRemoteFile(host, pathname, contentsBase64) {
-  // #182: a TOTAL budget, not idle — sftp.write's single callback exposes no
-  // incremental progress to reset against. Sized for the request cap in
-  // backend-deadline.mjs.
-  return withSftp(host, { timeoutMs: SFTP_UPLOAD_TIMEOUT_MS }, async ({ sftp, onTimeout }) => {
-    const targetPath = resolveRemotePath(host.sftpRoot ?? "/", pathname);
-    const buffer = Buffer.from(contentsBase64, "base64");
-    const handle = await new Promise((resolve, reject) => {
-      sftp.open(targetPath, "w", (error, nextHandle) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve(nextHandle);
-      });
-    });
-
-    // Best-effort, never awaited: a timeout must not leave a file handle open
-    // on the remote. Guarded so it cannot race the normal close below, and the
-    // channel/transport teardown that follows is the real guarantee.
-    let closeStarted = false;
-    onTimeout(() => {
-      if (closeStarted) {
-        return;
-      }
-      closeStarted = true;
-      sftp.close(handle, () => {});
-    });
-
-    try {
-      await new Promise((resolve, reject) => {
-        sftp.write(handle, buffer, 0, buffer.length, 0, (error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve();
-        });
-      });
-    } finally {
-      closeStarted = true;
-      await new Promise((resolve, reject) => {
-        sftp.close(handle, (error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve();
-        });
-      });
-    }
-
-    return targetPath;
-  });
-}
-
-async function sendRemoteFile(response, host, pathname) {
-  // #182: an IDLE deadline, so a large download that is slow but progressing is
-  // not killed; only silence ends it.
-  // #288: plus an absolute ceiling, because "not idle" is a bar a hostile or
-  // broken peer clears by dripping one byte per interval forever. Idle bounds
-  // silence; the ceiling bounds the transfer.
-  await withSftp(
-    host,
-    {
-      timeoutMs: SFTP_DOWNLOAD_IDLE_TIMEOUT_MS,
-      totalTimeoutMs: SFTP_DOWNLOAD_TOTAL_TIMEOUT_MS,
-    },
-    async ({ sftp, onTimeout, resetDeadline }) => {
-      const targetPath = resolveRemotePath(host.sftpRoot ?? "/", pathname);
-      const fileStats = await new Promise((resolve, reject) => {
-        sftp.stat(targetPath, (error, stats) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve(stats);
-        });
-      });
-      resetDeadline();
-
-      response.writeHead(200, {
-        "Content-Disposition": `attachment; filename="${sanitizeFilename(posixPath.basename(targetPath))}"`,
-        "Content-Length": String(fileStats.size ?? 0),
-        "Content-Type": "application/octet-stream",
-      });
-
-      const readStream = sftp.createReadStream(targetPath);
-      // Destroyed first so pipeline stops and the remote file handle starts
-      // closing before the channel underneath it goes away.
-      onTimeout(() => readStream.destroy());
-      // Headers — including a Content-Length — are already committed, so the
-      // status can no longer be replaced. DESTROY, never end(): end() asserts
-      // the response completed normally against a length the body will not
-      // reach, leaving the client to notice a framing violation and possibly
-      // keeping the connection alive. Destroying aborts it, so the browser's
-      // body read rejects and no truncated file reaches the save step.
-      onTimeout(() => response.destroy());
-
-      // What counts as progress. `data` is the remote supplying more body.
-      // `drain` matters because pipeline pauses the SFTP readable while
-      // response.write() applies backpressure — during that pause a slow but
-      // alive HTTP consumer produces no `data` at all, and a data-only timer
-      // would kill a healthy transfer.
-      const onProgress = () => resetDeadline();
-      readStream.on("open", onProgress);
-      readStream.on("data", onProgress);
-      response.on("drain", onProgress);
-
-      try {
-        await pipeline(readStream, response);
-      } finally {
-        readStream.off("open", onProgress);
-        readStream.off("data", onProgress);
-        response.off("drain", onProgress);
-      }
-    }
-  );
-}
+const {
+  listRemoteDirectory,
+  createRemoteDirectory,
+  renameRemoteEntry,
+  deleteRemoteEntry,
+  uploadRemoteFile,
+  sendRemoteFile,
+} = createSftpOperations({ withSftp });
 
 function serializeForward(forward) {
   return {
@@ -1211,6 +675,272 @@ async function scanKnownHost({ hostname, port }) {
   return parseKeyscanOutput(stdout, { hostname, port });
 }
 
+const routes = new Map([
+  [
+    "GET /api/backend/status",
+    async (request, response) => {
+      sendJson(response, 200, { ok: true });
+    },
+  ],
+  [
+    "POST /api/backend/status",
+    async (request, response) => {
+      sendJson(response, 200, { ok: true });
+    },
+  ],
+  [
+    "POST /api/backend/sessions",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        const host = body.host;
+
+        if (!host?.hostname || !host?.username || !host?.port) {
+          sendJson(response, 400, { error: "Missing host connection fields" });
+          return;
+        }
+
+        if (host.authMethod === "password" && !host.password) {
+          sendJson(response, 400, { error: "Password auth selected but no password provided" });
+          return;
+        }
+
+        if (host.authMethod === "privateKey" && !host.privateKeyPath) {
+          sendJson(response, 400, { error: "Private key auth selected but no key path provided" });
+          return;
+        }
+
+        if (host.authMethod === "none") {
+          sendJson(response, 400, { error: "Host is configured without SSH auth" });
+          return;
+        }
+
+        const session = await createSshSession(host);
+        sendJson(response, 200, { sessionId: session.id });
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/sftp/list",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        const result = await listRemoteDirectory(body.host, body.path);
+        sendJson(response, 200, result);
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/ssh-config/glob",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        const result = await globSshConfigFiles(body.pattern, body);
+        sendJson(response, 200, result);
+      } catch (error) {
+        // A refused/outside-~/.ssh pattern is a 400, not a 500.
+        if (error instanceof SshConfigResolutionFailure) {
+          // Only these documented client fields cross the HTTP boundary; any
+          // diagnostic properties added to the Error remain process-local.
+          sendJson(response, error.statusCode, projectSshConfigResolutionFailure(error));
+        } else {
+          respondError(response, error, 400);
+        }
+      }
+    },
+  ],
+  [
+    "POST /api/backend/keys/inspect",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        const result = await inspectKey(body.path);
+        sendJson(response, 200, result);
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/keys/generate",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        const result = await generateKeyPair(body);
+        sendJson(response, 200, result);
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/keys/import-from-body",
+    async (request, response) => {
+      // T13: write pasted key body to disk with 0600 perms, then run
+      // the same inspect path generateKeyPair uses on success.
+      try {
+        const body = await readJson(request);
+        const result = await importPrivateKeyFromBody(body);
+        sendJson(response, 200, result);
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/keys/copy-to-host",
+    async (request, response) => {
+      // T12: ssh-copy-id equivalent. Read .pub next to the private key,
+      // open a one-shot SSH connection, append to authorized_keys.
+      try {
+        const body = await readJson(request);
+        const result = await copyKeyToHostBackend(body);
+        sendJson(response, 200, result);
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/known-hosts/scan",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        const entries = await scanKnownHost(body);
+        sendJson(response, 200, { entries });
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/snippets/execute",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        const command = body.command?.trim();
+        const targets = Array.isArray(body.targets) ? body.targets : [];
+
+        if (!command) {
+          sendJson(response, 400, { error: "Snippet command is required" });
+          return;
+        }
+
+        if (!targets.length) {
+          sendJson(response, 400, { error: "At least one target host is required" });
+          return;
+        }
+
+        const results = await Promise.all(targets.map((target) => executeRemoteCommand(target, command)));
+        sendJson(response, 200, { results });
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "GET /api/backend/forwards",
+    async (request, response, url) => {
+      const sessionId = url.searchParams.get("sessionId");
+      const filtered = Array.from(forwards.values())
+        .filter((forward) => !sessionId || forward.sessionId === sessionId)
+        .map(serializeForward);
+      sendJson(response, 200, { forwards: filtered });
+    },
+  ],
+  [
+    "POST /api/backend/forwards",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        const result =
+          body.direction === "remote"
+            ? await createRemoteForward(body)
+            : await createLocalForward(body);
+        sendJson(response, 200, result);
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/sftp/mkdir",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        const path = await createRemoteDirectory(body.host, body.path);
+        sendJson(response, 200, { ok: true, path });
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/sftp/rename",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        const path = await renameRemoteEntry(body.host, body.currentPath, body.nextPath);
+        sendJson(response, 200, { ok: true, path });
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/sftp/delete",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        await deleteRemoteEntry(body.host, body.path, body.isDirectory);
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/sftp/upload",
+    async (request, response) => {
+      try {
+        // The upload body carries base64 file contents, so it gets a much larger
+        // cap than the control-payload routes.
+        const body = await readJson(request, SFTP_UPLOAD_MAX_BYTES);
+        const path = await uploadRemoteFile(body.host, body.path, body.contentsBase64);
+        sendJson(response, 200, { ok: true, path });
+      } catch (error) {
+        respondError(response, error);
+      }
+    },
+  ],
+  [
+    "POST /api/backend/sftp/download",
+    async (request, response) => {
+      try {
+        const body = await readJson(request);
+        await sendRemoteFile(response, body.host, body.path);
+      } catch (error) {
+        if (!response.headersSent) {
+          // Still recoverable — a hung stat times out here and surfaces as the
+          // 504 the error carries, before any filename or byte is committed.
+          respondError(response, error);
+        } else {
+          // #182: was response.end(). Once a Content-Length is committed, end()
+          // asserts the response finished normally against a length the body will
+          // never reach — a truncated file that looks complete to anything not
+          // checking the framing. Destroying aborts the connection instead, so the
+          // client's body read fails loudly.
+          response.destroy();
+        }
+      }
+    },
+  ],
+]);
+
 const server = createServer(async (request, response) => {
   if (!request.url || !request.method) {
     response.writeHead(400);
@@ -1271,249 +1001,10 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  // POST is accepted too: browsers attach an Origin header to a same-origin
-  // POST but not to a same-origin GET, so a page can only pass the auth gate
-  // above with a POST. The gate still applies to both methods.
-  if (
-    (request.method === "GET" || request.method === "POST") &&
-    url.pathname === "/api/backend/status"
-  ) {
-    sendJson(response, 200, { ok: true });
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/sessions") {
-    try {
-      const body = await readJson(request);
-      const host = body.host;
-
-      if (!host?.hostname || !host?.username || !host?.port) {
-        sendJson(response, 400, { error: "Missing host connection fields" });
-        return;
-      }
-
-      if (host.authMethod === "password" && !host.password) {
-        sendJson(response, 400, { error: "Password auth selected but no password provided" });
-        return;
-      }
-
-      if (host.authMethod === "privateKey" && !host.privateKeyPath) {
-        sendJson(response, 400, { error: "Private key auth selected but no key path provided" });
-        return;
-      }
-
-      if (host.authMethod === "none") {
-        sendJson(response, 400, { error: "Host is configured without SSH auth" });
-        return;
-      }
-
-      const session = await createSshSession(host);
-      sendJson(response, 200, { sessionId: session.id });
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/sftp/list") {
-    try {
-      const body = await readJson(request);
-      const result = await listRemoteDirectory(body.host, body.path);
-      sendJson(response, 200, result);
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/ssh-config/glob") {
-    try {
-      const body = await readJson(request);
-      const result = await globSshConfigFiles(body.pattern, body);
-      sendJson(response, 200, result);
-    } catch (error) {
-      // A refused/outside-~/.ssh pattern is a 400, not a 500.
-      if (error instanceof SshConfigResolutionFailure) {
-        // Only these documented client fields cross the HTTP boundary; any
-        // diagnostic properties added to the Error remain process-local.
-        sendJson(response, error.statusCode, projectSshConfigResolutionFailure(error));
-      } else {
-        respondError(response, error, 400);
-      }
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/keys/inspect") {
-    try {
-      const body = await readJson(request);
-      const result = await inspectKey(body.path);
-      sendJson(response, 200, result);
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/keys/generate") {
-    try {
-      const body = await readJson(request);
-      const result = await generateKeyPair(body);
-      sendJson(response, 200, result);
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/keys/import-from-body") {
-    // T13: write pasted key body to disk with 0600 perms, then run
-    // the same inspect path generateKeyPair uses on success.
-    try {
-      const body = await readJson(request);
-      const result = await importPrivateKeyFromBody(body);
-      sendJson(response, 200, result);
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/keys/copy-to-host") {
-    // T12: ssh-copy-id equivalent. Read .pub next to the private key,
-    // open a one-shot SSH connection, append to authorized_keys.
-    try {
-      const body = await readJson(request);
-      const result = await copyKeyToHostBackend(body);
-      sendJson(response, 200, result);
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/known-hosts/scan") {
-    try {
-      const body = await readJson(request);
-      const entries = await scanKnownHost(body);
-      sendJson(response, 200, { entries });
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/snippets/execute") {
-    try {
-      const body = await readJson(request);
-      const command = body.command?.trim();
-      const targets = Array.isArray(body.targets) ? body.targets : [];
-
-      if (!command) {
-        sendJson(response, 400, { error: "Snippet command is required" });
-        return;
-      }
-
-      if (!targets.length) {
-        sendJson(response, 400, { error: "At least one target host is required" });
-        return;
-      }
-
-      const results = await Promise.all(targets.map((target) => executeRemoteCommand(target, command)));
-      sendJson(response, 200, { results });
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "GET" && url.pathname === "/api/backend/forwards") {
-    const sessionId = url.searchParams.get("sessionId");
-    const filtered = Array.from(forwards.values())
-      .filter((forward) => !sessionId || forward.sessionId === sessionId)
-      .map(serializeForward);
-    sendJson(response, 200, { forwards: filtered });
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/forwards") {
-    try {
-      const body = await readJson(request);
-      const result =
-        body.direction === "remote"
-          ? await createRemoteForward(body)
-          : await createLocalForward(body);
-      sendJson(response, 200, result);
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/sftp/mkdir") {
-    try {
-      const body = await readJson(request);
-      const path = await createRemoteDirectory(body.host, body.path);
-      sendJson(response, 200, { ok: true, path });
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/sftp/rename") {
-    try {
-      const body = await readJson(request);
-      const path = await renameRemoteEntry(body.host, body.currentPath, body.nextPath);
-      sendJson(response, 200, { ok: true, path });
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/sftp/delete") {
-    try {
-      const body = await readJson(request);
-      await deleteRemoteEntry(body.host, body.path, body.isDirectory);
-      sendJson(response, 200, { ok: true });
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/sftp/upload") {
-    try {
-      // The upload body carries base64 file contents, so it gets a much larger
-      // cap than the control-payload routes.
-      const body = await readJson(request, SFTP_UPLOAD_MAX_BYTES);
-      const path = await uploadRemoteFile(body.host, body.path, body.contentsBase64);
-      sendJson(response, 200, { ok: true, path });
-    } catch (error) {
-      respondError(response, error);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/backend/sftp/download") {
-    try {
-      const body = await readJson(request);
-      await sendRemoteFile(response, body.host, body.path);
-    } catch (error) {
-      if (!response.headersSent) {
-        // Still recoverable — a hung stat times out here and surfaces as the
-        // 504 the error carries, before any filename or byte is committed.
-        respondError(response, error);
-      } else {
-        // #182: was response.end(). Once a Content-Length is committed, end()
-        // asserts the response finished normally against a length the body will
-        // never reach — a truncated file that looks complete to anything not
-        // checking the framing. Destroying aborts the connection instead, so the
-        // client's body read fails loudly.
-        response.destroy();
-      }
-    }
+  const routeKey = `${request.method} ${url.pathname}`;
+  const routeHandler = routes.get(routeKey);
+  if (routeHandler) {
+    await routeHandler(request, response, url);
     return;
   }
 
@@ -1572,7 +1063,6 @@ const server = createServer(async (request, response) => {
   response.writeHead(404);
   response.end("Not found");
 });
-
 const websocketServer = new WebSocketServer({ noServer: true });
 
 server.on("upgrade", (request, socket, head) => {

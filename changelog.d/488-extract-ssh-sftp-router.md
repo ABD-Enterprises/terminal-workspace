@@ -1,0 +1,1 @@
+- [INTERNAL] Extracted SSH session management and SFTP operations into `backend-ssh-session.mjs` and `backend-sftp-ops.mjs`, and replaced the 321-line if-chain router with a `Map<"METHOD /path", handler>` table (#488).
