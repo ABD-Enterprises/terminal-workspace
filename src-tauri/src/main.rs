@@ -2964,8 +2964,14 @@ async fn terminal_workspace_check_for_updates(
     _request: UpdateCheckRequest,
 ) -> Result<UpdateCheckResult, IpcError> {
     use tauri_plugin_updater::UpdaterExt;
-    let updater = app.updater().map_err(|error| IpcError::internal(error.to_string()))?;
-    match updater.check().await.map_err(|error| IpcError::internal(error.to_string()))? {
+    let updater = app
+        .updater()
+        .map_err(|error| IpcError::internal(error.to_string()))?;
+    match updater
+        .check()
+        .await
+        .map_err(|error| IpcError::internal(error.to_string()))?
+    {
         Some(update) => Ok(UpdateCheckResult {
             available: true,
             version: Some(update.version.clone()),
@@ -3011,7 +3017,9 @@ async fn terminal_workspace_install_update_and_restart(
         }
     }
 
-    let updater = app.updater().map_err(|error| IpcError::internal(error.to_string()))?;
+    let updater = app
+        .updater()
+        .map_err(|error| IpcError::internal(error.to_string()))?;
     let update = updater
         .check()
         .await
