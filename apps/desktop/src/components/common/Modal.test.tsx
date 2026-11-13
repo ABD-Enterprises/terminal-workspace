@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -198,5 +199,21 @@ describe("Modal", () => {
     expect(document.activeElement).toBe(screen.getByLabelText("New name"));
     fireEvent.keyDown(window, { key: "Escape" });
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it("keeps a dark surface in every theme so pale dialog contents stay legible (#UX-2)", () => {
+    render(
+      <Modal open={true} title="Dark surface" onClose={vi.fn()}>
+        <div>Body</div>
+      </Modal>
+    );
+    expect(screen.getByRole("dialog").classList.contains("tw-modal-surface")).toBe(true);
+
+    // The class must re-declare the dark shell tokens, otherwise light mode
+    // paints a white panel under slate-300 / amber-100 text.
+    const css = readFileSync(new URL("../../styles/globals.css", import.meta.url), "utf8");
+    const block = /\.tw-modal-surface\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(block).toContain("--shell-panel: #0d1724");
+    expect(block).toContain("--shell-text: #ebf2ff");
   });
 });
