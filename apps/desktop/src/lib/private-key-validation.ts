@@ -19,7 +19,7 @@ const RECOGNIZED_HEADERS = RECOGNIZED_PRIVATE_KEY_KINDS.map((kind) =>
 
 const FOOTER_RE = /-----END [A-Z ]*PRIVATE KEY-----/;
 
-export interface PrivateKeyValidationResult {
+interface PrivateKeyValidationResult {
   ok: boolean;
   /** When ok=false, a short human-readable reason. */
   reason?: string;

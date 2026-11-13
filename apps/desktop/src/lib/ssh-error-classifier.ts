@@ -15,7 +15,7 @@ export type SshErrorCategory =
   | "dns_failure"
   | "unknown";
 
-export interface ClassifiedSshError {
+interface ClassifiedSshError {
   category: SshErrorCategory;
   /** Short user-facing message — fits in a banner without wrapping. */
   message: string;

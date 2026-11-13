@@ -12,11 +12,6 @@
 
 import type { HostRecord } from "../types/host";
 
-export interface IdentityUsage {
-  identityId: string;
-  hostIds: string[];
-}
-
 /**
  * Group hosts by their `identityId`. Hosts without one are excluded — they
  * have no identity to consume.

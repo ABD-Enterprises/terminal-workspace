@@ -1,4 +1,4 @@
-export type KeyAlgorithm = "ED25519" | "ECDSA" | "RSA" | "UNKNOWN";
+type KeyAlgorithm = "ED25519" | "ECDSA" | "RSA" | "UNKNOWN";
 export type KeySource = "imported" | "generated";
 export type KeyGenerationType = "ed25519" | "ecdsa" | "rsa";
 

@@ -21,12 +21,12 @@ import { createTerminalPaneMockSession } from "./terminal-pane-mock-session";
 import { createTerminalPaneNativeSessionController } from "./terminal-pane-native-session";
 import { type RuntimeStatusMessage } from "./use-terminal-pane-runtime-status";
 
-export interface TrustedKnownHost {
+interface TrustedKnownHost {
   algorithm: string;
   publicKey: string;
 }
 
-export interface TerminalPaneLifecycleOptions {
+interface TerminalPaneLifecycleOptions {
   activeHistoryEntryIdRef: MutableRefObject<string | undefined>;
   agentForwarding: HostRecord["agentForwarding"];
   appendCommandOutput: (historyEntryId: string, outputPreview: string) => void;

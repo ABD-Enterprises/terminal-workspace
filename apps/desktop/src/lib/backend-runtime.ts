@@ -148,7 +148,7 @@ export interface Backend {
  * message; this discriminated union is the only shape the terminal pipe
  * understands.
  */
-export type SessionFrame =
+type SessionFrame =
   | { type: "data"; data: string }
   | { type: "status"; state: SessionConnectionState }
   | { type: "error"; message: string };

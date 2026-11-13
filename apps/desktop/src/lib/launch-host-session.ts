@@ -16,7 +16,7 @@ import {
 import type { HostRecord } from "../types/host";
 import { ensureTrustedHostKey } from "./ensure-trusted-host-key";
 
-export interface LaunchHostSessionResult {
+interface LaunchHostSessionResult {
   ok: boolean;
   /** When ok=true, the new (or reused) session tab id. */
   tabId?: string;

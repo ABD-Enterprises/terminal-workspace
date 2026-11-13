@@ -70,7 +70,7 @@ export interface GenerateKeyPayload {
   type: KeyGenerationType;
 }
 
-export type KeyCommandOperation = "inspect" | "generate";
+type KeyCommandOperation = "inspect" | "generate";
 
 export type KeyCommandFailure =
   | { reason: "path-required" }

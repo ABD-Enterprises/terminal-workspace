@@ -10,7 +10,7 @@ export interface RemoteFileEntry {
 }
 
 export type TransferDirection = "upload" | "download" | "remote";
-export type TransferStatus = "queued" | "running" | "completed" | "failed";
+type TransferStatus = "queued" | "running" | "completed" | "failed";
 
 export interface TransferItem {
   id: string;

@@ -8,7 +8,7 @@ import {
   type VaultSyncTrustAnalysis,
 } from "./vault-sync-contract";
 
-export interface VaultSyncRuntimeInspection {
+interface VaultSyncRuntimeInspection {
   envelope: VaultSyncEnvelopeAnalysis;
   trust: VaultSyncTrustAnalysis;
 }

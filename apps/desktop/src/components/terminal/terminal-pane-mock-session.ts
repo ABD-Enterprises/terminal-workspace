@@ -3,7 +3,7 @@ import { type Terminal } from "xterm";
 import { buildMockCommandResponse, formatPrompt } from "../../lib/terminal";
 import { type HostRecord } from "../../types/host";
 
-export interface TerminalPaneMockSessionOptions {
+interface TerminalPaneMockSessionOptions {
   activeHistoryEntryIdRef: MutableRefObject<string | undefined>;
   appendCommandOutput: (historyEntryId: string, outputPreview: string) => void;
   commandBufferRef: MutableRefObject<string>;

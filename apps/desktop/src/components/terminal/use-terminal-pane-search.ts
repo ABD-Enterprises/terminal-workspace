@@ -13,7 +13,7 @@ interface UseTerminalPaneSearchOptions {
   terminalRef: MutableRefObject<Terminal | null>;
 }
 
-export interface TerminalPaneSearchState {
+interface TerminalPaneSearchState {
   advanceSearchMatch: (direction: 1 | -1) => void;
   closeSearch: () => void;
   searchActiveIndex: number;

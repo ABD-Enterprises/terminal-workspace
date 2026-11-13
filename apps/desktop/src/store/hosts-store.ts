@@ -20,7 +20,7 @@ import {
 } from "../types/host";
 import { useVaultSyncStore } from "./vault-sync-store";
 
-export interface HostFilters {
+interface HostFilters {
   query: string;
   activeGroup: string;
   activeTag: string;

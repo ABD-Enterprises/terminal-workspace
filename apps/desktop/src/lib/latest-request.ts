@@ -17,7 +17,7 @@
  * not "stop the server doing it". The distinction is deliberate and is why the
  * UI wording says the load was cancelled rather than the operation.
  */
-export interface LatestRequestGuard {
+interface LatestRequestGuard {
   /** Claim the next sequence number, superseding anything already in flight. */
   begin: () => number;
   /** True only while `token` is still the newest claim. */

@@ -6,7 +6,7 @@ import type { SshConfigImportSkip } from "./ssh-config";
  * any Include lines that were rejected (cycle, not-found, allowlist), so the
  * import-summary modal can still tell the user what was dropped.
  */
-export interface ResolveSshIncludesResult {
+interface ResolveSshIncludesResult {
   text: string;
   skipped: SshConfigImportSkip[];
 }
@@ -99,7 +99,7 @@ export function compareOpenSshNames(left: string, right: string): number {
   return a.length - b.length;
 }
 
-export interface ResolveSshIncludesOptions {
+interface ResolveSshIncludesOptions {
   readFile: SshConfigFileReader;
   /** Optional glob expander; when omitted, glob Includes are skipped. */
   globFiles?: SshConfigGlobLister;

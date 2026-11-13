@@ -255,7 +255,7 @@ export function isKnownTheme(value: unknown): value is TerminalThemeName {
   );
 }
 
-export interface TerminalThemeOption {
+interface TerminalThemeOption {
   name: TerminalThemeName;
   label: string;
   description: string;
