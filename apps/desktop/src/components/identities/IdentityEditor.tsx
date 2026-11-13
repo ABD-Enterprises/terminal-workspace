@@ -5,7 +5,7 @@
 //
 // See docs/parity-and-hardening-plan.md P2-DM1 (batch 2).
 
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import {
   type IdentityRecord,
@@ -78,14 +78,27 @@ function IdentityEditorForm({
   onCancel,
   onSubmit,
 }: Omit<IdentityEditorProps, "open">) {
+  const formId = useId();
   const [values, setValues] = useState<IdentityEditorValues>(() =>
     buildInitialValues(identity)
   );
+  // #UX-3: errors only surface after the first submit attempt, so a fresh
+  // form isn't shouting before the user has typed anything.
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const labelRef = useRef<HTMLInputElement>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
+  const keyPathRef = useRef<HTMLInputElement>(null);
 
-  const isInvalid =
-    !values.label.trim() ||
-    !values.username.trim() ||
-    (values.authMethod === "privateKey" && !values.privateKeyPath.trim());
+  const errors = {
+    label: !values.label.trim() ? "A label is required." : undefined,
+    username: !values.username.trim() ? "A username is required." : undefined,
+    privateKeyPath:
+      values.authMethod === "privateKey" && !values.privateKeyPath.trim()
+        ? "A private key path is required."
+        : undefined,
+  };
+
+  const isInvalid = Boolean(errors.label || errors.username || errors.privateKeyPath);
 
   // Editing an existing derived identity becomes "imported" — the user has
   // taken ownership of it and a future re-derivation must not overwrite
@@ -98,6 +111,15 @@ function IdentityEditorForm({
       onSubmit={(event) => {
         event.preventDefault();
         if (isInvalid) {
+          setSubmitAttempted(true);
+          // Focus the first invalid field so keyboard users land where the
+          // problem is instead of hunting for the error text.
+          const firstInvalidRef = errors.label
+            ? labelRef
+            : errors.username
+              ? usernameRef
+              : keyPathRef;
+          firstInvalidRef.current?.focus();
           return;
         }
         onSubmit(values, nextSource);
@@ -110,6 +132,7 @@ function IdentityEditorForm({
         <label className="block text-xs uppercase tracking-[0.14em] text-slate-500">
           Label
           <input
+            ref={labelRef}
             aria-label="Identity label"
             value={values.label}
             onChange={(event) =>
@@ -118,11 +141,19 @@ function IdentityEditorForm({
             className={fieldClassName}
             placeholder="Deploy Shared Key (deploy)"
             autoFocus
+            aria-invalid={submitAttempted && errors.label ? true : undefined}
+            aria-describedby={submitAttempted && errors.label ? `${formId}-label-error` : undefined}
           />
         </label>
+        {submitAttempted && errors.label ? (
+          <p id={`${formId}-label-error`} role="alert" className="-mt-1 text-xs text-rose-200">
+            {errors.label}
+          </p>
+        ) : null}
         <label className="block text-xs uppercase tracking-[0.14em] text-slate-500">
           Username
           <input
+            ref={usernameRef}
             aria-label="Identity username"
             value={values.username}
             onChange={(event) =>
@@ -130,8 +161,17 @@ function IdentityEditorForm({
             }
             className={fieldClassName}
             placeholder="deploy"
+            aria-invalid={submitAttempted && errors.username ? true : undefined}
+            aria-describedby={
+              submitAttempted && errors.username ? `${formId}-username-error` : undefined
+            }
           />
         </label>
+        {submitAttempted && errors.username ? (
+          <p id={`${formId}-username-error`} role="alert" className="-mt-1 text-xs text-rose-200">
+            {errors.username}
+          </p>
+        ) : null}
         <label className="block text-xs uppercase tracking-[0.14em] text-slate-500">
           Auth method
           <select
@@ -154,6 +194,7 @@ function IdentityEditorForm({
           <label className="block text-xs uppercase tracking-[0.14em] text-slate-500">
             Private key path
             <input
+              ref={keyPathRef}
               aria-label="Identity private key path"
               value={values.privateKeyPath}
               onChange={(event) =>
@@ -164,6 +205,12 @@ function IdentityEditorForm({
               }
               className={fieldClassName}
               placeholder="~/.ssh/id_ed25519"
+              aria-invalid={submitAttempted && errors.privateKeyPath ? true : undefined}
+              aria-describedby={
+                submitAttempted && errors.privateKeyPath
+                  ? `${formId}-key-path-error`
+                  : undefined
+              }
             />
           </label>
         ) : (
@@ -171,6 +218,11 @@ function IdentityEditorForm({
             No key path needed for this auth method.
           </div>
         )}
+        {submitAttempted && errors.privateKeyPath ? (
+          <p id={`${formId}-key-path-error`} role="alert" className="-mt-1 text-xs text-rose-200">
+            {errors.privateKeyPath}
+          </p>
+        ) : null}
         <label
           className={cn(
             "flex items-center gap-2 rounded-xl border px-3 py-2 text-xs",

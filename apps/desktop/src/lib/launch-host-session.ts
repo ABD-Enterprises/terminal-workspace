@@ -6,6 +6,7 @@
 //
 // See docs/parity-and-hardening-plan.md P2-FP.
 
+import { useSyncExternalStore } from "react";
 import { useHostsStore } from "../store/hosts-store";
 import { useSessionsStore } from "../store/sessions-store";
 import {
@@ -39,6 +40,33 @@ interface LaunchHostSessionResult {
 // so the next legitimate connect attempt isn't blocked.
 const inFlight = new Map<string, Promise<LaunchHostSessionResult>>();
 
+// UX-3: pending-state subscription. The mutex already prevents duplicate
+// launches; this lets every connect affordance (host card, list row,
+// sidebar) disable itself and show "Connecting…" while the launch is in
+// flight, instead of silently accepting repeat clicks.
+const pendingListeners = new Set<() => void>();
+
+function notifyPendingChanged() {
+  for (const listener of pendingListeners) {
+    listener();
+  }
+}
+
+function subscribePending(listener: () => void): () => void {
+  pendingListeners.add(listener);
+  return () => {
+    pendingListeners.delete(listener);
+  };
+}
+
+export function isHostLaunchPending(hostId: string): boolean {
+  return inFlight.has(hostId);
+}
+
+export function useHostLaunchPending(hostId: string): boolean {
+  return useSyncExternalStore(subscribePending, () => isHostLaunchPending(hostId));
+}
+
 export async function launchHostSession(host: HostRecord): Promise<LaunchHostSessionResult> {
   const existing = inFlight.get(host.id);
   if (existing) {
@@ -46,8 +74,10 @@ export async function launchHostSession(host: HostRecord): Promise<LaunchHostSes
   }
   const promise = launchHostSessionInner(host).finally(() => {
     inFlight.delete(host.id);
+    notifyPendingChanged();
   });
   inFlight.set(host.id, promise);
+  notifyPendingChanged();
   return promise;
 }
 

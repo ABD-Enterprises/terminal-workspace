@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   emptyGenerateKeyValues,
   emptyImportKeyValues,
@@ -34,6 +34,27 @@ export function KeyEditor({
 
   const isImport = mode === "import";
   const formId = isImport ? "import-key-form" : "generate-key-form";
+  // Client-side validation used to be absent entirely: a blank label or path
+  // round-tripped to the backend before the user heard about it. Validate on
+  // submit, mark the offending fields, and move focus to the first one.
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const labelRef = useRef<HTMLInputElement>(null);
+  const keyPathRef = useRef<HTMLInputElement>(null);
+
+  const values = isImport ? importValues : generateValues;
+  // Both modes pre-fill privateKeyPath with a sensible default, so only the
+  // label can actually be blank.
+  const labelError = values.label.trim() ? null : "A label is required.";
+
+  const handleSubmit = () => {
+    if (labelError) {
+      setSubmitAttempted(true);
+      labelRef.current?.focus();
+      return;
+    }
+
+    void (isImport ? onImport(importValues) : onGenerate(generateValues));
+  };
 
   return (
     <Modal
@@ -70,7 +91,7 @@ export function KeyEditor({
         id={formId}
         onSubmit={(event) => {
           event.preventDefault();
-          void (isImport ? onImport(importValues) : onGenerate(generateValues));
+          handleSubmit();
         }}
       >
       {errorMessage ? (
@@ -86,19 +107,28 @@ export function KeyEditor({
               Label
             </span>
             <input
+              ref={labelRef}
               value={importValues.label}
               onChange={(event) =>
                 setImportValues((current) => ({ ...current, label: event.target.value }))
               }
               placeholder="MacBook Pro ED25519"
+              aria-invalid={submitAttempted && labelError ? true : undefined}
+              aria-describedby={submitAttempted && labelError ? `${formId}-label-error` : undefined}
               className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
             />
           </label>
+          {submitAttempted && labelError ? (
+            <p id={`${formId}-label-error`} role="alert" className="mt-1 text-xs text-rose-200">
+              {labelError}
+            </p>
+          ) : null}
           <label className="block">
             <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               Private key path
             </span>
             <input
+              ref={keyPathRef}
               value={importValues.privateKeyPath}
               onChange={(event) =>
                 setImportValues((current) => ({ ...current, privateKeyPath: event.target.value }))
@@ -171,20 +201,29 @@ export function KeyEditor({
               Label
             </span>
             <input
+              ref={labelRef}
               value={generateValues.label}
               onChange={(event) =>
                 setGenerateValues((current) => ({ ...current, label: event.target.value }))
               }
               placeholder="Generated Ops Key"
+              aria-invalid={submitAttempted && labelError ? true : undefined}
+              aria-describedby={submitAttempted && labelError ? `${formId}-label-error` : undefined}
               className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
             />
           </label>
+          {submitAttempted && labelError ? (
+            <p id={`${formId}-label-error`} role="alert" className="mt-1 text-xs text-rose-200">
+              {labelError}
+            </p>
+          ) : null}
 
           <label className="block sm:col-span-2">
             <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               Private key path
             </span>
             <input
+              ref={keyPathRef}
               value={generateValues.privateKeyPath}
               onChange={(event) =>
                 setGenerateValues((current) => ({ ...current, privateKeyPath: event.target.value }))

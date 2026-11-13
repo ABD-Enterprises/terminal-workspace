@@ -9,6 +9,23 @@ const fallbackStorage: StateStorage = {
   removeItem: () => undefined,
 };
 
+// UX-3: "active" means the transfer has not reached a terminal state.
+// Closing a session (or the app) mid-transfer leaves a partial file, so the
+// close guards in close-guard-store treat queued + running as blocking.
+export function isActiveTransfer(item: TransferItem): boolean {
+  return item.status === "queued" || item.status === "running";
+}
+
+export function countActiveTransfers(queue: TransferItem[], hostId?: string): number {
+  return queue.filter(
+    (item) => isActiveTransfer(item) && (hostId === undefined || item.hostId === hostId)
+  ).length;
+}
+
+export function hasActiveTransfers(queue: TransferItem[], hostId?: string): boolean {
+  return countActiveTransfers(queue, hostId) > 0;
+}
+
 function touchTransferItem(item: TransferItem, update: Partial<TransferItem>): TransferItem {
   return {
     ...item,

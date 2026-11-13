@@ -438,6 +438,33 @@ struct AppExitDrainGuard {
     in_progress: AtomicBool,
 }
 
+/// UX-3: one-shot token guarding the main window's CloseRequested. The
+/// native side always prevents the close and forwards the request to the
+/// renderer (terminal_workspace://window-close-requested), so the renderer
+/// can check for active file transfers before deciding. When the renderer
+/// confirms, `terminal_workspace_confirm_close_window` sets this token and
+/// closes the window; the interceptor consumes the token and lets that one
+/// close through. swap() on read keeps the token single-use: an accidental
+/// second close attempt re-enters the guarded path.
+#[derive(Default)]
+struct WindowCloseGate {
+    confirmed: AtomicBool,
+}
+
+/// UX-3: renderer-confirmed window close. Holds the one-shot gate token and
+/// closes the main window; the CloseRequested interceptor consumes the token
+/// and lets this close through. Called from close-guard-store once the user
+/// confirms past any active-transfer warning (or immediately when no
+/// transfers are active).
+#[tauri::command]
+fn terminal_workspace_confirm_close_window(
+    window: tauri::WebviewWindow,
+    gate: tauri::State<'_, WindowCloseGate>,
+) -> Result<(), String> {
+    gate.confirmed.store(true, Ordering::SeqCst);
+    window.close().map_err(|error| error.to_string())
+}
+
 #[derive(Clone)]
 struct NativeSessionHandle {
     command_sender: Sender<NativeSessionCommand>,
@@ -4468,6 +4495,10 @@ fn terminal_workspace_close_backend_session_stream(
 /// Channel name the renderer subscribes to for native menu activations.
 /// Payload is the menu-item id string (e.g. "menu:nav-hosts").
 const MENU_EVENT_NAME: &str = "terminal_workspace://menu-event";
+/// UX-3: emitted on the main window's CloseRequested after the close is
+/// prevented. The renderer decides (active transfers?) and either closes via
+/// terminal_workspace_confirm_close_window or shows a confirmation dialog.
+const WINDOW_CLOSE_REQUESTED_EVENT: &str = "terminal_workspace://window-close-requested";
 
 /// Build the macOS application menu. Each non-system item carries a stable
 /// string id (`menu:*`) that the renderer maps to an action via the
@@ -5005,6 +5036,7 @@ fn main() {
         .manage(NativeSessionRegistry::default())
         .manage(NativeForwardRegistry::default())
         .manage(AppExitDrainGuard::default())
+        .manage(WindowCloseGate::default())
         .setup(|app| {
             // #151: resolve the durable host-key store once, through Tauri, so it
             // follows the bundle identifier and never lands in the per-session
@@ -5090,13 +5122,14 @@ fn main() {
             terminal_workspace_import_private_key_from_body,
             terminal_workspace_copy_key_to_host,
             terminal_workspace_set_dock_badge,
+            terminal_workspace_confirm_close_window,
             terminal_workspace_check_for_updates,
             terminal_workspace_install_update_and_restart
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
+    app.run(|app_handle, mut event| {
             // #472: let an in-flight save finish before the process exits.
             // Exit follows every quit path, including app_handle.exit below.
             if let tauri::RunEvent::Exit = event {
@@ -5105,7 +5138,10 @@ fn main() {
                 }
                 return;
             }
-            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+            // `ref mut` (not a by-value binding): the UX-3 WindowEvent
+            // handler below still needs `event`, and a by-value `api` would
+            // partially move it.
+            if let tauri::RunEvent::ExitRequested { ref mut api, code, .. } = event {
                 let exit_guard = app_handle.state::<AppExitDrainGuard>();
                 if exit_guard.in_progress.swap(true, Ordering::AcqRel) {
                     return;
@@ -5124,6 +5160,33 @@ fn main() {
                     );
                 }
                 app_handle.exit(code.unwrap_or(0));
+            }
+
+            // UX-3: intercept the main window's close so the renderer can
+            // warn about active file transfers before the window (and every
+            // session in it) goes away. Always prevent first; a close that
+            // carries the renderer-confirmed token (consumed by swap) is
+            // allowed through. Without a token we forward the request and
+            // let the renderer decide.
+            if let tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } = event
+            {
+                if label != "main" {
+                    return;
+                }
+                let gate = app_handle.state::<WindowCloseGate>();
+                if gate.confirmed.swap(false, Ordering::SeqCst) {
+                    return;
+                }
+                api.prevent_close();
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    if let Err(error) = window.emit(WINDOW_CLOSE_REQUESTED_EVENT, ()) {
+                        log::warn!("[termsnip] failed to forward window close request: {error}");
+                    }
+                }
             }
         });
 }
