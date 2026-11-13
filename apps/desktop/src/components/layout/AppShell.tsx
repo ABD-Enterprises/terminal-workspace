@@ -19,6 +19,7 @@ import { formatHostProtocol, type HostProtocol } from "../../types/host";
 import { PreviewBanner } from "../common/PreviewBanner";
 import { DemoModeBanner } from "../common/DemoModeBanner";
 import { ConnectErrorBanner } from "../common/ConnectErrorBanner";
+import { ToastViewport } from "../common/ToastViewport";
 import { UpdateAvailableBanner } from "../common/UpdateAvailableBanner";
 import { SessionRestoreManager } from "../terminal/SessionRestoreManager";
 import { CommandPaletteDialog } from "./CommandPaletteDialog";
@@ -425,6 +426,7 @@ export function AppShell() {
       {commandPaletteOpen ? (
         <CommandPaletteDialog {...palette} />
       ) : null}
+      <ToastViewport />
       <KeyboardCheatsheet />
       <FirstRunTour />
     </div>

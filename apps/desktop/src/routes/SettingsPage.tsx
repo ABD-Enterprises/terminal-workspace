@@ -1,5 +1,4 @@
 import { useMemo, useRef, useState } from "react";
-import { ConfirmDialog } from "../components/common/ConfirmDialog";
 import { SettingsPreferencesSection } from "./SettingsPreferencesSection";
 import { SettingsTrustPolicySection } from "./SettingsTrustPolicySection";
 import { IdentityEditor, type IdentityEditorValues } from "../components/identities/IdentityEditor";
@@ -9,6 +8,7 @@ import { buildIdentityUsage } from "../lib/identity-usage";
 import { useAppStore } from "../store/app-store";
 import { useHostsStore } from "../store/hosts-store";
 import { useIdentitiesStore } from "../store/identities-store";
+import { UNDO_TOAST_DURATION_MS, pushToast } from "../store/toast-store";
 
 export function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -31,14 +31,7 @@ export function SettingsPage() {
   const usageByIdentityId = useMemo(() => buildIdentityUsage(allHosts), [allHosts]);
   const [identityEditorOpen, setIdentityEditorOpen] = useState(false);
   const [editingIdentityId, setEditingIdentityId] = useState<string | undefined>();
-  const [identityPendingDelete, setIdentityPendingDelete] = useState<
-    | {
-        identityId: string;
-        label: string;
-        usageCount: number;
-      }
-    | null
-  >(null);
+
 
   const submitIdentity = (values: IdentityEditorValues) => {
     if (editingIdentityId) {
@@ -189,11 +182,25 @@ export function SettingsPage() {
               onDelete={(identityId) => {
                 const target = identities.find((entry) => entry.id === identityId);
                 if (!target) return;
-                setIdentityPendingDelete({
-                  identityId,
-                  label: target.label,
-                  usageCount: usageByIdentityId.get(identityId)?.length ?? 0,
-                });
+
+                // UX-13: undoable delete. Host links are never severed —
+                // they fall back to per-host credential fields — so Undo
+                // only has to restore the record itself.
+                const removed = removeIdentity(identityId);
+                if (editingIdentityId === identityId) {
+                  setIdentityEditorOpen(false);
+                  setEditingIdentityId(undefined);
+                }
+                if (removed) {
+                  pushToast({
+                    message: `Deleted identity "${removed.label}"`,
+                    durationMs: UNDO_TOAST_DURATION_MS,
+                    action: {
+                      label: "Undo",
+                      run: () => useIdentitiesStore.getState().restoreDeletedIdentity(),
+                    },
+                  });
+                }
               }}
             />
             <IdentityEditor
@@ -368,33 +375,6 @@ export function SettingsPage() {
           setErrorMessage={setErrorMessage}
         />
       </div>
-
-      <ConfirmDialog
-        open={Boolean(identityPendingDelete)}
-        title="Delete identity"
-        description={
-          identityPendingDelete?.usageCount
-            ? `${identityPendingDelete.label} is currently linked to ${identityPendingDelete.usageCount} host${identityPendingDelete.usageCount === 1 ? "" : "s"}. Those hosts will keep working from their per-host credential fields, but they will lose the link to this identity. You can re-bind them later in the host editor.`
-            : `Delete ${identityPendingDelete?.label ?? "this identity"}? No hosts currently reference it.`
-        }
-        confirmLabel="Delete identity"
-        onCancel={() => setIdentityPendingDelete(null)}
-        onConfirm={() => {
-          if (!identityPendingDelete) return;
-          const removed = removeIdentity(identityPendingDelete.identityId);
-          setIdentityPendingDelete(null);
-          if (editingIdentityId === identityPendingDelete.identityId) {
-            setIdentityEditorOpen(false);
-            setEditingIdentityId(undefined);
-          }
-          setErrorMessage(undefined);
-          setStatusMessage(
-            removed
-              ? `Removed identity ${removed.label}.`
-              : "Identity already removed."
-          );
-        }}
-      />
     </section>
   );
 }

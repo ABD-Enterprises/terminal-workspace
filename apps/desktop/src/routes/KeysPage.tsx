@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ConfirmDialog } from "../components/common/ConfirmDialog";
 import { CopyKeyToHostDialog } from "../components/keys/CopyKeyToHostDialog";
 import { KeyEditor } from "../components/keys/KeyEditor";
 import { KeyList } from "../components/keys/KeyList";
@@ -19,6 +18,7 @@ import { validatePastedPrivateKey } from "../lib/private-key-validation";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useKeysStore } from "../store/keys-store";
+import { UNDO_TOAST_DURATION_MS, pushToast } from "../store/toast-store";
 import {
   emptyGenerateKeyValues,
   type GenerateKeyValues,
@@ -53,7 +53,6 @@ export function KeysPage() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorError, setEditorError] = useState<string>();
-  const [deletePendingKeyId, setDeletePendingKeyId] = useState<string>();
   const [scanHostId, setScanHostId] = useState("");
   const [scanBusy, setScanBusy] = useState(false);
   const [scanError, setScanError] = useState<string>();
@@ -138,19 +137,37 @@ export function KeysPage() {
     }
   };
 
-  const handleDelete = () => {
-    if (!deletePendingKeyId) {
+  // UX-13: undoable delete. The key record leaves the inventory immediately;
+  // an Undo toast offers a 5-second window. Host assignments are cleared
+  // right away (matching the previous hard-delete behaviour) and re-bound
+  // on Undo.
+  const handleDeleteKey = (keyId: string) => {
+    const deletedKey = deleteKey(keyId);
+    if (!deletedKey) {
       return;
     }
 
-    const deletedKey = deleteKey(deletePendingKeyId);
-    if (deletedKey) {
-      clearKeyByPath(deletedKey.privateKeyPath);
-    }
-    setDeletePendingKeyId(undefined);
-    if (selectedKeyId === deletePendingKeyId) {
+    clearKeyByPath(deletedKey.privateKeyPath);
+    if (selectedKeyId === keyId) {
       setSelectedKeyId(undefined);
     }
+
+    pushToast({
+      message: `Deleted key "${deletedKey.label}"`,
+      durationMs: UNDO_TOAST_DURATION_MS,
+      action: {
+        label: "Undo",
+        run: () => {
+          useKeysStore.getState().restoreDeletedKey();
+          for (const hostId of deletedKey.assignedHostIds) {
+            assignKey(hostId, {
+              label: deletedKey.label,
+              privateKeyPath: deletedKey.privateKeyPath,
+            });
+          }
+        },
+      },
+    });
   };
 
   const runKnownHostScan = useCallback(async (hostId = resolvedScanHostId) => {
@@ -252,7 +269,7 @@ export function KeysPage() {
               hosts={hostsById}
               selectedKeyId={selectedKey?.id}
               onSelect={setSelectedKeyId}
-              onDelete={setDeletePendingKeyId}
+              onDelete={handleDeleteKey}
               onCopyToHost={(keyId) => {
                 setCopyKeyId(keyId);
                 setCopyError(undefined);
@@ -425,15 +442,6 @@ export function KeysPage() {
         onClose={closeEditor}
         onImport={handleImport}
         onGenerate={handleGenerate}
-      />
-
-      <ConfirmDialog
-        open={Boolean(deletePendingKeyId)}
-        title="Delete key record"
-        description="Remove this key from the local inventory and clear any host assignments that point at it."
-        confirmLabel="Delete"
-        onCancel={() => setDeletePendingKeyId(undefined)}
-        onConfirm={handleDelete}
       />
 
       <CopyKeyToHostDialog

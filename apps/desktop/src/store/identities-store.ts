@@ -11,6 +11,7 @@ import {
   migrateHostsToIdentities,
 } from "../lib/identity-migration";
 import { createTermsnipStorage } from "../lib/persistence";
+import { cancelUndoWindow, expireUndoWindowNow, startUndoWindow } from "../lib/undo-delete";
 import {
   sampleIdentities,
   type IdentityRecord,
@@ -21,12 +22,21 @@ import { useHostsStore } from "./hosts-store";
 import { useKeysStore } from "./keys-store";
 import { useVaultSyncStore } from "./vault-sync-store";
 
+// UX-13: undoable delete — see keys-store for the full contract. The
+// Keychain passphrase GC defers to window expiry; the vault tombstone is
+// written now and cleared on undo. The stash is session-only (partialize
+// below already excludes it).
+const UNDO_WINDOW_KEY = "identities:delete";
+const UNDO_WINDOW_MS = 5_000;
+
 function sortIdentities(identities: IdentityRecord[]): IdentityRecord[] {
   return [...identities].sort((left, right) => left.label.localeCompare(right.label));
 }
 
 interface IdentitiesState {
   identities: IdentityRecord[];
+  /** Record removed by the most recent delete, pending expiry or undo. */
+  pendingDeletedIdentity?: IdentityRecord;
   /** True once the host→identity auto-migration has run for this session. */
   migrationCompleted: boolean;
   upsertIdentity: (
@@ -38,6 +48,7 @@ interface IdentitiesState {
   setLabel: (identityId: string, label: string) => void;
   setComment: (identityId: string, comment: string) => void;
   removeIdentity: (identityId: string) => IdentityRecord | undefined;
+  restoreDeletedIdentity: () => void;
   /**
    * Run the host→identity migration once per session. Idempotent: re-running
    * with a fully migrated set is a no-op. Safe to call from anywhere.
@@ -113,21 +124,43 @@ export const useIdentitiesStore = create<IdentitiesState>()(
             )
           ),
         })),
+      // UX-13: soft delete with an undo window; the Keychain passphrase GC
+      // defers to window expiry so Undo keeps the passphrase usable.
       removeIdentity: (identityId) => {
         const target = get().identities.find((entry) => entry.id === identityId);
         if (!target) {
           return undefined;
         }
+
+        expireUndoWindowNow(UNDO_WINDOW_KEY, () => {
+          const stale = get().pendingDeletedIdentity;
+          set({ pendingDeletedIdentity: undefined });
+          if (stale) {
+            void clearIdentityPassphraseById(stale.id);
+          }
+        });
         set((state) => ({
+          pendingDeletedIdentity: target,
           identities: state.identities.filter((entry) => entry.id !== identityId),
         }));
         useVaultSyncStore.getState().markDeleted("identities", identityId);
-        // GC the per-identity Keychain passphrase entry. Fire-and-forget —
-        // failures are logged inside clearIdentityPassphraseById and must
-        // not block the synchronous delete return value. See
-        // parity-and-hardening-plan.md P2-DM1 batch 3.
-        void clearIdentityPassphraseById(identityId);
+        startUndoWindow(UNDO_WINDOW_KEY, UNDO_WINDOW_MS, () => {
+          set({ pendingDeletedIdentity: undefined });
+          void clearIdentityPassphraseById(identityId);
+        });
         return target;
+      },
+      restoreDeletedIdentity: () => {
+        const stash = get().pendingDeletedIdentity;
+        if (!stash) {
+          return;
+        }
+        cancelUndoWindow(UNDO_WINDOW_KEY);
+        useVaultSyncStore.getState().clearDeleted("identities", stash.id);
+        set((state) => ({
+          pendingDeletedIdentity: undefined,
+          identities: sortIdentities([...state.identities, stash]),
+        }));
       },
       ensureMigrated: () => {
         if (get().migrationCompleted) {

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ConfirmDialog } from "../components/common/ConfirmDialog";
 import { SearchInput } from "../components/common/SearchInput";
 import { SnippetEditor } from "../components/snippets/SnippetEditor";
 import { SnippetList } from "../components/snippets/SnippetList";
@@ -15,6 +14,7 @@ import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useRunbooksStore } from "../store/runbooks-store";
 import { useSessionsStore } from "../store/sessions-store";
 import { useSnippetsStore } from "../store/snippets-store";
+import { UNDO_TOAST_DURATION_MS, pushToast } from "../store/toast-store";
 import { emptySnippetFormValues, type SnippetRecord } from "../types/snippet";
 
 export function SnippetsPage() {
@@ -37,7 +37,6 @@ export function SnippetsPage() {
   const [selectedSnippetId, setSelectedSnippetId] = useState<string>();
   const [editorTarget, setEditorTarget] = useState<SnippetRecord | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [deletePendingId, setDeletePendingId] = useState<string>();
   const [selectedHostIdsOverride, setSelectedHostIdsOverride] = useState<string[] | null>(null);
   const [broadcastBusy, setBroadcastBusy] = useState(false);
   const [broadcastResults, setBroadcastResults] = useState<SnippetExecutionResult[]>([]);
@@ -74,6 +73,29 @@ export function SnippetsPage() {
     filteredSnippets[0] ??
     snippets[0];
   const selectedHostIds = selectedHostIdsOverride ?? selectedSnippet?.targetHostIds ?? [];
+
+  // UX-13: undoable delete. Deleting is immediate; an Undo toast offers a
+  // 5-second window before the record's removal becomes permanent.
+  const requestDeleteSnippet = (snippetId: string) => {
+    const snippet = snippets.find((entry) => entry.id === snippetId);
+    if (!snippet) {
+      return;
+    }
+
+    deleteSnippet(snippetId);
+    if (selectedSnippet?.id === snippetId) {
+      setSelectedSnippetId(undefined);
+    }
+    setSelectedHostIdsOverride(null);
+    pushToast({
+      message: `Deleted snippet "${snippet.title}"`,
+      durationMs: UNDO_TOAST_DURATION_MS,
+      action: {
+        label: "Undo",
+        run: () => useSnippetsStore.getState().restoreDeletedSnippet(),
+      },
+    });
+  };
 
   useEffect(() => {
     const counts = snippets.reduce<Record<string, number>>((result, snippet) => {
@@ -224,7 +246,7 @@ export function SnippetsPage() {
               setSelectedHostIdsOverride(null);
               setSelectedSnippetId(duplicateSnippet(snippetId));
             }}
-            onDelete={setDeletePendingId}
+            onDelete={requestDeleteSnippet}
             renderExpandedContent={(snippet) => (
               <>
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -439,26 +461,6 @@ export function SnippetsPage() {
           setSelectedHostIdsOverride(null);
           setEditorOpen(false);
           setEditorTarget(null);
-        }}
-      />
-
-      <ConfirmDialog
-        open={Boolean(deletePendingId)}
-        title="Delete snippet"
-        description="Delete this saved command from the local snippet library?"
-        confirmLabel="Delete"
-        onCancel={() => setDeletePendingId(undefined)}
-        onConfirm={() => {
-          if (!deletePendingId) {
-            return;
-          }
-
-          deleteSnippet(deletePendingId);
-          if (selectedSnippet?.id === deletePendingId) {
-            setSelectedSnippetId(undefined);
-          }
-          setSelectedHostIdsOverride(null);
-          setDeletePendingId(undefined);
         }}
       />
     </>
