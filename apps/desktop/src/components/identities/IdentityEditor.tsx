@@ -268,8 +268,7 @@ function IdentityEditorForm({
         </button>
         <button
           type="submit"
-          disabled={isInvalid}
-          className="rounded-xl bg-emerald-400 px-3 py-1.5 text-xs font-medium text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+          className="rounded-xl bg-emerald-400 px-3 py-1.5 text-xs font-medium text-slate-950 transition hover:bg-emerald-300"
         >
           {identity ? "Save changes" : "Create identity"}
         </button>
