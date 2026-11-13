@@ -1,0 +1,1 @@
+- [FEATURE] Phase 1 responsiveness pass: minimum window size (960x600), icon-rail sidebar collapse below 1100px via container query, reduced-motion support, viewport-safe dialogs (dvh), and pixel-floor minimums for split panes
