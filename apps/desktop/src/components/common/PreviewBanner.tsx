@@ -7,7 +7,7 @@ import {
 } from "../../lib/backend-runtime";
 
 const ALERT_CLASS =
-  "border-b border-rose-400/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-[color:var(--shell-text)]";
+  "tw-banner-error border-b border-rose-400/40 px-4 py-2 text-sm font-semibold text-[color:var(--shell-text)]";
 
 const FAILURE_MESSAGES: Record<BackendProbeFailureKind, string> = {
   unreachable: "Backend server unreachable — verify that the preview backend is running.",
@@ -49,7 +49,7 @@ export function PreviewBanner() {
   }
 
   return (
-    <div className="border-b border-amber-300/40 bg-amber-300/10 px-4 py-2 text-sm font-semibold text-[color:var(--shell-text)]">
+    <div className="tw-banner-warn border-b border-amber-300/40 px-4 py-2 text-sm font-semibold text-[color:var(--shell-text)]">
       Preview only - Tauri native ship runs without this backend.
     </div>
   );

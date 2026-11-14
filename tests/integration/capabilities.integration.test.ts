@@ -139,4 +139,29 @@ describe("src-tauri/capabilities/default.json", () => {
     expect(block).toContain("--shell-panel: #0d1724");
     expect(block).toContain("--shell-text: #ebf2ff");
   });
+
+  it("#UX-2: banners sit on a theme-aware surface, not a bare tint over the dark body", () => {
+    // Banner text uses --shell-text (near-black in the light theme) while the
+    // body gradient is always dark, so the banner needs its own --shell-panel
+    // base. Each class must mix a tint into var(--shell-panel), and no banner
+    // may fall back to a bare bg-*/10 utility.
+    const css = readFileSync(join(repoRoot, "apps/desktop/src/styles/globals.css"), "utf8");
+    const banners: Array<[string, string]> = [
+      ["PreviewBanner.tsx", "tw-banner-warn"],
+      ["PreviewBanner.tsx", "tw-banner-error"],
+      ["DemoModeBanner.tsx", "tw-banner-warn"],
+      ["ConnectErrorBanner.tsx", "tw-banner-warn"],
+      ["ConnectErrorBanner.tsx", "tw-banner-error"],
+      ["UpdateAvailableBanner.tsx", "tw-banner-info"],
+    ];
+    for (const [file, cls] of banners) {
+      const block = new RegExp(`\\.${cls}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+      expect(block, `${cls} must mix its tint into var(--shell-panel)`).toMatch(
+        /background-color:\s*color-mix\([^;]*var\(--shell-panel\)\)/,
+      );
+      const source = readFileSync(join(repoRoot, "apps/desktop/src/components/common", file), "utf8");
+      expect(source, `${file} must use ${cls}`).toContain(cls);
+      expect(source, `${file} must not use a bare bg-*/10 tint`).not.toMatch(/\bbg-[a-z]+-\d+\/10\b/);
+    }
+  });
 });

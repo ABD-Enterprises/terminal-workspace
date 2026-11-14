@@ -94,6 +94,24 @@ html[data-app-theme="light"] {
 }
 
 /*
+ * #UX-2: banner surfaces. The shell is transparent over a hardcoded dark body
+ * gradient, so a bare 10% tint under var(--shell-text) (near-black in the
+ * light theme) was unreadable. Each banner mixes its 10% tint into the
+ * theme-aware --shell-panel, so text and surface agree in both themes.
+ */
+.tw-banner-warn {
+  background-color: color-mix(in srgb, #fcd34d 10%, var(--shell-panel));
+}
+
+.tw-banner-error {
+  background-color: color-mix(in srgb, #fb7185 10%, var(--shell-panel));
+}
+
+.tw-banner-info {
+  background-color: color-mix(in srgb, #34d399 10%, var(--shell-panel));
+}
+
+/*
  * #110: density tokens. Compact vs comfortable is driven from ONE source —
  * the `data-density` attribute set on the sidebar — instead of per-element
  * compact/comfortable ternaries. Components read these variables (e.g.

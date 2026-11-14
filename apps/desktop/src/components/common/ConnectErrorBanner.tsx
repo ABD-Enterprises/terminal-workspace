@@ -24,8 +24,8 @@ export function ConnectErrorBanner() {
       aria-label={isWarning ? "Connection cancelled" : "Connection failed"}
       className={
         isWarning
-          ? "flex flex-wrap items-center justify-between gap-3 border-b border-amber-300/40 bg-amber-300/10 px-4 py-2"
-          : "flex flex-wrap items-center justify-between gap-3 border-b border-rose-400/40 bg-rose-400/10 px-4 py-2"
+          ? "flex flex-wrap items-center justify-between gap-3 tw-banner-warn border-b border-amber-300/40 px-4 py-2"
+          : "flex flex-wrap items-center justify-between gap-3 tw-banner-error border-b border-rose-400/40 px-4 py-2"
       }
     >
       <p className="text-callout font-medium text-[color:var(--shell-text)]">{message}</p>

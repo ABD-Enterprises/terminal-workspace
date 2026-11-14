@@ -173,7 +173,7 @@ export function UpdateAvailableBanner() {
     <div
       role="status"
       aria-label="Update available"
-      className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-400/40 bg-emerald-400/10 px-4 py-2"
+      className="flex flex-wrap items-center justify-between gap-3 tw-banner-info border-b border-emerald-400/40 px-4 py-2"
     >
       <div className="min-w-0 flex-1">
         <p className="text-callout font-medium text-[color:var(--shell-text)]">
