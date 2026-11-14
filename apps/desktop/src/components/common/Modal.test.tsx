@@ -199,4 +199,13 @@ describe("Modal", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(document.activeElement).toBe(trigger);
   });
+
+  it("keeps a dark surface in every theme so pale dialog contents stay legible (#UX-2)", () => {
+    render(
+      <Modal open={true} title="Dark surface" onClose={vi.fn()}>
+        <div>Body</div>
+      </Modal>
+    );
+    expect(screen.getByRole("dialog").classList.contains("tw-modal-surface")).toBe(true);
+  });
 });

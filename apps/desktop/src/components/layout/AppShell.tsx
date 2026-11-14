@@ -28,6 +28,7 @@ import { PreviewBanner } from "../common/PreviewBanner";
 import { DemoModeBanner } from "../common/DemoModeBanner";
 import { CloseGuardDialog } from "../common/CloseGuardDialog";
 import { ConnectErrorBanner } from "../common/ConnectErrorBanner";
+import { ToastViewport } from "../common/ToastViewport";
 import { UpdateAvailableBanner } from "../common/UpdateAvailableBanner";
 import { SessionRestoreManager } from "../terminal/SessionRestoreManager";
 import { CommandPaletteDialog } from "./CommandPaletteDialog";
@@ -179,6 +180,20 @@ export function AppShell() {
             // UX-3: route through the transfer close guard instead of closing
             // directly, so ⌘W on a tab with an active download asks first.
             requestTabClose([activeSessionTab.id]);
+            break;
+          }
+          // #UX-2: macOS convention — ⌘W closes the tab, and once no tabs
+          // remain it closes the window. Previously the item silently did
+          // nothing on an empty workspace. The native close interceptor
+          // routes this window close through the same transfer guard
+          // (CloseGuardDialog), so an active transfer still asks first.
+          if (isTauriRuntime()) {
+            void import("@tauri-apps/api/window")
+              .then(({ getCurrentWindow }) => getCurrentWindow().close())
+              .catch(() => {
+                // Window API unavailable (unit tests, browser build) —
+                // nothing to close anyway.
+              });
           }
           break;
         }
@@ -505,6 +520,7 @@ export function AppShell() {
         <CommandPaletteDialog {...palette} />
       ) : null}
       <CloseGuardDialog />
+      <ToastViewport />
       <KeyboardCheatsheet />
       <FirstRunTour />
     </div>

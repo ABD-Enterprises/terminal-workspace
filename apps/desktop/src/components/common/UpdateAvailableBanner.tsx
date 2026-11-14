@@ -173,10 +173,10 @@ export function UpdateAvailableBanner() {
     <div
       role="status"
       aria-label="Update available"
-      className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-400/40 bg-emerald-400/10 px-4 py-2"
+      className="flex flex-wrap items-center justify-between gap-3 tw-banner-info border-b border-emerald-400/40 px-4 py-2"
     >
       <div className="min-w-0 flex-1">
-        <p className="text-callout font-medium text-emerald-100">
+        <p className="text-callout font-medium text-[color:var(--shell-text)]">
           {liveSessionCount !== null
             ? `Restarting will close ${liveSessionCount} live SSH session${
                 liveSessionCount === 1 ? "" : "s"
@@ -209,7 +209,7 @@ export function UpdateAvailableBanner() {
           type="button"
           disabled={installing}
           onClick={() => void runInstall(liveSessionCount !== null)}
-          className="rounded-control bg-emerald-400 px-3 py-1 text-callout font-medium text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-control bg-[color:var(--shell-accent)] px-3 py-1 text-callout font-medium text-[color:var(--shell-accent-ink)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {installing
             ? installProgress.phase === "installing"
@@ -224,7 +224,7 @@ export function UpdateAvailableBanner() {
         <button
           type="button"
           onClick={dismissUpdate}
-          className="rounded-control border border-slate-700 px-3 py-1 text-callout text-slate-200 transition hover:border-slate-500 hover:text-white"
+          className="rounded-control border border-[color:var(--shell-border)] px-3 py-1 text-callout text-[color:var(--shell-text)] transition hover:border-[color:var(--shell-muted)]"
         >
           Dismiss
         </button>

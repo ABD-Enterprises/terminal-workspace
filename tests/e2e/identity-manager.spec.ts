@@ -1,7 +1,7 @@
 import { expect, test  } from "./helpers";
 
 // End-to-end coverage for the Settings → Reusable identities surface.
-// Verifies the create flow, the inline edit flow, and the delete-with-warning
+// Verifies the create flow, the inline edit flow, and the delete-with-undo
 // flow round-trip through the identities-store + UI together. P2-DM1 batch 2.
 
 test.describe("identity manager", () => {
@@ -44,16 +44,26 @@ test.describe("identity manager", () => {
     await page.getByRole("button", { name: "Cancel" }).click();
   });
 
-  test("Delete identity surfaces the confirmation dialog", async ({ page }) => {
+  // UX-13: identity delete is immediate + undoable — no confirmation dialog.
+  test("Delete identity removes the row and Undo restores it", async ({ page }) => {
     await page.goto("/settings");
     const seededRow = page
       .getByText("Deploy Shared Key (deploy)")
       .locator("xpath=ancestor::li[1]");
     await seededRow.getByRole("button", { name: "Delete" }).click();
-    // ConfirmDialog with title "Delete identity" appears.
-    await expect(page.getByRole("heading", { name: "Delete identity" })).toBeVisible();
-    // Cancel without deleting.
-    await page.getByRole("button", { name: "Cancel" }).click();
+
+    // The row is gone immediately and an Undo toast appears.
+    await expect(
+      page.getByText("Deploy Shared Key (deploy)").locator("xpath=ancestor::li[1]")
+    ).toHaveCount(0);
+    const undo = page.getByRole("button", { name: "Undo" });
+    await expect(undo).toBeVisible();
+
+    // Undo brings the identity back.
+    await undo.click();
+    await expect(
+      page.getByText("Deploy Shared Key (deploy)").locator("xpath=ancestor::li[1]")
+    ).toBeVisible();
   });
 
   test("Identity rows expose Edit + Delete actions for each seeded entry", async ({ page }) => {

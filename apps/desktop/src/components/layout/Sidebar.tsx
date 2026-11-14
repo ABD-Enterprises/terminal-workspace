@@ -150,15 +150,16 @@ export function Sidebar() {
       data-density={workspaceDensity}
       className="flex w-[var(--sidebar-w)] shrink-0 flex-col border-r border-slate-800/80 bg-slate-950/85 px-[var(--space-shell)] py-[var(--space-shell)] backdrop-blur-xl"
     >
-      {/* Header — pinned above the single scroll region. */}
-      <div className="px-1.5">
+      {/* Header — pinned above the single scroll region. `sidebar-aux` marks
+          it for the narrow-window icon-rail collapse (globals.css). */}
+      <div className="sidebar-aux px-1.5">
         <p className="text-caption font-semibold uppercase tracking-brand text-emerald-300">
           Terminal Workspace
         </p>
         <h1 className="mt-0.5 text-title font-semibold text-slate-50">Local Vault</h1>
       </div>
 
-      <div className="mt-2">
+      <div className="sidebar-aux mt-2">
         <SearchInput
           value={sidebarSearch}
           onChange={setSidebarSearch}
@@ -170,16 +171,22 @@ export function Sidebar() {
         type="button"
         onClick={openLocalTerminal}
         aria-label="Open local terminal"
+        title="Open local terminal"
         className="mt-2 flex items-center justify-between rounded-control border border-emerald-400/40 bg-emerald-400/10 px-3 py-[var(--space-row-y)] text-left transition hover:border-emerald-400/70 hover:bg-emerald-400/15"
       >
-        <span className="text-callout font-medium text-emerald-100">Local terminal</span>
-        <span aria-hidden="true" className="text-emerald-300">
+        {/* `sidebar-icon-only` renders only in the collapsed icon rail. */}
+        <span aria-hidden="true" className="sidebar-icon-only hidden font-medium text-emerald-300">
+          ❯
+        </span>
+        <span className="sidebar-aux text-callout font-medium text-emerald-100">Local terminal</span>
+        <span aria-hidden="true" className="sidebar-aux text-emerald-300">
           ⌘
         </span>
       </button>
 
-      {/* #106: one scroll region for the whole source list (nav + sections). */}
-      <div className="mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-0.5">
+      {/* #106: one scroll region for the whole source list (nav + sections).
+          `sidebar-scroll` scopes the section-hiding in the collapsed rail. */}
+      <div className="sidebar-scroll mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-0.5">
         <nav aria-label="Primary" className="space-y-0.5">
           {navigationItems.map((item) => (
             <NavLink
@@ -199,7 +206,7 @@ export function Sidebar() {
               <span className="flex h-4 w-4 shrink-0 items-center justify-center">
                 {NAV_ICONS[item.path]}
               </span>
-              <span className="truncate">{item.label}</span>
+              <span className="sidebar-label truncate">{item.label}</span>
             </NavLink>
           ))}
         </nav>
