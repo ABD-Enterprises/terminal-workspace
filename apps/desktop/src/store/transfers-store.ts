@@ -26,6 +26,25 @@ export function hasActiveTransfers(queue: TransferItem[], hostId?: string): bool
   return countActiveTransfers(queue, hostId) > 0;
 }
 
+export const INTERRUPTED_TRANSFER_MESSAGE =
+  "Interrupted: the app closed before this transfer finished.";
+
+// Transfers are never resumed after a restart, so an entry persisted as
+// queued/running can only be a leftover from a session that ended mid-transfer.
+// Left alone it would read as live forever: the close guards would warn about
+// it on every later close and clearCompleted could not remove it. Mark such
+// entries failed on hydration so they are terminal (and visible as interrupted).
+export function normalizeHydratedQueue(queue: unknown): TransferItem[] {
+  if (!Array.isArray(queue)) {
+    return [];
+  }
+  return (queue as TransferItem[]).map((item) =>
+    isActiveTransfer(item)
+      ? { ...item, status: "failed", errorMessage: item.errorMessage ?? INTERRUPTED_TRANSFER_MESSAGE }
+      : item
+  );
+}
+
 function touchTransferItem(item: TransferItem, update: Partial<TransferItem>): TransferItem {
   return {
     ...item,
@@ -106,6 +125,14 @@ export const useTransfersStore = create<TransfersState>()(
     }),
     {
       name: "terminal-workspace-transfers",
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<TransfersState>;
+        return {
+          ...current,
+          ...saved,
+          queue: normalizeHydratedQueue(saved.queue),
+        };
+      },
       storage: createJSONStorage(() =>
         typeof window === "undefined" ? fallbackStorage : createMigratingLocalStorage()
       ),
