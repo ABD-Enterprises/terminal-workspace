@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getProtocolRuntimeStatus } from "../../lib/api";
 import { isTauriRuntime } from "../../lib/backend-runtime";
 import { formatHostAddress } from "../../lib/utils";
@@ -111,6 +111,7 @@ function HostEditorContent({
   // for set trust/jump values). Collapsing only hides the section —
   // `values` keeps everything that was typed.
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const nativeSecretStorage = isTauriRuntime();
   const [runtimeStatusMessage, setRuntimeStatusMessage] = useState<{
     protocol: HostFormValues["protocol"];
@@ -292,10 +293,17 @@ function HostEditorContent({
     >
       <form
         id={formId}
+        ref={formRef}
         onSubmit={(event) => {
           event.preventDefault();
 
           if (isInvalid) {
+            // The inline error messages are already rendered and the footer
+            // counts them; move keyboard focus to the first offending field
+            // so the user does not have to hunt for it.
+            formRef.current
+              ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+              ?.focus();
             return;
           }
 

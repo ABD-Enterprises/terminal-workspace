@@ -1,4 +1,5 @@
 import type { HostRecord } from "../../types/host";
+import { useHostLaunchPending } from "../../lib/launch-host-session";
 import { cn, formatHostAddress, formatRelativeTime } from "../../lib/utils";
 
 interface HostCardProps {
@@ -20,6 +21,10 @@ export function HostCard({
   onDelete,
   onToggleFavorite,
 }: HostCardProps) {
+  // UX-3: while the per-host launch mutex holds, show progress and ignore
+  // repeat clicks instead of silently swallowing them.
+  const launchPending = useHostLaunchPending(host.id);
+
   return (
     <article
       className={cn(
@@ -80,9 +85,11 @@ export function HostCard({
           <button
             type="button"
             onClick={onConnect}
-            className="rounded-2xl bg-emerald-400 px-3 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-300"
+            disabled={launchPending}
+            aria-busy={launchPending}
+            className="rounded-2xl bg-emerald-400 px-3 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-300 disabled:cursor-wait disabled:opacity-60"
           >
-            Connect
+            {launchPending ? "Connecting…" : "Connect"}
           </button>
           <button
             type="button"

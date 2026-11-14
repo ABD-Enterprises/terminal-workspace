@@ -7,6 +7,7 @@ import { scorePaletteMatch } from "../../lib/palette-score";
 import { selectMostRecentlyConnectedHosts, selectMostRecentlyRunSnippets } from "../../lib/recents";
 import { useAppStore } from "../../store/app-store";
 import { applyHostFilters, useHostsStore } from "../../store/hosts-store";
+import { useCloseGuardStore } from "../../store/close-guard-store";
 import { useSessionsStore } from "../../store/sessions-store";
 import { useSnippetsStore } from "../../store/snippets-store";
 import { useTransfersStore } from "../../store/transfers-store";
@@ -22,7 +23,6 @@ export function useCommandPaletteRows() {
   const sessionPanes = useSessionsStore((state) => state.panes);
   const activeSessionTabId = useSessionsStore((state) => state.activeTabId);
   const selectSessionTab = useSessionsStore((state) => state.selectTab);
-  const closeTab = useSessionsStore((state) => state.closeTab);
   const duplicateSession = useSessionsStore((state) => state.duplicateSession);
   const splitTab = useSessionsStore((state) => state.splitTab);
   const setSplitDirection = useSessionsStore((state) => state.setSplitDirection);
@@ -254,7 +254,9 @@ export function useCommandPaletteRows() {
         label: "Close this tab",
         sublabel: `Disconnect and remove "${activeSessionTab.title}"`,
         run: () => {
-          closeTab(tabId);
+          // UX-3: route through the transfer close guard so a palette-driven
+          // tab close on a session with an active download asks first.
+          useCloseGuardStore.getState().requestTabClose([tabId]);
           setPaletteQuery("");
           closeCommandPalette();
         },

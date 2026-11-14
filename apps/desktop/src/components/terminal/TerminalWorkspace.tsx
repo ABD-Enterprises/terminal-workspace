@@ -4,8 +4,10 @@ import { describeHostRuntime, formatHostAddress } from "../../lib/utils";
 import { SearchInput } from "../common/SearchInput";
 import { buildHostSearchText } from "../../lib/utils";
 import { useHostsStore } from "../../store/hosts-store";
+import { useCloseGuardStore } from "../../store/close-guard-store";
 import { useSessionsStore } from "../../store/sessions-store";
 import { hostSupportsPortForwarding, type HostRecord } from "../../types/host";
+import { ErrorBoundary, ScopedErrorFallback } from "../ErrorBoundary";
 import { EmptyState } from "../common/EmptyState";
 import { PortForwardPanel } from "./PortForwardPanel";
 import { SplitLayout } from "./SplitLayout";
@@ -27,13 +29,13 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
   const openSession = useSessionsStore((state) => state.openSession);
   const duplicateSession = useSessionsStore((state) => state.duplicateSession);
   const selectTab = useSessionsStore((state) => state.selectTab);
-  const closeTab = useSessionsStore((state) => state.closeTab);
   const splitTab = useSessionsStore((state) => state.splitTab);
   const closePane = useSessionsStore((state) => state.closePane);
   const selectPane = useSessionsStore((state) => state.selectPane);
   const setSplitDirection = useSessionsStore((state) => state.setSplitDirection);
   const setSplitRatio = useSessionsStore((state) => state.setSplitRatio);
   const reorderTab = useSessionsStore((state) => state.reorderTab);
+  const requestTabClose = useCloseGuardStore((state) => state.requestTabClose);
   const allHosts = useHostsStore((state) => state.hosts);
   const quickConnectHosts = useMemo(() => {
     const normalizedQuery = quickConnectQuery.trim().toLowerCase();
@@ -76,13 +78,12 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
   // T08 actions — Close others / Close to the right are derived from
   // the current tabs array. We snapshot the array before iterating so
   // each closeTab call sees consistent indices (the store sorts/reflows
-  // on each call).
+  // on each call). All paths route through the transfer close guard:
+  // tabs with active transfers park behind a confirmation dialog instead
+  // of closing silently.
+  const closeSingleTab = (tabId: string) => requestTabClose([tabId]);
   const closeOthers = (keepTabId: string) => {
-    for (const tab of [...tabs]) {
-      if (tab.id !== keepTabId) {
-        closeTab(tab.id);
-      }
-    }
+    requestTabClose(tabs.filter((tab) => tab.id !== keepTabId).map((tab) => tab.id));
   };
   const closeToRight = (anchorTabId: string) => {
     const snapshot = [...tabs];
@@ -90,9 +91,7 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
     if (anchorIndex < 0) {
       return;
     }
-    for (const tab of snapshot.slice(anchorIndex + 1)) {
-      closeTab(tab.id);
-    }
+    requestTabClose(snapshot.slice(anchorIndex + 1).map((tab) => tab.id));
   };
   const duplicateByTabId = (tabId: string) => {
     const tab = tabs.find((entry) => entry.id === tabId);
@@ -114,7 +113,7 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
           hosts={hosts}
           activeTabId={activeTab.id}
           onSelect={selectTab}
-          onClose={closeTab}
+          onClose={closeSingleTab}
           onReorder={reorderTab}
           onContextMenu={(tabId, x, y) => setTabMenu({ tabId, x, y })}
         />
@@ -122,7 +121,7 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
       <TabContextMenu
         payload={tabMenu}
         onClose={() => setTabMenu(null)}
-        onCloseTab={closeTab}
+        onCloseTab={closeSingleTab}
         onCloseOthers={closeOthers}
         onCloseToRight={closeToRight}
         onDuplicate={duplicateByTabId}
@@ -192,15 +191,24 @@ export function TerminalWorkspace({ launchHost }: TerminalWorkspaceProps) {
                   return null;
                 }
                 return (
-                  <TerminalPane
+                  // #UX-3: one crashing pane is contained by its own
+                  // boundary — the sibling panes in the split (and their
+                  // live sessions) keep running.
+                  <ErrorBoundary
                     key={pane.id}
-                    host={host}
-                    pane={pane}
-                    active={activeTab.activePaneId === pane.id}
-                    onActivate={() => selectPane(activeTab.id, pane.id)}
-                    onSplit={() => splitTab(activeTab.id, host)}
-                    onClose={() => closePane(activeTab.id, pane.id)}
-                  />
+                    fallback={(error, retry) => (
+                      <ScopedErrorFallback error={error} onRetry={retry} />
+                    )}
+                  >
+                    <TerminalPane
+                      host={host}
+                      pane={pane}
+                      active={activeTab.activePaneId === pane.id}
+                      onActivate={() => selectPane(activeTab.id, pane.id)}
+                      onSplit={() => splitTab(activeTab.id, host)}
+                      onClose={() => closePane(activeTab.id, pane.id)}
+                    />
+                  </ErrorBoundary>
                 );
               })
               .filter((node): node is NonNullable<typeof node> => node !== null)}

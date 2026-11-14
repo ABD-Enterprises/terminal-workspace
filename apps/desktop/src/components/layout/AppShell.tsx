@@ -1,3 +1,4 @@
+import { ErrorBoundary, ScopedErrorFallback } from "../ErrorBoundary";
 import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAppShellTheme } from "../../hooks/useAppShellTheme";
@@ -13,11 +14,19 @@ import { navigationItems } from "../../lib/navigation";
 import { formatPrimaryShortcut, isPrimaryShortcut } from "../../lib/shortcuts";
 import { cn } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
+import {
+  acknowledgeWindowCloseRequest,
+  setCloseGuardReady,
+  useCloseGuardStore,
+  WINDOW_CLOSE_REQUESTED_EVENT,
+} from "../../store/close-guard-store";
 import { useHostsStore } from "../../store/hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
+import { hasActiveTransfers, useTransfersStore } from "../../store/transfers-store";
 import { formatHostProtocol, type HostProtocol } from "../../types/host";
 import { PreviewBanner } from "../common/PreviewBanner";
 import { DemoModeBanner } from "../common/DemoModeBanner";
+import { CloseGuardDialog } from "../common/CloseGuardDialog";
 import { ConnectErrorBanner } from "../common/ConnectErrorBanner";
 import { ToastViewport } from "../common/ToastViewport";
 import { UpdateAvailableBanner } from "../common/UpdateAvailableBanner";
@@ -57,11 +66,11 @@ export function AppShell() {
   const navigate = useNavigate();
   const palette = useCommandPaletteRows();
   const { setPaletteQuery, setPaletteSelectedIndex, inputRef, activeSessionTab } = palette;
+  const requestTabClose = useCloseGuardStore((state) => state.requestTabClose);
   const hosts = useHostsStore((state) => state.hosts);
   const sessionTabs = useSessionsStore((state) => state.tabs);
   const activeSessionTabId = useSessionsStore((state) => state.activeTabId);
   const selectSessionTab = useSessionsStore((state) => state.selectTab);
-  const closeTab = useSessionsStore((state) => state.closeTab);
   const duplicateSession = useSessionsStore((state) => state.duplicateSession);
   const activeItem =
     navigationItems.find((item) => location.pathname.startsWith(item.path)) ?? navigationItems[0];
@@ -168,12 +177,16 @@ export function AppShell() {
         }
         case "menu:close-tab": {
           if (activeSessionTab) {
-            closeTab(activeSessionTab.id);
+            // UX-3: route through the transfer close guard instead of closing
+            // directly, so ⌘W on a tab with an active download asks first.
+            requestTabClose([activeSessionTab.id]);
             break;
           }
           // #UX-2: macOS convention — ⌘W closes the tab, and once no tabs
           // remain it closes the window. Previously the item silently did
-          // nothing on an empty workspace.
+          // nothing on an empty workspace. The native close interceptor
+          // routes this window close through the same transfer guard
+          // (CloseGuardDialog), so an active transfer still asks first.
           if (isTauriRuntime()) {
             void import("@tauri-apps/api/window")
               .then(({ getCurrentWindow }) => getCurrentWindow().close())
@@ -236,16 +249,73 @@ export function AppShell() {
   }, [
     activeSessionTab,
     activeSessionTabId,
-    closeTab,
     duplicateSession,
     hosts,
     navigate,
     openCommandPalette,
+    requestTabClose,
     selectSessionTab,
     sessionTabs,
     setWorkspaceDensity,
     workspaceDensity,
   ]);
+
+  // ---- UX-3 window close guard --------------------------------------------
+  // The native shell intercepts the main window's CloseRequested, prevents
+  // the close, and forwards it here. With no active transfers the window
+  // closes immediately; otherwise the request parks behind a ConfirmDialog
+  // (CloseGuardDialog) and only proceeds on explicit confirmation, which
+  // holds the native one-shot close token (terminal_workspace_confirm_close_window).
+  // The native side vetoes a close only while this effect has reported ready
+  // (and times out an unacknowledged request), so if the shell fails to mount
+  // or is replaced by the top-level ErrorBoundary the window still closes.
+  // Browser preview has no native close interception, so it falls back to the
+  // standard beforeunload prompt when transfers are active.
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      const onBeforeUnload = (event: BeforeUnloadEvent) => {
+        if (hasActiveTransfers(useTransfersStore.getState().queue)) {
+          event.preventDefault();
+        }
+      };
+      window.addEventListener("beforeunload", onBeforeUnload);
+      return () => {
+        window.removeEventListener("beforeunload", onBeforeUnload);
+      };
+    }
+
+    let cancelled = false;
+    let unlistenFn: (() => void) | undefined;
+
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<number>(WINDOW_CLOSE_REQUESTED_EVENT, (event) => {
+          // Acknowledge first: from here the user may take as long as they
+          // need on the confirmation dialog.
+          void acknowledgeWindowCloseRequest(event.payload);
+          useCloseGuardStore.getState().handleWindowCloseRequest();
+        })
+      )
+      .then((unlisten) => {
+        if (cancelled) {
+          unlisten();
+          return;
+        }
+        unlistenFn = unlisten;
+        void setCloseGuardReady(true);
+      })
+      .catch(() => {
+        // Tauri event API not available — guard silently disabled.
+      });
+
+    return () => {
+      cancelled = true;
+      unlistenFn?.();
+      if (unlistenFn) {
+        void setCloseGuardReady(false);
+      }
+    };
+  }, []);
 
   // Bind the macOS window title to the active session so the dock / Mission
   // Control / Cmd-Tab labels reflect what the user is currently looking at.
@@ -429,7 +499,18 @@ export function AppShell() {
                 workspaceDensity === "compact" ? "px-3 py-2.5" : "px-4 py-3.5"
               )}
             >
-              <Outlet />
+              {/*
+                #UX-3: a render crash inside any single route view is caught
+                here and recovers in place, so a bad surface never white-screens
+                the whole shell (and never disturbs live terminal sessions in
+                other tabs).
+              */}
+              <ErrorBoundary
+                resetKey={location.pathname}
+                fallback={(error, retry) => <ScopedErrorFallback error={error} onRetry={retry} />}
+              >
+                <Outlet />
+              </ErrorBoundary>
             </div>
           </div>
         </main>
@@ -438,6 +519,7 @@ export function AppShell() {
       {commandPaletteOpen ? (
         <CommandPaletteDialog {...palette} />
       ) : null}
+      <CloseGuardDialog />
       <ToastViewport />
       <KeyboardCheatsheet />
       <FirstRunTour />

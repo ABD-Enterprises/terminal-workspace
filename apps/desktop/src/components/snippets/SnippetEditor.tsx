@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { Modal } from "../common/Modal";
 import { formatHostAddress } from "../../lib/utils";
 import { emptySnippetFormValues, snippetToFormValues, type SnippetFormValues, type SnippetRecord } from "../../types/snippet";
@@ -13,9 +13,29 @@ interface SnippetEditorProps {
 }
 
 export function SnippetEditor({ open, snippet, hosts, onClose, onSave }: SnippetEditorProps) {
+  const formId = useId();
   const [draft, setDraft] = useState<SnippetFormValues>(
     snippet ? snippetToFormValues(snippet) : emptySnippetFormValues
   );
+  // The save button used to disable itself while required fields were blank,
+  // leaving no clue which field was at fault. Validate on submit instead,
+  // mark the offending fields, and move focus to the first one.
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const commandRef = useRef<HTMLTextAreaElement>(null);
+
+  const titleError = draft.title.trim() ? null : "A title is required.";
+  const commandError = draft.command.trim() ? null : "A command is required.";
+
+  const handleSubmit = () => {
+    if (titleError || commandError) {
+      setSubmitAttempted(true);
+      (titleError ? titleRef : commandRef).current?.focus();
+      return;
+    }
+
+    onSave(draft);
+  };
 
   const hostOptions = useMemo(
     () =>
@@ -43,8 +63,7 @@ export function SnippetEditor({ open, snippet, hosts, onClose, onSave }: Snippet
           </button>
           <button
             type="button"
-            onClick={() => onSave(draft)}
-            disabled={!draft.title.trim() || !draft.command.trim()}
+            onClick={handleSubmit}
             className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {snippet ? "Save snippet" : "Create snippet"}
@@ -59,13 +78,21 @@ export function SnippetEditor({ open, snippet, hosts, onClose, onSave }: Snippet
               Title
             </span>
             <input
+              ref={titleRef}
               autoFocus
               value={draft.title}
               onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
               placeholder="Restart billing workers"
+              aria-invalid={submitAttempted && titleError ? true : undefined}
+              aria-describedby={submitAttempted && titleError ? `${formId}-title-error` : undefined}
               className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
             />
           </label>
+          {submitAttempted && titleError ? (
+            <p id={`${formId}-title-error`} role="alert" className="-mt-1 text-xs text-rose-200">
+              {titleError}
+            </p>
+          ) : null}
 
           <label className="grid gap-1.5">
             <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -86,13 +113,21 @@ export function SnippetEditor({ open, snippet, hosts, onClose, onSave }: Snippet
               Command
             </span>
             <textarea
+              ref={commandRef}
               rows={8}
               value={draft.command}
               onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))}
               placeholder="uname -a && uptime"
+              aria-invalid={submitAttempted && commandError ? true : undefined}
+              aria-describedby={submitAttempted && commandError ? `${formId}-command-error` : undefined}
               className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-emerald-400/60 focus:ring-2 focus:ring-emerald-400/20"
             />
           </label>
+          {submitAttempted && commandError ? (
+            <p id={`${formId}-command-error`} role="alert" className="-mt-1 text-xs text-rose-200">
+              {commandError}
+            </p>
+          ) : null}
 
           <label className="grid gap-1.5">
             <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">

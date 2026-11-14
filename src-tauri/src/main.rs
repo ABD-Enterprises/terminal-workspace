@@ -438,6 +438,112 @@ struct AppExitDrainGuard {
     in_progress: AtomicBool,
 }
 
+/// UX-3: gate for the main window's CloseRequested. While the renderer's
+/// close guard is mounted (`renderer_ready`), the native side prevents the
+/// close and forwards the request to the renderer
+/// (terminal_workspace://window-close-requested, payload = request sequence
+/// number) so it can check for active file transfers before deciding. When the
+/// renderer confirms, `terminal_workspace_confirm_close_window` sets the
+/// one-shot `confirmed` token and closes the window; the interceptor consumes
+/// the token and lets that one close through (swap() keeps it single-use).
+///
+/// The renderer can never veto a close indefinitely: if its close guard is not
+/// mounted (it failed before AppShell rendered, or the top-level ErrorBoundary
+/// replaced it) the close goes straight through, and a forwarded request the
+/// renderer does not acknowledge within WINDOW_CLOSE_ACK_TIMEOUT_MS is closed
+/// anyway. Only an acknowledged request may wait on the user's confirmation.
+#[derive(Default)]
+struct WindowCloseGate {
+    confirmed: AtomicBool,
+    renderer_ready: AtomicBool,
+    requested_seq: AtomicU64,
+    acked_seq: AtomicU64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum WindowCloseDecision {
+    /// Let the close proceed.
+    Allow,
+    /// Veto the close and ask the renderer, tagging the request with `seq`.
+    Forward { seq: u64 },
+}
+
+impl WindowCloseGate {
+    fn decide(&self) -> WindowCloseDecision {
+        if self.confirmed.swap(false, Ordering::SeqCst) {
+            return WindowCloseDecision::Allow;
+        }
+        if !self.renderer_ready.load(Ordering::SeqCst) {
+            return WindowCloseDecision::Allow;
+        }
+        WindowCloseDecision::Forward {
+            seq: self.requested_seq.fetch_add(1, Ordering::SeqCst) + 1,
+        }
+    }
+
+    fn acknowledge(&self, seq: u64) {
+        self.acked_seq.fetch_max(seq, Ordering::SeqCst);
+    }
+
+    fn request_unanswered(&self, seq: u64) -> bool {
+        self.acked_seq.load(Ordering::SeqCst) < seq
+    }
+}
+
+/// UX-3: renderer-confirmed window close. Holds the one-shot gate token and
+/// closes the main window; the CloseRequested interceptor consumes the token
+/// and lets this close through. Called from close-guard-store once the user
+/// confirms past any active-transfer warning (or immediately when no
+/// transfers are active).
+#[tauri::command]
+fn terminal_workspace_confirm_close_window(
+    window: tauri::WebviewWindow,
+    gate: tauri::State<'_, WindowCloseGate>,
+) -> Result<(), String> {
+    gate.confirmed.store(true, Ordering::SeqCst);
+    window.close().map_err(|error| error.to_string())
+}
+
+/// UX-3: the renderer reports whether its window-close listener is mounted.
+/// Until it says ready (and again after it unmounts), closes are not vetoed.
+#[tauri::command]
+fn terminal_workspace_set_close_guard_ready(ready: bool, gate: tauri::State<'_, WindowCloseGate>) {
+    gate.renderer_ready.store(ready, Ordering::SeqCst);
+}
+
+/// UX-3: the renderer received close request `seq` and now owns the decision
+/// (it may keep a confirmation dialog open as long as the user needs).
+#[tauri::command]
+fn terminal_workspace_ack_close_request(seq: u64, gate: tauri::State<'_, WindowCloseGate>) {
+    gate.acknowledge(seq);
+}
+
+/// UX-3: veto the close and hand request `seq` to the renderer, then close the
+/// window anyway if the renderer does not acknowledge it in time.
+fn forward_window_close_request(app_handle: &tauri::AppHandle, seq: u64) {
+    let Some(window) = app_handle.get_webview_window("main") else {
+        return;
+    };
+    if let Err(error) = window.emit(WINDOW_CLOSE_REQUESTED_EVENT, seq) {
+        log::warn!("[termsnip] failed to forward window close request: {error}");
+    }
+    let app_handle = app_handle.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(WINDOW_CLOSE_ACK_TIMEOUT_MS));
+        let gate = app_handle.state::<WindowCloseGate>();
+        if !gate.request_unanswered(seq) {
+            return;
+        }
+        log::warn!("[termsnip] renderer did not answer window close request; closing anyway");
+        gate.confirmed.store(true, Ordering::SeqCst);
+        if let Some(window) = app_handle.get_webview_window("main") {
+            if let Err(error) = window.close() {
+                log::warn!("[termsnip] failed to close unresponsive window: {error}");
+            }
+        }
+    });
+}
+
 #[derive(Clone)]
 struct NativeSessionHandle {
     command_sender: Sender<NativeSessionCommand>,
@@ -4468,6 +4574,14 @@ fn terminal_workspace_close_backend_session_stream(
 /// Channel name the renderer subscribes to for native menu activations.
 /// Payload is the menu-item id string (e.g. "menu:nav-hosts").
 const MENU_EVENT_NAME: &str = "terminal_workspace://menu-event";
+/// UX-3: emitted on the main window's CloseRequested after the close is
+/// prevented. The renderer acknowledges it (terminal_workspace_ack_close_request),
+/// then decides (active transfers?) and either closes via
+/// terminal_workspace_confirm_close_window or shows a confirmation dialog.
+const WINDOW_CLOSE_REQUESTED_EVENT: &str = "terminal_workspace://window-close-requested";
+/// UX-3: how long a forwarded close request may go unacknowledged before the
+/// window closes anyway, so a dead renderer cannot veto closing indefinitely.
+const WINDOW_CLOSE_ACK_TIMEOUT_MS: u64 = 2_000;
 
 /// Build the macOS application menu. Each non-system item carries a stable
 /// string id (`menu:*`) that the renderer maps to an action via the
@@ -5005,6 +5119,7 @@ fn main() {
         .manage(NativeSessionRegistry::default())
         .manage(NativeForwardRegistry::default())
         .manage(AppExitDrainGuard::default())
+        .manage(WindowCloseGate::default())
         .setup(|app| {
             // #151: resolve the durable host-key store once, through Tauri, so it
             // follows the bundle identifier and never lands in the per-session
@@ -5090,13 +5205,16 @@ fn main() {
             terminal_workspace_import_private_key_from_body,
             terminal_workspace_copy_key_to_host,
             terminal_workspace_set_dock_badge,
+            terminal_workspace_confirm_close_window,
+            terminal_workspace_set_close_guard_ready,
+            terminal_workspace_ack_close_request,
             terminal_workspace_check_for_updates,
             terminal_workspace_install_update_and_restart
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
+    app.run(|app_handle, mut event| {
             // #472: let an in-flight save finish before the process exits.
             // Exit follows every quit path, including app_handle.exit below.
             if let tauri::RunEvent::Exit = event {
@@ -5105,7 +5223,10 @@ fn main() {
                 }
                 return;
             }
-            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+            // `ref mut` (not a by-value binding): the UX-3 WindowEvent
+            // handler below still needs `event`, and a by-value `api` would
+            // partially move it.
+            if let tauri::RunEvent::ExitRequested { ref mut api, code, .. } = event {
                 let exit_guard = app_handle.state::<AppExitDrainGuard>();
                 if exit_guard.in_progress.swap(true, Ordering::AcqRel) {
                     return;
@@ -5124,6 +5245,28 @@ fn main() {
                     );
                 }
                 app_handle.exit(code.unwrap_or(0));
+            }
+
+            // UX-3: intercept the main window's close so the renderer can
+            // warn about active file transfers before the window (and every
+            // session in it) goes away. The gate vetoes only while the
+            // renderer's close guard is mounted and a forwarded request is
+            // always bounded by an acknowledgement timeout (see
+            // WindowCloseGate), so a failed renderer cannot trap the window.
+            if let tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } = event
+            {
+                if label != "main" {
+                    return;
+                }
+                let gate = app_handle.state::<WindowCloseGate>();
+                if let WindowCloseDecision::Forward { seq } = gate.decide() {
+                    api.prevent_close();
+                    forward_window_close_request(app_handle, seq);
+                }
             }
         });
 }
@@ -5165,6 +5308,51 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn window_close_is_not_vetoed_until_the_renderer_reports_ready() {
+        let gate = WindowCloseGate::default();
+        assert_eq!(gate.decide(), WindowCloseDecision::Allow);
+
+        gate.renderer_ready.store(true, Ordering::SeqCst);
+        assert_eq!(gate.decide(), WindowCloseDecision::Forward { seq: 1 });
+
+        // The guard unmounted (top-level ErrorBoundary took over): no veto.
+        gate.renderer_ready.store(false, Ordering::SeqCst);
+        assert_eq!(gate.decide(), WindowCloseDecision::Allow);
+    }
+
+    #[test]
+    fn window_close_confirmation_token_is_single_use() {
+        let gate = WindowCloseGate::default();
+        gate.renderer_ready.store(true, Ordering::SeqCst);
+        gate.confirmed.store(true, Ordering::SeqCst);
+
+        assert_eq!(gate.decide(), WindowCloseDecision::Allow);
+        assert_eq!(gate.decide(), WindowCloseDecision::Forward { seq: 1 });
+    }
+
+    #[test]
+    fn unacknowledged_window_close_request_is_reported_unanswered() {
+        let gate = WindowCloseGate::default();
+        gate.renderer_ready.store(true, Ordering::SeqCst);
+
+        let WindowCloseDecision::Forward { seq: first } = gate.decide() else {
+            panic!("a ready renderer should receive the request");
+        };
+        assert!(gate.request_unanswered(first));
+        gate.acknowledge(first);
+        assert!(!gate.request_unanswered(first));
+
+        // A later request is tracked on its own; an old ack does not cover it.
+        let WindowCloseDecision::Forward { seq: second } = gate.decide() else {
+            panic!("a ready renderer should receive the request");
+        };
+        assert!(second > first);
+        assert!(gate.request_unanswered(second));
+        gate.acknowledge(second);
+        assert!(!gate.request_unanswered(second));
+    }
 
     #[test]
     fn update_download_progress_throttle_suppresses_chunks_but_emits_completion() {

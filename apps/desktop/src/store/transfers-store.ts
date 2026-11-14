@@ -9,6 +9,62 @@ const fallbackStorage: StateStorage = {
   removeItem: () => undefined,
 };
 
+// UX-3: "active" means the transfer has not reached a terminal state.
+// Closing a session (or the app) mid-transfer leaves a partial file, so the
+// close guards in close-guard-store treat queued + running as blocking.
+export function isActiveTransfer(item: TransferItem): boolean {
+  return item.status === "queued" || item.status === "running";
+}
+
+export function countActiveTransfers(queue: TransferItem[], hostId?: string): number {
+  return queue.filter(
+    (item) => isActiveTransfer(item) && (hostId === undefined || item.hostId === hostId)
+  ).length;
+}
+
+export function hasActiveTransfers(queue: TransferItem[], hostId?: string): boolean {
+  return countActiveTransfers(queue, hostId) > 0;
+}
+
+const MAX_TRANSFER_HISTORY = 24;
+
+// Keeps the queue (newest first) to `limit` entries by dropping only finished
+// ones, oldest first. A queued/running transfer is never evicted: the close
+// guards read this queue, so dropping a live transfer would let the window or
+// a tab close with no warning while it is still moving data.
+export function trimTransferQueue(queue: TransferItem[], limit = MAX_TRANSFER_HISTORY): TransferItem[] {
+  let finishedBudget = Math.max(0, limit - countActiveTransfers(queue));
+  return queue.filter((item) => {
+    if (isActiveTransfer(item)) {
+      return true;
+    }
+    if (finishedBudget > 0) {
+      finishedBudget -= 1;
+      return true;
+    }
+    return false;
+  });
+}
+
+export const INTERRUPTED_TRANSFER_MESSAGE =
+  "Interrupted: the app closed before this transfer finished.";
+
+// Transfers are never resumed after a restart, so an entry persisted as
+// queued/running can only be a leftover from a session that ended mid-transfer.
+// Left alone it would read as live forever: the close guards would warn about
+// it on every later close and clearCompleted could not remove it. Mark such
+// entries failed on hydration so they are terminal (and visible as interrupted).
+export function normalizeHydratedQueue(queue: unknown): TransferItem[] {
+  if (!Array.isArray(queue)) {
+    return [];
+  }
+  return (queue as TransferItem[]).map((item) =>
+    isActiveTransfer(item)
+      ? { ...item, status: "failed", errorMessage: item.errorMessage ?? INTERRUPTED_TRANSFER_MESSAGE }
+      : item
+  );
+}
+
 function touchTransferItem(item: TransferItem, update: Partial<TransferItem>): TransferItem {
   return {
     ...item,
@@ -56,7 +112,7 @@ export const useTransfersStore = create<TransfersState>()(
       queueTransfer: (values) => {
         const transfer = createTransferItem(values);
         set((state) => ({
-          queue: [transfer, ...state.queue].slice(0, 24),
+          queue: trimTransferQueue([transfer, ...state.queue]),
         }));
         return transfer.id;
       },
@@ -89,6 +145,14 @@ export const useTransfersStore = create<TransfersState>()(
     }),
     {
       name: "terminal-workspace-transfers",
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<TransfersState>;
+        return {
+          ...current,
+          ...saved,
+          queue: normalizeHydratedQueue(saved.queue),
+        };
+      },
       storage: createJSONStorage(() =>
         typeof window === "undefined" ? fallbackStorage : createMigratingLocalStorage()
       ),

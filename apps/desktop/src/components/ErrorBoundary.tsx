@@ -12,6 +12,20 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
+  /**
+   * Scoped recovery UI for nested boundaries (#UX-3). When omitted, the
+   * boundary renders the full-window ErrorFallback with a page reload;
+   * when provided, the fallback renders in place (e.g. one crashed pane
+   * or route view) and `retry` clears the error and re-renders children.
+   */
+  fallback?: (error: Error, retry: () => void) => ReactNode;
+  /**
+   * When this value changes while an error is showing, the error is cleared
+   * and children render again. A route-level boundary passes the current
+   * pathname so navigating away from a crashed view shows the next view
+   * instead of the stale fallback.
+   */
+  resetKey?: string;
 }
 
 interface ErrorBoundaryState {
@@ -89,18 +103,101 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     console.error("Render error caught by ErrorBoundary:", error, info.componentStack);
   }
 
+  componentDidUpdate(previousProps: ErrorBoundaryProps): void {
+    if (this.state.error && previousProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
+  }
+
   private handleReload = (): void => {
     if (typeof window !== "undefined") {
       window.location.reload();
     }
   };
 
+  private handleRetry = (): void => {
+    this.setState({ error: null });
+  };
+
   render(): ReactNode {
     if (this.state.error) {
+      if (this.props.fallback) {
+        return this.props.fallback(this.state.error, this.handleRetry);
+      }
       return <ErrorFallback error={this.state.error} onReload={this.handleReload} />;
     }
     return this.props.children;
   }
+}
+
+/**
+ * #UX-3: in-place recovery UI for a nested boundary (a route view or a
+ * single terminal pane). Renders where the children would have, so a crash
+ * in one surface no longer takes down the whole workspace — for a terminal
+ * app holding live SSH sessions that is the difference between a hiccup
+ * and losing every open session. Styled with shell tokens (not the Tailwind
+ * classes the crashed subtree may share a flaw with).
+ */
+export function ScopedErrorFallback({
+  error,
+  onRetry,
+}: {
+  error: Error;
+  onRetry: () => void;
+}): ReactNode {
+  return (
+    <div
+      role="alert"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "12rem",
+        height: "100%",
+        padding: "1.5rem",
+        background: "var(--shell-panel, #0d1724)",
+        color: "var(--shell-text, #ebf2ff)",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: "28rem",
+          width: "100%",
+          border: "1px solid var(--shell-border, #1f2c42)",
+          background: "var(--shell-base, #07111b)",
+          borderRadius: "0.875rem",
+          padding: "1.25rem",
+        }}
+      >
+        <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.375rem" }}>
+          This view hit an error
+        </h2>
+        <p style={{ fontSize: "0.8125rem", lineHeight: 1.6, color: "var(--shell-muted, #8ea0bd)" }}>
+          {error.message || "Something unexpected happened while rendering."} Your sessions and
+          other views are unaffected.
+        </p>
+        <button
+          type="button"
+          autoFocus
+          onClick={onRetry}
+          style={{
+            marginTop: "1rem",
+            borderRadius: "0.75rem",
+            background: "var(--shell-accent, #76e4c3)",
+            color: "var(--shell-base, #07111b)",
+            padding: "0.5rem 1rem",
+            fontSize: "0.8125rem",
+            fontWeight: 500,
+            border: "none",
+            cursor: "pointer",
+          }}
+        >
+          Try again
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /**

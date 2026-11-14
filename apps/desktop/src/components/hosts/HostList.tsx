@@ -4,6 +4,7 @@ import {
   statusDotAriaLabel,
   statusDotClass,
 } from "../../lib/host-status";
+import { useHostLaunchPending } from "../../lib/launch-host-session";
 import { cn, describeHostRuntime, formatHostAddress, formatRelativeTime } from "../../lib/utils";
 import { useSessionsStore } from "../../store/sessions-store";
 import { formatHostProtocol, type HostRecord } from "../../types/host";
@@ -11,6 +12,24 @@ import { EmptyState } from "../common/EmptyState";
 
 function getVisibleTags(tags: string[]) {
   return tags.filter((tag) => tag.trim().toLowerCase() !== "favorite");
+}
+
+// UX-3: row-level connect button needs its own component so the pending
+// hook runs once per row, not inside the list's render map.
+function HostOpenButton({ hostId, onConnect }: { hostId: string; onConnect: (hostId: string) => void }) {
+  const launchPending = useHostLaunchPending(hostId);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onConnect(hostId)}
+      disabled={launchPending}
+      aria-busy={launchPending}
+      className="rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-medium text-slate-950 transition hover:bg-emerald-300 disabled:cursor-wait disabled:opacity-60"
+    >
+      {launchPending ? "Opening…" : "Open"}
+    </button>
+  );
 }
 
 interface HostListProps {
@@ -164,13 +183,7 @@ export function HostList({
                   with an extra left margin so a misclick can't destroy a host.
                 */}
                 <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onConnect(host.id)}
-                    className="rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-medium text-slate-950 transition hover:bg-emerald-300"
-                  >
-                    Open
-                  </button>
+                  <HostOpenButton hostId={host.id} onConnect={onConnect} />
                   <button
                     type="button"
                     onClick={() => onEdit(host.id)}
