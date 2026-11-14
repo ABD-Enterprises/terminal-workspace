@@ -14,7 +14,12 @@ import { navigationItems } from "../../lib/navigation";
 import { formatPrimaryShortcut, isPrimaryShortcut } from "../../lib/shortcuts";
 import { cn } from "../../lib/utils";
 import { useAppStore } from "../../store/app-store";
-import { useCloseGuardStore, WINDOW_CLOSE_REQUESTED_EVENT } from "../../store/close-guard-store";
+import {
+  acknowledgeWindowCloseRequest,
+  setCloseGuardReady,
+  useCloseGuardStore,
+  WINDOW_CLOSE_REQUESTED_EVENT,
+} from "../../store/close-guard-store";
 import { useHostsStore } from "../../store/hosts-store";
 import { useSessionsStore } from "../../store/sessions-store";
 import { hasActiveTransfers, useTransfersStore } from "../../store/transfers-store";
@@ -246,6 +251,9 @@ export function AppShell() {
   // closes immediately; otherwise the request parks behind a ConfirmDialog
   // (CloseGuardDialog) and only proceeds on explicit confirmation, which
   // holds the native one-shot close token (terminal_workspace_confirm_close_window).
+  // The native side vetoes a close only while this effect has reported ready
+  // (and times out an unacknowledged request), so if the shell fails to mount
+  // or is replaced by the top-level ErrorBoundary the window still closes.
   // Browser preview has no native close interception, so it falls back to the
   // standard beforeunload prompt when transfers are active.
   useEffect(() => {
@@ -266,7 +274,10 @@ export function AppShell() {
 
     void import("@tauri-apps/api/event")
       .then(({ listen }) =>
-        listen<void>(WINDOW_CLOSE_REQUESTED_EVENT, () => {
+        listen<number>(WINDOW_CLOSE_REQUESTED_EVENT, (event) => {
+          // Acknowledge first: from here the user may take as long as they
+          // need on the confirmation dialog.
+          void acknowledgeWindowCloseRequest(event.payload);
           useCloseGuardStore.getState().handleWindowCloseRequest();
         })
       )
@@ -276,6 +287,7 @@ export function AppShell() {
           return;
         }
         unlistenFn = unlisten;
+        void setCloseGuardReady(true);
       })
       .catch(() => {
         // Tauri event API not available — guard silently disabled.
@@ -284,6 +296,9 @@ export function AppShell() {
     return () => {
       cancelled = true;
       unlistenFn?.();
+      if (unlistenFn) {
+        void setCloseGuardReady(false);
+      }
     };
   }, []);
 

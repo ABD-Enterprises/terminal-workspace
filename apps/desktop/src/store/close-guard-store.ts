@@ -51,6 +51,33 @@ async function closeMainWindow() {
   }
 }
 
+// Handshake with the native close gate. The native side only vetoes a window
+// close while this guard reports ready, and closes anyway if a forwarded
+// request is not acknowledged quickly, so a renderer that failed to mount (or
+// was replaced by the top-level ErrorBoundary) can never trap the window open.
+async function invokeCloseGate(command: string, args: Record<string, unknown>) {
+  if (!isTauriRuntime()) {
+    return;
+  }
+
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke(command, args);
+  } catch (error) {
+    console.warn("[close-guard] native close gate call failed:", command, error);
+  }
+}
+
+/** Tell the native shell whether this renderer is listening for close requests. */
+export function setCloseGuardReady(ready: boolean): Promise<void> {
+  return invokeCloseGate("terminal_workspace_set_close_guard_ready", { ready });
+}
+
+/** Acknowledge close request `seq` so the native side waits for our decision. */
+export function acknowledgeWindowCloseRequest(seq: number): Promise<void> {
+  return invokeCloseGate("terminal_workspace_ack_close_request", { seq });
+}
+
 export const useCloseGuardStore = create<CloseGuardState>()((set, get) => ({
   pendingTabIds: [],
   windowClosePending: false,
