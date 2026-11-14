@@ -70,9 +70,16 @@ test.describe("settings page", () => {
     await page.goto("/settings");
     await page.getByRole("button", { name: "Add identity" }).click();
     await expect(page.getByText(/New identity/i)).toBeVisible();
-    // Form requires Label + Username + key path before Create is enabled.
+    // Form requires Label + Username + key path. Submitting it empty must not
+    // create anything: it shows what is missing and keeps the editor open.
     const createBtn = page.getByRole("button", { name: "Create identity" });
-    await expect(createBtn).toBeDisabled();
+    await expect(createBtn).toBeEnabled();
+    await createBtn.click();
+    await expect(page.getByText("A label is required.")).toBeVisible();
+    await expect(page.getByText("A username is required.")).toBeVisible();
+    await expect(page.getByText("A private key path is required.")).toBeVisible();
+    await expect(page.getByLabel("Identity label")).toBeFocused();
+    await expect(page.getByText(/New identity/i)).toBeVisible();
     // Cancel out without persisting.
     await page.getByRole("button", { name: "Cancel" }).click();
   });
