@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { createTermsnipStorage } from "../lib/persistence";
+import { cancelUndoWindow, expireUndoWindowNow, restoredUpdatedAt, startUndoWindow } from "../lib/undo-delete";
 import {
   createSnippetRecord,
   sampleSnippets,
@@ -13,11 +14,30 @@ function sortSnippets(snippets: SnippetRecord[]) {
   return [...snippets].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
+// UX-13: undoable delete. The record is removed from the list immediately
+// and stashed here until the undo window expires. On expiry (or replacement
+// by a newer delete) the stash drops for good; Undo restores it. The vault
+// tombstone is written at delete time and cleared on undo.
+const UNDO_WINDOW_KEY = "snippets:delete";
+const UNDO_WINDOW_MS = 5_000;
+
 interface SnippetsState {
   snippets: SnippetRecord[];
+  /** Record removed by the most recent delete, pending expiry or undo. */
+  pendingDeletedSnippet?: SnippetRecord;
   createSnippet: (values: SnippetFormValues) => string;
   updateSnippet: (snippetId: string, values: SnippetFormValues) => string;
   deleteSnippet: (snippetId: string) => void;
+  /**
+   * Restore the pending deleted snippet, but only if it is the one named by
+   * `snippetId`, so an Undo bound to an older deletion cannot restore a newer one.
+   */
+  restoreDeletedSnippet: (snippetId: string) => SnippetRecord | undefined;
+  /**
+   * End the undo window now without restoring. Used when the inventory is
+   * replaced (config import) while a delete is pending.
+   */
+  expirePendingDeletion: () => void;
   duplicateSnippet: (snippetId: string) => string;
   markSnippetRun: (snippetId: string) => void;
   removeHostFromAllTargets: (hostId: string) => void;
@@ -46,13 +66,55 @@ export const useSnippetsStore = create<SnippetsState>()(
         useVaultSyncStore.getState().clearDeleted("snippets", snippetId);
         return snippetId;
       },
-      deleteSnippet: (snippetId) =>
-        set((state) => {
-          useVaultSyncStore.getState().markDeleted("snippets", snippetId);
-          return {
-            snippets: sortSnippets(state.snippets.filter((snippet) => snippet.id !== snippetId)),
-          };
-        }),
+      // UX-13: soft delete. The record leaves the list immediately (every
+      // consumer keeps working unchanged) and is stashed until the undo
+      // window expires. A second delete while one is pending expires the
+      // first window so its record is never silently resurrectable.
+      deleteSnippet: (snippetId) => {
+        const stash = get().snippets.find((snippet) => snippet.id === snippetId);
+        if (!stash) {
+          return;
+        }
+
+        expireUndoWindowNow(UNDO_WINDOW_KEY, () => {
+          set({ pendingDeletedSnippet: undefined });
+        });
+        useVaultSyncStore.getState().markDeleted("snippets", snippetId);
+        set((state) => ({
+          pendingDeletedSnippet: stash,
+          snippets: sortSnippets(state.snippets.filter((snippet) => snippet.id !== snippetId)),
+        }));
+        startUndoWindow(UNDO_WINDOW_KEY, UNDO_WINDOW_MS, () => {
+          set({ pendingDeletedSnippet: undefined });
+        });
+      },
+      restoreDeletedSnippet: (snippetId) => {
+        const stash = get().pendingDeletedSnippet;
+        if (!stash || stash.id !== snippetId) {
+          return undefined;
+        }
+        if (get().snippets.some((snippet) => snippet.id === stash.id)) {
+          // The inventory already has this id (e.g. an import brought it
+          // back): restoring would duplicate it.
+          get().expirePendingDeletion();
+          return undefined;
+        }
+        cancelUndoWindow(UNDO_WINDOW_KEY);
+        const restored = {
+          ...stash,
+          updatedAt: restoredUpdatedAt("snippets", stash.id, stash.updatedAt),
+        };
+        useVaultSyncStore.getState().clearDeleted("snippets", stash.id);
+        set((state) => ({
+          pendingDeletedSnippet: undefined,
+          snippets: sortSnippets([...state.snippets, restored]),
+        }));
+        return restored;
+      },
+      expirePendingDeletion: () => {
+        cancelUndoWindow(UNDO_WINDOW_KEY);
+        set({ pendingDeletedSnippet: undefined });
+      },
       duplicateSnippet: (snippetId) => {
         const source = get().snippets.find((snippet) => snippet.id === snippetId);
         if (!source) {
@@ -107,6 +169,9 @@ export const useSnippetsStore = create<SnippetsState>()(
     {
       name: "terminal-workspace-snippets",
       storage: createJSONStorage(() => createTermsnipStorage("terminal-workspace-snippets")),
+      // UX-13: the undo stash is session-only; a persisted stash would
+      // outlive the window it belongs to.
+      partialize: (state) => ({ snippets: state.snippets }),
     }
   )
 );
