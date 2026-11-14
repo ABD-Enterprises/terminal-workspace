@@ -17,7 +17,11 @@ vi.mock("../lib/backend-runtime", async (importOriginal) => ({
 vi.mock("./vault-sync-store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./vault-sync-store")>()),
   useVaultSyncStore: {
-    getState: () => ({ markDeleted: () => undefined, clearDeleted: () => undefined }),
+    getState: () => ({
+      deletions: { hosts: [], keys: [], snippets: [], knownHosts: [], identities: [] },
+      markDeleted: () => undefined,
+      clearDeleted: () => undefined,
+    }),
   },
 }));
 

@@ -9,6 +9,8 @@
 // Timers live outside React: undo windows survive re-renders and must fire
 // even if the component that opened them unmounted.
 
+import { useVaultSyncStore, type VaultDeletionMap } from "../store/vault-sync-store";
+
 const timers = new Map<string, { timeout: ReturnType<typeof setTimeout>; onExpire: () => void }>();
 
 function take(key: string) {
@@ -49,4 +51,25 @@ export function expireUndoWindowNow(key: string, onExpire: () => void): void {
     return;
   }
   onExpire();
+}
+
+/**
+ * `updatedAt` for a record brought back by Undo. The delete wrote a vault
+ * tombstone, and a configuration merge removes local records older than an
+ * imported tombstone, so a snapshot taken between delete and Undo would
+ * delete the restored record again. Stamping it later than both its old
+ * `updatedAt` and the tombstone makes Undo count as the newer change. Call
+ * before the tombstone is cleared.
+ */
+export function restoredUpdatedAt(
+  kind: keyof VaultDeletionMap,
+  id: string,
+  previousUpdatedAt: string
+): string {
+  const deletedAt = useVaultSyncStore
+    .getState()
+    .deletions[kind].find((entry) => entry.id === id)?.deletedAt;
+  const floor = deletedAt && deletedAt > previousUpdatedAt ? deletedAt : previousUpdatedAt;
+  const now = new Date().toISOString();
+  return now > floor ? now : new Date(Date.parse(floor) + 1).toISOString();
 }

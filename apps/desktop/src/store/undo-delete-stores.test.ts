@@ -1,20 +1,34 @@
 // UX-13: soft-delete + undo behaviour for the inventory stores.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { applyImportedLocalConfigBundle, buildLocalConfigBundle } from "../lib/local-config";
 import { useIdentitiesStore } from "./identities-store";
 import { useKeysStore } from "./keys-store";
 import { useSnippetsStore } from "./snippets-store";
+import { useVaultSyncStore } from "./vault-sync-store";
 
 const SNIPPET_ID = "api-tail";
 const KEY_ID = "key-prod-ed25519";
 const IDENTITY_ID = "identity-prod-bastion-ops";
 
+const initial = {
+  snippets: useSnippetsStore.getState().snippets,
+  keys: useKeysStore.getState().keys,
+  identities: useIdentitiesStore.getState().identities,
+  deletions: useVaultSyncStore.getState().deletions,
+};
+
 describe("undoable deletes", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    useSnippetsStore.setState({ pendingDeletedSnippet: undefined });
-    useKeysStore.setState({ pendingDeletedKey: undefined });
-    useIdentitiesStore.setState({ pendingDeletedIdentity: undefined });
+    // Start every test from the same inventory; earlier deletes are permanent.
+    useSnippetsStore.setState({ snippets: initial.snippets, pendingDeletedSnippet: undefined });
+    useKeysStore.setState({ keys: initial.keys, pendingDeletedKey: undefined });
+    useIdentitiesStore.setState({
+      identities: initial.identities,
+      pendingDeletedIdentity: undefined,
+    });
+    useVaultSyncStore.setState({ deletions: initial.deletions });
   });
 
   afterEach(() => {
@@ -39,7 +53,7 @@ describe("undoable deletes", () => {
     const restored = useSnippetsStore.getState().snippets.find(
       (snippet) => snippet.id === SNIPPET_ID
     );
-    expect(restored).toEqual(target);
+    expect(restored).toEqual({ ...target, updatedAt: expect.any(String) });
     expect(useSnippetsStore.getState().pendingDeletedSnippet).toBeUndefined();
   });
 
@@ -93,7 +107,10 @@ describe("undoable deletes", () => {
     expect(useKeysStore.getState().keys.some((key) => key.id === KEY_ID)).toBe(false);
 
     useKeysStore.getState().restoreDeletedKey(KEY_ID);
-    expect(useKeysStore.getState().keys.find((key) => key.id === KEY_ID)).toEqual(target);
+    expect(useKeysStore.getState().keys.find((key) => key.id === KEY_ID)).toEqual({
+      ...target,
+      updatedAt: expect.any(String),
+    });
   });
 
   it("identity delete is undoable within the window", () => {
@@ -108,9 +125,9 @@ describe("undoable deletes", () => {
     ).toBe(false);
 
     useIdentitiesStore.getState().restoreDeletedIdentity(IDENTITY_ID);
-    expect(useIdentitiesStore.getState().identities.find((identity) => identity.id === IDENTITY_ID)).toEqual(
-      target
-    );
+    expect(
+      useIdentitiesStore.getState().identities.find((identity) => identity.id === IDENTITY_ID)
+    ).toEqual({ ...target, updatedAt: expect.any(String) });
   });
 
   it("a stale snippet Undo does not restore a newer deletion", () => {
@@ -153,5 +170,34 @@ describe("undoable deletes", () => {
     expect(useIdentitiesStore.getState().restoreDeletedIdentity(IDENTITY_ID)).toBeUndefined();
     expect(useIdentitiesStore.getState().pendingDeletedIdentity?.id).toBe(otherId);
     expect(useIdentitiesStore.getState().restoreDeletedIdentity(otherId)?.id).toBe(otherId);
+  });
+
+  it("a snapshot taken before Undo cannot delete the restored record on merge", () => {
+    vi.setSystemTime(new Date("2026-04-05T00:00:00.000Z"));
+    useSnippetsStore.getState().deleteSnippet(SNIPPET_ID);
+    useKeysStore.getState().deleteKey(KEY_ID);
+    useIdentitiesStore.getState().removeIdentity(IDENTITY_ID);
+
+    // A configuration snapshot that captured the deletions.
+    const snapshot = JSON.parse(JSON.stringify(buildLocalConfigBundle()));
+    expect(snapshot.deletions.snippets.map((entry: { id: string }) => entry.id)).toContain(
+      SNIPPET_ID
+    );
+
+    // Undo within the same instant: the restored records must still count as newer.
+    useSnippetsStore.getState().restoreDeletedSnippet(SNIPPET_ID);
+    useKeysStore.getState().restoreDeletedKey(KEY_ID);
+    useIdentitiesStore.getState().restoreDeletedIdentity(IDENTITY_ID);
+
+    // keep-local only settles an unrelated built-in host conflict in this fixture.
+    applyImportedLocalConfigBundle(snapshot, { mode: "merge", conflictResolution: "keep-local" });
+
+    expect(useSnippetsStore.getState().snippets.some((entry) => entry.id === SNIPPET_ID)).toBe(
+      true
+    );
+    expect(useKeysStore.getState().keys.some((entry) => entry.id === KEY_ID)).toBe(true);
+    expect(
+      useIdentitiesStore.getState().identities.some((entry) => entry.id === IDENTITY_ID)
+    ).toBe(true);
   });
 });

@@ -11,7 +11,7 @@ import {
   migrateHostsToIdentities,
 } from "../lib/identity-migration";
 import { createTermsnipStorage } from "../lib/persistence";
-import { cancelUndoWindow, expireUndoWindowNow, startUndoWindow } from "../lib/undo-delete";
+import { cancelUndoWindow, expireUndoWindowNow, restoredUpdatedAt, startUndoWindow } from "../lib/undo-delete";
 import {
   sampleIdentities,
   type IdentityRecord,
@@ -190,15 +190,19 @@ export const useIdentitiesStore = create<IdentitiesState>()(
           return undefined;
         }
         cancelUndoWindow(UNDO_WINDOW_KEY);
+        const restored = {
+          ...stash,
+          updatedAt: restoredUpdatedAt("identities", stash.id, stash.updatedAt),
+        };
         useVaultSyncStore.getState().clearDeleted("identities", stash.id);
         set((state) => ({
           pendingDeletedIdentity: undefined,
           pendingPassphraseCleanupIds: state.pendingPassphraseCleanupIds.filter(
             (entry) => entry !== stash.id
           ),
-          identities: sortIdentities([...state.identities, stash]),
+          identities: sortIdentities([...state.identities, restored]),
         }));
-        return stash;
+        return restored;
       },
       reconcilePendingCleanups: () => {
         // A live undo window owns its own id; leave that one alone.

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { createTermsnipStorage } from "../lib/persistence";
-import { cancelUndoWindow, expireUndoWindowNow, startUndoWindow } from "../lib/undo-delete";
+import { cancelUndoWindow, expireUndoWindowNow, restoredUpdatedAt, startUndoWindow } from "../lib/undo-delete";
 import { sampleKeys, type KeyMetadata, type KeyRecord, type KeySource } from "../types/key";
 import { clearKeyPassphraseByFingerprint } from "./connection-secrets-store";
 import { useVaultSyncStore } from "./vault-sync-store";
@@ -185,15 +185,19 @@ export const useKeysStore = create<KeysState>()(
           return undefined;
         }
         cancelUndoWindow(UNDO_WINDOW_KEY);
+        const restored = {
+          ...stash,
+          updatedAt: restoredUpdatedAt("keys", stash.id, stash.updatedAt),
+        };
         useVaultSyncStore.getState().clearDeleted("keys", stash.id);
         set((state) => ({
           pendingDeletedKey: undefined,
           pendingPassphraseCleanups: state.pendingPassphraseCleanups.filter(
             (entry) => entry !== stash.fingerprint
           ),
-          keys: sortKeys([...state.keys, stash]),
+          keys: sortKeys([...state.keys, restored]),
         }));
-        return stash;
+        return restored;
       },
       reconcilePendingCleanups: () => {
         // A live undo window owns its own fingerprint; leave that one alone.

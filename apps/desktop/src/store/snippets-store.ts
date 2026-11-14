@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { createTermsnipStorage } from "../lib/persistence";
-import { cancelUndoWindow, expireUndoWindowNow, startUndoWindow } from "../lib/undo-delete";
+import { cancelUndoWindow, expireUndoWindowNow, restoredUpdatedAt, startUndoWindow } from "../lib/undo-delete";
 import {
   createSnippetRecord,
   sampleSnippets,
@@ -89,12 +89,16 @@ export const useSnippetsStore = create<SnippetsState>()(
           return undefined;
         }
         cancelUndoWindow(UNDO_WINDOW_KEY);
+        const restored = {
+          ...stash,
+          updatedAt: restoredUpdatedAt("snippets", stash.id, stash.updatedAt),
+        };
         useVaultSyncStore.getState().clearDeleted("snippets", stash.id);
         set((state) => ({
           pendingDeletedSnippet: undefined,
-          snippets: sortSnippets([...state.snippets, stash]),
+          snippets: sortSnippets([...state.snippets, restored]),
         }));
-        return stash;
+        return restored;
       },
       duplicateSnippet: (snippetId) => {
         const source = get().snippets.find((snippet) => snippet.id === snippetId);
