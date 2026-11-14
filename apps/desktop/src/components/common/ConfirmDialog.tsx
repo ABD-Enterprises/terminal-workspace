@@ -8,6 +8,14 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   /**
+   * Visual register of the confirm action, per the HIG destructive-action
+   * convention: "destructive" renders red and is meant for irreversible
+   * actions with a specific verb ("Delete Host"); "primary" renders in the
+   * accent for ordinary confirms. Defaults to "destructive" so existing
+   * call sites keep their current appearance.
+   */
+  tone?: "destructive" | "primary";
+  /**
    * Which button receives initial focus when the dialog opens.
    * Defaults to "cancel" to prevent accidental destructive actions (#512).
    */
@@ -36,6 +44,7 @@ export function ConfirmDialog({
   description,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
+  tone = "destructive",
   defaultFocus = "cancel",
   onCancel,
   onConfirm,
@@ -80,7 +89,7 @@ export function ConfirmDialog({
             type="button"
             onClick={onCancel}
             autoFocus={defaultFocus === "cancel"}
-            className="rounded-2xl border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white"
+            className="rounded-2xl border border-[color:var(--shell-border)] px-4 py-2 text-sm text-[color:var(--shell-text)] transition hover:border-[color:var(--shell-muted)]"
           >
             {cancelLabel}
           </button>
@@ -88,7 +97,11 @@ export function ConfirmDialog({
             type="button"
             onClick={onConfirm}
             autoFocus={defaultFocus === "confirm"}
-            className="rounded-2xl bg-rose-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-400"
+            className={
+              tone === "destructive"
+                ? "rounded-2xl bg-[color:var(--shell-danger-strong)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[color:var(--shell-danger)]"
+                : "rounded-2xl bg-[color:var(--shell-accent)] px-4 py-2 text-sm font-medium text-[color:var(--shell-accent-ink)] transition hover:opacity-90"
+            }
           >
             {confirmLabel}
           </button>

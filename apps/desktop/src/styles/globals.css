@@ -58,6 +58,9 @@ html[data-app-theme="dark"] {
   --shell-text: #ebf2ff;
   --shell-muted: #8ea0bd;
   --shell-accent: #76e4c3;
+  --shell-accent-ink: #06281f;
+  --shell-danger: #fb7185;
+  --shell-danger-strong: #f43f5e;
 }
 
 html[data-app-theme="light"] {
@@ -68,6 +71,44 @@ html[data-app-theme="light"] {
   --shell-text: #122033;
   --shell-muted: #5c708a;
   --shell-accent: #1a9474;
+  --shell-danger: #be123c;
+  --shell-danger-strong: #e11d48;
+}
+
+/*
+ * #UX-2: dialogs stay dark in every theme. Their contents are written for a
+ * dark surface (pale slate/amber text), so the Modal frame re-declares the
+ * dark shell tokens for itself and everything inside it.
+ */
+.tw-modal-surface {
+  color-scheme: dark;
+  --shell-base: #07111b;
+  --shell-panel: #0d1724;
+  --shell-border: #1f2c42;
+  --shell-text: #ebf2ff;
+  --shell-muted: #8ea0bd;
+  --shell-accent: #76e4c3;
+  --shell-accent-ink: #06281f;
+  --shell-danger: #fb7185;
+  --shell-danger-strong: #f43f5e;
+}
+
+/*
+ * #UX-2: banner surfaces. The shell is transparent over a hardcoded dark body
+ * gradient, so a bare 10% tint under var(--shell-text) (near-black in the
+ * light theme) was unreadable. Each banner mixes its 10% tint into the
+ * theme-aware --shell-panel, so text and surface agree in both themes.
+ */
+.tw-banner-warn {
+  background-color: color-mix(in srgb, #fcd34d 10%, var(--shell-panel));
+}
+
+.tw-banner-error {
+  background-color: color-mix(in srgb, #fb7185 10%, var(--shell-panel));
+}
+
+.tw-banner-info {
+  background-color: color-mix(in srgb, #34d399 10%, var(--shell-panel));
 }
 
 /*
