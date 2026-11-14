@@ -19,6 +19,13 @@ interface ErrorBoundaryProps {
    * or route view) and `retry` clears the error and re-renders children.
    */
   fallback?: (error: Error, retry: () => void) => ReactNode;
+  /**
+   * When this value changes while an error is showing, the error is cleared
+   * and children render again. A route-level boundary passes the current
+   * pathname so navigating away from a crashed view shows the next view
+   * instead of the stale fallback.
+   */
+  resetKey?: string;
 }
 
 interface ErrorBoundaryState {
@@ -94,6 +101,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error("Render error caught by ErrorBoundary:", error, info.componentStack);
+  }
+
+  componentDidUpdate(previousProps: ErrorBoundaryProps): void {
+    if (this.state.error && previousProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
   }
 
   private handleReload = (): void => {

@@ -490,7 +490,10 @@ export function AppShell() {
                 the whole shell (and never disturbs live terminal sessions in
                 other tabs).
               */}
-              <ErrorBoundary fallback={(error, retry) => <ScopedErrorFallback error={error} onRetry={retry} />}>
+              <ErrorBoundary
+                resetKey={location.pathname}
+                fallback={(error, retry) => <ScopedErrorFallback error={error} onRetry={retry} />}
+              >
                 <Outlet />
               </ErrorBoundary>
             </div>
