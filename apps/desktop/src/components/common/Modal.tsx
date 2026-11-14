@@ -158,7 +158,7 @@ export function Modal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-xs sm:px-6 sm:py-10">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs sm:px-6 sm:py-10">
       <button
         type="button"
         tabIndex={-1}
