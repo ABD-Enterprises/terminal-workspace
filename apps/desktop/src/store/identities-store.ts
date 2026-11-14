@@ -62,6 +62,12 @@ interface IdentitiesState {
   /** Clear the Keychain passphrase of every id left in `pendingPassphraseCleanupIds`. Runs at startup. */
   reconcilePendingCleanups: () => void;
   /**
+   * End the undo window now without restoring: the deletion becomes final and
+   * its passphrase cleanup runs unless the identity exists again. Used when
+   * the inventory is replaced (config import) while a delete is pending.
+   */
+  expirePendingDeletion: () => void;
+  /**
    * Run the host→identity migration once per session. Idempotent: re-running
    * with a fully migrated set is a no-op. Safe to call from anywhere.
    */
@@ -99,6 +105,27 @@ function makeIdentityRecord(
     createdAt: partial.createdAt ?? now,
     updatedAt: partial.updatedAt ?? now,
   };
+}
+
+// Finalise a deletion: forget the pending cleanup, drop the stash if it still
+// belongs to this identity, and clear the Keychain passphrase unless the
+// identity exists again.
+function finalizeIdentityDeletion(
+  deleted: IdentityRecord,
+  get: () => IdentitiesState,
+  set: (update: (state: IdentitiesState) => Partial<IdentitiesState>) => void
+) {
+  const stillUsed = get().identities.some((entry) => entry.id === deleted.id);
+  set((state) => ({
+    pendingDeletedIdentity:
+      state.pendingDeletedIdentity?.id === deleted.id ? undefined : state.pendingDeletedIdentity,
+    pendingPassphraseCleanupIds: state.pendingPassphraseCleanupIds.filter(
+      (entry) => entry !== deleted.id
+    ),
+  }));
+  if (!stillUsed) {
+    void clearIdentityPassphraseById(deleted.id);
+  }
 }
 
 export const useIdentitiesStore = create<IdentitiesState>()(
@@ -146,24 +173,7 @@ export const useIdentitiesStore = create<IdentitiesState>()(
           return undefined;
         }
 
-        // Finalise a deletion: forget the pending cleanup, drop the stash if
-        // it still belongs to this identity, and clear the Keychain passphrase
-        // unless the identity has been re-created in the meantime.
-        const finalize = (deleted: IdentityRecord) => {
-          const stillUsed = get().identities.some((entry) => entry.id === deleted.id);
-          set((state) => ({
-            pendingDeletedIdentity:
-              state.pendingDeletedIdentity?.id === deleted.id
-                ? undefined
-                : state.pendingDeletedIdentity,
-            pendingPassphraseCleanupIds: state.pendingPassphraseCleanupIds.filter(
-              (entry) => entry !== deleted.id
-            ),
-          }));
-          if (!stillUsed) {
-            void clearIdentityPassphraseById(deleted.id);
-          }
-        };
+        const finalize = (deleted: IdentityRecord) => finalizeIdentityDeletion(deleted, get, set);
 
         const stale = get().pendingDeletedIdentity;
         expireUndoWindowNow(UNDO_WINDOW_KEY, () => {
@@ -189,6 +199,12 @@ export const useIdentitiesStore = create<IdentitiesState>()(
         if (!stash || stash.id !== identityId) {
           return undefined;
         }
+        if (get().identities.some((entry) => entry.id === stash.id)) {
+          // The inventory already has this id (e.g. an import brought it
+          // back): restoring would duplicate it.
+          get().expirePendingDeletion();
+          return undefined;
+        }
         cancelUndoWindow(UNDO_WINDOW_KEY);
         const restored = {
           ...stash,
@@ -203,6 +219,14 @@ export const useIdentitiesStore = create<IdentitiesState>()(
           identities: sortIdentities([...state.identities, restored]),
         }));
         return restored;
+      },
+      expirePendingDeletion: () => {
+        const stash = get().pendingDeletedIdentity;
+        if (!stash) {
+          return;
+        }
+        cancelUndoWindow(UNDO_WINDOW_KEY);
+        finalizeIdentityDeletion(stash, get, set);
       },
       reconcilePendingCleanups: () => {
         // A live undo window owns its own id; leave that one alone.

@@ -102,8 +102,35 @@ interface KeysState {
    * `pendingPassphraseCleanups` that no current key uses. Runs at startup.
    */
   reconcilePendingCleanups: () => void;
+  /**
+   * End the undo window now without restoring: the deletion becomes final and
+   * its passphrase cleanup runs unless a current key still uses it. Used when
+   * the inventory is replaced (config import) while a delete is pending.
+   */
+  expirePendingDeletion: () => void;
   assignHost: (keyId: string, hostId: string) => void;
   unassignHostFromAll: (hostId: string) => void;
+}
+
+// Finalise a deletion: forget the pending cleanup, drop the stash if it still
+// belongs to this key, and clear the Keychain passphrase unless a current key
+// record uses the same fingerprint.
+function finalizeKeyDeletion(
+  deleted: KeyRecord,
+  get: () => KeysState,
+  set: (update: (state: KeysState) => Partial<KeysState>) => void
+) {
+  const stillUsed = get().keys.some((entry) => entry.fingerprint === deleted.fingerprint);
+  set((state) => ({
+    pendingDeletedKey:
+      state.pendingDeletedKey?.id === deleted.id ? undefined : state.pendingDeletedKey,
+    pendingPassphraseCleanups: state.pendingPassphraseCleanups.filter(
+      (entry) => entry !== deleted.fingerprint
+    ),
+  }));
+  if (!stillUsed) {
+    void clearKeyPassphraseByFingerprint(deleted.fingerprint);
+  }
 }
 
 export const useKeysStore = create<KeysState>()(
@@ -143,22 +170,7 @@ export const useKeysStore = create<KeysState>()(
           return undefined;
         }
 
-        // Finalise a deletion: forget the pending cleanup, drop the stash if
-        // it still belongs to this key, and clear the Keychain passphrase
-        // unless another key record now uses the same fingerprint.
-        const finalize = (deleted: KeyRecord) => {
-          const stillUsed = get().keys.some((entry) => entry.fingerprint === deleted.fingerprint);
-          set((state) => ({
-            pendingDeletedKey:
-              state.pendingDeletedKey?.id === deleted.id ? undefined : state.pendingDeletedKey,
-            pendingPassphraseCleanups: state.pendingPassphraseCleanups.filter(
-              (entry) => entry !== deleted.fingerprint
-            ),
-          }));
-          if (!stillUsed) {
-            void clearKeyPassphraseByFingerprint(deleted.fingerprint);
-          }
-        };
+        const finalize = (deleted: KeyRecord) => finalizeKeyDeletion(deleted, get, set);
 
         const stale = get().pendingDeletedKey;
         expireUndoWindowNow(UNDO_WINDOW_KEY, () => {
@@ -184,6 +196,12 @@ export const useKeysStore = create<KeysState>()(
         if (!stash || stash.id !== keyId) {
           return undefined;
         }
+        if (get().keys.some((entry) => entry.id === stash.id)) {
+          // The inventory already has this id (e.g. an import brought it
+          // back): restoring would duplicate it.
+          get().expirePendingDeletion();
+          return undefined;
+        }
         cancelUndoWindow(UNDO_WINDOW_KEY);
         const restored = {
           ...stash,
@@ -198,6 +216,14 @@ export const useKeysStore = create<KeysState>()(
           keys: sortKeys([...state.keys, restored]),
         }));
         return restored;
+      },
+      expirePendingDeletion: () => {
+        const stash = get().pendingDeletedKey;
+        if (!stash) {
+          return;
+        }
+        cancelUndoWindow(UNDO_WINDOW_KEY);
+        finalizeKeyDeletion(stash, get, set);
       },
       reconcilePendingCleanups: () => {
         // A live undo window owns its own fingerprint; leave that one alone.

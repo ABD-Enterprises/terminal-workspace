@@ -151,6 +151,40 @@ describe("deferred passphrase cleanup is durable", () => {
     expect(useIdentitiesStore.getState().pendingPassphraseCleanupIds).toEqual([]);
   });
 
+  it("key: ending the window early still clears the passphrase unless the inventory uses it", () => {
+    useKeysStore.getState().deleteKey(KEY_ID);
+    useKeysStore.getState().expirePendingDeletion();
+    expect(clearKey).toHaveBeenCalledWith(KEY_FINGERPRINT);
+    expect(useKeysStore.getState().pendingDeletedKey).toBeUndefined();
+    expect(useKeysStore.getState().pendingPassphraseCleanups).toEqual([]);
+
+    clearKey.mockClear();
+    useKeysStore.setState({ keys: initialKeys });
+    useKeysStore.getState().deleteKey(KEY_ID);
+    // An import replaced the inventory with one that still has this key.
+    useKeysStore.setState({ keys: initialKeys });
+    useKeysStore.getState().expirePendingDeletion();
+    expect(clearKey).not.toHaveBeenCalled();
+    expect(useKeysStore.getState().pendingPassphraseCleanups).toEqual([]);
+
+    // The window is gone, so the timer must not fire a second cleanup.
+    vi.advanceTimersByTime(10_000);
+    expect(clearKey).not.toHaveBeenCalled();
+  });
+
+  it("identity: ending the window early still clears the passphrase unless the identity exists", () => {
+    useIdentitiesStore.getState().removeIdentity(IDENTITY_ID);
+    useIdentitiesStore.getState().expirePendingDeletion();
+    expect(clearIdentity).toHaveBeenCalledWith(IDENTITY_ID);
+    expect(useIdentitiesStore.getState().pendingPassphraseCleanupIds).toEqual([]);
+
+    clearIdentity.mockClear();
+    useIdentitiesStore.getState().removeIdentity(IDENTITY_ID);
+    useIdentitiesStore.setState({ identities: initialIdentities });
+    useIdentitiesStore.getState().expirePendingDeletion();
+    expect(clearIdentity).not.toHaveBeenCalled();
+  });
+
   it("the pending cleanup lists are part of the persisted state", () => {
     const keysPartialize = useKeysStore.persist.getOptions().partialize!;
     const identitiesPartialize = useIdentitiesStore.persist.getOptions().partialize!;

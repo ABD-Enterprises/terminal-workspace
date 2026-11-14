@@ -5,6 +5,8 @@ import { applyImportedLocalConfigBundle, buildLocalConfigBundle } from "../lib/l
 import { useIdentitiesStore } from "./identities-store";
 import { useKeysStore } from "./keys-store";
 import { useSnippetsStore } from "./snippets-store";
+import { pushUndoToast } from "../lib/undo-toast";
+import { useToastStore } from "./toast-store";
 import { useVaultSyncStore } from "./vault-sync-store";
 
 const SNIPPET_ID = "api-tail";
@@ -199,5 +201,83 @@ describe("undoable deletes", () => {
     expect(
       useIdentitiesStore.getState().identities.some((entry) => entry.id === IDENTITY_ID)
     ).toBe(true);
+  });
+
+  it("Undo is a no-op when the inventory already has the id", () => {
+    const snippet = useSnippetsStore.getState().snippets.find((entry) => entry.id === SNIPPET_ID)!;
+    const key = useKeysStore.getState().keys.find((entry) => entry.id === KEY_ID)!;
+    const identity = useIdentitiesStore
+      .getState()
+      .identities.find((entry) => entry.id === IDENTITY_ID)!;
+    useSnippetsStore.getState().deleteSnippet(SNIPPET_ID);
+    useKeysStore.getState().deleteKey(KEY_ID);
+    useIdentitiesStore.getState().removeIdentity(IDENTITY_ID);
+
+    // Something else (an import) put the same ids back during the window.
+    useSnippetsStore.setState((state) => ({ snippets: [...state.snippets, snippet] }));
+    useKeysStore.setState((state) => ({ keys: [...state.keys, key] }));
+    useIdentitiesStore.setState((state) => ({ identities: [...state.identities, identity] }));
+
+    expect(useSnippetsStore.getState().restoreDeletedSnippet(SNIPPET_ID)).toBeUndefined();
+    expect(useKeysStore.getState().restoreDeletedKey(KEY_ID)).toBeUndefined();
+    expect(useIdentitiesStore.getState().restoreDeletedIdentity(IDENTITY_ID)).toBeUndefined();
+
+    const count = <T extends { id: string }>(records: T[], id: string) =>
+      records.filter((record) => record.id === id).length;
+    expect(count(useSnippetsStore.getState().snippets, SNIPPET_ID)).toBe(1);
+    expect(count(useKeysStore.getState().keys, KEY_ID)).toBe(1);
+    expect(count(useIdentitiesStore.getState().identities, IDENTITY_ID)).toBe(1);
+    expect(useSnippetsStore.getState().pendingDeletedSnippet).toBeUndefined();
+    expect(useKeysStore.getState().pendingDeletedKey).toBeUndefined();
+    expect(useIdentitiesStore.getState().pendingDeletedIdentity).toBeUndefined();
+  });
+
+  it("an import during the window that already has the records leaves no duplicates", () => {
+    const bundle = JSON.parse(JSON.stringify(buildLocalConfigBundle()));
+    useSnippetsStore.getState().deleteSnippet(SNIPPET_ID);
+    useKeysStore.getState().deleteKey(KEY_ID);
+    useIdentitiesStore.getState().removeIdentity(IDENTITY_ID);
+
+    applyImportedLocalConfigBundle(bundle, { mode: "replace" });
+    expect(useSnippetsStore.getState().pendingDeletedSnippet).toBeUndefined();
+    expect(useKeysStore.getState().pendingDeletedKey).toBeUndefined();
+    expect(useIdentitiesStore.getState().pendingDeletedIdentity).toBeUndefined();
+
+    useSnippetsStore.getState().restoreDeletedSnippet(SNIPPET_ID);
+    useKeysStore.getState().restoreDeletedKey(KEY_ID);
+    useIdentitiesStore.getState().restoreDeletedIdentity(IDENTITY_ID);
+
+    const count = <T extends { id: string }>(records: T[], id: string) =>
+      records.filter((record) => record.id === id).length;
+    expect(count(useSnippetsStore.getState().snippets, SNIPPET_ID)).toBe(1);
+    expect(count(useKeysStore.getState().keys, KEY_ID)).toBe(1);
+    expect(count(useIdentitiesStore.getState().identities, IDENTITY_ID)).toBe(1);
+  });
+
+  it("an import during the window that lacks the records cannot be undone into them", () => {
+    useSnippetsStore.getState().deleteSnippet(SNIPPET_ID);
+    useKeysStore.getState().deleteKey(KEY_ID);
+    useIdentitiesStore.getState().removeIdentity(IDENTITY_ID);
+    pushUndoToast("snippets", "Deleted snippet", vi.fn());
+    pushUndoToast("keys", "Deleted key", vi.fn());
+    pushUndoToast("identities", "Deleted identity", vi.fn());
+    expect(useToastStore.getState().toasts).toHaveLength(3);
+
+    // Snapshot of another inventory that never had these records.
+    const bundle = JSON.parse(JSON.stringify(buildLocalConfigBundle()));
+    bundle.snippets = bundle.snippets.filter((entry: { id: string }) => entry.id !== SNIPPET_ID);
+    applyImportedLocalConfigBundle(bundle, { mode: "replace" });
+
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+    expect(useSnippetsStore.getState().restoreDeletedSnippet(SNIPPET_ID)).toBeUndefined();
+    expect(useKeysStore.getState().restoreDeletedKey(KEY_ID)).toBeUndefined();
+    expect(useIdentitiesStore.getState().restoreDeletedIdentity(IDENTITY_ID)).toBeUndefined();
+    expect(useSnippetsStore.getState().snippets.some((entry) => entry.id === SNIPPET_ID)).toBe(
+      false
+    );
+    expect(useKeysStore.getState().keys.some((entry) => entry.id === KEY_ID)).toBe(false);
+    expect(
+      useIdentitiesStore.getState().identities.some((entry) => entry.id === IDENTITY_ID)
+    ).toBe(false);
   });
 });

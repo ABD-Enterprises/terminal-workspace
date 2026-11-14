@@ -14,6 +14,7 @@ import {
   type VaultDeletionEntry,
   type VaultDeletionMap,
 } from "../store/vault-sync-store";
+import { dismissUndoToast } from "./undo-toast";
 import type { HostRecord } from "../types/host";
 import type { IdentityRecord } from "../types/identity";
 import type { KeyRecord } from "../types/key";
@@ -924,6 +925,15 @@ export function applyImportedLocalConfigBundle(bundle: unknown, options: ApplyLo
   useKnownHostsStore.setState((state) => ({ ...state, knownHosts: appliedKnownHosts }));
   useIdentitiesStore.setState((state) => ({ ...state, identities: appliedIdentities }));
   useVaultSyncStore.getState().replaceDeletions(nextDeletions);
+  // A delete still inside its undo window belongs to the inventory that was
+  // just replaced: end the window (its Keychain cleanup still runs unless the
+  // imported inventory uses it) and remove the now-stale Undo toast.
+  useSnippetsStore.getState().expirePendingDeletion();
+  useKeysStore.getState().expirePendingDeletion();
+  useIdentitiesStore.getState().expirePendingDeletion();
+  dismissUndoToast("snippets");
+  dismissUndoToast("keys");
+  dismissUndoToast("identities");
   const importedVault = getImportedVaultMetadata(importedBundle);
   if (importedVault?.vaultId) {
     useAppStore.getState().setVaultId(importedVault.vaultId);

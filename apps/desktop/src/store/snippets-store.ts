@@ -33,6 +33,11 @@ interface SnippetsState {
    * `snippetId`, so an Undo bound to an older deletion cannot restore a newer one.
    */
   restoreDeletedSnippet: (snippetId: string) => SnippetRecord | undefined;
+  /**
+   * End the undo window now without restoring. Used when the inventory is
+   * replaced (config import) while a delete is pending.
+   */
+  expirePendingDeletion: () => void;
   duplicateSnippet: (snippetId: string) => string;
   markSnippetRun: (snippetId: string) => void;
   removeHostFromAllTargets: (hostId: string) => void;
@@ -88,6 +93,12 @@ export const useSnippetsStore = create<SnippetsState>()(
         if (!stash || stash.id !== snippetId) {
           return undefined;
         }
+        if (get().snippets.some((snippet) => snippet.id === stash.id)) {
+          // The inventory already has this id (e.g. an import brought it
+          // back): restoring would duplicate it.
+          get().expirePendingDeletion();
+          return undefined;
+        }
         cancelUndoWindow(UNDO_WINDOW_KEY);
         const restored = {
           ...stash,
@@ -99,6 +110,10 @@ export const useSnippetsStore = create<SnippetsState>()(
           snippets: sortSnippets([...state.snippets, restored]),
         }));
         return restored;
+      },
+      expirePendingDeletion: () => {
+        cancelUndoWindow(UNDO_WINDOW_KEY);
+        set({ pendingDeletedSnippet: undefined });
       },
       duplicateSnippet: (snippetId) => {
         const source = get().snippets.find((snippet) => snippet.id === snippetId);

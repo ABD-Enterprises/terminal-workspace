@@ -23,3 +23,12 @@ export function pushUndoToast(kind: string, message: string, onUndo: () => void)
   liveToastByKind.set(kind, toastId);
   return toastId;
 }
+
+/** Dismiss the live Undo toast of `kind`, if any (its deletion is no longer undoable). */
+export function dismissUndoToast(kind: string): void {
+  const toastId = liveToastByKind.get(kind);
+  if (toastId !== undefined) {
+    useToastStore.getState().dismissToast(toastId);
+    liveToastByKind.delete(kind);
+  }
+}
