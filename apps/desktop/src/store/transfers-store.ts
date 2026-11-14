@@ -26,6 +26,26 @@ export function hasActiveTransfers(queue: TransferItem[], hostId?: string): bool
   return countActiveTransfers(queue, hostId) > 0;
 }
 
+const MAX_TRANSFER_HISTORY = 24;
+
+// Keeps the queue (newest first) to `limit` entries by dropping only finished
+// ones, oldest first. A queued/running transfer is never evicted: the close
+// guards read this queue, so dropping a live transfer would let the window or
+// a tab close with no warning while it is still moving data.
+export function trimTransferQueue(queue: TransferItem[], limit = MAX_TRANSFER_HISTORY): TransferItem[] {
+  let finishedBudget = Math.max(0, limit - countActiveTransfers(queue));
+  return queue.filter((item) => {
+    if (isActiveTransfer(item)) {
+      return true;
+    }
+    if (finishedBudget > 0) {
+      finishedBudget -= 1;
+      return true;
+    }
+    return false;
+  });
+}
+
 export const INTERRUPTED_TRANSFER_MESSAGE =
   "Interrupted: the app closed before this transfer finished.";
 
@@ -92,7 +112,7 @@ export const useTransfersStore = create<TransfersState>()(
       queueTransfer: (values) => {
         const transfer = createTransferItem(values);
         set((state) => ({
-          queue: [transfer, ...state.queue].slice(0, 24),
+          queue: trimTransferQueue([transfer, ...state.queue]),
         }));
         return transfer.id;
       },

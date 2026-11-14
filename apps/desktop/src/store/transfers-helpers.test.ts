@@ -7,6 +7,7 @@ import {
   INTERRUPTED_TRANSFER_MESSAGE,
   isActiveTransfer,
   normalizeHydratedQueue,
+  trimTransferQueue,
   useTransfersStore,
 } from "./transfers-store";
 
@@ -99,5 +100,69 @@ describe("transfers store hydration", () => {
     expect(queue.map((entry) => entry.status)).toEqual(["failed", "failed"]);
     expect(hasActiveTransfers(queue)).toBe(false);
     localStorage.removeItem("terminal-workspace-transfers");
+  });
+});
+
+describe("trimTransferQueue", () => {
+  const many = (count: number, status: TransferItem["status"], prefix: string) =>
+    Array.from({ length: count }, (_, index) => item({ id: `${prefix}${index}`, status }));
+
+  it("leaves a queue within the limit untouched", () => {
+    const queue = [...many(3, "running", "r"), ...many(3, "completed", "c")];
+    expect(trimTransferQueue(queue)).toEqual(queue);
+  });
+
+  it("drops the oldest finished entries first", () => {
+    const queue = many(30, "completed", "c");
+    const trimmed = trimTransferQueue(queue);
+    expect(trimmed).toHaveLength(24);
+    expect(trimmed[0].id).toBe("c0");
+    expect(trimmed[23].id).toBe("c23");
+  });
+
+  it("never evicts a running or queued transfer, even behind 24 newer ones", () => {
+    const queue = [...many(24, "completed", "new"), item({ id: "old-running", status: "running" }), item({ id: "old-queued", status: "queued" })];
+    const trimmed = trimTransferQueue(queue);
+    const ids = trimmed.map((entry) => entry.id);
+    expect(ids).toContain("old-running");
+    expect(ids).toContain("old-queued");
+    expect(trimmed).toHaveLength(24);
+    expect(hasActiveTransfers(trimmed)).toBe(true);
+  });
+
+  it("keeps every live transfer even when they alone exceed the limit", () => {
+    const queue = [...many(30, "running", "r"), ...many(5, "completed", "c")];
+    const trimmed = trimTransferQueue(queue);
+    expect(trimmed).toHaveLength(30);
+    expect(countActiveTransfers(trimmed)).toBe(30);
+  });
+});
+
+describe("queueTransfer", () => {
+  it("keeps an old running transfer after 24 newer ones are queued", () => {
+    useTransfersStore.setState({ queue: [] });
+    const store = useTransfersStore.getState();
+    const first = store.queueTransfer({
+      hostId: "h1",
+      hostLabel: "web-1",
+      direction: "upload",
+      name: "first.bin",
+      remotePath: "/tmp/first.bin",
+    });
+    store.markTransferRunning(first);
+    for (let index = 0; index < 24; index += 1) {
+      store.queueTransfer({
+        hostId: "h1",
+        hostLabel: "web-1",
+        direction: "upload",
+        name: `f${index}.bin`,
+        remotePath: `/tmp/f${index}.bin`,
+      });
+    }
+
+    const { queue } = useTransfersStore.getState();
+    expect(queue.some((entry) => entry.id === first)).toBe(true);
+    expect(hasActiveTransfers(queue, "h1")).toBe(true);
+    useTransfersStore.setState({ queue: [] });
   });
 });
