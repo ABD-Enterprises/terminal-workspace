@@ -20,10 +20,7 @@ const viteArgs =
 
 const children = [
   spawn(process.execPath, ["./server/backend.mjs"], { stdio: "inherit" }),
-  spawn("vite", viteArgs, {
-    stdio: "inherit",
-    shell: process.platform === "win32",
-  }),
+  spawn("vite", viteArgs, { stdio: "inherit" }),
 ];
 
 let shuttingDown = false;
