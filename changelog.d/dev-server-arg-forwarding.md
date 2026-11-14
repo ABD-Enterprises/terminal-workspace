@@ -1,0 +1,1 @@
+- [INTERNAL] npm run dev forwards trailing host/port args to Vite so external preview harnesses can assign a conflict-free port instead of Vite always starting on the hardcoded 127.0.0.1:5173 (#585)
