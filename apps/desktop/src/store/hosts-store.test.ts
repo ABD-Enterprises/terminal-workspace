@@ -4,6 +4,8 @@ import {
   applyHostFilters,
   createHostRecord,
   deleteHostFromCollection,
+  restoreKeyBindingsInCollection,
+  snapshotKeyBindings,
   sortHostCollection,
   toggleHostFavoriteInCollection,
   upsertHostCollection,
@@ -253,5 +255,54 @@ describe("hosts store helpers", () => {
   it("removeGroup with an empty name is a no-op (P2-DM2)", () => {
     expect(useHostsStore.getState().removeGroup("")).toBe(0);
     expect(useHostsStore.getState().removeGroup("   ")).toBe(0);
+  });
+});
+
+describe("key binding snapshot and restore", () => {
+  const keyPath = "~/.ssh/example_key";
+  const hostWith = (id: string, path: string, label = "") => ({
+    ...createHostRecord({ ...emptyHostFormValues, label: id, hostname: `${id}.example.test` }),
+    id,
+    privateKeyPath: path,
+    keyLabel: label,
+  });
+
+  it("captures every host with the path, including ones typed in the host editor", () => {
+    const hosts = [hostWith("a", keyPath, "Label A"), hostWith("b", keyPath), hostWith("c", "~/.ssh/other")];
+    expect(snapshotKeyBindings(hosts, keyPath)).toEqual([
+      { hostId: "a", keyLabel: "Label A" },
+      { hostId: "b", keyLabel: "" },
+    ]);
+    expect(snapshotKeyBindings(hosts, "")).toEqual([]);
+  });
+
+  it("clearKeyByPath returns what it cleared and restore puts it back", () => {
+    useHostsStore.setState({
+      hosts: [hostWith("a", keyPath, "Label A"), hostWith("b", keyPath), hostWith("c", "~/.ssh/other")],
+    });
+
+    const cleared = useHostsStore.getState().clearKeyByPath(keyPath);
+    expect(cleared.map((entry) => entry.hostId).sort()).toEqual(["a", "b"]);
+    expect(useHostsStore.getState().hosts.filter((host) => host.privateKeyPath === keyPath)).toHaveLength(0);
+
+    useHostsStore.getState().restoreKeyBindings(keyPath, cleared);
+    const byId = new Map(useHostsStore.getState().hosts.map((host) => [host.id, host]));
+    expect(byId.get("a")).toMatchObject({ privateKeyPath: keyPath, keyLabel: "Label A" });
+    expect(byId.get("b")).toMatchObject({ privateKeyPath: keyPath, keyLabel: "" });
+    expect(byId.get("c")?.privateKeyPath).toBe("~/.ssh/other");
+  });
+
+  it("restore leaves hosts that were re-pointed or removed during the window alone", () => {
+    const hosts = [hostWith("a", ""), hostWith("b", "~/.ssh/newer"), hostWith("d", "")];
+    const restored = restoreKeyBindingsInCollection(hosts, keyPath, [
+      { hostId: "a", keyLabel: "Label A" },
+      { hostId: "b", keyLabel: "Label B" },
+      { hostId: "gone", keyLabel: "Label G" },
+    ]);
+    const byId = new Map(restored.map((host) => [host.id, host]));
+    expect(byId.get("a")).toMatchObject({ privateKeyPath: keyPath, keyLabel: "Label A" });
+    expect(byId.get("b")?.privateKeyPath).toBe("~/.ssh/newer");
+    expect(byId.get("d")?.privateKeyPath).toBe("");
+    expect(restored).toHaveLength(3);
   });
 });

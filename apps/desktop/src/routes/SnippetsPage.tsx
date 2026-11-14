@@ -8,13 +8,13 @@ import { executeSnippetOnHosts, type SnippetExecutionResult } from "../lib/api";
 import { formatSnippetExecutionFailure } from "../lib/backend-failure-messages";
 import { buildBackendConnection } from "../lib/connections";
 import { ensureRuntimeSecrets } from "../lib/runtime-secrets";
+import { pushUndoToast } from "../lib/undo-toast";
 import { formatHostAddress } from "../lib/utils";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useRunbooksStore } from "../store/runbooks-store";
 import { useSessionsStore } from "../store/sessions-store";
 import { useSnippetsStore } from "../store/snippets-store";
-import { UNDO_TOAST_DURATION_MS, pushToast } from "../store/toast-store";
 import { emptySnippetFormValues, type SnippetRecord } from "../types/snippet";
 
 export function SnippetsPage() {
@@ -87,13 +87,9 @@ export function SnippetsPage() {
       setSelectedSnippetId(undefined);
     }
     setSelectedHostIdsOverride(null);
-    pushToast({
-      message: `Deleted snippet "${snippet.title}"`,
-      durationMs: UNDO_TOAST_DURATION_MS,
-      action: {
-        label: "Undo",
-        run: () => useSnippetsStore.getState().restoreDeletedSnippet(),
-      },
+    pushUndoToast("snippets", `Deleted snippet "${snippet.title}"`, () => {
+      // Bound to this snippet's id: a no-op if a newer delete replaced this one.
+      useSnippetsStore.getState().restoreDeletedSnippet(snippetId);
     });
   };
 

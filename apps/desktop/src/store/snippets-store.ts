@@ -28,7 +28,11 @@ interface SnippetsState {
   createSnippet: (values: SnippetFormValues) => string;
   updateSnippet: (snippetId: string, values: SnippetFormValues) => string;
   deleteSnippet: (snippetId: string) => void;
-  restoreDeletedSnippet: () => void;
+  /**
+   * Restore the pending deleted snippet, but only if it is the one named by
+   * `snippetId`, so an Undo bound to an older deletion cannot restore a newer one.
+   */
+  restoreDeletedSnippet: (snippetId: string) => SnippetRecord | undefined;
   duplicateSnippet: (snippetId: string) => string;
   markSnippetRun: (snippetId: string) => void;
   removeHostFromAllTargets: (hostId: string) => void;
@@ -79,10 +83,10 @@ export const useSnippetsStore = create<SnippetsState>()(
           set({ pendingDeletedSnippet: undefined });
         });
       },
-      restoreDeletedSnippet: () => {
+      restoreDeletedSnippet: (snippetId) => {
         const stash = get().pendingDeletedSnippet;
-        if (!stash) {
-          return;
+        if (!stash || stash.id !== snippetId) {
+          return undefined;
         }
         cancelUndoWindow(UNDO_WINDOW_KEY);
         useVaultSyncStore.getState().clearDeleted("snippets", stash.id);
@@ -90,6 +94,7 @@ export const useSnippetsStore = create<SnippetsState>()(
           pendingDeletedSnippet: undefined,
           snippets: sortSnippets([...state.snippets, stash]),
         }));
+        return stash;
       },
       duplicateSnippet: (snippetId) => {
         const source = get().snippets.find((snippet) => snippet.id === snippetId);

@@ -187,6 +187,58 @@ export function clearKeyInCollection(hosts: HostRecord[], privateKeyPath: string
   );
 }
 
+/** Host credential binding captured before a key delete clears it. */
+export interface HostKeyBinding {
+  hostId: string;
+  keyLabel: string;
+}
+
+/**
+ * Hosts whose private-key path matches `privateKeyPath`: exactly the set
+ * `clearKeyInCollection` will clear (including paths typed in the host
+ * editor), so an Undo can put back what the delete took away.
+ */
+export function snapshotKeyBindings(
+  hosts: HostRecord[],
+  privateKeyPath: string
+): HostKeyBinding[] {
+  if (!privateKeyPath) {
+    return [];
+  }
+  return hosts
+    .filter((host) => host.privateKeyPath === privateKeyPath)
+    .map((host) => ({ hostId: host.id, keyLabel: host.keyLabel }));
+}
+
+/**
+ * Re-apply bindings captured by `snapshotKeyBindings`. A host is restored
+ * only if it still exists and still has no key path, so edits made during
+ * the undo window are never overwritten. Leaves `authMethod` alone, as the
+ * clear did.
+ */
+export function restoreKeyBindingsInCollection(
+  hosts: HostRecord[],
+  privateKeyPath: string,
+  bindings: HostKeyBinding[]
+) {
+  if (!privateKeyPath || bindings.length === 0) {
+    return hosts;
+  }
+  const labelByHostId = new Map(bindings.map((binding) => [binding.hostId, binding.keyLabel]));
+  return sortHostCollection(
+    hosts.map((host) =>
+      labelByHostId.has(host.id) && !host.privateKeyPath
+        ? {
+            ...host,
+            keyLabel: labelByHostId.get(host.id) ?? "",
+            privateKeyPath,
+            updatedAt: new Date().toISOString(),
+          }
+        : host
+    )
+  );
+}
+
 export function collectHostGroups(hosts: HostRecord[]) {
   return Array.from(new Set(hosts.map((host) => host.group).filter(Boolean))).sort((left, right) =>
     left.localeCompare(right)
@@ -251,7 +303,12 @@ interface HostsState {
   markConnected: (hostId: string) => void;
   setSnippetCounts: (counts: Record<string, number>) => void;
   assignKey: (hostId: string, key: { label: string; privateKeyPath: string }) => void;
-  clearKeyByPath: (privateKeyPath: string) => void;
+  /**
+   * Clear the key binding from every host whose private-key path matches.
+   * Returns the bindings that were cleared so a delete can be undone.
+   */
+  clearKeyByPath: (privateKeyPath: string) => HostKeyBinding[];
+  restoreKeyBindings: (privateKeyPath: string, bindings: HostKeyBinding[]) => void;
   /**
    * Rename a group across every host that currently belongs to it. Returns
    * the number of hosts that were touched. P2-DM2: this is the inline-
@@ -285,7 +342,7 @@ interface HostsState {
 
 export const useHostsStore = create<HostsState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       hosts: sortHostCollection(sampleHosts),
       createHost: (values) => {
         const host = createHostRecord(values);
@@ -330,9 +387,18 @@ export const useHostsStore = create<HostsState>()(
         set((state) => ({
           hosts: assignKeyInCollection(state.hosts, hostId, key),
         })),
-      clearKeyByPath: (privateKeyPath) =>
+      clearKeyByPath: (privateKeyPath) => {
+        const bindings = snapshotKeyBindings(get().hosts, privateKeyPath);
+        if (bindings.length > 0) {
+          set((state) => ({
+            hosts: clearKeyInCollection(state.hosts, privateKeyPath),
+          }));
+        }
+        return bindings;
+      },
+      restoreKeyBindings: (privateKeyPath, bindings) =>
         set((state) => ({
-          hosts: clearKeyInCollection(state.hosts, privateKeyPath),
+          hosts: restoreKeyBindingsInCollection(state.hosts, privateKeyPath, bindings),
         })),
       renameGroup: (oldName, newName) => {
         const trimmedOld = oldName.trim();

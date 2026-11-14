@@ -5,10 +5,10 @@ import { IdentityEditor, type IdentityEditorValues } from "../components/identit
 import { IdentityList } from "../components/identities/IdentityList";
 import { applyImportedLocalConfigBundle, buildLocalConfigBundle, inspectImportedLocalConfigBundle, type LocalConfigImportAnalysis } from "../lib/local-config";
 import { buildIdentityUsage } from "../lib/identity-usage";
+import { pushUndoToast } from "../lib/undo-toast";
 import { useAppStore } from "../store/app-store";
 import { useHostsStore } from "../store/hosts-store";
 import { useIdentitiesStore } from "../store/identities-store";
-import { UNDO_TOAST_DURATION_MS, pushToast } from "../store/toast-store";
 
 export function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -192,13 +192,9 @@ export function SettingsPage() {
                   setEditingIdentityId(undefined);
                 }
                 if (removed) {
-                  pushToast({
-                    message: `Deleted identity "${removed.label}"`,
-                    durationMs: UNDO_TOAST_DURATION_MS,
-                    action: {
-                      label: "Undo",
-                      run: () => useIdentitiesStore.getState().restoreDeletedIdentity(),
-                    },
+                  pushUndoToast("identities", `Deleted identity "${removed.label}"`, () => {
+                    // Bound to this identity's id: a no-op if a newer delete replaced this one.
+                    useIdentitiesStore.getState().restoreDeletedIdentity(removed.id);
                   });
                 }
               }}

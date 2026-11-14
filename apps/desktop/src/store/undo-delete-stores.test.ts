@@ -35,7 +35,7 @@ describe("undoable deletes", () => {
       false
     );
 
-    useSnippetsStore.getState().restoreDeletedSnippet();
+    useSnippetsStore.getState().restoreDeletedSnippet(SNIPPET_ID);
     const restored = useSnippetsStore.getState().snippets.find(
       (snippet) => snippet.id === SNIPPET_ID
     );
@@ -51,7 +51,7 @@ describe("undoable deletes", () => {
     expect(useSnippetsStore.getState().pendingDeletedSnippet).toBeUndefined();
 
     // No restore possible after expiry.
-    useSnippetsStore.getState().restoreDeletedSnippet();
+    useSnippetsStore.getState().restoreDeletedSnippet(SNIPPET_ID);
     expect(useSnippetsStore.getState().snippets.some((snippet) => snippet.id === SNIPPET_ID)).toBe(
       false
     );
@@ -68,10 +68,16 @@ describe("undoable deletes", () => {
     expect(useSnippetsStore.getState().pendingDeletedSnippet?.id).toBe(otherId);
 
     // The first record is gone for good — expiry already ran for it.
-    useSnippetsStore.getState().restoreDeletedSnippet();
+    useSnippetsStore.getState().restoreDeletedSnippet(SNIPPET_ID);
     expect(useSnippetsStore.getState().snippets.some((snippet) => snippet.id === SNIPPET_ID)).toBe(
       false
     );
+    expect(useSnippetsStore.getState().snippets.some((snippet) => snippet.id === otherId)).toBe(
+      false
+    );
+
+    // Undo bound to the newest deletion still works.
+    useSnippetsStore.getState().restoreDeletedSnippet(otherId!);
     expect(useSnippetsStore.getState().snippets.some((snippet) => snippet.id === otherId)).toBe(
       true
     );
@@ -86,7 +92,7 @@ describe("undoable deletes", () => {
     expect(returned?.id).toBe(KEY_ID);
     expect(useKeysStore.getState().keys.some((key) => key.id === KEY_ID)).toBe(false);
 
-    useKeysStore.getState().restoreDeletedKey();
+    useKeysStore.getState().restoreDeletedKey(KEY_ID);
     expect(useKeysStore.getState().keys.find((key) => key.id === KEY_ID)).toEqual(target);
   });
 
@@ -101,9 +107,51 @@ describe("undoable deletes", () => {
       useIdentitiesStore.getState().identities.some((identity) => identity.id === IDENTITY_ID)
     ).toBe(false);
 
-    useIdentitiesStore.getState().restoreDeletedIdentity();
+    useIdentitiesStore.getState().restoreDeletedIdentity(IDENTITY_ID);
     expect(useIdentitiesStore.getState().identities.find((identity) => identity.id === IDENTITY_ID)).toEqual(
       target
     );
+  });
+
+  it("a stale snippet Undo does not restore a newer deletion", () => {
+    const otherId = useSnippetsStore
+      .getState()
+      .snippets.map((snippet) => snippet.id)
+      .find((id) => id !== SNIPPET_ID)!;
+    useSnippetsStore.getState().deleteSnippet(SNIPPET_ID);
+    useSnippetsStore.getState().deleteSnippet(otherId);
+
+    expect(useSnippetsStore.getState().restoreDeletedSnippet(SNIPPET_ID)).toBeUndefined();
+    expect(useSnippetsStore.getState().pendingDeletedSnippet?.id).toBe(otherId);
+    expect(useSnippetsStore.getState().snippets.some((snippet) => snippet.id === otherId)).toBe(
+      false
+    );
+  });
+
+  it("a stale key Undo does not restore a newer deletion", () => {
+    const otherId = useKeysStore
+      .getState()
+      .keys.map((key) => key.id)
+      .find((id) => id !== KEY_ID)!;
+    useKeysStore.getState().deleteKey(KEY_ID);
+    useKeysStore.getState().deleteKey(otherId);
+
+    expect(useKeysStore.getState().restoreDeletedKey(KEY_ID)).toBeUndefined();
+    expect(useKeysStore.getState().pendingDeletedKey?.id).toBe(otherId);
+    expect(useKeysStore.getState().keys.some((key) => key.id === otherId)).toBe(false);
+    expect(useKeysStore.getState().restoreDeletedKey(otherId)?.id).toBe(otherId);
+  });
+
+  it("a stale identity Undo does not restore a newer deletion", () => {
+    const otherId = useIdentitiesStore
+      .getState()
+      .identities.map((identity) => identity.id)
+      .find((id) => id !== IDENTITY_ID)!;
+    useIdentitiesStore.getState().removeIdentity(IDENTITY_ID);
+    useIdentitiesStore.getState().removeIdentity(otherId);
+
+    expect(useIdentitiesStore.getState().restoreDeletedIdentity(IDENTITY_ID)).toBeUndefined();
+    expect(useIdentitiesStore.getState().pendingDeletedIdentity?.id).toBe(otherId);
+    expect(useIdentitiesStore.getState().restoreDeletedIdentity(otherId)?.id).toBe(otherId);
   });
 });

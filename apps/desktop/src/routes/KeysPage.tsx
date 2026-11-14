@@ -14,11 +14,11 @@ import {
   formatBackendFailure,
   formatCopyKeyToHostFailure,
 } from "../lib/backend-failure-messages";
+import { pushUndoToast } from "../lib/undo-toast";
 import { validatePastedPrivateKey } from "../lib/private-key-validation";
 import { useHostsStore } from "../store/hosts-store";
 import { useKnownHostsStore } from "../store/known-hosts-store";
 import { useKeysStore } from "../store/keys-store";
-import { UNDO_TOAST_DURATION_MS, pushToast } from "../store/toast-store";
 import {
   emptyGenerateKeyValues,
   type GenerateKeyValues,
@@ -138,35 +138,27 @@ export function KeysPage() {
   };
 
   // UX-13: undoable delete. The key record leaves the inventory immediately;
-  // an Undo toast offers a 5-second window. Host assignments are cleared
-  // right away (matching the previous hard-delete behaviour) and re-bound
-  // on Undo.
+  // an Undo toast offers a 5-second window. Host bindings are cleared right
+  // away (matching the previous hard-delete behaviour). The bindings that
+  // were actually cleared are captured first, so Undo restores exactly those
+  // hosts, including ones whose key path was typed in the host editor.
   const handleDeleteKey = (keyId: string) => {
     const deletedKey = deleteKey(keyId);
     if (!deletedKey) {
       return;
     }
 
-    clearKeyByPath(deletedKey.privateKeyPath);
+    const clearedBindings = clearKeyByPath(deletedKey.privateKeyPath);
     if (selectedKeyId === keyId) {
       setSelectedKeyId(undefined);
     }
 
-    pushToast({
-      message: `Deleted key "${deletedKey.label}"`,
-      durationMs: UNDO_TOAST_DURATION_MS,
-      action: {
-        label: "Undo",
-        run: () => {
-          useKeysStore.getState().restoreDeletedKey();
-          for (const hostId of deletedKey.assignedHostIds) {
-            assignKey(hostId, {
-              label: deletedKey.label,
-              privateKeyPath: deletedKey.privateKeyPath,
-            });
-          }
-        },
-      },
+    pushUndoToast("keys", `Deleted key "${deletedKey.label}"`, () => {
+      // Bound to this key's id: a no-op if a newer delete replaced this one.
+      const restored = useKeysStore.getState().restoreDeletedKey(deletedKey.id);
+      if (restored) {
+        useHostsStore.getState().restoreKeyBindings(restored.privateKeyPath, clearedBindings);
+      }
     });
   };
 

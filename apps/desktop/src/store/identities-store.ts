@@ -37,6 +37,12 @@ interface IdentitiesState {
   identities: IdentityRecord[];
   /** Record removed by the most recent delete, pending expiry or undo. */
   pendingDeletedIdentity?: IdentityRecord;
+  /**
+   * Identity ids whose Keychain passphrase still has to be cleared. Persisted
+   * (unlike the undo stash) so quitting inside the undo window cannot leave a
+   * deleted identity's passphrase behind; cleared at the next start.
+   */
+  pendingPassphraseCleanupIds: string[];
   /** True once the host→identity auto-migration has run for this session. */
   migrationCompleted: boolean;
   upsertIdentity: (
@@ -48,7 +54,13 @@ interface IdentitiesState {
   setLabel: (identityId: string, label: string) => void;
   setComment: (identityId: string, comment: string) => void;
   removeIdentity: (identityId: string) => IdentityRecord | undefined;
-  restoreDeletedIdentity: () => void;
+  /**
+   * Restore the pending deleted identity, but only if it is the one named by
+   * `identityId`, so an Undo bound to an older deletion cannot restore a newer one.
+   */
+  restoreDeletedIdentity: (identityId: string) => IdentityRecord | undefined;
+  /** Clear the Keychain passphrase of every id left in `pendingPassphraseCleanupIds`. Runs at startup. */
+  reconcilePendingCleanups: () => void;
   /**
    * Run the host→identity migration once per session. Idempotent: re-running
    * with a fully migrated set is a no-op. Safe to call from anywhere.
@@ -58,6 +70,7 @@ interface IdentitiesState {
 
 interface PersistedIdentitiesState {
   identities: IdentityRecord[];
+  pendingPassphraseCleanupIds: string[];
 }
 
 function logIdentityError(action: string, error: unknown) {
@@ -93,6 +106,7 @@ export const useIdentitiesStore = create<IdentitiesState>()(
     (set, get) => ({
       identities: sortIdentities(sampleIdentities),
       migrationCompleted: false,
+      pendingPassphraseCleanupIds: [],
       upsertIdentity: (input) => {
         const record = makeIdentityRecord(input);
         set((state) => ({
@@ -132,35 +146,78 @@ export const useIdentitiesStore = create<IdentitiesState>()(
           return undefined;
         }
 
+        // Finalise a deletion: forget the pending cleanup, drop the stash if
+        // it still belongs to this identity, and clear the Keychain passphrase
+        // unless the identity has been re-created in the meantime.
+        const finalize = (deleted: IdentityRecord) => {
+          const stillUsed = get().identities.some((entry) => entry.id === deleted.id);
+          set((state) => ({
+            pendingDeletedIdentity:
+              state.pendingDeletedIdentity?.id === deleted.id
+                ? undefined
+                : state.pendingDeletedIdentity,
+            pendingPassphraseCleanupIds: state.pendingPassphraseCleanupIds.filter(
+              (entry) => entry !== deleted.id
+            ),
+          }));
+          if (!stillUsed) {
+            void clearIdentityPassphraseById(deleted.id);
+          }
+        };
+
+        const stale = get().pendingDeletedIdentity;
         expireUndoWindowNow(UNDO_WINDOW_KEY, () => {
-          const stale = get().pendingDeletedIdentity;
-          set({ pendingDeletedIdentity: undefined });
           if (stale) {
-            void clearIdentityPassphraseById(stale.id);
+            finalize(stale);
           }
         });
+        // The removal and the durable cleanup record are one state change, so
+        // they are persisted together.
         set((state) => ({
           pendingDeletedIdentity: target,
+          pendingPassphraseCleanupIds: Array.from(
+            new Set([...state.pendingPassphraseCleanupIds, target.id])
+          ),
           identities: state.identities.filter((entry) => entry.id !== identityId),
         }));
         useVaultSyncStore.getState().markDeleted("identities", identityId);
-        startUndoWindow(UNDO_WINDOW_KEY, UNDO_WINDOW_MS, () => {
-          set({ pendingDeletedIdentity: undefined });
-          void clearIdentityPassphraseById(identityId);
-        });
+        startUndoWindow(UNDO_WINDOW_KEY, UNDO_WINDOW_MS, () => finalize(target));
         return target;
       },
-      restoreDeletedIdentity: () => {
+      restoreDeletedIdentity: (identityId) => {
         const stash = get().pendingDeletedIdentity;
-        if (!stash) {
-          return;
+        if (!stash || stash.id !== identityId) {
+          return undefined;
         }
         cancelUndoWindow(UNDO_WINDOW_KEY);
         useVaultSyncStore.getState().clearDeleted("identities", stash.id);
         set((state) => ({
           pendingDeletedIdentity: undefined,
+          pendingPassphraseCleanupIds: state.pendingPassphraseCleanupIds.filter(
+            (entry) => entry !== stash.id
+          ),
           identities: sortIdentities([...state.identities, stash]),
         }));
+        return stash;
+      },
+      reconcilePendingCleanups: () => {
+        // A live undo window owns its own id; leave that one alone.
+        const live = get().pendingDeletedIdentity?.id;
+        const due = get().pendingPassphraseCleanupIds.filter((entry) => entry !== live);
+        if (due.length === 0) {
+          return;
+        }
+        const inUse = new Set(get().identities.map((entry) => entry.id));
+        set((state) => ({
+          pendingPassphraseCleanupIds: state.pendingPassphraseCleanupIds.filter(
+            (entry) => !due.includes(entry)
+          ),
+        }));
+        for (const identityId of due) {
+          if (!inUse.has(identityId)) {
+            void clearIdentityPassphraseById(identityId);
+          }
+        }
       },
       ensureMigrated: () => {
         if (get().migrationCompleted) {
@@ -215,14 +272,23 @@ export const useIdentitiesStore = create<IdentitiesState>()(
       storage: createJSONStorage(() => createTermsnipStorage("terminal-workspace-identities")),
       partialize: (state): PersistedIdentitiesState => ({
         identities: state.identities,
+        pendingPassphraseCleanupIds: state.pendingPassphraseCleanupIds,
       }),
+      onRehydrateStorage: () => () => {
+        // Run after the store is assigned (hydration may finish synchronously).
+        setTimeout(() => useIdentitiesStore.getState().reconcilePendingCleanups(), 0);
+      },
       merge: (persistedState, currentState) => {
         const persistedIdentities =
           (persistedState as Partial<PersistedIdentitiesState> | undefined)?.identities ??
           currentState.identities;
+        const persistedCleanups = (
+          persistedState as Partial<PersistedIdentitiesState> | undefined
+        )?.pendingPassphraseCleanupIds;
         return {
           ...currentState,
           identities: sortIdentities(persistedIdentities),
+          pendingPassphraseCleanupIds: Array.isArray(persistedCleanups) ? persistedCleanups : [],
           // Re-run migration each session start so newly-added hosts pick
           // up identities without requiring an explicit user action.
           migrationCompleted: false,
