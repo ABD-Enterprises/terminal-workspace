@@ -129,4 +129,14 @@ describe("src-tauri/capabilities/default.json", () => {
     expect(capability.identifier).toBe("default");
     expect(capability.windows).toContain("main");
   });
+
+  it("#UX-2: the Modal surface class re-declares the dark shell tokens", () => {
+    // Dialog contents are written for a dark surface (pale slate/amber text),
+    // so .tw-modal-surface must pin the dark tokens or light mode paints a
+    // white panel under them.
+    const css = readFileSync(join(repoRoot, "apps/desktop/src/styles/globals.css"), "utf8");
+    const block = /\.tw-modal-surface\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(block).toContain("--shell-panel: #0d1724");
+    expect(block).toContain("--shell-text: #ebf2ff");
+  });
 });

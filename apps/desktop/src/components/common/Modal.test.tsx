@@ -1,7 +1,5 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -209,12 +207,5 @@ describe("Modal", () => {
       </Modal>
     );
     expect(screen.getByRole("dialog").classList.contains("tw-modal-surface")).toBe(true);
-
-    // The class must re-declare the dark shell tokens, otherwise light mode
-    // paints a white panel under slate-300 / amber-100 text.
-    const globalsCss = readFileSync(join(process.cwd(), "apps/desktop/src/styles/globals.css"), "utf8");
-    const block = /\.tw-modal-surface\s*\{([^}]*)\}/.exec(globalsCss)?.[1] ?? "";
-    expect(block).toContain("--shell-panel: #0d1724");
-    expect(block).toContain("--shell-text: #ebf2ff");
   });
 });
